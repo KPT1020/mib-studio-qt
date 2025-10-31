@@ -8,6 +8,7 @@
 
 #include "backend/AppBackend.h"
 #include "backend/services/CaptureService.h"
+#include "frontend/PlaybackPanel.h"
 
 MainWindow::MainWindow(backend::AppBackend& backend, QWidget* parent)
     : QMainWindow(parent), backend_(backend) {
@@ -28,6 +29,10 @@ MainWindow::MainWindow(backend::AppBackend& backend, QWidget* parent)
     statsTimer_ = new QTimer(this);
     statsTimer_->setInterval(500);
     connect(statsTimer_, &QTimer::timeout, this, &MainWindow::onUpdateStats);
+
+    // Playback panel as central widget for live display
+    playbackPanel_ = new PlaybackPanel(backend_, this);
+    setCentralWidget(playbackPanel_);
 }
 
 void MainWindow::onStartCapture() {

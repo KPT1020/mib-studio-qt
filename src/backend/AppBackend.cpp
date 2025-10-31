@@ -5,6 +5,8 @@
 #include "backend/services/Hdf5Service.h"
 #include "backend/services/CaptureService.h"
 #include "backend/services/ProcessingService.h"
+#include "backend/services/PlaybackService.h"
+#include "backend/playback/FrameStore.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -24,11 +26,17 @@ bool AppBackend::initialize(const std::string& dataDir) {
     hdf5Service_ = std::make_unique<services::Hdf5Service>();
     captureService_ = std::make_unique<services::CaptureService>();
     processingService_ = std::make_unique<services::ProcessingService>();
+    playbackService_ = std::make_unique<services::PlaybackService>();
+    frameStore_ = std::make_shared<playback::FrameStore>(512);
 
     sqliteService_->initialize((std::filesystem::path(dataDir) / "app.sqlite3").string());
     hdf5Service_->initialize(dataDir);
 
     processingService_->start();
+
+    // Wire capture -> frame store for playback/display
+    captureService_->setFrameStore(frameStore_);
+    playbackService_->setFrameStore(frameStore_);
 
     // Wire capture -> processing (CPU-only): compute a tiny checksum snapshot and enqueue a lightweight job
     captureService_->setFrameCallback([this](const uint8_t* data,
@@ -53,5 +61,6 @@ services::SqliteService& AppBackend::sqlite() { return *sqliteService_; }
 services::Hdf5Service& AppBackend::hdf5() { return *hdf5Service_; }
 services::CaptureService& AppBackend::capture() { return *captureService_; }
 services::ProcessingService& AppBackend::processing() { return *processingService_; }
+services::PlaybackService& AppBackend::playback() { return *playbackService_; }
 
 } // namespace backend

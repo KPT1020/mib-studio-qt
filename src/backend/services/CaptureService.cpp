@@ -1,10 +1,14 @@
 #include "backend/services/CaptureService.h"
+#include "backend/Tools.h"
+#include "backend/playback/FrameStore.h"
 
 #include <EGrabber.h>
 #include <spdlog/spdlog.h>
 
 #include <chrono>
 #include <stdexcept>
+#include <thread>
+#include <vector>
 
 using namespace Euresys;
 
@@ -16,6 +20,8 @@ CaptureService::~CaptureService() { stop(); }
 void CaptureService::setConfig(const Config& cfg) { config_ = cfg; }
 
 void CaptureService::setFrameCallback(FrameCallback cb) { callback_ = std::move(cb); }
+
+void CaptureService::setFrameStore(std::shared_ptr<backend::playback::FrameStore> store) { frameStore_ = std::move(store); }
 
 bool CaptureService::start() {
     if (running_.load()) return true;
@@ -33,10 +39,6 @@ void CaptureService::stop() {
 bool CaptureService::isRunning() const { return running_.load(); }
 
 void CaptureService::run() {
-    auto nowUs = []() -> uint64_t {
-        using namespace std::chrono;
-        return static_cast<uint64_t>(duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count());
-    };
 
     try {
         SPDLOG_INFO("CaptureService starting: parts={}, buffers={}", config_.bufferPartCount, config_.numBuffers);
@@ -49,46 +51,58 @@ void CaptureService::run() {
         uint64_t width = grabber.getInteger<StreamModule>("Width");
         uint64_t height = grabber.getInteger<StreamModule>("Height");
 
-        // Configure buffer parts and allocate buffers
+        // Configure buffer parts and allocate buffers - following 310-high-frame-rate.cpp pattern
         grabber.setInteger<StreamModule>("BufferPartCount", config_.bufferPartCount);
-        BufferIndexRange bir = grabber.reallocBuffers(config_.numBuffers);
+        grabber.reallocBuffers(config_.numBuffers);
 
-        size_t offset = 0;
         grabber.start();
 
-        uint64_t tShowStats = nowUs() + 1000000ULL;
+        // Give camera time to start streaming
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+        uint64_t tShowStats = Tools::getTimestamp() + 1000000ULL;
 
         while (running_.load()) {
-            // Access next buffer in round-robin
-            size_t bufferIndex = bir.indexAt(offset);
-            uint8_t* bufferPtr = grabber.getBufferInfo<uint8_t*>(bufferIndex, gc::BUFFER_INFO_BASE);
-            size_t imageSize = grabber.getBufferInfo<size_t>(bufferIndex, ge::BUFFER_INFO_CUSTOM_PART_SIZE);
-            size_t imageCount = grabber.getBufferInfo<size_t>(bufferIndex, ge::BUFFER_INFO_CUSTOM_NUM_PARTS);
-
-            // Process delivered parts as they become available
-            size_t processed = 0;
-            size_t delivered = 0;
-            do {
-                delivered = grabber.getBufferInfo<size_t>(bufferIndex, ge::BUFFER_INFO_CUSTOM_NUM_DELIVERED_PARTS);
-                while (processed < delivered) {
-                    const uint8_t* imagePtr = bufferPtr + processed * imageSize;
-                    uint64_t timestamp = grabber.getBufferInfo<uint64_t>(bufferIndex, gc::BUFFER_INFO_TIMESTAMP);
-
-                    if (callback_) {
-                        callback_(imagePtr, imageSize, width, height, timestamp);
-                    }
-                    stats_.framesProcessed.fetch_add(1, std::memory_order_relaxed);
-                    ++processed;
-                }
-                if (!running_.load()) break;
-            } while (delivered < imageCount);
-
-            // Pop current ready buffer and push it back into the input FIFO
+            // Use ScopedBuffer to get next available buffer - matches 310-high-frame-rate.cpp
             ScopedBuffer buffer(grabber);
-            offset = (offset + 1) % bir.size();
+            uint8_t* bufferPtr = buffer.getInfo<uint8_t*>(gc::BUFFER_INFO_BASE);
+            size_t imageSize = buffer.getInfo<size_t>(ge::BUFFER_INFO_CUSTOM_PART_SIZE);
+            size_t linePitch = buffer.getInfo<size_t>(ge::BUFFER_INFO_CUSTOM_LINE_PITCH);
+            uint64_t pixelFormat = buffer.getInfo<uint64_t>(gc::BUFFER_INFO_PIXELFORMAT);
+
+            // Process available images - matches 310-high-frame-rate.cpp
+            size_t delivered = buffer.getInfo<size_t>(ge::BUFFER_INFO_CUSTOM_NUM_DELIVERED_PARTS);
+            size_t processed = 0;
+
+            // Get individual part timestamps for high frame rate accuracy
+            std::vector<char> tsData = buffer.getInfo<std::vector<char>>(ge::BUFFER_INFO_CUSTOM_PART_TIMESTAMPS);
+            const size_t tsCount = tsData.size() / sizeof(uint64_t);
+            uint64_t* timestamps = tsCount > 0 ? reinterpret_cast<uint64_t*>(&tsData[0]) : nullptr;
+
+            while (processed < delivered) {
+                const uint8_t* imagePtr = bufferPtr + processed * imageSize;
+                // Use individual part timestamp if available, otherwise use buffer timestamp
+                uint64_t timestamp = (timestamps && processed < tsCount) ? timestamps[processed] :
+                                   buffer.getInfo<uint64_t>(gc::BUFFER_INFO_TIMESTAMP);
+
+                if (callback_) {
+                    callback_(imagePtr, imageSize, width, height, timestamp);
+                }
+                if (frameStore_) {
+                    frameStore_->pushFrame(imagePtr,
+                                           imageSize,
+                                           width,
+                                           height,
+                                           linePitch,
+                                           pixelFormat,
+                                           timestamp);
+                }
+                stats_.framesProcessed.fetch_add(1, std::memory_order_relaxed);
+                ++processed;
+            }
 
             // Periodic stats update
-            uint64_t now = nowUs();
+            uint64_t now = Tools::getTimestamp();
             if (now >= tShowStats) {
                 uint64_t fr = grabber.getInteger<StreamModule>("StatisticsFrameRate");
                 uint64_t dr = grabber.getInteger<StreamModule>("StatisticsDataRate");

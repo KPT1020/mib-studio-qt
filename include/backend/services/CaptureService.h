@@ -6,6 +6,9 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <memory>
+
+namespace backend { namespace playback { class FrameStore; } }
 
 namespace backend::services {
 
@@ -34,6 +37,9 @@ public:
     void setConfig(const Config& cfg);
     void setFrameCallback(FrameCallback cb);
 
+    // Optional: store frames to a shared ring for playback/display
+    void setFrameStore(std::shared_ptr<backend::playback::FrameStore> store);
+
     bool start();
     void stop();
     bool isRunning() const;
@@ -45,6 +51,7 @@ private:
 
     Config config_{};
     FrameCallback callback_{};
+    std::shared_ptr<backend::playback::FrameStore> frameStore_{};
 
     std::thread thread_;
     std::atomic<bool> running_{false};

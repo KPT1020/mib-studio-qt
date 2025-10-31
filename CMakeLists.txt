@@ -33,12 +33,15 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 # Backend library (services, APIs)
 add_library(mib_backend STATIC
     src/backend/AppBackend.cpp
+    src/backend/Tools.cpp
     src/backend/services/Logger.cpp
     src/backend/services/SqliteService.cpp
     src/backend/services/Hdf5Service.cpp
     src/backend/services/CaptureService.cpp
     src/backend/services/RecorderService.cpp
     src/backend/services/ProcessingService.cpp
+    src/backend/services/PlaybackService.cpp
+    src/backend/playback/FrameStore.cpp
 )
 
 target_include_directories(mib_backend PUBLIC
@@ -75,6 +78,8 @@ add_executable(mib_studio_qt
     src/frontend/main.cpp
     src/frontend/MainWindow.cpp
     include/frontend/MainWindow.h
+    src/frontend/PlaybackPanel.cpp
+    include/frontend/PlaybackPanel.h
 )
 
 target_include_directories(mib_studio_qt PRIVATE
@@ -87,6 +92,7 @@ target_link_libraries(mib_studio_qt PRIVATE
     mib_backend
     spdlog::spdlog
 )
+
 
 if(TARGET nlohmann_json::nlohmann_json)
     target_link_libraries(mib_studio_qt PRIVATE nlohmann_json::nlohmann_json)

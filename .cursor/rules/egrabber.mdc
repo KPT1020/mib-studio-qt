@@ -1,0 +1,10 @@
+---
+alwaysApply: true
+---
+- always reference egrabber-sample-programs in the workspace before implementing any functions
+- prefer ready-made SDK patterns (e.g., 310-high-frame-rate.cpp) for capture/metrics
+- use spdlog for logging; do not use std::cout in app code
+- keep tasks/issues under knowledge_map/task and add docs under docs/
+- before writing new utilities, review existing Tools and SDK tools for similar functions
+- Qt app runtime: use windeployqt for Release; for Debug either install Qt debug DLLs or copy from vcpkg debug/bin
+- if capture stats are needed at app shutdown, refresh StreamModule counters before stopping capture
