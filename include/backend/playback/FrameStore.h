@@ -38,6 +38,16 @@ namespace backend::playback
         // Retrieve a copy by absolute write index; returns false if out-of-range
         bool getByWriteIndex(uint64_t writeIndex, Frame &out) const;
 
+        // Absolute index helpers (monotonic sequence since start)
+        // Earliest absolute index currently retained in the ring
+        uint64_t earliestAvailableIndex() const;
+
+        // Latest absolute index written (w-1). Only valid when totalWritten() > 0
+        uint64_t latestAvailableIndex() const;
+
+        // Number of frames currently retained in the ring (<= capacity)
+        size_t availableCount() const;
+
         // Current number of frames written since start (monotonic)
         uint64_t totalWritten() const { return totalWritten_.load(); }
 

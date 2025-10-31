@@ -27,6 +27,33 @@ bool PlaybackService::fetchLatest(backend::playback::Frame& out) const {
     return store_->getLatest(out);
 }
 
+bool PlaybackService::fetchByIndex(uint64_t absoluteIndex, backend::playback::Frame& out) const {
+    if (!store_) return false;
+    return store_->getByWriteIndex(absoluteIndex, out);
+}
+
+bool PlaybackService::queryRange(uint64_t& outEarliest, uint64_t& outLatest, size_t& outCount) const {
+    if (!store_) return false;
+    const uint64_t latest = store_->latestAvailableIndex();
+    const size_t count = store_->availableCount();
+    if (count == 0) return false;
+    const uint64_t earliest = store_->earliestAvailableIndex();
+    outEarliest = earliest;
+    outLatest = latest;
+    outCount = count;
+    return true;
+}
+
+uint64_t PlaybackService::totalWritten() const {
+    if (!store_) return 0;
+    return store_->totalWritten();
+}
+
+size_t PlaybackService::capacity() const {
+    if (!store_) return 0;
+    return store_->capacity();
+}
+
 } // namespace backend::services
 
 

@@ -17,3 +17,11 @@
 ## Future
 - Add disk-backed playback via Recorder (260/261) when persistence is needed.
 - Handle color conversions (e.g., Bayer to RGB) if camera output is not Mono8.
+
+## Scrubber (Review) Workflow
+- FrameStore now exposes absolute index helpers: `earliestAvailableIndex()`, `latestAvailableIndex()`, and `availableCount()`.
+- PlaybackService exposes `queryRange(earliest, latest, count)` and `fetchByIndex(idx, frame)` in addition to `fetchLatest`.
+- PlaybackPanel hosts an image canvas and a horizontal `QSlider`:
+  - When the user is not scrubbing, the slider auto-follows the latest frame and the view shows live images.
+  - While scrubbing (slider pressed), the view shows the frame at the slider's absolute index.
+  - Slider range dynamically reflects the current in-memory window `[earliest, latest]`.

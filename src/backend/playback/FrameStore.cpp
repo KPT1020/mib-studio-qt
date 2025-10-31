@@ -46,6 +46,25 @@ bool FrameStore::getByWriteIndex(uint64_t writeIndex, Frame& out) const {
     return !out.data.empty();
 }
 
+uint64_t FrameStore::earliestAvailableIndex() const {
+    const uint64_t w = totalWritten_.load();
+    if (capacity_ == 0 || w == 0) return 0;
+    if (w <= capacity_) return 0;
+    return w - static_cast<uint64_t>(capacity_);
+}
+
+uint64_t FrameStore::latestAvailableIndex() const {
+    const uint64_t w = totalWritten_.load();
+    if (w == 0) return 0;
+    return w - 1;
+}
+
+size_t FrameStore::availableCount() const {
+    const uint64_t w = totalWritten_.load();
+    if (capacity_ == 0) return 0;
+    return static_cast<size_t>(std::min<uint64_t>(w, static_cast<uint64_t>(capacity_)));
+}
+
 } // namespace backend::playback
 
 
