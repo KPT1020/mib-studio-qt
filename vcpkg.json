@@ -1,0 +1,11 @@
+{
+    "name": "mib-studio-qt",
+    "version-string": "0.1.0",
+    "dependencies": [
+        "qtbase",
+        "spdlog",
+        "sqlite3",
+        "hdf5",
+        "nlohmann-json"
+    ]
+}
