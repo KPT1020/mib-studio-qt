@@ -14,6 +14,7 @@ This document captures how we integrate with Euresys EGrabber and how we configu
 ## Stats Sourcing
 - Primary: StreamModule counters `StatisticsFrameRate`, `StatisticsDataRate` (polled ~1 Hz during capture)
 - Fallback: compute from part timestamps `BUFFER_INFO_CUSTOM_PART_TIMESTAMPS` and `imageSize`
+- Runtime wrapper: `camera/common/EGrabberCamera` exposes the grabber via the shared `ICamera` interface (mirrors sample 310).
 
 ## Notes
 - For short runs, ensure at least one stats poll occurs before stopping capture.

@@ -1,20 +1,23 @@
 #include "backend/services/CaptureService.h"
 #include "backend/Tools.h"
 #include "backend/playback/FrameStore.h"
+#include "camera/common/EGrabberCamera.h"
+#include "camera/common/ICamera.h"
 
-#include <EGrabber.h>
 #include <spdlog/spdlog.h>
 
 #include <chrono>
 #include <stdexcept>
 #include <thread>
-#include <vector>
-
-using namespace Euresys;
 
 namespace backend::services {
 
-CaptureService::CaptureService() = default;
+CaptureService::CaptureService() {
+    cameraFactory_ = []() {
+        return std::make_unique<camera::common::EGrabberCamera>();
+    };
+}
+
 CaptureService::~CaptureService() { stop(); }
 
 void CaptureService::setConfig(const Config& cfg) { config_ = cfg; }
@@ -22,6 +25,10 @@ void CaptureService::setConfig(const Config& cfg) { config_ = cfg; }
 void CaptureService::setFrameCallback(FrameCallback cb) { callback_ = std::move(cb); }
 
 void CaptureService::setFrameStore(std::shared_ptr<backend::playback::FrameStore> store) { frameStore_ = std::move(store); }
+
+void CaptureService::setCameraFactory(CameraFactory factory) {
+    cameraFactory_ = std::move(factory);
+}
 
 bool CaptureService::start() {
     if (running_.load()) return true;
@@ -33,93 +40,122 @@ bool CaptureService::start() {
 void CaptureService::stop() {
     if (!running_.load()) return;
     running_.store(false);
+    {
+        std::scoped_lock lk(cameraMutex_);
+        if (activeCamera_) {
+            activeCamera_->stop();
+        }
+    }
     if (thread_.joinable()) thread_.join();
 }
 
 bool CaptureService::isRunning() const { return running_.load(); }
 
 void CaptureService::run() {
+    std::unique_ptr<camera::common::ICamera> camera;
+
+    auto releaseCamera = [&]() {
+        if (camera) {
+            camera->stop();
+        }
+        {
+            std::scoped_lock lk(cameraMutex_);
+            activeCamera_ = nullptr;
+        }
+        camera.reset();
+    };
 
     try {
         SPDLOG_INFO("CaptureService starting: parts={}, buffers={}", config_.bufferPartCount, config_.numBuffers);
 
-        EGenTL genTL;
-        EGrabber<CallbackOnDemand> grabber(genTL);
+        if (!cameraFactory_) {
+            throw std::runtime_error("CaptureService has no camera factory configured");
+        }
 
-        // Determine width/height first
-        grabber.setInteger<StreamModule>("BufferPartCount", 1);
-        uint64_t width = grabber.getInteger<StreamModule>("Width");
-        uint64_t height = grabber.getInteger<StreamModule>("Height");
+        camera = cameraFactory_();
+        if (!camera) {
+            throw std::runtime_error("CaptureService camera factory returned null");
+        }
 
-        // Configure buffer parts and allocate buffers - following 310-high-frame-rate.cpp pattern
-        grabber.setInteger<StreamModule>("BufferPartCount", config_.bufferPartCount);
-        grabber.reallocBuffers(config_.numBuffers);
+        camera::common::CameraConfig camCfg;
+        camCfg.bufferPartCount = config_.bufferPartCount;
+        camCfg.numBuffers = config_.numBuffers;
+        camera->applyConfig(camCfg);
 
-        grabber.start();
+        {
+            std::scoped_lock lk(cameraMutex_);
+            activeCamera_ = camera.get();
+        }
 
-        // Give camera time to start streaming
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        if (!camera->start()) {
+            throw std::runtime_error("CaptureService camera failed to start");
+        }
 
-        uint64_t tShowStats = Tools::getTimestamp() + 1000000ULL;
+        constexpr uint64_t kStatsInterval = 1'000'000ULL;
+        uint64_t nextStatsPoll = Tools::getTimestamp() + kStatsInterval;
 
         while (running_.load()) {
-            // Use ScopedBuffer to get next available buffer - matches 310-high-frame-rate.cpp
-            ScopedBuffer buffer(grabber);
-            uint8_t* bufferPtr = buffer.getInfo<uint8_t*>(gc::BUFFER_INFO_BASE);
-            size_t imageSize = buffer.getInfo<size_t>(ge::BUFFER_INFO_CUSTOM_PART_SIZE);
-            size_t linePitch = buffer.getInfo<size_t>(ge::BUFFER_INFO_CUSTOM_LINE_PITCH);
-            uint64_t pixelFormat = buffer.getInfo<uint64_t>(gc::BUFFER_INFO_PIXELFORMAT);
-
-            // Process available images - matches 310-high-frame-rate.cpp
-            size_t delivered = buffer.getInfo<size_t>(ge::BUFFER_INFO_CUSTOM_NUM_DELIVERED_PARTS);
-            size_t processed = 0;
-
-            // Get individual part timestamps for high frame rate accuracy
-            std::vector<char> tsData = buffer.getInfo<std::vector<char>>(ge::BUFFER_INFO_CUSTOM_PART_TIMESTAMPS);
-            const size_t tsCount = tsData.size() / sizeof(uint64_t);
-            uint64_t* timestamps = tsCount > 0 ? reinterpret_cast<uint64_t*>(&tsData[0]) : nullptr;
-
-            while (processed < delivered) {
-                const uint8_t* imagePtr = bufferPtr + processed * imageSize;
-                // Use individual part timestamp if available, otherwise use buffer timestamp
-                uint64_t timestamp = (timestamps && processed < tsCount) ? timestamps[processed] :
-                                   buffer.getInfo<uint64_t>(gc::BUFFER_INFO_TIMESTAMP);
-
-                if (callback_) {
-                    callback_(imagePtr, imageSize, width, height, timestamp);
+            camera::common::Frame frame;
+            if (!camera->grabFrame(frame)) {
+                if (!running_.load()) {
+                    break;
                 }
-                if (frameStore_) {
-                    frameStore_->pushFrame(imagePtr,
-                                           imageSize,
-                                           width,
-                                           height,
-                                           linePitch,
-                                           pixelFormat,
-                                           timestamp);
+                if (!camera->isRunning()) {
+                    SPDLOG_INFO("CaptureService camera stopped streaming");
+                    break;
                 }
-                stats_.framesProcessed.fetch_add(1, std::memory_order_relaxed);
-                ++processed;
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                continue;
             }
 
-            // Periodic stats update
-            uint64_t now = Tools::getTimestamp();
-            if (now >= tShowStats) {
-                uint64_t fr = grabber.getInteger<StreamModule>("StatisticsFrameRate");
-                uint64_t dr = grabber.getInteger<StreamModule>("StatisticsDataRate");
-                stats_.lastFrameRate.store(fr, std::memory_order_relaxed);
-                stats_.lastDataRateMBps.store(dr, std::memory_order_relaxed);
-                SPDLOG_INFO("Capture stats: {}x{}, {} MB/s, {} fps", width, height, dr, fr);
-                tShowStats += 1000000ULL;
+            if (callback_) {
+                callback_(frame.data.data(),
+                          frame.data.size(),
+                          frame.width,
+                          frame.height,
+                          frame.timestamp);
+            }
+            if (frameStore_) {
+                frameStore_->pushFrame(frame.data.data(),
+                                       frame.data.size(),
+                                       frame.width,
+                                       frame.height,
+                                       frame.linePitch,
+                                       frame.pixelFormat,
+                                       frame.timestamp);
+            }
+            stats_.framesProcessed.fetch_add(1, std::memory_order_relaxed);
+
+            const uint64_t now = Tools::getTimestamp();
+            if (now >= nextStatsPoll) {
+                camera::common::CameraStats cameraStats{};
+                if (camera->pollStats(cameraStats)) {
+                    stats_.lastFrameRate.store(cameraStats.frameRate, std::memory_order_relaxed);
+                    stats_.lastDataRateMBps.store(cameraStats.dataRateMBps, std::memory_order_relaxed);
+                    SPDLOG_INFO("Capture stats: {} fps, {} MB/s", cameraStats.frameRate, cameraStats.dataRateMBps);
+                }
+                nextStatsPoll = now + kStatsInterval;
             }
         }
 
-        grabber.stop();
+        if (camera) {
+            camera::common::CameraStats cameraStats{};
+            if (camera->pollStats(cameraStats)) {
+                stats_.lastFrameRate.store(cameraStats.frameRate, std::memory_order_relaxed);
+                stats_.lastDataRateMBps.store(cameraStats.dataRateMBps, std::memory_order_relaxed);
+            }
+        }
+
+        releaseCamera();
+        running_.store(false);
         SPDLOG_INFO("CaptureService stopped");
     } catch (const std::exception& ex) {
         SPDLOG_ERROR("CaptureService exception: {}", ex.what());
+        releaseCamera();
         running_.store(false);
     } catch (...) {
         SPDLOG_ERROR("CaptureService unknown exception");
+        releaseCamera();
         running_.store(false);
     }
 }

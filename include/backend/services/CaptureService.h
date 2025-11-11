@@ -4,9 +4,14 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
-#include <memory>
+
+namespace camera::common {
+class ICamera;
+struct CameraConfig;
+}
 
 namespace backend { namespace playback { class FrameStore; } }
 
@@ -26,6 +31,8 @@ public:
                                              uint64_t height,
                                              uint64_t timestampNs)>;
 
+    using CameraFactory = std::function<std::unique_ptr<camera::common::ICamera>()>;
+
     struct Config {
         int bufferPartCount = 100;  // number of images per buffer
         int numBuffers = 20;        // ring size
@@ -40,6 +47,8 @@ public:
     // Optional: store frames to a shared ring for playback/display
     void setFrameStore(std::shared_ptr<backend::playback::FrameStore> store);
 
+    void setCameraFactory(CameraFactory factory);
+
     bool start();
     void stop();
     bool isRunning() const;
@@ -52,6 +61,10 @@ private:
     Config config_{};
     FrameCallback callback_{};
     std::shared_ptr<backend::playback::FrameStore> frameStore_{};
+
+    CameraFactory cameraFactory_{};
+    camera::common::ICamera* activeCamera_{nullptr};
+    std::mutex cameraMutex_;
 
     std::thread thread_;
     std::atomic<bool> running_{false};

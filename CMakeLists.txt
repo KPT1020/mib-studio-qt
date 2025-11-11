@@ -13,7 +13,7 @@ if(MSVC)
     add_compile_options(/wd4828)
 endif()
 
-find_package(Qt6 COMPONENTS Widgets REQUIRED)
+find_package(Qt6 COMPONENTS Widgets Gui REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG QUIET)
 
@@ -42,6 +42,8 @@ add_library(mib_backend STATIC
     src/backend/services/ProcessingService.cpp
     src/backend/services/PlaybackService.cpp
     src/backend/playback/FrameStore.cpp
+    src/camera/common/EGrabberCamera.cpp
+    src/camera/mock/MockCamera.cpp
 )
 
 target_include_directories(mib_backend PUBLIC
@@ -49,7 +51,10 @@ target_include_directories(mib_backend PUBLIC
     "C:/Program Files/Euresys/eGrabber/include"
 )
 
-target_link_libraries(mib_backend PUBLIC spdlog::spdlog)
+target_link_libraries(mib_backend PUBLIC
+    spdlog::spdlog
+    Qt6::Gui
+)
 
 if(TARGET nlohmann_json::nlohmann_json)
     target_link_libraries(mib_backend PUBLIC nlohmann_json::nlohmann_json)
@@ -96,15 +101,29 @@ target_link_libraries(mib_studio_qt PRIVATE
 # Qt deployment: copy platform plugins to build directory
 if(WIN32)
     # Use the correct vcpkg installed path for Qt plugins
-    set(QT_PLUGINS_PATH ${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/Qt6/plugins/platforms)
+    set(VCPKG_BIN_DIR ${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/bin)
+    set(QT_PLATFORMS_PATH ${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/Qt6/plugins/platforms)
+    set(QT_IMAGEFORMATS_PATH ${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/Qt6/plugins/imageformats)
     
     # Add custom target to deploy Qt plugins
     add_custom_command(TARGET mib_studio_qt POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:mib_studio_qt>/platforms
+        COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:mib_studio_qt>/imageformats
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${QT_PLUGINS_PATH}/qwindows.dll
+            ${QT_PLATFORMS_PATH}/qwindows.dll
             $<TARGET_FILE_DIR:mib_studio_qt>/platforms/
-        COMMENT "Deploying Qt platform plugins from ${QT_PLUGINS_PATH}"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${QT_IMAGEFORMATS_PATH}
+            $<TARGET_FILE_DIR:mib_studio_qt>/imageformats
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/jpeg62.dll $<TARGET_FILE_DIR:mib_studio_qt>/
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/tiff.dll $<TARGET_FILE_DIR:mib_studio_qt>/
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/liblzma.dll $<TARGET_FILE_DIR:mib_studio_qt>/
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/jasper.dll $<TARGET_FILE_DIR:mib_studio_qt>/
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/libwebp.dll $<TARGET_FILE_DIR:mib_studio_qt>/
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/libwebpdemux.dll $<TARGET_FILE_DIR:mib_studio_qt>/
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/libwebpmux.dll $<TARGET_FILE_DIR:mib_studio_qt>/
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/libsharpyuv.dll $<TARGET_FILE_DIR:mib_studio_qt>/
+        COMMENT "Deploying Qt plugins (platforms/imageformats) and codec runtime deps"
     )
 endif()
 
