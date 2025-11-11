@@ -12,6 +12,7 @@ class PlaybackService;
 }
 
 namespace backend { namespace playback { class FrameStore; } }
+namespace camera::mock { struct MockCameraOptions; }
 
 namespace backend {
 
@@ -27,6 +28,8 @@ public:
     services::CaptureService& capture();
     services::ProcessingService& processing();
     services::PlaybackService& playback();
+
+    void configureMockCamera(const camera::mock::MockCameraOptions& options);
 
 private:
     std::unique_ptr<services::SqliteService> sqliteService_;

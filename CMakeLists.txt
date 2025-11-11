@@ -79,12 +79,23 @@ elseif(TARGET HDF5::HDF5)
 endif()
 
 # Frontend application (Qt Widgets)
-add_executable(mib_studio_qt
-    src/frontend/main.cpp
+set(FRONTEND_COMMON_SOURCES
     src/frontend/MainWindow.cpp
     include/frontend/MainWindow.h
     src/frontend/PlaybackPanel.cpp
     include/frontend/PlaybackPanel.h
+)
+
+add_executable(mib_studio_qt
+    src/frontend/main.cpp
+    ${FRONTEND_COMMON_SOURCES}
+)
+
+add_executable(mock_studio_qt
+    src/frontend/mock_main.cpp
+    src/frontend/MockConfigDialog.cpp
+    include/frontend/MockConfigDialog.h
+    ${FRONTEND_COMMON_SOURCES}
 )
 
 target_include_directories(mib_studio_qt PRIVATE
@@ -92,7 +103,18 @@ target_include_directories(mib_studio_qt PRIVATE
     "C:/Program Files/Euresys/eGrabber/include"
 )
 
+target_include_directories(mock_studio_qt PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    "C:/Program Files/Euresys/eGrabber/include"
+)
+
 target_link_libraries(mib_studio_qt PRIVATE
+    Qt6::Widgets
+    mib_backend
+    spdlog::spdlog
+)
+
+target_link_libraries(mock_studio_qt PRIVATE
     Qt6::Widgets
     mib_backend
     spdlog::spdlog
@@ -106,29 +128,32 @@ if(WIN32)
     set(QT_IMAGEFORMATS_PATH ${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/Qt6/plugins/imageformats)
     
     # Add custom target to deploy Qt plugins
-    add_custom_command(TARGET mib_studio_qt POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:mib_studio_qt>/platforms
-        COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:mib_studio_qt>/imageformats
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${QT_PLATFORMS_PATH}/qwindows.dll
-            $<TARGET_FILE_DIR:mib_studio_qt>/platforms/
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${QT_IMAGEFORMATS_PATH}
-            $<TARGET_FILE_DIR:mib_studio_qt>/imageformats
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/jpeg62.dll $<TARGET_FILE_DIR:mib_studio_qt>/
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/tiff.dll $<TARGET_FILE_DIR:mib_studio_qt>/
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/liblzma.dll $<TARGET_FILE_DIR:mib_studio_qt>/
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/jasper.dll $<TARGET_FILE_DIR:mib_studio_qt>/
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/libwebp.dll $<TARGET_FILE_DIR:mib_studio_qt>/
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/libwebpdemux.dll $<TARGET_FILE_DIR:mib_studio_qt>/
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/libwebpmux.dll $<TARGET_FILE_DIR:mib_studio_qt>/
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/libsharpyuv.dll $<TARGET_FILE_DIR:mib_studio_qt>/
-        COMMENT "Deploying Qt plugins (platforms/imageformats) and codec runtime deps"
-    )
+    foreach(app_target IN ITEMS mib_studio_qt mock_studio_qt)
+        add_custom_command(TARGET ${app_target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${app_target}>/platforms
+            COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${app_target}>/imageformats
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${QT_PLATFORMS_PATH}/qwindows.dll
+                $<TARGET_FILE_DIR:${app_target}>/platforms/
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${QT_IMAGEFORMATS_PATH}
+                $<TARGET_FILE_DIR:${app_target}>/imageformats
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/jpeg62.dll $<TARGET_FILE_DIR:${app_target}>/
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/tiff.dll $<TARGET_FILE_DIR:${app_target}>/
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/liblzma.dll $<TARGET_FILE_DIR:${app_target}>/
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/jasper.dll $<TARGET_FILE_DIR:${app_target}>/
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/libwebp.dll $<TARGET_FILE_DIR:${app_target}>/
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/libwebpdemux.dll $<TARGET_FILE_DIR:${app_target}>/
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/libwebpmux.dll $<TARGET_FILE_DIR:${app_target}>/
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/libsharpyuv.dll $<TARGET_FILE_DIR:${app_target}>/
+            COMMENT "Deploying Qt plugins (platforms/imageformats) and codec runtime deps (${app_target})"
+        )
+    endforeach()
 endif()
 
 if(TARGET nlohmann_json::nlohmann_json)
     target_link_libraries(mib_studio_qt PRIVATE nlohmann_json::nlohmann_json)
+    target_link_libraries(mock_studio_qt PRIVATE nlohmann_json::nlohmann_json)
 endif()
 
 # Console test: capture + processing (CPU-only)

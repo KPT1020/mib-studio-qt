@@ -91,9 +91,12 @@ namespace backend
                 options.loopFiles = (loopValue != "false" && loopValue != "0" && loopValue != "no");
             }
 
-            SPDLOG_INFO("AppBackend: configuring MockCamera (folder={}, interval={} ms, loop={})",
+            const auto intervalUs = options.frameInterval.count();
+            const double configuredFps = intervalUs > 0 ? 1'000'000.0 / static_cast<double>(intervalUs) : 0.0;
+            SPDLOG_INFO("AppBackend: configuring MockCamera (folder={}, interval={} us, ~{:.1f} fps, loop={})",
                         options.folder.string(),
-                        options.frameInterval.count(),
+                        intervalUs,
+                        configuredFps,
                         options.loopFiles);
 
             captureService_->setCameraFactory([options]() mutable
@@ -107,20 +110,8 @@ namespace backend
         }
         playbackService_->setFrameStore(frameStore_);
 
-        // Wire capture -> processing (CPU-only): compute a tiny checksum snapshot and enqueue a lightweight job
-        captureService_->setFrameCallback([this](const uint8_t *data,
-                                                 size_t size,
-                                                 uint64_t width,
-                                                 uint64_t height,
-                                                 uint64_t timestampNs)
-                                          {
-        const size_t sampleSize = std::min<size_t>(size, 64);
-        uint32_t checksum = 0;
-        for (size_t i = 0; i < sampleSize; ++i) checksum += data[i];
-        processingService_->submit([checksum, width, height, timestampNs]() {
-            SPDLOG_INFO("CPU job: {}x{}, ts={} ns, cksum={}",
-                        width, height, timestampNs, checksum);
-        }); });
+        // No per-frame logging; rely on periodic capture stats
+        captureService_->setFrameCallback(nullptr);
 
         SPDLOG_INFO("Backend initialized.");
         return true;
@@ -131,5 +122,12 @@ namespace backend
     services::CaptureService &AppBackend::capture() { return *captureService_; }
     services::ProcessingService &AppBackend::processing() { return *processingService_; }
     services::PlaybackService &AppBackend::playback() { return *playbackService_; }
+
+void AppBackend::configureMockCamera(const camera::mock::MockCameraOptions& options) {
+    if (!captureService_) return;
+    captureService_->setCameraFactory([options]() mutable {
+        return std::make_unique<camera::mock::MockCamera>(options);
+    });
+}
 
 } // namespace backend

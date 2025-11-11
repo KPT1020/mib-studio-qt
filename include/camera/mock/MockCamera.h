@@ -10,7 +10,7 @@ namespace camera::mock {
 
 struct MockCameraOptions {
     std::filesystem::path folder;
-    std::chrono::milliseconds frameInterval{33};
+    std::chrono::microseconds frameInterval{33'000};
     bool loopFiles{true};
 };
 
@@ -27,16 +27,18 @@ public:
     bool grabFrame(camera::common::Frame& out) override;
     bool pollStats(camera::common::CameraStats& out) const override;
 
-    void setFrameInterval(std::chrono::milliseconds interval);
+    void setFrameInterval(std::chrono::microseconds interval);
     void setLooping(bool loop);
 
 private:
     void refreshFileList();
     bool loadFrameFromPath(const std::filesystem::path& path, camera::common::Frame& frame);
+    bool preloadFrames();
 
     MockCameraOptions options_;
     camera::common::CameraConfig config_{};
     std::vector<std::filesystem::path> files_;
+    std::vector<camera::common::Frame> preloadedFrames_;
     size_t nextIndex_{0};
 
     bool running_{false};
