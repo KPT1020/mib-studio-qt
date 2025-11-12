@@ -120,34 +120,47 @@ target_link_libraries(mock_studio_qt PRIVATE
     spdlog::spdlog
 )
 
-# Qt deployment: copy platform plugins to build directory
+# Qt deployment via windeployqt (vcpkg)
 if(WIN32)
-    # Use the correct vcpkg installed path for Qt plugins
     set(VCPKG_BIN_DIR ${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/bin)
-    set(QT_PLATFORMS_PATH ${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/Qt6/plugins/platforms)
-    set(QT_IMAGEFORMATS_PATH ${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/Qt6/plugins/imageformats)
-    
-    # Add custom target to deploy Qt plugins
+    set(WINDEPLOYQT ${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/tools/qt6/bin/windeployqt.exe)
+
+    # Discover extra third-party codec runtimes used by Qt imageformats plugins (copy after windeployqt)
+    # This helps ensure qjpeg/qtiff/qwebp/qjp2 load on machines without vcpkg in PATH.
+    set(_EXTRA_CODEC_PATTERNS
+        "${VCPKG_BIN_DIR}/jpeg*.dll"
+        "${VCPKG_BIN_DIR}/libjpeg*.dll"
+        "${VCPKG_BIN_DIR}/tiff*.dll"
+        "${VCPKG_BIN_DIR}/libtiff*.dll"
+        "${VCPKG_BIN_DIR}/liblzma*.dll"
+        "${VCPKG_BIN_DIR}/libwebp*.dll"
+        "${VCPKG_BIN_DIR}/libwebpdemux*.dll"
+        "${VCPKG_BIN_DIR}/libwebpmux*.dll"
+        "${VCPKG_BIN_DIR}/libsharpyuv*.dll"
+        "${VCPKG_BIN_DIR}/openjp*.dll"      # openjp2 for qjp2
+        "${VCPKG_BIN_DIR}/zstd*.dll"
+        "${VCPKG_BIN_DIR}/libdeflate*.dll"
+    )
+    set(_EXTRA_CODEC_DLLS "")
+    foreach(_pat IN LISTS _EXTRA_CODEC_PATTERNS)
+        file(GLOB _found "${_pat}")
+        list(APPEND _EXTRA_CODEC_DLLS ${_found})
+    endforeach()
+    list(REMOVE_DUPLICATES _EXTRA_CODEC_DLLS)
+
     foreach(app_target IN ITEMS mib_studio_qt mock_studio_qt)
         add_custom_command(TARGET ${app_target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${app_target}>/platforms
-            COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${app_target}>/imageformats
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${QT_PLATFORMS_PATH}/qwindows.dll
-                $<TARGET_FILE_DIR:${app_target}>/platforms/
-            COMMAND ${CMAKE_COMMAND} -E copy_directory
-                ${QT_IMAGEFORMATS_PATH}
-                $<TARGET_FILE_DIR:${app_target}>/imageformats
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/jpeg62.dll $<TARGET_FILE_DIR:${app_target}>/
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/tiff.dll $<TARGET_FILE_DIR:${app_target}>/
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/liblzma.dll $<TARGET_FILE_DIR:${app_target}>/
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/jasper.dll $<TARGET_FILE_DIR:${app_target}>/
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/libwebp.dll $<TARGET_FILE_DIR:${app_target}>/
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/libwebpdemux.dll $<TARGET_FILE_DIR:${app_target}>/
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/libwebpmux.dll $<TARGET_FILE_DIR:${app_target}>/
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${VCPKG_BIN_DIR}/libsharpyuv.dll $<TARGET_FILE_DIR:${app_target}>/
-            COMMENT "Deploying Qt plugins (platforms/imageformats) and codec runtime deps (${app_target})"
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=${VCPKG_BIN_DIR};$ENV{PATH}"
+                    "${WINDEPLOYQT}" --release "$<TARGET_FILE:${app_target}>"
+            COMMENT "windeployqt (Release): ${app_target}"
         )
+        # Copy extra codec/runtime DLLs if present
+        foreach(_dll IN LISTS _EXTRA_CODEC_DLLS)
+            add_custom_command(TARGET ${app_target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_dll}" "$<TARGET_FILE_DIR:${app_target}>/"
+                VERBATIM
+            )
+        endforeach()
     endforeach()
 endif()
 
