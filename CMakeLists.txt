@@ -36,6 +36,7 @@ add_library(mib_backend STATIC
     src/backend/Tools.cpp
     src/backend/services/Logger.cpp
     src/backend/services/SqliteService.cpp
+    src/backend/services/CameraControlService.cpp
     src/backend/services/Hdf5Service.cpp
     src/backend/services/CaptureService.cpp
     src/backend/services/RecorderService.cpp
@@ -84,6 +85,13 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/MainWindow.h
     src/frontend/PlaybackPanel.cpp
     include/frontend/PlaybackPanel.h
+    resources/defaults.qrc
+    src/frontend/ConnectTab.cpp
+    include/frontend/ConnectTab.h
+    src/frontend/PreviewPage.cpp
+    include/frontend/PreviewPage.h
+    src/frontend/ConfigTabs.cpp
+    include/frontend/ConfigTabs.h
 )
 
 add_executable(mib_studio_qt

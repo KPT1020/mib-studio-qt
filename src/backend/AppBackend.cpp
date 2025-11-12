@@ -9,6 +9,7 @@
 #include "backend/playback/FrameStore.h"
 #include "camera/common/EGrabberCamera.h"
 #include "camera/mock/MockCamera.h"
+#include "backend/services/CameraControlService.h"
 
 #include <algorithm>
 #include <chrono>
@@ -35,6 +36,7 @@ namespace backend
         captureService_ = std::make_unique<services::CaptureService>();
         processingService_ = std::make_unique<services::ProcessingService>();
         playbackService_ = std::make_unique<services::PlaybackService>();
+        cameraControlService_ = std::make_unique<services::CameraControlService>();
         frameStore_ = std::make_shared<playback::FrameStore>(512);
 
         sqliteService_->initialize((std::filesystem::path(dataDir) / "app.sqlite3").string());
@@ -122,12 +124,43 @@ namespace backend
     services::CaptureService &AppBackend::capture() { return *captureService_; }
     services::ProcessingService &AppBackend::processing() { return *processingService_; }
     services::PlaybackService &AppBackend::playback() { return *playbackService_; }
+    services::CameraControlService &AppBackend::cameraControl() { return *cameraControlService_; }
 
 void AppBackend::configureMockCamera(const camera::mock::MockCameraOptions& options) {
     if (!captureService_) return;
     captureService_->setCameraFactory([options]() mutable {
         return std::make_unique<camera::mock::MockCamera>(options);
     });
+    selectedIfIndex_ = -1;
+    selectedDevIndex_ = -1;
+    selectedLabel_.clear();
+}
+
+void AppBackend::setHardwareCameraSelection(int interfaceIndex, int deviceIndex, const std::string& label) {
+    if (!captureService_) return;
+    selectedIfIndex_ = interfaceIndex;
+    selectedDevIndex_ = deviceIndex;
+    selectedLabel_ = label;
+
+    captureService_->setCameraFactory([interfaceIndex, deviceIndex]() {
+        return std::make_unique<camera::common::EGrabberCamera>(interfaceIndex, deviceIndex);
+    });
+    SPDLOG_INFO("Hardware camera selected: {} (if={}, dev={})",
+                label, interfaceIndex, deviceIndex);
+}
+
+bool AppBackend::applyCameraScriptFromFile(const std::string& path, std::string* errorOut) {
+    if (selectedIfIndex_ < 0 || selectedDevIndex_ < 0) {
+        if (errorOut) *errorOut = "No hardware camera selected";
+        return false;
+    }
+    // Ensure capture thread is stopped
+    if (captureService_ && captureService_->isRunning()) {
+        SPDLOG_INFO("Stopping capture before applying camera script");
+        captureService_->stop();
+    }
+    SPDLOG_INFO("Applying camera script to {} from {}", selectedLabel_, path);
+    return cameraControlService_->applyScriptToDevice(selectedIfIndex_, selectedDevIndex_, path, errorOut);
 }
 
 } // namespace backend

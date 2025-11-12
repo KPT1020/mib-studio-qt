@@ -5,6 +5,7 @@
 #include <EGrabber.h>
 
 #include <deque>
+#include <optional>
 #include <memory>
 
 namespace camera::common {
@@ -17,6 +18,7 @@ namespace camera::common {
 class EGrabberCamera : public ICamera {
 public:
     EGrabberCamera();
+    EGrabberCamera(int interfaceIndex, int deviceIndex);
     ~EGrabberCamera() override;
 
     void applyConfig(const CameraConfig& config) override;
@@ -36,6 +38,11 @@ private:
 
     uint64_t width_ = 0;
     uint64_t height_ = 0;
+
+    // Optional target selection (interface/device indices)
+    bool hasSelection_ = false;
+    int selectedInterfaceIndex_ = -1;
+    int selectedDeviceIndex_ = -1;
 
     mutable CameraStats lastStats_{};
     std::deque<Frame> pendingFrames_;

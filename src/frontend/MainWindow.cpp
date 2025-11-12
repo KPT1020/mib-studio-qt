@@ -5,10 +5,13 @@
 #include <QStatusBar>
 #include <QTimer>
 #include <QToolBar>
+#include <QTabWidget>
 
 #include "backend/AppBackend.h"
 #include "backend/services/CaptureService.h"
 #include "frontend/PlaybackPanel.h"
+#include "frontend/ConnectTab.h"
+#include "frontend/PreviewPage.h"
 
 MainWindow::MainWindow(backend::AppBackend& backend, QWidget* parent)
     : QMainWindow(parent), backend_(backend) {
@@ -30,9 +33,17 @@ MainWindow::MainWindow(backend::AppBackend& backend, QWidget* parent)
     statsTimer_->setInterval(500);
     connect(statsTimer_, &QTimer::timeout, this, &MainWindow::onUpdateStats);
 
-    // Playback panel as central widget for live display
-    playbackPanel_ = new PlaybackPanel(backend_, this);
-    setCentralWidget(playbackPanel_);
+    // Tabs: Connect + Preview
+    tabs_ = new QTabWidget(this);
+    auto* connectTab = new frontend::ConnectTab(backend_, tabs_);
+    auto* previewPage = new frontend::PreviewPage(backend_, tabs_);
+    tabs_->addTab(connectTab, tr("Connect"));
+    tabs_->addTab(previewPage, tr("Preview"));
+    setCentralWidget(tabs_);
+
+    connect(connectTab, &frontend::ConnectTab::connected, this, [this]() {
+        if (tabs_) tabs_->setCurrentIndex(1);
+    });
 }
 
 void MainWindow::onStartCapture() {

@@ -1,0 +1,25 @@
+{
+    "buffer_threshold": 1000,
+    "image_processing": {
+        "area_threshold_max": 1200,
+        "area_threshold_min": 250,
+        "bg_subtract_threshold": 8,
+        "filters": {
+            "enable_area_range_check": true,
+            "enable_border_check": true,
+            "enable_multiple_contours_check": false,
+            "require_single_inner_contour": true
+        },
+        "gaussian_blur_size": 3,
+        "morph_iterations": 1,
+        "morph_kernel_size": 3
+    },
+    "save_directory": "testing",
+    "scatter_plot_enabled": true,
+    "target_fps": 5000,
+    "autofocus_min_samples_per_step": 100,
+    "ring_ratio_stale_ms": 1500,
+    "require_new_sample_per_step": true
+}
+
+

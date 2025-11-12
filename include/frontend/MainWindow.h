@@ -5,6 +5,7 @@
 class QLabel;
 class QTimer;
 class PlaybackPanel;
+class QTabWidget;
 
 namespace backend { class AppBackend; }
 
@@ -23,4 +24,5 @@ private:
     QLabel* statusLabel_ = nullptr;
     QTimer* statsTimer_ = nullptr;
     PlaybackPanel* playbackPanel_ = nullptr;
+    QTabWidget* tabs_ = nullptr;
 };

@@ -1,0 +1,8 @@
+<RCC>
+  <qresource prefix="/defaults">
+    <file alias="config.json">defaults/config.json</file>
+    <file alias="egrabberConfig.js">defaults/egrabberConfig.js</file>
+  </qresource>
+</RCC>
+
+

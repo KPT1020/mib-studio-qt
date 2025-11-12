@@ -12,6 +12,11 @@ namespace camera::common {
 
 EGrabberCamera::EGrabberCamera() = default;
 
+EGrabberCamera::EGrabberCamera(int interfaceIndex, int deviceIndex)
+    : hasSelection_(true),
+      selectedInterfaceIndex_(interfaceIndex),
+      selectedDeviceIndex_(deviceIndex) {}
+
 EGrabberCamera::~EGrabberCamera() {
     stop();
 }
@@ -27,7 +32,12 @@ bool EGrabberCamera::start() {
 
     try {
         genTL_ = std::make_unique<EGenTL>();
-        grabber_ = std::make_unique<EGrabber<CallbackOnDemand>>(*genTL_);
+        if (hasSelection_) {
+            grabber_ = std::make_unique<EGrabber<CallbackOnDemand>>(
+                *genTL_, selectedInterfaceIndex_, selectedDeviceIndex_);
+        } else {
+            grabber_ = std::make_unique<EGrabber<CallbackOnDemand>>(*genTL_);
+        }
 
         // Follow SDK sample 310-high-frame-rate.cpp: probe resolution, then configure buffers.
         grabber_->setInteger<StreamModule>("BufferPartCount", 1);
