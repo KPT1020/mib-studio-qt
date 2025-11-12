@@ -16,6 +16,7 @@ endif()
 find_package(Qt6 COMPONENTS Widgets Gui REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG QUIET)
+find_package(OpenCV CONFIG REQUIRED)
 
 # Prefer official SQLite3 package; fallback to unofficial config if needed
 find_package(SQLite3 QUIET)
@@ -127,6 +128,20 @@ target_link_libraries(mock_studio_qt PRIVATE
     mib_backend
     spdlog::spdlog
 )
+
+# OpenCV linking (prefer imported targets; fallback to variables)
+if(TARGET opencv_world)
+    target_link_libraries(mib_studio_qt PRIVATE opencv_world)
+    target_link_libraries(mock_studio_qt PRIVATE opencv_world)
+elseif(TARGET opencv_core)
+    target_link_libraries(mib_studio_qt PRIVATE opencv_core opencv_imgproc opencv_imgcodecs)
+    target_link_libraries(mock_studio_qt PRIVATE opencv_core opencv_imgproc opencv_imgcodecs)
+elseif(DEFINED OpenCV_LIBS)
+    target_include_directories(mib_studio_qt PRIVATE ${OpenCV_INCLUDE_DIRS})
+    target_link_libraries(mib_studio_qt PRIVATE ${OpenCV_LIBS})
+    target_include_directories(mock_studio_qt PRIVATE ${OpenCV_INCLUDE_DIRS})
+    target_link_libraries(mock_studio_qt PRIVATE ${OpenCV_LIBS})
+endif()
 
 # Qt deployment via windeployqt (vcpkg)
 if(WIN32)

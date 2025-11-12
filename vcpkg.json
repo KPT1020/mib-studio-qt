@@ -7,6 +7,7 @@
         "spdlog",
         "sqlite3",
         "hdf5",
-        "nlohmann-json"
+        "nlohmann-json",
+        "opencv4"
     ]
 }

@@ -1,165 +1,59 @@
-[2025-11-11 16:00:13.969] [app] [info] [Logger.cpp:27] Logger initialized: data\logs\app.log
-[2025-11-11 16:00:13.970] [app] [info] [SqliteService.cpp:9] SqliteService initialized at data\app.sqlite3
-[2025-11-11 16:00:13.970] [app] [info] [Hdf5Service.cpp:9] Hdf5Service initialized at data
-[2025-11-11 16:00:13.970] [app] [info] [ProcessingService.cpp:18] ProcessingService started with 8 workers
-[2025-11-11 16:00:13.971] [app] [info] [AppBackend.cpp:97] AppBackend: configuring MockCamera (folder=C:\Users\gavin\Developer\image_stream\231, interval=33 ms, loop=true)
-[2025-11-11 16:00:13.971] [app] [info] [AppBackend.cpp:125] Backend initialized.
-[2025-11-11 16:00:20.834] [app] [info] [CaptureService.cpp:69] CaptureService starting: parts=100, buffers=20
-[2025-11-11 16:00:20.848] [app] [info] [MockCamera.cpp:58] MockCamera started with 5000 files from C:\Users\gavin\Developer\image_stream\231
-[2025-11-11 16:00:20.898] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96730118217700 ns, cksum=8989
-[2025-11-11 16:00:20.972] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96730192618600 ns, cksum=8953
-[2025-11-11 16:00:21.048] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96730268842800 ns, cksum=8923
-[2025-11-11 16:00:21.115] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96730335490500 ns, cksum=8859
-[2025-11-11 16:00:21.191] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96730411718600 ns, cksum=8824
-[2025-11-11 16:00:21.270] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96730490743300 ns, cksum=8880
-[2025-11-11 16:00:21.344] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96730564554400 ns, cksum=8961
-[2025-11-11 16:00:21.421] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96730641989000 ns, cksum=8988
-[2025-11-11 16:00:21.504] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96730724615800 ns, cksum=8969
-[2025-11-11 16:00:21.577] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96730798076400 ns, cksum=8877
-[2025-11-11 16:00:21.655] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96730876038100 ns, cksum=8897
-[2025-11-11 16:00:21.715] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96730935634200 ns, cksum=8873
-[2025-11-11 16:00:21.786] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96731006475200 ns, cksum=8923
-[2025-11-11 16:00:21.863] [app] [info] [CaptureService.cpp:135] Capture stats: 30 fps, 1 MB/s
-[2025-11-11 16:00:21.863] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96731084240000 ns, cksum=8970
-[2025-11-11 16:00:21.929] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96731149575200 ns, cksum=9006
-[2025-11-11 16:00:21.992] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96731212686400 ns, cksum=8954
-[2025-11-11 16:00:22.046] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96731266446900 ns, cksum=8894
-[2025-11-11 16:00:22.131] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96731351430800 ns, cksum=8843
-[2025-11-11 16:00:22.208] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96731428826900 ns, cksum=8913
-[2025-11-11 16:00:22.279] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96731500005100 ns, cksum=8969
-[2025-11-11 16:00:22.365] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96731585444600 ns, cksum=8973
-[2025-11-11 16:00:22.425] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96731645854800 ns, cksum=8991
-[2025-11-11 16:00:22.503] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96731723608400 ns, cksum=8930
-[2025-11-11 16:00:22.573] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96731793942000 ns, cksum=8898
-[2025-11-11 16:00:22.661] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96731881500700 ns, cksum=8883
-[2025-11-11 16:00:22.716] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96731937000100 ns, cksum=8931
-[2025-11-11 16:00:22.794] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96732014881200 ns, cksum=8998
-[2025-11-11 16:00:22.869] [app] [info] [CaptureService.cpp:135] Capture stats: 30 fps, 1 MB/s
-[2025-11-11 16:00:22.869] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96732089994100 ns, cksum=9019
-[2025-11-11 16:00:22.928] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96732149223900 ns, cksum=8967
-[2025-11-11 16:00:23.009] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96732229637300 ns, cksum=8922
-[2025-11-11 16:00:23.073] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96732293626900 ns, cksum=8888
-[2025-11-11 16:00:23.141] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96732362136200 ns, cksum=8936
-[2025-11-11 16:00:23.217] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96732437797600 ns, cksum=8965
-[2025-11-11 16:00:23.287] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96732508194600 ns, cksum=9032
-[2025-11-11 16:00:23.364] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96732585124900 ns, cksum=9000
-[2025-11-11 16:00:23.446] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96732667199400 ns, cksum=8967
-[2025-11-11 16:00:23.521] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96732741820600 ns, cksum=8895
-[2025-11-11 16:00:23.598] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96732818891500 ns, cksum=8917
-[2025-11-11 16:00:23.679] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96732900327800 ns, cksum=8931
-[2025-11-11 16:00:23.760] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96732981112100 ns, cksum=9004
-[2025-11-11 16:00:23.816] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96733037263100 ns, cksum=9010
-[2025-11-11 16:00:23.893] [app] [info] [CaptureService.cpp:135] Capture stats: 30 fps, 1 MB/s
-[2025-11-11 16:00:23.893] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96733114076100 ns, cksum=9014
-[2025-11-11 16:00:23.968] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96733188536100 ns, cksum=8962
-[2025-11-11 16:00:24.038] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96733259280600 ns, cksum=8927
-[2025-11-11 16:00:24.127] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96733347988400 ns, cksum=8878
-[2025-11-11 16:00:24.205] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96733426120600 ns, cksum=8957
-[2025-11-11 16:00:24.293] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96733513414400 ns, cksum=9005
-[2025-11-11 16:00:24.354] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96733574718300 ns, cksum=9004
-[2025-11-11 16:00:24.429] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96733650147200 ns, cksum=8976
-[2025-11-11 16:00:24.514] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96733734475000 ns, cksum=8933
-[2025-11-11 16:00:24.563] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96733783400200 ns, cksum=8932
-[2025-11-11 16:00:24.624] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96733844740800 ns, cksum=8891
-[2025-11-11 16:00:24.697] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96733917306100 ns, cksum=8951
-[2025-11-11 16:00:24.768] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96733988458100 ns, cksum=9009
-[2025-11-11 16:00:24.829] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96734049951700 ns, cksum=8982
-[2025-11-11 16:00:24.901] [app] [info] [CaptureService.cpp:135] Capture stats: 30 fps, 1 MB/s
-[2025-11-11 16:00:24.901] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96734121972700 ns, cksum=8930
-[2025-11-11 16:00:24.956] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96734176637400 ns, cksum=8882
-[2025-11-11 16:00:25.032] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96734252677600 ns, cksum=8866
-[2025-11-11 16:00:25.092] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96734312479600 ns, cksum=8911
-[2025-11-11 16:00:25.158] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96734378964100 ns, cksum=8986
-[2025-11-11 16:00:25.243] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96734463460300 ns, cksum=8972
-[2025-11-11 16:00:25.313] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96734533438300 ns, cksum=8942
-[2025-11-11 16:00:25.379] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96734599685900 ns, cksum=8906
-[2025-11-11 16:00:25.437] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96734657866100 ns, cksum=8859
-[2025-11-11 16:00:25.510] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96734730534900 ns, cksum=8908
-[2025-11-11 16:00:25.583] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96734803455900 ns, cksum=8933
-[2025-11-11 16:00:25.643] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96734864037700 ns, cksum=8977
-[2025-11-11 16:00:25.699] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96734919891700 ns, cksum=9004
-[2025-11-11 16:00:25.765] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96734985602600 ns, cksum=8964
-[2025-11-11 16:00:25.821] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96735041985300 ns, cksum=8890
-[2025-11-11 16:00:25.924] [app] [info] [CaptureService.cpp:135] Capture stats: 30 fps, 1 MB/s
-[2025-11-11 16:00:25.924] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96735145059800 ns, cksum=8859
-[2025-11-11 16:00:26.002] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96735222409200 ns, cksum=8911
-[2025-11-11 16:00:26.078] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96735298432900 ns, cksum=8994
-[2025-11-11 16:00:26.153] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96735373926900 ns, cksum=8980
-[2025-11-11 16:00:26.228] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96735448548000 ns, cksum=8957
-[2025-11-11 16:00:26.311] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96735531436500 ns, cksum=8942
-[2025-11-11 16:00:26.390] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96735610431700 ns, cksum=8877
-[2025-11-11 16:00:26.476] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96735697135200 ns, cksum=8882
-[2025-11-11 16:00:26.550] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96735771052300 ns, cksum=8952
-[2025-11-11 16:00:26.612] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96735832687200 ns, cksum=8997
-[2025-11-11 16:00:26.681] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96735901399400 ns, cksum=9007
-[2025-11-11 16:00:26.766] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96735986687200 ns, cksum=8988
-[2025-11-11 16:00:26.841] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96736061894000 ns, cksum=8921
-[2025-11-11 16:00:26.927] [app] [info] [CaptureService.cpp:135] Capture stats: 30 fps, 1 MB/s
-[2025-11-11 16:00:26.927] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96736148052300 ns, cksum=8893
-[2025-11-11 16:00:26.979] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96736199594900 ns, cksum=8904
-[2025-11-11 16:00:27.025] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96736245487600 ns, cksum=8969
-[2025-11-11 16:00:27.094] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96736314566600 ns, cksum=9027
-[2025-11-11 16:00:27.170] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96736390433300 ns, cksum=9014
-[2025-11-11 16:00:27.247] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96736468357000 ns, cksum=8958
-[2025-11-11 16:00:27.329] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96736550268000 ns, cksum=8917
-[2025-11-11 16:00:27.415] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96736636147900 ns, cksum=8884
-[2025-11-11 16:00:27.491] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96736711912200 ns, cksum=8935
-[2025-11-11 16:00:27.566] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96736786563800 ns, cksum=8994
-[2025-11-11 16:00:27.632] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96736852359800 ns, cksum=9014
-[2025-11-11 16:00:27.701] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96736921473000 ns, cksum=8988
-[2025-11-11 16:00:27.786] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96737006301900 ns, cksum=8959
-[2025-11-11 16:00:27.844] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96737065309000 ns, cksum=8939
-[2025-11-11 16:00:27.917] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96737137536000 ns, cksum=8904
-[2025-11-11 16:00:27.986] [app] [info] [CaptureService.cpp:135] Capture stats: 30 fps, 1 MB/s
-[2025-11-11 16:00:27.986] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96737206648300 ns, cksum=8945
-[2025-11-11 16:00:28.046] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96737266522300 ns, cksum=8976
-[2025-11-11 16:00:28.131] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96737351402600 ns, cksum=9011
-[2025-11-11 16:00:28.205] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96737425897400 ns, cksum=8963
-[2025-11-11 16:00:28.282] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96737502879300 ns, cksum=8936
-[2025-11-11 16:00:28.354] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96737574387900 ns, cksum=8906
-[2025-11-11 16:00:28.420] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96737640698600 ns, cksum=8854
-[2025-11-11 16:00:28.480] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96737700361100 ns, cksum=8933
-[2025-11-11 16:00:28.556] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96737776868400 ns, cksum=8988
-[2025-11-11 16:00:28.608] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96737828414300 ns, cksum=8987
-[2025-11-11 16:00:28.671] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96737891979500 ns, cksum=8983
-[2025-11-11 16:00:28.737] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96737957649800 ns, cksum=8945
-[2025-11-11 16:00:28.813] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96738033881200 ns, cksum=8854
-[2025-11-11 16:00:28.894] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96738114683300 ns, cksum=8924
-[2025-11-11 16:00:28.976] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96738196641700 ns, cksum=8970
-[2025-11-11 16:00:29.033] [app] [info] [CaptureService.cpp:135] Capture stats: 30 fps, 1 MB/s
-[2025-11-11 16:00:29.033] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96738254161200 ns, cksum=9008
-[2025-11-11 16:00:29.086] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96738306599700 ns, cksum=9011
-[2025-11-11 16:00:29.164] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96738385149000 ns, cksum=8958
-[2025-11-11 16:00:29.228] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96738449175200 ns, cksum=8913
-[2025-11-11 16:00:29.312] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96738533229200 ns, cksum=8872
-[2025-11-11 16:00:29.391] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96738611790000 ns, cksum=8897
-[2025-11-11 16:00:29.478] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96738698645100 ns, cksum=8963
-[2025-11-11 16:00:29.540] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96738760660800 ns, cksum=8989
-[2025-11-11 16:00:29.610] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96738830862100 ns, cksum=8958
-[2025-11-11 16:00:29.695] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96738915480200 ns, cksum=8919
-[2025-11-11 16:00:29.753] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96738973898500 ns, cksum=8905
-[2025-11-11 16:00:29.823] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96739043402600 ns, cksum=8862
-[2025-11-11 16:00:29.885] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96739106256900 ns, cksum=8911
-[2025-11-11 16:00:29.947] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96739167784400 ns, cksum=8970
-[2025-11-11 16:00:30.021] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96739241474500 ns, cksum=8981
-[2025-11-11 16:00:30.078] [app] [info] [CaptureService.cpp:135] Capture stats: 30 fps, 1 MB/s
-[2025-11-11 16:00:30.078] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96739298568600 ns, cksum=8953
-[2025-11-11 16:00:30.165] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96739385701700 ns, cksum=8917
-[2025-11-11 16:00:30.224] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96739445117000 ns, cksum=8877
-[2025-11-11 16:00:30.312] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96739533122400 ns, cksum=8879
-[2025-11-11 16:00:30.395] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96739615551800 ns, cksum=8956
-[2025-11-11 16:00:30.477] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96739697769400 ns, cksum=8990
-[2025-11-11 16:00:30.550] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96739771171500 ns, cksum=8994
-[2025-11-11 16:00:30.629] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96739850237700 ns, cksum=8956
-[2025-11-11 16:00:30.708] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96739928652600 ns, cksum=8928
-[2025-11-11 16:00:30.794] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96740015142700 ns, cksum=8883
-[2025-11-11 16:00:30.844] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96740065033200 ns, cksum=8918
-[2025-11-11 16:00:30.905] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96740125805800 ns, cksum=8969
-[2025-11-11 16:00:30.972] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96740192811800 ns, cksum=9025
-[2025-11-11 16:00:31.057] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96740278016100 ns, cksum=9004
-[2025-11-11 16:00:31.136] [app] [info] [CaptureService.cpp:135] Capture stats: 30 fps, 1 MB/s
-[2025-11-11 16:00:31.136] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96740356910300 ns, cksum=8936
-[2025-11-11 16:00:31.212] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96740432604800 ns, cksum=8917
-[2025-11-11 16:00:31.292] [app] [info] [AppBackend.cpp:122] CPU job: 512x96, ts=96740512933700 ns, cksum=8904
-[2025-11-11 16:00:31.294] [app] [info] [CaptureService.cpp:151] CaptureService stopped
-[2025-11-11 16:00:34.460] [app] [info] [ProcessingService.cpp:35] ProcessingService stopped
+[2025-11-12 16:27:41.300] [app] [info] [Logger.cpp:27] Logger initialized: data\logs\app.log
+[2025-11-12 16:27:41.301] [app] [info] [SqliteService.cpp:9] SqliteService initialized at data\app.sqlite3
+[2025-11-12 16:27:41.301] [app] [info] [Hdf5Service.cpp:9] Hdf5Service initialized at data
+[2025-11-12 16:27:41.301] [app] [info] [ProcessingService.cpp:18] ProcessingService started with 8 workers
+[2025-11-12 16:27:41.302] [app] [info] [AppBackend.cpp:109] AppBackend: configuring hardware EGrabber camera
+[2025-11-12 16:27:41.302] [app] [info] [AppBackend.cpp:118] Backend initialized.
+[2025-11-12 16:27:41.344] [app] [info] [CameraControlService.cpp:56] Discovery found 0 device(s)
+[2025-11-12 16:27:41.345] [app] [info] [ConnectTab.cpp:102] ConnectTab: refreshed, 0 device(s) listed
+[2025-11-12 16:27:43.733] [app] [info] [CaptureService.cpp:69] CaptureService starting: parts=100, buffers=20
+[2025-11-12 16:27:46.010] [app] [info] [MockCamera.cpp:81] MockCamera started with 5000 files from C:/Users/gavin/Developer/image_stream/231 (preloaded 5000 frames)
+[2025-11-12 16:27:47.010] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:27:48.010] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:27:49.025] [app] [info] [CaptureService.cpp:151] CaptureService stopped
+[2025-11-12 16:27:52.398] [app] [info] [PlaybackPanel.cpp:261] PlaybackPanel: ROI x=369, y=22, w=134, h=59
+[2025-11-12 16:27:53.660] [app] [info] [PlaybackPanel.cpp:474] PlaybackPanel: background captured (512x96)
+[2025-11-12 16:27:57.243] [app] [info] [PlaybackPanel.cpp:442] PlaybackPanel: overlay mode changed to 1
+[2025-11-12 16:27:59.121] [app] [info] [PlaybackPanel.cpp:381] PlaybackPanel: scrubbing started
+[2025-11-12 16:28:06.217] [app] [info] [PlaybackPanel.cpp:391] PlaybackPanel: scrubbing ended, pinned index=14896
+[2025-11-12 16:28:10.632] [app] [info] [PlaybackPanel.cpp:381] PlaybackPanel: scrubbing started
+[2025-11-12 16:28:12.320] [app] [info] [PlaybackPanel.cpp:391] PlaybackPanel: scrubbing ended, pinned index=14897
+[2025-11-12 16:30:05.840] [app] [info] [PlaybackPanel.cpp:381] PlaybackPanel: scrubbing started
+[2025-11-12 16:30:18.056] [app] [info] [PlaybackPanel.cpp:391] PlaybackPanel: scrubbing ended, pinned index=14767
+[2025-11-12 16:30:53.101] [app] [info] [PlaybackPanel.cpp:442] PlaybackPanel: overlay mode changed to 2
+[2025-11-12 16:30:57.510] [app] [info] [PlaybackPanel.cpp:442] PlaybackPanel: overlay mode changed to 3
+[2025-11-12 16:30:59.743] [app] [info] [PlaybackPanel.cpp:442] PlaybackPanel: overlay mode changed to 0
+[2025-11-12 16:31:00.300] [app] [info] [PlaybackPanel.cpp:442] PlaybackPanel: overlay mode changed to 1
+[2025-11-12 16:31:01.013] [app] [info] [PlaybackPanel.cpp:442] PlaybackPanel: overlay mode changed to 2
+[2025-11-12 16:31:02.996] [app] [info] [PlaybackPanel.cpp:442] PlaybackPanel: overlay mode changed to 3
+[2025-11-12 16:31:03.843] [app] [info] [PlaybackPanel.cpp:442] PlaybackPanel: overlay mode changed to 0
+[2025-11-12 16:31:04.436] [app] [info] [PlaybackPanel.cpp:442] PlaybackPanel: overlay mode changed to 1
+[2025-11-12 16:31:05.739] [app] [info] [PlaybackPanel.cpp:442] PlaybackPanel: overlay mode changed to 2
+[2025-11-12 16:32:13.847] [app] [info] [CaptureService.cpp:69] CaptureService starting: parts=100, buffers=20
+[2025-11-12 16:32:15.965] [app] [info] [MockCamera.cpp:81] MockCamera started with 5000 files from C:/Users/gavin/Developer/image_stream/231 (preloaded 5000 frames)
+[2025-11-12 16:32:16.966] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:32:17.966] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:32:18.966] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:32:19.966] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:32:20.966] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:32:21.967] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:32:22.967] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:32:23.967] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:32:24.967] [app] [info] [CaptureService.cpp:135] Capture stats: 4897 fps, 241 MB/s
+[2025-11-12 16:32:25.537] [app] [info] [CaptureService.cpp:151] CaptureService stopped
+[2025-11-12 16:34:09.894] [app] [info] [CaptureService.cpp:69] CaptureService starting: parts=100, buffers=20
+[2025-11-12 16:34:12.100] [app] [info] [MockCamera.cpp:81] MockCamera started with 5000 files from C:/Users/gavin/Developer/image_stream/231 (preloaded 5000 frames)
+[2025-11-12 16:34:13.100] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:34:14.101] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:34:15.101] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:34:16.101] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:34:17.101] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:34:18.101] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:34:19.101] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:34:20.101] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:34:21.101] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:34:22.101] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:34:23.101] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:34:24.101] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 16:34:25.101] [app] [info] [CaptureService.cpp:135] Capture stats: 4995 fps, 246 MB/s
+[2025-11-12 16:34:25.434] [app] [info] [CaptureService.cpp:151] CaptureService stopped
