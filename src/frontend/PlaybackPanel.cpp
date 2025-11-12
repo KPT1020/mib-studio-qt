@@ -7,8 +7,11 @@
 #include <QHBoxLayout>
 #include <QToolButton>
 #include <QMouseEvent>
+#include <QKeyEvent>
 #include <QMenu>
 #include <QCursor>
+#include <QShortcut>
+#include <QKeySequence>
 #include <limits>
 #include <algorithm>
 
@@ -225,6 +228,8 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     slider_->setRange(0, 0);
     slider_->setSingleStep(1);
     slider_->setPageStep(8);
+    slider_->setFocusPolicy(Qt::StrongFocus);
+    slider_->installEventFilter(this);
 
     layout->addWidget(canvas_, 1);
 
@@ -251,6 +256,12 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     connect(slider_, &QSlider::valueChanged, this, &PlaybackPanel::onSliderValueChanged);
     connect(overlayBtn_, &QToolButton::clicked, this, &PlaybackPanel::onToggleOverlay);
     connect(setBgBtn_, &QToolButton::clicked, this, &PlaybackPanel::onSetBackground);
+
+    // Space shortcut to start/stop capture
+    {
+        auto *spaceShortcut = new QShortcut(QKeySequence(Qt::Key_Space), this);
+        connect(spaceShortcut, &QShortcut::activated, this, &PlaybackPanel::onToggleCapture);
+    }
 
     // Canvas callbacks
     auto *canvas = static_cast<ImageCanvas *>(canvas_);
@@ -399,6 +410,8 @@ void PlaybackPanel::onSliderPressed()
     SPDLOG_INFO("PlaybackPanel: scrubbing started");
     if (setBgBtn_)
         setBgBtn_->setEnabled(true);
+    if (slider_)
+        slider_->setFocus();
 }
 
 void PlaybackPanel::onSliderReleased()
@@ -503,6 +516,20 @@ void PlaybackPanel::onSetBackground()
                                                                             : backgroundGray_.convertToFormat(QImage::Format_Grayscale8);
         cv::Mat bg(gray.height(), gray.width(), CV_8UC1, const_cast<uchar *>(gray.bits()), gray.bytesPerLine());
         backend_.processing().setRealtimeBackgroundGray(bg.clone());
+    }
+}
+
+void PlaybackPanel::onToggleCapture()
+{
+    if (backend_.capture().isRunning())
+    {
+        SPDLOG_INFO("PlaybackPanel: stopping capture (Space)");
+        backend_.capture().stop();
+    }
+    else
+    {
+        SPDLOG_INFO("PlaybackPanel: starting capture (Space)");
+        backend_.capture().start();
     }
 }
 
@@ -647,4 +674,59 @@ void PlaybackPanel::updateOverlayButtonUi()
     }
     overlayBtn_->setText(label);
     overlayBtn_->setToolTip("Toggle overlay (Off → Mask → Contours → Both)");
+}
+
+bool PlaybackPanel::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == slider_ && event->type() == QEvent::KeyPress)
+    {
+        auto *ke = static_cast<QKeyEvent *>(event);
+        const int key = ke->key();
+        const bool shift = (ke->modifiers() & Qt::ShiftModifier);
+        const int step = shift ? std::max(1, slider_->pageStep()) : std::max(1, slider_->singleStep());
+        const int minVal = slider_->minimum();
+        const int maxVal = slider_->maximum();
+        int newVal = slider_->value();
+        bool handled = false;
+
+        switch (key)
+        {
+        case Qt::Key_Left:
+            newVal = std::clamp(newVal - step, minVal, maxVal);
+            handled = true;
+            break;
+        case Qt::Key_Right:
+            newVal = std::clamp(newVal + step, minVal, maxVal);
+            handled = true;
+            break;
+        case Qt::Key_Home:
+            newVal = minVal;
+            handled = true;
+            break;
+        case Qt::Key_End:
+            newVal = maxVal;
+            handled = true;
+            break;
+        case Qt::Key_Space:
+            onToggleCapture();
+            return true;
+        default:
+            break;
+        }
+
+        if (handled)
+        {
+            followLive_ = false;
+            if (setBgBtn_)
+                setBgBtn_->setEnabled(true);
+            if (newVal != slider_->value())
+            {
+                scrubbing_ = true;
+                slider_->setValue(newVal); // triggers onSliderValueChanged
+                scrubbing_ = false;
+            }
+            return true;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
 }

@@ -30,6 +30,10 @@ private slots:
     void onSliderValueChanged(int value);
     void onToggleOverlay();
     void onSetBackground();
+    void onToggleCapture();
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
     void computeProcessedOverlay();
