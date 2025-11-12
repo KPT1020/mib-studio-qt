@@ -15,6 +15,7 @@
 #include "backend/AppBackend.h"
 #include "backend/services/CaptureService.h"
 #include "backend/services/PlaybackService.h"
+#include "backend/services/ProcessingService.h"
 #include "backend/playback/FrameStore.h"
 
 #include <spdlog/spdlog.h>
@@ -259,6 +260,23 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
         SPDLOG_INFO("PlaybackPanel: ROI {}",
                     roiActive_ ? fmt::format("x={}, y={}, w={}, h={}", r.x(), r.y(), r.width(), r.height())
                                : std::string("cleared"));
+        // Sync ROI to backend realtime processor (full image when cleared)
+        backend::services::ProcessingService::Roi roi{};
+        if (roiActive_)
+        {
+            roi.x = r.x();
+            roi.y = r.y();
+            roi.w = r.width();
+            roi.h = r.height();
+        }
+        else
+        {
+            roi.x = 0;
+            roi.y = 0;
+            roi.w = frameImage_.width();
+            roi.h = frameImage_.height();
+        }
+        backend_.processing().setRealtimeRoi(roi);
         if (overlayMode_ != OverlayMode::Off)
         {
             computeProcessedOverlay();
@@ -477,6 +495,14 @@ void PlaybackPanel::onSetBackground()
         computeProcessedOverlay();
         if (canvas_)
             canvas_->update();
+    }
+    // Also push background to backend realtime processor
+    if (!backgroundGray_.isNull())
+    {
+        QImage gray = backgroundGray_.format() == QImage::Format_Grayscale8 ? backgroundGray_
+                                                                            : backgroundGray_.convertToFormat(QImage::Format_Grayscale8);
+        cv::Mat bg(gray.height(), gray.width(), CV_8UC1, const_cast<uchar *>(gray.bits()), gray.bytesPerLine());
+        backend_.processing().setRealtimeBackgroundGray(bg.clone());
     }
 }
 

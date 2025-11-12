@@ -43,6 +43,7 @@ namespace backend
         hdf5Service_->initialize(dataDir);
 
         processingService_->start();
+        processingService_->startRealtime(frameStore_);
 
         // Wire capture -> frame store for playback/display
         captureService_->setFrameStore(frameStore_);

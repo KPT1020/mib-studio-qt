@@ -58,6 +58,15 @@ target_link_libraries(mib_backend PUBLIC
     Qt6::Gui
 )
 
+if(TARGET opencv_world)
+    target_link_libraries(mib_backend PUBLIC opencv_world)
+elseif(TARGET opencv_core)
+    target_link_libraries(mib_backend PUBLIC opencv_core opencv_imgproc opencv_imgcodecs)
+elseif(DEFINED OpenCV_LIBS)
+    target_include_directories(mib_backend PUBLIC ${OpenCV_INCLUDE_DIRS})
+    target_link_libraries(mib_backend PUBLIC ${OpenCV_LIBS})
+endif()
+
 if(TARGET nlohmann_json::nlohmann_json)
     target_link_libraries(mib_backend PUBLIC nlohmann_json::nlohmann_json)
 endif()
