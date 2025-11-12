@@ -103,3 +103,40 @@
 [2025-11-12 17:00:53.275] [app] [info] [ProcessingService.cpp:233] Realtime processing summary: frames=4896 window_ms=1000 avg_ms=0.124 ~fps=4895.8
 [2025-11-12 17:00:54.221] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
 [2025-11-12 17:00:54.278] [app] [info] [ProcessingService.cpp:233] Realtime processing summary: frames=5015 window_ms=1002 avg_ms=0.103 ~fps=5003.6
+[2025-11-12 17:00:55.221] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 17:00:55.279] [app] [info] [ProcessingService.cpp:233] Realtime processing summary: frames=4981 window_ms=1001 avg_ms=0.101 ~fps=4973.8
+[2025-11-12 17:00:56.221] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 17:00:56.279] [app] [info] [ProcessingService.cpp:233] Realtime processing summary: frames=4949 window_ms=1000 avg_ms=0.108 ~fps=4948.7
+[2025-11-12 17:00:57.221] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 17:00:57.280] [app] [info] [ProcessingService.cpp:233] Realtime processing summary: frames=4967 window_ms=1001 avg_ms=0.103 ~fps=4961.9
+[2025-11-12 17:00:58.221] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 17:00:58.280] [app] [info] [ProcessingService.cpp:233] Realtime processing summary: frames=4903 window_ms=1000 avg_ms=0.118 ~fps=4902.9
+[2025-11-12 17:00:59.221] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 17:00:59.282] [app] [info] [ProcessingService.cpp:233] Realtime processing summary: frames=4914 window_ms=1002 avg_ms=0.103 ~fps=4904.0
+[2025-11-12 17:01:00.221] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 17:01:00.285] [app] [info] [ProcessingService.cpp:233] Realtime processing summary: frames=5049 window_ms=1003 avg_ms=0.112 ~fps=5033.9
+[2025-11-12 17:01:01.222] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 17:01:01.285] [app] [info] [ProcessingService.cpp:233] Realtime processing summary: frames=5013 window_ms=1000 avg_ms=0.100 ~fps=5012.9
+[2025-11-12 17:01:02.222] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 17:01:02.288] [app] [info] [ProcessingService.cpp:233] Realtime processing summary: frames=4961 window_ms=1003 avg_ms=0.108 ~fps=4945.4
+[2025-11-12 17:01:03.222] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 17:01:03.300] [app] [info] [ProcessingService.cpp:233] Realtime processing summary: frames=4996 window_ms=1011 avg_ms=0.101 ~fps=4940.2
+[2025-11-12 17:01:04.233] [app] [info] [CaptureService.cpp:135] Capture stats: 85 fps, 4 MB/s
+[2025-11-12 17:01:04.300] [app] [info] [ProcessingService.cpp:233] Realtime processing summary: frames=3989 window_ms=1000 avg_ms=0.130 ~fps=3988.6
+[2025-11-12 17:01:05.233] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 17:01:05.302] [app] [info] [ProcessingService.cpp:233] Realtime processing summary: frames=4758 window_ms=1002 avg_ms=0.103 ~fps=4748.2
+[2025-11-12 17:01:06.233] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 17:01:06.302] [app] [info] [ProcessingService.cpp:233] Realtime processing summary: frames=4971 window_ms=1000 avg_ms=0.098 ~fps=4970.7
+[2025-11-12 17:01:07.233] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 17:01:07.302] [app] [info] [ProcessingService.cpp:233] Realtime processing summary: frames=5033 window_ms=1000 avg_ms=0.110 ~fps=5032.5
+[2025-11-12 17:01:08.233] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 17:01:08.306] [app] [info] [ProcessingService.cpp:233] Realtime processing summary: frames=5002 window_ms=1004 avg_ms=0.102 ~fps=4984.2
+[2025-11-12 17:01:09.233] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 17:01:09.306] [app] [info] [ProcessingService.cpp:233] Realtime processing summary: frames=5000 window_ms=1000 avg_ms=0.105 ~fps=4999.7
+[2025-11-12 17:01:10.234] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 17:01:10.307] [app] [info] [ProcessingService.cpp:233] Realtime processing summary: frames=4937 window_ms=1002 avg_ms=0.108 ~fps=4928.2
+[2025-11-12 17:01:11.234] [app] [info] [CaptureService.cpp:135] Capture stats: 5000 fps, 246 MB/s
+[2025-11-12 17:01:11.309] [app] [info] [ProcessingService.cpp:233] Realtime processing summary: frames=5012 window_ms=1001 avg_ms=0.078 ~fps=5006.7
+[2025-11-12 17:01:11.431] [app] [info] [CaptureService.cpp:151] CaptureService stopped
+[2025-11-12 17:01:18.450] [app] [info] [PlaybackPanel.cpp:399] PlaybackPanel: scrubbing started
+[2025-11-12 17:01:23.476] [app] [info] [PlaybackPanel.cpp:409] PlaybackPanel: scrubbing ended, pinned index=298274
