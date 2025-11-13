@@ -54,6 +54,41 @@ size_t PlaybackService::capacity() const {
     return store_->capacity();
 }
 
+bool PlaybackService::saveFramesToDisk(const std::string& outputDir) const {
+    if (!store_) return false;
+    return store_->saveFramesToDisk(outputDir);
+}
+
+bool PlaybackService::saveFramesToDisk(const std::string& outputDir, uint64_t startIndex, uint64_t endIndex) const {
+    if (!store_) return false;
+    return store_->saveFramesToDisk(outputDir, startIndex, endIndex);
+}
+
+bool PlaybackService::saveFramesToDisk(const std::string& outputDir, uint64_t startTimestamp, uint64_t endTimestamp, bool useTimestamps) const {
+    if (!store_) return false;
+    return store_->saveFramesToDisk(outputDir, startTimestamp, endTimestamp, useTimestamps);
+}
+
+bool PlaybackService::resize(size_t newCapacity) {
+    if (!store_) return false;
+    return store_->resize(newCapacity);
+}
+
+backend::playback::IndexRange PlaybackService::getAvailableRange() const {
+    if (!store_) {
+        backend::playback::IndexRange empty;
+        empty.start = 0;
+        empty.end = 0;
+        return empty;
+    }
+    return store_->getAvailableRange();
+}
+
+bool PlaybackService::getAvailableTimestampRange(backend::playback::TimestampRange& out) const {
+    if (!store_) return false;
+    return store_->getAvailableTimestampRange(out);
+}
+
 } // namespace backend::services
 
 
