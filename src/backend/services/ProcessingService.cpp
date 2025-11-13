@@ -188,18 +188,28 @@ size_t ProcessingService::flushBufferedFrames(class Hdf5Service& hdf5) {
     
     // Append to HDF5 file
     if (!validToFlush.empty() || !invalidToFlush.empty()) {
-        if (hdf5.appendFrames(validToFlush, invalidToFlush)) {
-            size_t flushed = validToFlush.size() + invalidToFlush.size();
+        using clock = std::chrono::steady_clock;
+        const size_t validCount = validToFlush.size();
+        const size_t invalidCount = invalidToFlush.size();
+        SPDLOG_INFO("HDF5 flush start: valid={}, invalid={}", validCount, invalidCount);
+        const auto t0 = clock::now();
+        const bool ok = hdf5.appendFrames(validToFlush, invalidToFlush);
+        const auto t1 = clock::now();
+        const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+
+        if (ok) {
+            size_t flushed = validCount + invalidCount;
             framesSinceLastFlush_.store(0, std::memory_order_relaxed);
-            SPDLOG_DEBUG("Flushed {} frames to HDF5 ({} valid, {} invalid)", 
-                        flushed, validToFlush.size(), invalidToFlush.size());
+            SPDLOG_INFO("HDF5 flush end: flushed={} (valid={}, invalid={}) duration_ms={:.3f}",
+                        flushed, validCount, invalidCount, ms);
             return flushed;
         } else {
             // Flush failed, put frames back
             std::scoped_lock lk(framesMutex_);
             validFrames_.insert(validFrames_.end(), validToFlush.begin(), validToFlush.end());
             invalidFrames_.insert(invalidFrames_.end(), invalidToFlush.begin(), invalidToFlush.end());
-            SPDLOG_ERROR("Failed to flush frames to HDF5, frames restored to buffer");
+            SPDLOG_ERROR("HDF5 flush failed after {:.3f} ms; frames restored (valid={}, invalid={})",
+                         ms, validCount, invalidCount);
             return 0;
         }
     }
@@ -440,6 +450,7 @@ void ProcessingService::realtimeLoop() {
     uint64_t framesSinceSummary = 0;
     uint64_t framesSkippedSinceSummary = 0;
     double msSinceSummary = 0.0;
+    double algoMsSinceSummary = 0.0;
 
     while (rtRunning_.load()) {
         if (!rtStore_) {
@@ -503,6 +514,7 @@ void ProcessingService::realtimeLoop() {
             cv::Mat roiCurr = gray(cvRoi);
             cv::Mat roiDst = mask(cvRoi);
             cv::Mat blurredCurr, blurredBg, diff, thresh;
+            const auto algoStart = clock::now();
             cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(3, 3), 0);
             if (!bg.empty() && bg.size() == gray.size() && bg.type() == CV_8UC1) {
                 cv::GaussianBlur(bg(cvRoi), blurredBg, cv::Size(3, 3), 0);
@@ -529,6 +541,9 @@ void ProcessingService::realtimeLoop() {
                 }
                 
                 FilterResult validation = filterProcessedImage(mask, cvRoi, config, gray);
+                const auto algoEnd = clock::now();
+                const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
+                algoMsSinceSummary += algoMs;
                 
                 // Determine if we should save this frame
                 // Always save valid frames, but sample invalid frames to reduce file size and improve performance
@@ -572,6 +587,11 @@ void ProcessingService::realtimeLoop() {
                         }
                     }
                 }
+            } else {
+                // Not accumulating frames; still record algorithm-only time
+                const auto algoEnd = clock::now();
+                const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
+                algoMsSinceSummary += algoMs;
             }
 
             // Publish snapshot
@@ -597,13 +617,15 @@ void ProcessingService::realtimeLoop() {
             const double windowMs = std::chrono::duration<double, std::milli>(now - lastSummaryTs).count();
             if (windowMs >= 1000.0) {
                 const double avgMs = framesSinceSummary > 0 ? (msSinceSummary / static_cast<double>(framesSinceSummary)) : 0.0;
+                const double algoAvgMs = framesSinceSummary > 0 ? (algoMsSinceSummary / static_cast<double>(framesSinceSummary)) : 0.0;
                 const double fps = windowMs > 0.0 ? (static_cast<double>(framesSinceSummary) * 1000.0 / windowMs) : 0.0;
-                SPDLOG_INFO("Realtime processing summary: processed={} skipped={} window_ms={:.0f} avg_ms={:.3f} ~fps={:.1f}",
-                            framesSinceSummary, framesSkippedSinceSummary, windowMs, avgMs, fps);
+                SPDLOG_INFO("Realtime processing summary: processed={} skipped={} window_ms={:.0f} avg_ms={:.3f} algo_avg_ms={:.3f} ~fps={:.1f}",
+                            framesSinceSummary, framesSkippedSinceSummary, windowMs, avgMs, algoAvgMs, fps);
                 lastSummaryTs = now;
                 framesSinceSummary = 0;
                 framesSkippedSinceSummary = 0;
                 msSinceSummary = 0.0;
+                algoMsSinceSummary = 0.0;
             }
         }
     }

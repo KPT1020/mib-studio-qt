@@ -22,6 +22,11 @@
 #include <QFutureWatcher>
 #include <QSpinBox>
 #include <QLayout>
+#include <QThread>
+#include <thread>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 MainWindow::MainWindow(backend::AppBackend& backend, QWidget* parent)
     : QMainWindow(parent), backend_(backend) {
@@ -53,8 +58,27 @@ MainWindow::MainWindow(backend::AppBackend& backend, QWidget* parent)
                 backend_.processing().setInvalidFrameSamplingRate(static_cast<size_t>(value));
             });
     
+    // Initialize defaults for this session
+    backend_.processing().setInvalidFrameSamplingRate(200);
+    backend_.processing().setFlushInterval(200);
+
     // Initialize the sampling rate from backend
     invalidFrameSamplingSpinBox_->setValue(static_cast<int>(backend_.processing().getInvalidFrameSamplingRate()));
+
+    // Flush interval control
+    toolbar->addSeparator();
+    toolbar->addWidget(new QLabel("Flush Interval:", this));
+    auto* flushIntervalSpinBox = new QSpinBox(this);
+    flushIntervalSpinBox->setMinimum(1);
+    flushIntervalSpinBox->setMaximum(10000);
+    flushIntervalSpinBox->setValue(static_cast<int>(backend_.processing().getFlushInterval()));
+    flushIntervalSpinBox->setSuffix(" frames");
+    flushIntervalSpinBox->setToolTip("Flush buffered frames to HDF5 every N frames");
+    toolbar->addWidget(flushIntervalSpinBox);
+    connect(flushIntervalSpinBox, QOverload<int>::of(&QSpinBox::valueChanged),
+            this, [this](int value) {
+                backend_.processing().setFlushInterval(static_cast<size_t>(value));
+            });
 
     connect(startCaptureAct, &QAction::triggered, this, &MainWindow::onStartCapture);
     connect(stopCaptureAct, &QAction::triggered, this, &MainWindow::onStopCapture);
@@ -268,6 +292,21 @@ void MainWindow::onUpdateStats() {
             flushInProgress_ = true;
             // Capture backend_ by reference - it's a member variable so safe
             QFuture<size_t> future = QtConcurrent::run([this]() {
+#ifdef _WIN32
+                // Lower OS thread priority and optionally set affinity to a non-critical core
+                // Background mode (Vista+); falls back to BELOW_NORMAL if unavailable
+                if (!SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN)) {
+                    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+                }
+                const unsigned int cores = std::thread::hardware_concurrency();
+                if (cores > 1) {
+                    // Prefer the last core
+                    const DWORD_PTR mask = (cores >= (sizeof(DWORD_PTR) * 8))
+                        ? (static_cast<DWORD_PTR>(1) << ((sizeof(DWORD_PTR) * 8) - 1))
+                        : (static_cast<DWORD_PTR>(1) << (cores - 1));
+                    SetThreadAffinityMask(GetCurrentThread(), mask);
+                }
+#endif
                 auto& hdf5 = backend_.hdf5();
                 auto& proc = backend_.processing();
                 return proc.flushBufferedFrames(hdf5);

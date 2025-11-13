@@ -424,7 +424,7 @@ namespace backend::services
         H5Sget_simple_extent_dims(filespaceId, currentDims, nullptr);
         H5Sclose(filespaceId);
 
-        // Extend dataset
+        // Extend dataset once for the whole batch
         hsize_t newDims[4];
         if (channels == 1)
         {
@@ -447,58 +447,70 @@ namespace backend::services
             return false;
         }
 
-        // Select hyperslab for writing
-        filespaceId = H5Dget_space(datasetId);
-        // Use actual dataset extent, not tracked currentSize (which may be stale)
-        hsize_t start[4] = {currentDims[0], 0, 0, 0};
-        hsize_t count[4];
-        if (channels == 1)
-        {
-            count[0] = images.size();
-            count[1] = static_cast<hsize_t>(height);
-            count[2] = static_cast<hsize_t>(width);
-        }
-        else
-        {
-            count[0] = images.size();
-            count[1] = static_cast<hsize_t>(height);
-            count[2] = static_cast<hsize_t>(width);
-            count[3] = static_cast<hsize_t>(channels);
-        }
-        H5Sselect_hyperslab(filespaceId, H5S_SELECT_SET, start, nullptr, count, nullptr);
+        // Write each frame as its own hyperslab to avoid assembling a large contiguous buffer
+        const size_t imageSizeBytes = static_cast<size_t>(height) * width * channels;
+        std::vector<uint8_t> scratch; // allocated only if needed
 
-        // Create memory dataspace
-        hid_t memspaceId = H5Screate_simple(channels == 1 ? 3 : 4, count, nullptr);
-
-        // Prepare data buffer
-        size_t imageSize = static_cast<size_t>(height) * width * channels;
-        std::vector<uint8_t> buffer(images.size() * imageSize);
-        size_t offset = 0;
-        for (const auto &img : images)
+        for (size_t i = 0; i < images.size(); ++i)
         {
+            const cv::Mat &img = images[i];
             if (img.rows != height || img.cols != width || img.channels() != channels)
             {
                 SPDLOG_ERROR("Image dimensions mismatch in appendImageDataset");
-                H5Sclose(memspaceId);
-                H5Sclose(filespaceId);
                 H5Dclose(datasetId);
                 return false;
             }
-            std::memcpy(buffer.data() + offset, img.data, imageSize);
-            offset += imageSize;
+
+            filespaceId = H5Dget_space(datasetId);
+            hsize_t start[4] = {currentDims[0] + static_cast<hsize_t>(i), 0, 0, 0};
+            hsize_t count[4];
+            if (channels == 1)
+            {
+                count[0] = 1;
+                count[1] = static_cast<hsize_t>(height);
+                count[2] = static_cast<hsize_t>(width);
+            }
+            else
+            {
+                count[0] = 1;
+                count[1] = static_cast<hsize_t>(height);
+                count[2] = static_cast<hsize_t>(width);
+                count[3] = static_cast<hsize_t>(channels);
+            }
+            H5Sselect_hyperslab(filespaceId, H5S_SELECT_SET, start, nullptr, count, nullptr);
+
+            hid_t memspaceId = H5Screate_simple(channels == 1 ? 3 : 4, count, nullptr);
+
+            const void *srcPtr = nullptr;
+            if (img.isContinuous())
+            {
+                srcPtr = img.data;
+            }
+            else
+            {
+                if (scratch.size() < imageSizeBytes) scratch.resize(imageSizeBytes);
+                size_t off = 0;
+                const size_t rowBytes = static_cast<size_t>(img.cols) * img.elemSize();
+                for (int r = 0; r < img.rows; ++r)
+                {
+                    std::memcpy(scratch.data() + off, img.ptr(r), rowBytes);
+                    off += rowBytes;
+                }
+                srcPtr = scratch.data();
+            }
+
+            status = H5Dwrite(datasetId, H5T_NATIVE_UINT8, memspaceId, filespaceId, H5P_DEFAULT, srcPtr);
+            H5Sclose(memspaceId);
+            H5Sclose(filespaceId);
+            if (status < 0)
+            {
+                SPDLOG_ERROR("Failed to append frame {} to dataset {}", i, datasetPath);
+                H5Dclose(datasetId);
+                return false;
+            }
         }
 
-        // Write data
-        status = H5Dwrite(datasetId, H5T_NATIVE_UINT8, memspaceId, filespaceId, H5P_DEFAULT, buffer.data());
-        H5Sclose(memspaceId);
-        H5Sclose(filespaceId);
         H5Dclose(datasetId);
-
-        if (status < 0)
-        {
-            SPDLOG_ERROR("Failed to append data to dataset {}", datasetPath);
-            return false;
-        }
 
         // Update tracked size to match actual dataset extent after successful write
         currentSize = currentDims[0] + images.size();
@@ -548,7 +560,7 @@ namespace backend::services
             return false;
         }
 
-        // Extend dataset
+        // Extend dataset once for the whole batch
         hid_t filespaceId = H5Dget_space(datasetId);
         hsize_t currentDims[1];
         H5Sget_simple_extent_dims(filespaceId, currentDims, nullptr);
@@ -564,21 +576,10 @@ namespace backend::services
             return false;
         }
 
-        // Select hyperslab
-        filespaceId = H5Dget_space(datasetId);
-        // Use actual dataset extent, not tracked currentSize (which may be stale)
-        hsize_t start[1] = {currentDims[0]};
-        hsize_t count[1] = {frames.size()};
-        H5Sselect_hyperslab(filespaceId, H5S_SELECT_SET, start, nullptr, count, nullptr);
-
-        // Create memory dataspace
-        hid_t memspaceId = H5Screate_simple(1, count, nullptr);
-
-        // Prepare metadata
-        std::vector<FrameMetadata> metadata;
-        metadata.reserve(frames.size());
-        for (const auto &frame : frames)
+        // Write each metadata entry individually
+        for (size_t i = 0; i < frames.size(); ++i)
         {
+            const auto &frame = frames[i];
             FrameMetadata md{};
             md.index = frame.index;
             md.timestampNs = frame.timestampNs;
@@ -595,21 +596,27 @@ namespace backend::services
             md.brightness_q2 = frame.validation.brightness.q2;
             md.brightness_q3 = frame.validation.brightness.q3;
             md.brightness_q4 = frame.validation.brightness.q4;
-            metadata.push_back(md);
+
+            filespaceId = H5Dget_space(datasetId);
+            hsize_t start[1] = {currentDims[0] + static_cast<hsize_t>(i)};
+            hsize_t count[1] = {1};
+            H5Sselect_hyperslab(filespaceId, H5S_SELECT_SET, start, nullptr, count, nullptr);
+            hid_t memspaceId = H5Screate_simple(1, count, nullptr);
+
+            status = H5Dwrite(datasetId, compTypeId, memspaceId, filespaceId, H5P_DEFAULT, &md);
+            H5Sclose(memspaceId);
+            H5Sclose(filespaceId);
+            if (status < 0)
+            {
+                SPDLOG_ERROR("Failed to append metadata entry {} to dataset {}", i, datasetPath);
+                H5Tclose(compTypeId);
+                H5Dclose(datasetId);
+                return false;
+            }
         }
 
-        // Write data
-        status = H5Dwrite(datasetId, compTypeId, memspaceId, filespaceId, H5P_DEFAULT, metadata.data());
-        H5Sclose(memspaceId);
-        H5Sclose(filespaceId);
         H5Tclose(compTypeId);
         H5Dclose(datasetId);
-
-        if (status < 0)
-        {
-            SPDLOG_ERROR("Failed to append metadata to dataset {}", datasetPath);
-            return false;
-        }
 
         // Update tracked size to match actual dataset extent after successful write
         currentSize = currentDims[0] + frames.size();
