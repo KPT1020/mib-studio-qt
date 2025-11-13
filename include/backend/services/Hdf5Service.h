@@ -24,6 +24,7 @@ public:
     
     // File operations
     bool openFile(const std::string& filePath);
+    bool loadFile(const std::string& filePath); // Open existing file for reading
     void closeFile();
     bool isFileOpen() const;
     
@@ -36,9 +37,15 @@ public:
     bool appendFrames(const std::vector<ProcessedFrame>& validFrames,
                       const std::vector<ProcessedFrame>& invalidFrames);
     
+    // Frame reading
+    bool readValidFrames(std::vector<ProcessedFrame>& frames);
+    bool readInvalidFrames(std::vector<ProcessedFrame>& frames);
+    
     // Experiment metadata
     bool writeExperimentInfo(uint64_t startTimeNs, uint64_t endTimeNs,
                              size_t totalValidFrames, size_t totalInvalidFrames);
+    bool readExperimentInfo(uint64_t& startTimeNs, uint64_t& endTimeNs,
+                             size_t& totalValidFrames, size_t& totalInvalidFrames);
 
 private:
     struct Impl;

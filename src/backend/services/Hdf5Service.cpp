@@ -802,4 +802,398 @@ namespace backend::services
         return true;
     }
 
+    bool Hdf5Service::loadFile(const std::string& filePath)
+    {
+        if (impl_->isOpen_)
+        {
+            SPDLOG_WARN("HDF5 file already open: {}", impl_->filePath_);
+            return false;
+        }
+
+        // Open existing file for reading
+        impl_->fileId_ = H5Fopen(filePath.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        if (impl_->fileId_ < 0)
+        {
+            SPDLOG_ERROR("Failed to open HDF5 file for reading: {}", filePath);
+            return false;
+        }
+
+        impl_->filePath_ = filePath;
+        impl_->isOpen_ = true;
+        SPDLOG_INFO("HDF5 file opened for reading: {}", filePath);
+        return true;
+    }
+
+    static bool readImageDataset(hid_t fileId, const std::string& datasetPath,
+                                 std::vector<cv::Mat>& images)
+    {
+        // Check if dataset exists
+        htri_t exists = H5Lexists(fileId, datasetPath.c_str(), H5P_DEFAULT);
+        if (exists <= 0)
+        {
+            SPDLOG_WARN("Dataset {} does not exist", datasetPath);
+            return false;
+        }
+
+        // Open dataset
+        hid_t datasetId = H5Dopen2(fileId, datasetPath.c_str(), H5P_DEFAULT);
+        if (datasetId < 0)
+        {
+            SPDLOG_ERROR("Failed to open dataset {}", datasetPath);
+            return false;
+        }
+
+        // Get dataspace and dimensions
+        hid_t dataspaceId = H5Dget_space(datasetId);
+        int ndims = H5Sget_simple_extent_ndims(dataspaceId);
+        hsize_t dims[4];
+        H5Sget_simple_extent_dims(dataspaceId, dims, nullptr);
+        H5Sclose(dataspaceId);
+
+        if (ndims < 3)
+        {
+            SPDLOG_ERROR("Invalid dataset dimensions: {}", ndims);
+            H5Dclose(datasetId);
+            return false;
+        }
+
+        hsize_t numFrames = dims[0];
+        hsize_t height = dims[1];
+        hsize_t width = dims[2];
+        hsize_t channels = (ndims == 4) ? dims[3] : 1;
+
+        // Read data
+        size_t frameSize = static_cast<size_t>(height) * width * channels;
+        std::vector<uint8_t> buffer(numFrames * frameSize);
+        herr_t status = H5Dread(datasetId, H5T_NATIVE_UINT8, H5S_ALL, H5S_ALL, H5P_DEFAULT, buffer.data());
+        H5Dclose(datasetId);
+
+        if (status < 0)
+        {
+            SPDLOG_ERROR("Failed to read dataset {}", datasetPath);
+            return false;
+        }
+
+        // Convert to cv::Mat
+        images.clear();
+        images.reserve(numFrames);
+        for (hsize_t i = 0; i < numFrames; ++i)
+        {
+            size_t offset = i * frameSize;
+            cv::Mat img;
+            if (channels == 1)
+            {
+                img = cv::Mat(static_cast<int>(height), static_cast<int>(width), CV_8UC1,
+                             buffer.data() + offset);
+            }
+            else
+            {
+                img = cv::Mat(static_cast<int>(height), static_cast<int>(width), CV_8UC(channels),
+                             buffer.data() + offset);
+            }
+            images.push_back(img.clone()); // Clone to ensure data ownership
+        }
+
+        SPDLOG_DEBUG("Read {} images from {} ({}x{}x{})", numFrames, datasetPath, height, width, channels);
+        return true;
+    }
+
+    static bool readMetadataDataset(hid_t fileId, const std::string& datasetPath,
+                                    std::vector<ProcessedFrame>& frames)
+    {
+        // Check if dataset exists
+        htri_t exists = H5Lexists(fileId, datasetPath.c_str(), H5P_DEFAULT);
+        if (exists <= 0)
+        {
+            SPDLOG_WARN("Dataset {} does not exist", datasetPath);
+            return false;
+        }
+
+        // Open dataset
+        hid_t datasetId = H5Dopen2(fileId, datasetPath.c_str(), H5P_DEFAULT);
+        if (datasetId < 0)
+        {
+            SPDLOG_ERROR("Failed to open metadata dataset {}", datasetPath);
+            return false;
+        }
+
+        // Get compound type
+        hid_t compTypeId = H5Dget_type(datasetId);
+        if (compTypeId < 0)
+        {
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("Failed to get compound type from dataset {}", datasetPath);
+            return false;
+        }
+
+        // Get dataspace and dimensions
+        hid_t dataspaceId = H5Dget_space(datasetId);
+        hsize_t dims[1];
+        H5Sget_simple_extent_dims(dataspaceId, dims, nullptr);
+        H5Sclose(dataspaceId);
+
+        hsize_t numFrames = dims[0];
+        if (numFrames == 0)
+        {
+            H5Tclose(compTypeId);
+            H5Dclose(datasetId);
+            frames.clear();
+            return true;
+        }
+
+        // Define FrameMetadata structure matching write structure
+        struct FrameMetadata
+        {
+            uint64_t index;
+            uint64_t timestampNs;
+            double deformability;
+            double area;
+            double areaRatio;
+            double ringRatio;
+            uint8_t isValid;
+            uint8_t touchesBorder;
+            uint8_t hasSingleInnerContour;
+            uint8_t inRange;
+            int32_t innerContourCount;
+            double brightness_q1;
+            double brightness_q2;
+            double brightness_q3;
+            double brightness_q4;
+        };
+
+        // Read metadata
+        std::vector<FrameMetadata> metadata(numFrames);
+        herr_t status = H5Dread(datasetId, compTypeId, H5S_ALL, H5S_ALL, H5P_DEFAULT, metadata.data());
+        H5Tclose(compTypeId);
+        H5Dclose(datasetId);
+
+        if (status < 0)
+        {
+            SPDLOG_ERROR("Failed to read metadata dataset {}", datasetPath);
+            return false;
+        }
+
+        // Convert to ProcessedFrame (images will be filled separately)
+        frames.clear();
+        frames.reserve(numFrames);
+        for (const auto& md : metadata)
+        {
+            ProcessedFrame frame;
+            frame.index = md.index;
+            frame.timestampNs = md.timestampNs;
+            frame.validation.deformability = md.deformability;
+            frame.validation.area = md.area;
+            frame.validation.areaRatio = md.areaRatio;
+            frame.validation.ringRatio = md.ringRatio;
+            frame.validation.isValid = (md.isValid != 0);
+            frame.validation.touchesBorder = (md.touchesBorder != 0);
+            frame.validation.hasSingleInnerContour = (md.hasSingleInnerContour != 0);
+            frame.validation.inRange = (md.inRange != 0);
+            frame.validation.innerContourCount = md.innerContourCount;
+            frame.validation.brightness.q1 = md.brightness_q1;
+            frame.validation.brightness.q2 = md.brightness_q2;
+            frame.validation.brightness.q3 = md.brightness_q3;
+            frame.validation.brightness.q4 = md.brightness_q4;
+            frames.push_back(frame);
+        }
+
+        SPDLOG_DEBUG("Read {} metadata entries from {}", numFrames, datasetPath);
+        return true;
+    }
+
+    bool Hdf5Service::readValidFrames(std::vector<ProcessedFrame>& frames)
+    {
+        if (!isFileOpen())
+        {
+            SPDLOG_ERROR("HDF5 file is not open");
+            return false;
+        }
+
+        // Read metadata first
+        if (!readMetadataDataset(impl_->fileId_, "/valid_frames/metadata", frames))
+        {
+            return false;
+        }
+
+        // Read images
+        std::vector<cv::Mat> images;
+        if (!readImageDataset(impl_->fileId_, "/valid_frames/images", images))
+        {
+            frames.clear();
+            return false;
+        }
+
+        // Read masks
+        std::vector<cv::Mat> masks;
+        if (!readImageDataset(impl_->fileId_, "/valid_frames/masks", masks))
+        {
+            frames.clear();
+            return false;
+        }
+
+        // Combine images and masks with metadata
+        if (frames.size() != images.size() || frames.size() != masks.size())
+        {
+            SPDLOG_ERROR("Mismatch in frame counts: metadata={}, images={}, masks={}",
+                        frames.size(), images.size(), masks.size());
+            frames.clear();
+            return false;
+        }
+
+        for (size_t i = 0; i < frames.size(); ++i)
+        {
+            frames[i].originalImage = images[i];
+            frames[i].processedImage = masks[i];
+        }
+
+        SPDLOG_INFO("Read {} valid frames from HDF5", frames.size());
+        return true;
+    }
+
+    bool Hdf5Service::readInvalidFrames(std::vector<ProcessedFrame>& frames)
+    {
+        if (!isFileOpen())
+        {
+            SPDLOG_ERROR("HDF5 file is not open");
+            return false;
+        }
+
+        // Read metadata first
+        if (!readMetadataDataset(impl_->fileId_, "/invalid_frames/metadata", frames))
+        {
+            return false;
+        }
+
+        // Read images
+        std::vector<cv::Mat> images;
+        if (!readImageDataset(impl_->fileId_, "/invalid_frames/images", images))
+        {
+            frames.clear();
+            return false;
+        }
+
+        // Read masks
+        std::vector<cv::Mat> masks;
+        if (!readImageDataset(impl_->fileId_, "/invalid_frames/masks", masks))
+        {
+            frames.clear();
+            return false;
+        }
+
+        // Combine images and masks with metadata
+        if (frames.size() != images.size() || frames.size() != masks.size())
+        {
+            SPDLOG_ERROR("Mismatch in frame counts: metadata={}, images={}, masks={}",
+                        frames.size(), images.size(), masks.size());
+            frames.clear();
+            return false;
+        }
+
+        for (size_t i = 0; i < frames.size(); ++i)
+        {
+            frames[i].originalImage = images[i];
+            frames[i].processedImage = masks[i];
+        }
+
+        SPDLOG_INFO("Read {} invalid frames from HDF5", frames.size());
+        return true;
+    }
+
+    bool Hdf5Service::readExperimentInfo(uint64_t& startTimeNs, uint64_t& endTimeNs,
+                                         size_t& totalValidFrames, size_t& totalInvalidFrames)
+    {
+        if (!isFileOpen())
+        {
+            SPDLOG_ERROR("HDF5 file is not open");
+            return false;
+        }
+
+        // Check if group exists
+        htri_t exists = H5Lexists(impl_->fileId_, "/experiment_info", H5P_DEFAULT);
+        if (exists <= 0)
+        {
+            SPDLOG_WARN("Experiment info group does not exist");
+            return false;
+        }
+
+        // Open group
+        hid_t infoGroupId = H5Gopen2(impl_->fileId_, "/experiment_info", H5P_DEFAULT);
+        if (infoGroupId < 0)
+        {
+            SPDLOG_ERROR("Failed to open experiment_info group");
+            return false;
+        }
+
+        // Read attributes
+        bool success = true;
+        if (H5Aexists(infoGroupId, "start_time_ns") > 0)
+        {
+            hid_t attr = H5Aopen(infoGroupId, "start_time_ns", H5P_DEFAULT);
+            if (attr >= 0)
+            {
+                H5Aread(attr, H5T_NATIVE_UINT64, &startTimeNs);
+                H5Aclose(attr);
+            }
+            else
+            {
+                success = false;
+            }
+        }
+
+        if (H5Aexists(infoGroupId, "end_time_ns") > 0)
+        {
+            hid_t attr = H5Aopen(infoGroupId, "end_time_ns", H5P_DEFAULT);
+            if (attr >= 0)
+            {
+                H5Aread(attr, H5T_NATIVE_UINT64, &endTimeNs);
+                H5Aclose(attr);
+            }
+            else
+            {
+                success = false;
+            }
+        }
+
+        uint64_t validCount = 0;
+        if (H5Aexists(infoGroupId, "total_valid_frames") > 0)
+        {
+            hid_t attr = H5Aopen(infoGroupId, "total_valid_frames", H5P_DEFAULT);
+            if (attr >= 0)
+            {
+                H5Aread(attr, H5T_NATIVE_UINT64, &validCount);
+                H5Aclose(attr);
+            }
+            else
+            {
+                success = false;
+            }
+        }
+        totalValidFrames = static_cast<size_t>(validCount);
+
+        uint64_t invalidCount = 0;
+        if (H5Aexists(infoGroupId, "total_invalid_frames") > 0)
+        {
+            hid_t attr = H5Aopen(infoGroupId, "total_invalid_frames", H5P_DEFAULT);
+            if (attr >= 0)
+            {
+                H5Aread(attr, H5T_NATIVE_UINT64, &invalidCount);
+                H5Aclose(attr);
+            }
+            else
+            {
+                success = false;
+            }
+        }
+        totalInvalidFrames = static_cast<size_t>(invalidCount);
+
+        H5Gclose(infoGroupId);
+
+        if (success)
+        {
+            SPDLOG_DEBUG("Read experiment info: start={}, end={}, valid={}, invalid={}",
+                        startTimeNs, endTimeNs, totalValidFrames, totalInvalidFrames);
+        }
+        return success;
+    }
+
 } // namespace backend::services
