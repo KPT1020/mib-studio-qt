@@ -130,6 +130,8 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/PreviewPage.h
     src/frontend/ConfigTabs.cpp
     include/frontend/ConfigTabs.h
+    src/frontend/ProcessingSettingsDialog.cpp
+    include/frontend/ProcessingSettingsDialog.h
 )
 
 add_executable(mib_studio_qt

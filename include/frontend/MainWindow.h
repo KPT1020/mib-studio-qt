@@ -33,5 +33,4 @@ private:
     bool experimentActive_{false};
     bool flushInProgress_{false};
     QFutureWatcher<size_t>* flushWatcher_{nullptr};
-    QSpinBox* invalidFrameSamplingSpinBox_{nullptr};
 };

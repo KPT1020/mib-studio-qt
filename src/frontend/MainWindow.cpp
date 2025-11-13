@@ -24,6 +24,9 @@
 #include <QLayout>
 #include <QThread>
 #include <thread>
+#include <QMenuBar>
+#include <QMenu>
+#include "frontend/ProcessingSettingsDialog.h"
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -31,6 +34,27 @@
 MainWindow::MainWindow(backend::AppBackend& backend, QWidget* parent)
     : QMainWindow(parent), backend_(backend) {
     setWindowTitle("MIB Studio Qt Scaffold");
+
+    // Menu bar
+    auto* fileMenu = menuBar()->addMenu(tr("File"));
+    auto* exitAct = fileMenu->addAction(tr("Exit"));
+    connect(exitAct, &QAction::triggered, this, &QWidget::close);
+
+    auto* settingsMenu = menuBar()->addMenu(tr("Settings"));
+    auto* processingSettingsAct = settingsMenu->addAction(tr("Processing Settings..."));
+    connect(processingSettingsAct, &QAction::triggered, this, [this]() {
+        SPDLOG_INFO("Opening Processing Settings dialog");
+        ProcessingSettingsDialog dlg(backend_, this);
+        dlg.exec();
+    });
+
+    auto* helpMenu = menuBar()->addMenu(tr("Help"));
+    auto* aboutAct = helpMenu->addAction(tr("About"));
+    connect(aboutAct, &QAction::triggered, this, [this]() {
+        QMessageBox::about(this,
+                           tr("About MIB Studio Qt Scaffold"),
+                           tr("MIB Studio Qt Scaffold\n\nProvides camera capture, processing, and HDF5 logging."));
+    });
 
     auto* toolbar = addToolBar("Capture");
     auto* startCaptureAct = new QAction("Start Camera", this);
@@ -42,43 +66,10 @@ MainWindow::MainWindow(backend::AppBackend& backend, QWidget* parent)
     auto* stopExperimentAct = new QAction("Stop Experiment", this);
     toolbar->addAction(startExperimentAct);
     toolbar->addAction(stopExperimentAct);
-    toolbar->addSeparator();
-    
-    // Invalid frame sampling rate control
-    toolbar->addWidget(new QLabel("Invalid Frame Sampling:", this));
-    invalidFrameSamplingSpinBox_ = new QSpinBox(this);
-    invalidFrameSamplingSpinBox_->setMinimum(1);
-    invalidFrameSamplingSpinBox_->setMaximum(10000);
-    invalidFrameSamplingSpinBox_->setValue(100);
-    invalidFrameSamplingSpinBox_->setSuffix("th frame");
-    invalidFrameSamplingSpinBox_->setToolTip("Save every Nth invalid frame (1 = save all, higher = fewer frames)");
-    toolbar->addWidget(invalidFrameSamplingSpinBox_);
-    connect(invalidFrameSamplingSpinBox_, QOverload<int>::of(&QSpinBox::valueChanged), 
-            this, [this](int value) {
-                backend_.processing().setInvalidFrameSamplingRate(static_cast<size_t>(value));
-            });
-    
+
     // Initialize defaults for this session
     backend_.processing().setInvalidFrameSamplingRate(200);
     backend_.processing().setFlushInterval(200);
-
-    // Initialize the sampling rate from backend
-    invalidFrameSamplingSpinBox_->setValue(static_cast<int>(backend_.processing().getInvalidFrameSamplingRate()));
-
-    // Flush interval control
-    toolbar->addSeparator();
-    toolbar->addWidget(new QLabel("Flush Interval:", this));
-    auto* flushIntervalSpinBox = new QSpinBox(this);
-    flushIntervalSpinBox->setMinimum(1);
-    flushIntervalSpinBox->setMaximum(10000);
-    flushIntervalSpinBox->setValue(static_cast<int>(backend_.processing().getFlushInterval()));
-    flushIntervalSpinBox->setSuffix(" frames");
-    flushIntervalSpinBox->setToolTip("Flush buffered frames to HDF5 every N frames");
-    toolbar->addWidget(flushIntervalSpinBox);
-    connect(flushIntervalSpinBox, QOverload<int>::of(&QSpinBox::valueChanged),
-            this, [this](int value) {
-                backend_.processing().setFlushInterval(static_cast<size_t>(value));
-            });
 
     connect(startCaptureAct, &QAction::triggered, this, &MainWindow::onStartCapture);
     connect(stopCaptureAct, &QAction::triggered, this, &MainWindow::onStopCapture);
