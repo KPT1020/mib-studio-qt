@@ -2,8 +2,9 @@
 
 #include <memory>
 #include <cstdint>
+#include <string>
 
-namespace backend::playback { struct Frame; class FrameStore; }
+namespace backend::playback { struct Frame; class FrameStore; struct IndexRange; struct TimestampRange; }
 
 namespace backend::services {
 
@@ -31,6 +32,29 @@ public:
     // Convenience accessors
     uint64_t totalWritten() const;
     size_t capacity() const;
+
+    // Save frames to disk as TIFF images
+    // Saves all available frames if range not specified
+    bool saveFramesToDisk(const std::string& outputDir) const;
+
+    // Save frames by index range (startIndex inclusive, endIndex inclusive)
+    bool saveFramesToDisk(const std::string& outputDir, uint64_t startIndex, uint64_t endIndex) const;
+
+    // Save frames by timestamp range (startTimestamp inclusive, endTimestamp inclusive)
+    bool saveFramesToDisk(const std::string& outputDir, uint64_t startTimestamp, uint64_t endTimestamp, bool useTimestamps) const;
+
+    // Resize buffer capacity safely
+    // Preserves existing frames when possible (if new size >= current available frames)
+    // Clears buffer if new size < current available frames
+    // Returns true on success, false on failure
+    bool resize(size_t newCapacity);
+
+    // Get available index range
+    backend::playback::IndexRange getAvailableRange() const;
+
+    // Get available timestamp range
+    // Returns false if no frames available
+    bool getAvailableTimestampRange(backend::playback::TimestampRange& out) const;
 
 private:
     std::shared_ptr<backend::playback::FrameStore> store_{};

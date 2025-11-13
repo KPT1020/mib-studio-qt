@@ -20,6 +20,7 @@
 #include "backend/services/PlaybackService.h"
 #include "backend/services/ProcessingService.h"
 #include "backend/playback/FrameStore.h"
+#include "frontend/BufferSaveDialog.h"
 
 #include <spdlog/spdlog.h>
 
@@ -244,8 +245,12 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     setBgBtn_ = new QToolButton(controls);
     setBgBtn_->setText("Set Background");
     setBgBtn_->setToolTip("Capture current frame as background (when paused)");
+    saveBufferBtn_ = new QToolButton(controls);
+    saveBufferBtn_->setText("Save Buffer");
+    saveBufferBtn_->setToolTip("Save buffer frames to disk and manage buffer size");
     controlsLayout->addWidget(overlayBtn_);
     controlsLayout->addWidget(setBgBtn_);
+    controlsLayout->addWidget(saveBufferBtn_);
     controlsLayout->addStretch(1);
     layout->addWidget(controls);
 
@@ -256,6 +261,7 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     connect(slider_, &QSlider::valueChanged, this, &PlaybackPanel::onSliderValueChanged);
     connect(overlayBtn_, &QToolButton::clicked, this, &PlaybackPanel::onToggleOverlay);
     connect(setBgBtn_, &QToolButton::clicked, this, &PlaybackPanel::onSetBackground);
+    connect(saveBufferBtn_, &QToolButton::clicked, this, &PlaybackPanel::onSaveBuffer);
 
     // Space shortcut to start/stop capture
     {
@@ -517,6 +523,12 @@ void PlaybackPanel::onSetBackground()
         cv::Mat bg(gray.height(), gray.width(), CV_8UC1, const_cast<uchar *>(gray.bits()), gray.bytesPerLine());
         backend_.processing().setRealtimeBackgroundGray(bg.clone());
     }
+}
+
+void PlaybackPanel::onSaveBuffer()
+{
+    frontend::BufferSaveDialog dialog(backend_, this);
+    dialog.exec();
 }
 
 void PlaybackPanel::onToggleCapture()

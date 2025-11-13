@@ -121,6 +121,8 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/MainWindow.h
     src/frontend/PlaybackPanel.cpp
     include/frontend/PlaybackPanel.h
+    src/frontend/BufferSaveDialog.cpp
+    include/frontend/BufferSaveDialog.h
     resources/defaults.qrc
     src/frontend/ConnectTab.cpp
     include/frontend/ConnectTab.h

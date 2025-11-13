@@ -31,6 +31,7 @@ private slots:
     void onToggleOverlay();
     void onSetBackground();
     void onToggleCapture();
+    void onSaveBuffer();
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -45,6 +46,7 @@ private:
     QSlider* slider_ = nullptr;
     QToolButton* overlayBtn_ = nullptr;
     QToolButton* setBgBtn_ = nullptr;
+    QToolButton* saveBufferBtn_ = nullptr;
     bool scrubbing_ = false;
     bool followLive_ = true;           // auto-follow latest when true
     bool prevCaptureRunning_ = false;  // detect start transitions

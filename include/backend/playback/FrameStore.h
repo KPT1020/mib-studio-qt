@@ -4,6 +4,7 @@
 #include <vector>
 #include <mutex>
 #include <atomic>
+#include <string>
 
 namespace backend::playback
 {
@@ -16,6 +17,16 @@ namespace backend::playback
         size_t linePitch = 0;     // bytes per line
         uint64_t timestamp = 0;   // raw unit from source
         std::vector<uint8_t> data;
+    };
+
+    struct IndexRange {
+        uint64_t start = 0;
+        uint64_t end = 0;
+    };
+
+    struct TimestampRange {
+        uint64_t start = 0;
+        uint64_t end = 0;
     };
 
     class FrameStore
@@ -54,11 +65,40 @@ namespace backend::playback
         // Ring capacity
         size_t capacity() const { return capacity_; }
 
+        // Save frames to disk as TIFF images
+        // Saves all available frames if range not specified
+        bool saveFramesToDisk(const std::string& outputDir) const;
+
+        // Save frames by index range (startIndex inclusive, endIndex inclusive)
+        bool saveFramesToDisk(const std::string& outputDir, uint64_t startIndex, uint64_t endIndex) const;
+
+        // Save frames by timestamp range (startTimestamp inclusive, endTimestamp inclusive)
+        bool saveFramesToDisk(const std::string& outputDir, uint64_t startTimestamp, uint64_t endTimestamp, bool useTimestamps) const;
+
+        // Resize buffer capacity safely
+        // Preserves existing frames when possible (if new size >= current available frames)
+        // Clears buffer if new size < current available frames
+        // Returns true on success, false on failure
+        bool resize(size_t newCapacity);
+
+        // Get available index range
+        IndexRange getAvailableRange() const;
+
+        // Get available timestamp range
+        // Returns false if no frames available
+        bool getAvailableTimestampRange(TimestampRange& out) const;
+
     private:
-        const size_t capacity_;
+        size_t capacity_;
         mutable std::mutex mutex_;
         std::vector<Frame> ring_;
         std::atomic<uint64_t> totalWritten_{0};
+
+        // Internal helper to save a single frame as TIFF
+        bool saveFrameAsTiff(const Frame& frame, const std::string& filepath) const;
+
+        // Internal helper to find frame indices by timestamp range
+        bool findIndicesByTimestampRange(uint64_t startTimestamp, uint64_t endTimestamp, uint64_t& startIndex, uint64_t& endIndex) const;
     };
 
 } // namespace backend::playback
