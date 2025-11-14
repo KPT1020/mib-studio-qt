@@ -132,6 +132,8 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/ConfigTabs.h
     src/frontend/ProcessingSettingsDialog.cpp
     include/frontend/ProcessingSettingsDialog.h
+    src/frontend/MockConfigDialog.cpp
+    include/frontend/MockConfigDialog.h
 )
 
 add_executable(mib_studio_qt
@@ -141,8 +143,6 @@ add_executable(mib_studio_qt
 
 add_executable(mock_studio_qt
     src/frontend/mock_main.cpp
-    src/frontend/MockConfigDialog.cpp
-    include/frontend/MockConfigDialog.h
     ${FRONTEND_COMMON_SOURCES}
 )
 
