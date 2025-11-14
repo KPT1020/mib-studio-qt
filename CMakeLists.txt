@@ -119,6 +119,8 @@ endif()
 set(FRONTEND_COMMON_SOURCES
     src/frontend/MainWindow.cpp
     include/frontend/MainWindow.h
+    src/frontend/HdfReviewTab.cpp
+    include/frontend/HdfReviewTab.h
     src/frontend/PlaybackPanel.cpp
     include/frontend/PlaybackPanel.h
     src/frontend/BufferSaveDialog.cpp
