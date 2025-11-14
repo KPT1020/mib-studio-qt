@@ -72,8 +72,21 @@ void EGrabberCamera::stop() {
     if (grabber_) {
         try {
             grabber_->stop();
+        } catch (const gentl_error& e) {
+            if (e.gc_err != gc::GC_ERR_ABORT) {
+                SPDLOG_WARN("EGrabberCamera stop error: {}", e.what());
+            } else {
+                SPDLOG_DEBUG("EGrabberCamera stop aborted pending operations (expected): {}", e.what());
+            }
         } catch (const std::exception& ex) {
             SPDLOG_WARN("EGrabberCamera stop error: {}", ex.what());
+        }
+
+        // Wake up any pending pop() to allow threads to exit cleanly
+        try {
+            grabber_->cancelPop();
+        } catch (const std::exception& ex) {
+            SPDLOG_DEBUG("EGrabberCamera cancelPop note: {}", ex.what());
         }
 
         try {
@@ -104,6 +117,15 @@ bool EGrabberCamera::grabFrame(Frame& out) {
         out = std::move(pendingFrames_.front());
         pendingFrames_.pop_front();
         return true;
+    } catch (const gentl_error& e) {
+        if (e.gc_err == gc::GC_ERR_ABORT) {
+            // Normal during stop/shutdown
+            SPDLOG_DEBUG("EGrabberCamera grab aborted (expected during stop): {}", e.what());
+            return false;
+        }
+        SPDLOG_ERROR("EGrabberCamera grab failed: {}", e.what());
+        stop();
+        return false;
     } catch (const std::exception& ex) {
         SPDLOG_ERROR("EGrabberCamera grab failed: {}", ex.what());
         stop();
@@ -132,31 +154,40 @@ void EGrabberCamera::replenishPendingFrames() {
         return;
     }
 
-    ScopedBuffer buffer(*grabber_);
-    uint8_t* basePtr = buffer.getInfo<uint8_t*>(gc::BUFFER_INFO_BASE);
-    const size_t imageSize = buffer.getInfo<size_t>(ge::BUFFER_INFO_CUSTOM_PART_SIZE);
-    const size_t linePitch = buffer.getInfo<size_t>(ge::BUFFER_INFO_CUSTOM_LINE_PITCH);
-    const uint64_t pixelFormat = buffer.getInfo<uint64_t>(gc::BUFFER_INFO_PIXELFORMAT);
-    const uint64_t bufferTimestamp = buffer.getInfo<uint64_t>(gc::BUFFER_INFO_TIMESTAMP);
-    const size_t delivered = buffer.getInfo<size_t>(ge::BUFFER_INFO_CUSTOM_NUM_DELIVERED_PARTS);
+    try {
+        ScopedBuffer buffer(*grabber_);
+        uint8_t* basePtr = buffer.getInfo<uint8_t*>(gc::BUFFER_INFO_BASE);
+        const size_t imageSize = buffer.getInfo<size_t>(ge::BUFFER_INFO_CUSTOM_PART_SIZE);
+        const size_t linePitch = buffer.getInfo<size_t>(ge::BUFFER_INFO_CUSTOM_LINE_PITCH);
+        const uint64_t pixelFormat = buffer.getInfo<uint64_t>(gc::BUFFER_INFO_PIXELFORMAT);
+        const uint64_t bufferTimestamp = buffer.getInfo<uint64_t>(gc::BUFFER_INFO_TIMESTAMP);
+        const size_t delivered = buffer.getInfo<size_t>(ge::BUFFER_INFO_CUSTOM_NUM_DELIVERED_PARTS);
 
-    std::vector<char> rawTimestamps = buffer.getInfo<std::vector<char>>(ge::BUFFER_INFO_CUSTOM_PART_TIMESTAMPS);
-    const size_t tsCount = rawTimestamps.size() / sizeof(uint64_t);
-    const uint64_t* timestamps = tsCount > 0 ? reinterpret_cast<const uint64_t*>(rawTimestamps.data()) : nullptr;
+        std::vector<char> rawTimestamps = buffer.getInfo<std::vector<char>>(ge::BUFFER_INFO_CUSTOM_PART_TIMESTAMPS);
+        const size_t tsCount = rawTimestamps.size() / sizeof(uint64_t);
+        const uint64_t* timestamps = tsCount > 0 ? reinterpret_cast<const uint64_t*>(rawTimestamps.data()) : nullptr;
 
-    for (size_t idx = 0; idx < delivered; ++idx) {
-        const uint8_t* partPtr = basePtr + idx * imageSize;
+        for (size_t idx = 0; idx < delivered; ++idx) {
+            const uint8_t* partPtr = basePtr + idx * imageSize;
 
-        Frame frame;
-        frame.width = width_;
-        frame.height = height_;
-        frame.pixelFormat = pixelFormat;
-        frame.linePitch = linePitch == 0 ? static_cast<size_t>(width_) : linePitch;
-        frame.timestamp = (timestamps && idx < tsCount) ? timestamps[idx] : bufferTimestamp;
-        frame.data.resize(imageSize);
-        std::copy_n(partPtr, imageSize, frame.data.begin());
+            Frame frame;
+            frame.width = width_;
+            frame.height = height_;
+            frame.pixelFormat = pixelFormat;
+            frame.linePitch = linePitch == 0 ? static_cast<size_t>(width_) : linePitch;
+            frame.timestamp = (timestamps && idx < tsCount) ? timestamps[idx] : bufferTimestamp;
+            frame.data.resize(imageSize);
+            std::copy_n(partPtr, imageSize, frame.data.begin());
 
-        pendingFrames_.push_back(std::move(frame));
+            pendingFrames_.push_back(std::move(frame));
+        }
+    } catch (const gentl_error& e) {
+        if (e.gc_err == gc::GC_ERR_ABORT) {
+            // Expected during stop; do nothing
+            SPDLOG_DEBUG("EGrabberCamera replenish aborted (expected during stop): {}", e.what());
+            return;
+        }
+        throw;
     }
 }
 
