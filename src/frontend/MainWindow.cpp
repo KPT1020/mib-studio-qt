@@ -16,6 +16,7 @@
 #include "frontend/PlaybackPanel.h"
 #include "frontend/ConnectTab.h"
 #include "frontend/PreviewPage.h"
+#include "frontend/HdfReviewTab.h"
 #include <spdlog/spdlog.h>
 #include <chrono>
 #include <QtConcurrent/QtConcurrent>
@@ -93,12 +94,14 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
             SPDLOG_INFO("Auto-flushed {} frames to HDF5", flushed);
         } });
 
-    // Tabs: Connect + Preview
+    // Tabs: Connect + Preview + Review
     tabs_ = new QTabWidget(this);
     auto *connectTab = new frontend::ConnectTab(backend_, tabs_);
     auto *previewPage = new frontend::PreviewPage(backend_, tabs_);
+    auto *hdfReviewTab = new frontend::HdfReviewTab(backend_, tabs_);
     tabs_->addTab(connectTab, tr("Connect"));
     tabs_->addTab(previewPage, tr("Preview"));
+    tabs_->addTab(hdfReviewTab, tr("Review"));
     setCentralWidget(tabs_);
 
     connect(connectTab, &frontend::ConnectTab::connected, this, [this]()
