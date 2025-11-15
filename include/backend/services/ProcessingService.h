@@ -91,6 +91,7 @@ public:
     void stopRealtime();
     void setRealtimeEnabled(bool on);
     void setRealtimeRoi(const Roi& roi);
+    Roi getRealtimeRoi() const;
     void setRealtimeBackgroundGray(const cv::Mat& bg);
     bool getLatestSnapshot(RealtimeSnapshot& out);
 
@@ -142,7 +143,7 @@ private:
     std::atomic<bool> rtRunning_{false};
     std::atomic<bool> rtEnabled_{true};
     std::shared_ptr<backend::playback::FrameStore> rtStore_;
-    std::mutex rtMutex_;
+    mutable std::mutex rtMutex_;
     Roi rtRoi_{};
     cv::Mat rtBgGray_; // protected by rtMutex_
     std::atomic<uint64_t> rtLastProcessed_{0};

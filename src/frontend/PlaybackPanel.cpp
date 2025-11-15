@@ -12,6 +12,7 @@
 #include <QCursor>
 #include <QShortcut>
 #include <QKeySequence>
+#include <QSize>
 #include <limits>
 #include <algorithm>
 
@@ -315,6 +316,47 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
 }
 
 PlaybackPanel::~PlaybackPanel() = default;
+
+void PlaybackPanel::setRoi(const QRect& roi) {
+    imageRoi_ = roi;
+    roiActive_ = roi.isValid() && !roi.isNull();
+    SPDLOG_INFO("PlaybackPanel: ROI {}",
+                roiActive_ ? fmt::format("x={}, y={}, w={}, h={}", roi.x(), roi.y(), roi.width(), roi.height())
+                           : std::string("cleared"));
+    // Sync ROI to backend realtime processor (full image when cleared)
+    backend::services::ProcessingService::Roi backendRoi{};
+    if (roiActive_)
+    {
+        backendRoi.x = roi.x();
+        backendRoi.y = roi.y();
+        backendRoi.w = roi.width();
+        backendRoi.h = roi.height();
+    }
+    else
+    {
+        backendRoi.x = 0;
+        backendRoi.y = 0;
+        backendRoi.w = frameImage_.width();
+        backendRoi.h = frameImage_.height();
+    }
+    backend_.processing().setRealtimeRoi(backendRoi);
+    if (overlayMode_ != OverlayMode::Off)
+    {
+        computeProcessedOverlay();
+    }
+    if (canvas_)
+        canvas_->update();
+}
+
+QRect PlaybackPanel::getRoi() const {
+    return imageRoi_;
+}
+
+QSize PlaybackPanel::getImageDimensions() const {
+    if (frameImage_.isNull())
+        return QSize(0, 0);
+    return frameImage_.size();
+}
 
 void PlaybackPanel::onTick()
 {

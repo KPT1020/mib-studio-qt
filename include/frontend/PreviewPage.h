@@ -14,6 +14,7 @@ class PreviewPage : public QWidget {
     Q_OBJECT
 public:
     explicit PreviewPage(backend::AppBackend& backend, QWidget* parent = nullptr);
+    PlaybackPanel* getPlaybackPanel() const { return playback_; }
 
 private slots:
     void onPlay();

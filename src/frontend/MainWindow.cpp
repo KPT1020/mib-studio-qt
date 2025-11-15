@@ -47,7 +47,18 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     connect(processingSettingsAct, &QAction::triggered, this, [this]()
             {
         SPDLOG_INFO("Opening Processing Settings dialog");
-        ProcessingSettingsDialog dlg(backend_, this);
+        // Find PlaybackPanel from PreviewPage tab
+        PlaybackPanel* playbackPanel = nullptr;
+        if (tabs_) {
+            // Preview tab is at index 1
+            if (tabs_->count() > 1) {
+                auto* previewPage = qobject_cast<frontend::PreviewPage*>(tabs_->widget(1));
+                if (previewPage) {
+                    playbackPanel = previewPage->getPlaybackPanel();
+                }
+            }
+        }
+        ProcessingSettingsDialog dlg(backend_, playbackPanel, this);
         dlg.exec(); });
 
     auto *helpMenu = menuBar()->addMenu(tr("Help"));

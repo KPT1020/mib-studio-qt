@@ -100,6 +100,11 @@ void ProcessingService::setRealtimeRoi(const Roi& roi) {
     rtRoi_ = roi;
 }
 
+ProcessingService::Roi ProcessingService::getRealtimeRoi() const {
+    std::scoped_lock lk(rtMutex_);
+    return rtRoi_;
+}
+
 void ProcessingService::setRealtimeBackgroundGray(const cv::Mat& bg) {
     std::scoped_lock lk(rtMutex_);
     if (!bg.empty() && bg.type() == CV_8UC1) {

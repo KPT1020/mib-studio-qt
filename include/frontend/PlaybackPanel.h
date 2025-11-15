@@ -23,6 +23,11 @@ public:
 
     enum class OverlayMode { Off, Mask, Contours, Both };
 
+    // ROI management
+    void setRoi(const QRect& roi);
+    QRect getRoi() const;
+    QSize getImageDimensions() const;
+
 private slots:
     void onTick();
     void onSliderPressed();
