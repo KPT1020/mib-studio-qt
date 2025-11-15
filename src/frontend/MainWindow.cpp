@@ -124,16 +124,16 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
             SPDLOG_INFO("Auto-flushed {} frames to HDF5", flushed);
         } });
 
-    // Tabs: Connect + Preview + Review + Monitoring
+    // Tabs: Connect + Preview + Monitoring + Review
     tabs_ = new QTabWidget(this);
     auto *connectTab = new frontend::ConnectTab(backend_, tabs_);
     auto *previewPage = new frontend::PreviewPage(backend_, tabs_);
-    auto *hdfReviewTab = new frontend::HdfReviewTab(backend_, tabs_);
     auto *monitoringTab = new frontend::ExperimentMonitoringTab(backend_, tabs_);
+    auto *hdfReviewTab = new frontend::HdfReviewTab(backend_, tabs_);
     tabs_->addTab(connectTab, tr("Connect"));
     tabs_->addTab(previewPage, tr("Preview"));
-    tabs_->addTab(hdfReviewTab, tr("Review"));
     tabs_->addTab(monitoringTab, tr("Monitoring"));
+    tabs_->addTab(hdfReviewTab, tr("Review"));
     setCentralWidget(tabs_);
 
     connect(connectTab, &frontend::ConnectTab::connected, this, [this]()
@@ -297,8 +297,10 @@ void MainWindow::onStopExperiment()
         size_t totalInvalid = invalidFrames.size();
         // Note: We can't easily track total frames written via append, so we use current counts
         // In a production system, you'd want to track cumulative counts
+        auto processingConfig = processing.getProcessingConfig();
+        auto roi = processing.getRealtimeRoi();
         hdf5.writeExperimentInfo(experimentStartTimeNs_, experimentEndTimeNs,
-                                 totalValid, totalInvalid);
+                                 totalValid, totalInvalid, processingConfig, roi);
 
         statusLabel_->setText(QString("Experiment saved: %1 valid, %2 invalid frames")
                                   .arg(totalValid)

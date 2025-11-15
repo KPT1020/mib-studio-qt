@@ -9,6 +9,8 @@ namespace cv { class Mat; }
 namespace backend { class AppBackend; }
 namespace backend::services { struct ProcessedFrame; }
 
+#include "backend/services/ProcessingService.h"
+
 class QPushButton;
 class QLabel;
 class QTabWidget;
@@ -17,6 +19,7 @@ class QGridLayout;
 class QScrollArea;
 class QVBoxLayout;
 class QHBoxLayout;
+class QCheckBox;
 
 namespace frontend {
 
@@ -28,6 +31,8 @@ public:
 
 private slots:
     void onSelectFile();
+    void onExportMetrics();
+    void onToggleRoiOverlay(bool enabled);
     void onTabChanged(int index);
     void onThumbnailClicked(int frameIndex);
     void onTableSelectionChanged();
@@ -43,11 +48,16 @@ private:
     QImage matToQImage(const cv::Mat& mat) const;
     void setSelectedFrame(int frameIndex);
     void onScrollValueChanged(int value);
+    void exportMetricsToCsv(const QString& filePath);
+    QImage drawRoiOverlay(const QImage& image, int imgWidth, int imgHeight) const;
+    QImage createProcessingOverlay(const cv::Mat& original, const cv::Mat& mask) const;
 
     backend::AppBackend& backend_;
 
     // UI components
     QPushButton* selectFileBtn_ = nullptr;
+    QPushButton* exportMetricsBtn_ = nullptr;
+    QCheckBox* roiOverlayCheck_ = nullptr;
     QLabel* filePathLabel_ = nullptr;
     QLabel* statusLabel_ = nullptr;
     QTabWidget* frameTypeTabs_ = nullptr;
@@ -71,6 +81,8 @@ private:
     std::vector<backend::services::ProcessedFrame> invalidFrames_;
     int selectedFrameIndex_ = -1;
     bool isShowingValid_ = true;
+    bool showRoiOverlay_ = false;
+    backend::services::ProcessingService::Roi roi_{0, 0, 0, 0};
     
     static constexpr int THUMBNAIL_SIZE = 128;
     static constexpr int GRID_COLUMNS = 5;

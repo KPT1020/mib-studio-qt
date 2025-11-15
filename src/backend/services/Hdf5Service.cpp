@@ -743,7 +743,9 @@ namespace backend::services
     }
 
     bool Hdf5Service::writeExperimentInfo(uint64_t startTimeNs, uint64_t endTimeNs,
-                                          size_t totalValidFrames, size_t totalInvalidFrames)
+                                          size_t totalValidFrames, size_t totalInvalidFrames,
+                                          const ProcessingConfig& processingConfig,
+                                          const ProcessingService::Roi& roi)
     {
         if (!isFileOpen())
         {
@@ -803,9 +805,128 @@ namespace backend::services
             H5Aclose(attr4);
         }
 
+        // Write processing configuration attributes
+        int32_t gaussianBlurSize = static_cast<int32_t>(processingConfig.gaussian_blur_size);
+        hid_t attr5 = H5Acreate2(infoGroupId, "processing_config_gaussian_blur_size", H5T_NATIVE_INT32, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attr5 >= 0)
+        {
+            H5Awrite(attr5, H5T_NATIVE_INT32, &gaussianBlurSize);
+            H5Aclose(attr5);
+        }
+
+        int32_t bgSubtractThreshold = static_cast<int32_t>(processingConfig.bg_subtract_threshold);
+        hid_t attr6 = H5Acreate2(infoGroupId, "processing_config_bg_subtract_threshold", H5T_NATIVE_INT32, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attr6 >= 0)
+        {
+            H5Awrite(attr6, H5T_NATIVE_INT32, &bgSubtractThreshold);
+            H5Aclose(attr6);
+        }
+
+        int32_t morphKernelSize = static_cast<int32_t>(processingConfig.morph_kernel_size);
+        hid_t attr7 = H5Acreate2(infoGroupId, "processing_config_morph_kernel_size", H5T_NATIVE_INT32, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attr7 >= 0)
+        {
+            H5Awrite(attr7, H5T_NATIVE_INT32, &morphKernelSize);
+            H5Aclose(attr7);
+        }
+
+        int32_t morphIterations = static_cast<int32_t>(processingConfig.morph_iterations);
+        hid_t attr8 = H5Acreate2(infoGroupId, "processing_config_morph_iterations", H5T_NATIVE_INT32, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attr8 >= 0)
+        {
+            H5Awrite(attr8, H5T_NATIVE_INT32, &morphIterations);
+            H5Aclose(attr8);
+        }
+
+        int32_t areaThresholdMin = static_cast<int32_t>(processingConfig.area_threshold_min);
+        hid_t attr9 = H5Acreate2(infoGroupId, "processing_config_area_threshold_min", H5T_NATIVE_INT32, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attr9 >= 0)
+        {
+            H5Awrite(attr9, H5T_NATIVE_INT32, &areaThresholdMin);
+            H5Aclose(attr9);
+        }
+
+        int32_t areaThresholdMax = static_cast<int32_t>(processingConfig.area_threshold_max);
+        hid_t attr10 = H5Acreate2(infoGroupId, "processing_config_area_threshold_max", H5T_NATIVE_INT32, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attr10 >= 0)
+        {
+            H5Awrite(attr10, H5T_NATIVE_INT32, &areaThresholdMax);
+            H5Aclose(attr10);
+        }
+
+        uint8_t enableBorderCheck = processingConfig.enable_border_check ? 1 : 0;
+        hid_t attr11 = H5Acreate2(infoGroupId, "processing_config_enable_border_check", H5T_NATIVE_UINT8, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attr11 >= 0)
+        {
+            H5Awrite(attr11, H5T_NATIVE_UINT8, &enableBorderCheck);
+            H5Aclose(attr11);
+        }
+
+        uint8_t enableAreaRangeCheck = processingConfig.enable_area_range_check ? 1 : 0;
+        hid_t attr12 = H5Acreate2(infoGroupId, "processing_config_enable_area_range_check", H5T_NATIVE_UINT8, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attr12 >= 0)
+        {
+            H5Awrite(attr12, H5T_NATIVE_UINT8, &enableAreaRangeCheck);
+            H5Aclose(attr12);
+        }
+
+        uint8_t requireSingleInnerContour = processingConfig.require_single_inner_contour ? 1 : 0;
+        hid_t attr13 = H5Acreate2(infoGroupId, "processing_config_require_single_inner_contour", H5T_NATIVE_UINT8, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attr13 >= 0)
+        {
+            H5Awrite(attr13, H5T_NATIVE_UINT8, &requireSingleInnerContour);
+            H5Aclose(attr13);
+        }
+
+        // Write ROI attributes
+        int32_t roiX = static_cast<int32_t>(roi.x);
+        hid_t attr14 = H5Acreate2(infoGroupId, "roi_x", H5T_NATIVE_INT32, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attr14 >= 0)
+        {
+            H5Awrite(attr14, H5T_NATIVE_INT32, &roiX);
+            H5Aclose(attr14);
+        }
+
+        int32_t roiY = static_cast<int32_t>(roi.y);
+        hid_t attr15 = H5Acreate2(infoGroupId, "roi_y", H5T_NATIVE_INT32, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attr15 >= 0)
+        {
+            H5Awrite(attr15, H5T_NATIVE_INT32, &roiY);
+            H5Aclose(attr15);
+        }
+
+        int32_t roiW = static_cast<int32_t>(roi.w);
+        hid_t attr16 = H5Acreate2(infoGroupId, "roi_w", H5T_NATIVE_INT32, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attr16 >= 0)
+        {
+            H5Awrite(attr16, H5T_NATIVE_INT32, &roiW);
+            H5Aclose(attr16);
+        }
+
+        int32_t roiH = static_cast<int32_t>(roi.h);
+        hid_t attr17 = H5Acreate2(infoGroupId, "roi_h", H5T_NATIVE_INT32, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attr17 >= 0)
+        {
+            H5Awrite(attr17, H5T_NATIVE_INT32, &roiH);
+            H5Aclose(attr17);
+        }
+
         H5Sclose(scalarSpaceId);
         H5Gclose(infoGroupId);
-        SPDLOG_DEBUG("Wrote experiment info to HDF5");
+        SPDLOG_DEBUG("Wrote experiment info, processing config, and ROI to HDF5");
         return true;
     }
 
@@ -1107,7 +1228,8 @@ namespace backend::services
     }
 
     bool Hdf5Service::readExperimentInfo(uint64_t& startTimeNs, uint64_t& endTimeNs,
-                                         size_t& totalValidFrames, size_t& totalInvalidFrames)
+                                         size_t& totalValidFrames, size_t& totalInvalidFrames,
+                                         ProcessingService::Roi* roi)
     {
         if (!isFileOpen())
         {
@@ -1192,6 +1314,101 @@ namespace backend::services
             }
         }
         totalInvalidFrames = static_cast<size_t>(invalidCount);
+
+        // Read ROI attributes if requested
+        if (roi != nullptr)
+        {
+            int32_t roiX = 0, roiY = 0, roiW = 0, roiH = 0;
+            bool roiRead = true;
+
+            if (H5Aexists(infoGroupId, "roi_x") > 0)
+            {
+                hid_t attr = H5Aopen(infoGroupId, "roi_x", H5P_DEFAULT);
+                if (attr >= 0)
+                {
+                    H5Aread(attr, H5T_NATIVE_INT32, &roiX);
+                    H5Aclose(attr);
+                }
+                else
+                {
+                    roiRead = false;
+                }
+            }
+            else
+            {
+                roiRead = false;
+            }
+
+            if (H5Aexists(infoGroupId, "roi_y") > 0)
+            {
+                hid_t attr = H5Aopen(infoGroupId, "roi_y", H5P_DEFAULT);
+                if (attr >= 0)
+                {
+                    H5Aread(attr, H5T_NATIVE_INT32, &roiY);
+                    H5Aclose(attr);
+                }
+                else
+                {
+                    roiRead = false;
+                }
+            }
+            else
+            {
+                roiRead = false;
+            }
+
+            if (H5Aexists(infoGroupId, "roi_w") > 0)
+            {
+                hid_t attr = H5Aopen(infoGroupId, "roi_w", H5P_DEFAULT);
+                if (attr >= 0)
+                {
+                    H5Aread(attr, H5T_NATIVE_INT32, &roiW);
+                    H5Aclose(attr);
+                }
+                else
+                {
+                    roiRead = false;
+                }
+            }
+            else
+            {
+                roiRead = false;
+            }
+
+            if (H5Aexists(infoGroupId, "roi_h") > 0)
+            {
+                hid_t attr = H5Aopen(infoGroupId, "roi_h", H5P_DEFAULT);
+                if (attr >= 0)
+                {
+                    H5Aread(attr, H5T_NATIVE_INT32, &roiH);
+                    H5Aclose(attr);
+                }
+                else
+                {
+                    roiRead = false;
+                }
+            }
+            else
+            {
+                roiRead = false;
+            }
+
+            if (roiRead)
+            {
+                roi->x = roiX;
+                roi->y = roiY;
+                roi->w = roiW;
+                roi->h = roiH;
+            }
+            else
+            {
+                // Default to full image if ROI not found
+                roi->x = 0;
+                roi->y = 0;
+                roi->w = 0;
+                roi->h = 0;
+            }
+        }
 
         H5Gclose(infoGroupId);
 

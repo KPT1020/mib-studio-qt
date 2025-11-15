@@ -11,7 +11,10 @@ namespace cv {
 
 namespace backend::services {
     struct ProcessedFrame;
+    struct ProcessingConfig;
 }
+
+#include "backend/services/ProcessingService.h"
 
 namespace backend::services {
 
@@ -43,9 +46,12 @@ public:
     
     // Experiment metadata
     bool writeExperimentInfo(uint64_t startTimeNs, uint64_t endTimeNs,
-                             size_t totalValidFrames, size_t totalInvalidFrames);
+                             size_t totalValidFrames, size_t totalInvalidFrames,
+                             const ProcessingConfig& processingConfig,
+                             const ProcessingService::Roi& roi);
     bool readExperimentInfo(uint64_t& startTimeNs, uint64_t& endTimeNs,
-                             size_t& totalValidFrames, size_t& totalInvalidFrames);
+                             size_t& totalValidFrames, size_t& totalInvalidFrames,
+                             ProcessingService::Roi* roi = nullptr);
 
 private:
     struct Impl;
