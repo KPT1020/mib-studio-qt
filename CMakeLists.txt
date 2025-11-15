@@ -134,6 +134,8 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/ConfigTabs.h
     src/frontend/ProcessingSettingsDialog.cpp
     include/frontend/ProcessingSettingsDialog.h
+    src/frontend/FrameViewerDialog.cpp
+    include/frontend/FrameViewerDialog.h
     src/frontend/MockConfigDialog.cpp
     include/frontend/MockConfigDialog.h
     src/frontend/ExperimentMonitoringTab.cpp

@@ -35,7 +35,9 @@ private slots:
     void onToggleRoiOverlay(bool enabled);
     void onTabChanged(int index);
     void onThumbnailClicked(int frameIndex);
+    void onThumbnailDoubleClicked(int frameIndex);
     void onTableSelectionChanged();
+    void onViewFrameDetails(int frameIndex);
 
 private:
     void loadHdfFile(const QString& filePath);
@@ -51,6 +53,7 @@ private:
     void exportMetricsToCsv(const QString& filePath);
     QImage drawRoiOverlay(const QImage& image, int imgWidth, int imgHeight) const;
     QImage createProcessingOverlay(const cv::Mat& original, const cv::Mat& mask) const;
+    void showFrameViewer(int frameIndex);
 
     backend::AppBackend& backend_;
 

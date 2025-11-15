@@ -24,6 +24,7 @@
 #include "backend/AppBackend.h"
 #include "backend/services/Hdf5Service.h"
 #include "backend/services/ProcessingService.h"
+#include "frontend/FrameViewerDialog.h"
 
 #include <spdlog/spdlog.h>
 #include <opencv2/core.hpp>
@@ -57,6 +58,7 @@ public:
 
 signals:
     void clicked(int frameIndex);
+    void doubleClicked(int frameIndex);
 
 protected:
     void mousePressEvent(QMouseEvent* event) override {
@@ -64,6 +66,13 @@ protected:
             emit clicked(frameIndex_);
         }
         QLabel::mousePressEvent(event);
+    }
+
+    void mouseDoubleClickEvent(QMouseEvent* event) override {
+        if (event->button() == Qt::LeftButton) {
+            emit doubleClicked(frameIndex_);
+        }
+        QLabel::mouseDoubleClickEvent(event);
     }
 
 private:
@@ -170,6 +179,18 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
             this, &HdfReviewTab::onTableSelectionChanged);
     connect(invalidMetricsTable_, &QTableWidget::itemSelectionChanged,
             this, &HdfReviewTab::onTableSelectionChanged);
+    connect(validMetricsTable_, &QTableWidget::itemDoubleClicked,
+            this, [this](QTableWidgetItem* item) {
+                if (item) {
+                    onViewFrameDetails(item->row());
+                }
+            });
+    connect(invalidMetricsTable_, &QTableWidget::itemDoubleClicked,
+            this, [this](QTableWidgetItem* item) {
+                if (item) {
+                    onViewFrameDetails(item->row());
+                }
+            });
 }
 
 HdfReviewTab::~HdfReviewTab() = default;
@@ -376,9 +397,10 @@ void HdfReviewTab::loadThumbnailsBatch(const std::vector<backend::services::Proc
         
         auto* label = new ThumbnailLabel(static_cast<int>(i), THUMBNAIL_SIZE, grid->parentWidget());
         label->setPixmap(QPixmap::fromImage(scaled));
-        label->setToolTip(QString("Frame %1\nIndex: %2").arg(i).arg(frame.index));
+        label->setToolTip(QString("Frame %1\nIndex: %2\nDouble-click to view details").arg(i).arg(frame.index));
         
         connect(label, &ThumbnailLabel::clicked, this, &HdfReviewTab::onThumbnailClicked);
+        connect(label, &ThumbnailLabel::doubleClicked, this, &HdfReviewTab::onThumbnailDoubleClicked);
         
         int row = static_cast<int>(i) / GRID_COLUMNS;
         int col = static_cast<int>(i) % GRID_COLUMNS;
@@ -497,6 +519,14 @@ void HdfReviewTab::onTabChanged(int index) {
 
 void HdfReviewTab::onThumbnailClicked(int frameIndex) {
     setSelectedFrame(frameIndex);
+}
+
+void HdfReviewTab::onThumbnailDoubleClicked(int frameIndex) {
+    showFrameViewer(frameIndex);
+}
+
+void HdfReviewTab::onViewFrameDetails(int frameIndex) {
+    showFrameViewer(frameIndex);
 }
 
 void HdfReviewTab::onTableSelectionChanged() {
@@ -703,6 +733,60 @@ QImage HdfReviewTab::createProcessingOverlay(const cv::Mat& original, const cv::
     
     QImage img(overlay.data, overlay.cols, overlay.rows, static_cast<int>(overlay.step), QImage::Format_RGB888);
     return img.copy();
+}
+
+void HdfReviewTab::showFrameViewer(int frameIndex) {
+    const auto& frames = isShowingValid_ ? validFrames_ : invalidFrames_;
+    if (frameIndex < 0 || frameIndex >= static_cast<int>(frames.size())) {
+        return;
+    }
+
+    const auto& frame = frames[frameIndex];
+    
+    // Create dialog
+    auto* dialog = new FrameViewerDialog(frame, roi_, showRoiOverlay_, this);
+    
+    // Store current index in a way that can be modified by lambdas
+    struct NavigationState {
+        int currentIndex;
+        const std::vector<backend::services::ProcessedFrame>* framesPtr;
+    };
+    
+    auto* navState = new NavigationState{frameIndex, &frames};
+    
+    // Connect navigation signals
+    connect(dialog, &FrameViewerDialog::requestPreviousFrame, this, [this, dialog, navState]() {
+        navState->currentIndex = navState->currentIndex - 1;
+        if (navState->currentIndex < 0) {
+            navState->currentIndex = static_cast<int>(navState->framesPtr->size()) - 1; // Wrap to last
+        }
+        if (navState->currentIndex >= 0 && navState->currentIndex < static_cast<int>(navState->framesPtr->size())) {
+            dialog->setFrame((*navState->framesPtr)[navState->currentIndex]);
+            // Update selected frame in main view
+            setSelectedFrame(navState->currentIndex);
+        }
+    });
+    
+    connect(dialog, &FrameViewerDialog::requestNextFrame, this, [this, dialog, navState]() {
+        navState->currentIndex = navState->currentIndex + 1;
+        if (navState->currentIndex >= static_cast<int>(navState->framesPtr->size())) {
+            navState->currentIndex = 0; // Wrap to first
+        }
+        if (navState->currentIndex >= 0 && navState->currentIndex < static_cast<int>(navState->framesPtr->size())) {
+            dialog->setFrame((*navState->framesPtr)[navState->currentIndex]);
+            // Update selected frame in main view
+            setSelectedFrame(navState->currentIndex);
+        }
+    });
+    
+    // Clean up navigation state when dialog is destroyed
+    connect(dialog, &QObject::destroyed, this, [navState]() {
+        delete navState;
+    });
+    
+    // Show dialog
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->exec();
 }
 
 } // namespace frontend
