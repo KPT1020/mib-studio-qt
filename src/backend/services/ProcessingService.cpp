@@ -164,6 +164,22 @@ void ProcessingService::clearAccumulatedFrames() {
     invalidFrames_.clear();
 }
 
+std::vector<ProcessedFrame> ProcessingService::getMonitoringValidFrames() const {
+    std::scoped_lock lk(monitoringFramesMutex_);
+    return monitoringValidFrames_;
+}
+
+std::vector<ProcessedFrame> ProcessingService::getMonitoringInvalidFrames() const {
+    std::scoped_lock lk(monitoringFramesMutex_);
+    return monitoringInvalidFrames_;
+}
+
+void ProcessingService::clearMonitoringFrames() {
+    std::scoped_lock lk(monitoringFramesMutex_);
+    monitoringValidFrames_.clear();
+    monitoringInvalidFrames_.clear();
+}
+
 void ProcessingService::setProcessingConfig(const ProcessingConfig& config) {
     std::scoped_lock lk(configMutex_);
     processingConfig_ = config;
@@ -537,19 +553,47 @@ void ProcessingService::realtimeLoop() {
             std::vector<cv::Vec4i> hierarchy;
             cv::findContours(mask, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-            // Validate and accumulate frames if experiment is active
-            if (experimentActive_.load()) {
-                ProcessingConfig config;
-                {
-                    std::scoped_lock cfgLk(configMutex_);
-                    config = processingConfig_;
+            // Always run validation for monitoring (even without experiment)
+            ProcessingConfig config;
+            {
+                std::scoped_lock cfgLk(configMutex_);
+                config = processingConfig_;
+            }
+            
+            FilterResult validation = filterProcessedImage(mask, cvRoi, config, gray);
+            const auto algoEnd = clock::now();
+            const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
+            algoMsSinceSummary += algoMs;
+            
+            // Always accumulate frames for monitoring (with size limit)
+            {
+                ProcessedFrame monitoringFrame;
+                monitoringFrame.index = idx;
+                monitoringFrame.timestampNs = f.timestamp;
+                monitoringFrame.validation = validation;
+                // Only clone images for monitoring if we have space (to reduce memory usage)
+                // For monitoring, we can use smaller images or skip some frames
+                monitoringFrame.originalImage = gray.clone();
+                monitoringFrame.processedImage = mask.clone();
+                
+                std::scoped_lock monitoringLk(monitoringFramesMutex_);
+                if (validation.isValid) {
+                    monitoringValidFrames_.emplace_back(std::move(monitoringFrame));
+                    // Trim to max size
+                    if (monitoringValidFrames_.size() > MAX_MONITORING_FRAMES) {
+                        monitoringValidFrames_.erase(monitoringValidFrames_.begin());
+                    }
+                } else {
+                    monitoringInvalidFrames_.emplace_back(std::move(monitoringFrame));
+                    // Trim to max size
+                    if (monitoringInvalidFrames_.size() > MAX_MONITORING_FRAMES) {
+                        monitoringInvalidFrames_.erase(monitoringInvalidFrames_.begin());
+                    }
                 }
-                
-                FilterResult validation = filterProcessedImage(mask, cvRoi, config, gray);
-                const auto algoEnd = clock::now();
-                const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
-                algoMsSinceSummary += algoMs;
-                
+            }
+            
+            // Also accumulate frames for experiment if active
+            if (experimentActive_.load()) {
                 // Determine if we should save this frame
                 // Always save valid frames, but sample invalid frames to reduce file size and improve performance
                 bool shouldSave = false;
@@ -592,11 +636,6 @@ void ProcessingService::realtimeLoop() {
                         }
                     }
                 }
-            } else {
-                // Not accumulating frames; still record algorithm-only time
-                const auto algoEnd = clock::now();
-                const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
-                algoMsSinceSummary += algoMs;
             }
 
             // Publish snapshot

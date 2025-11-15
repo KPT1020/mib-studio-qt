@@ -17,6 +17,8 @@
 #include "frontend/ConnectTab.h"
 #include "frontend/PreviewPage.h"
 #include "frontend/HdfReviewTab.h"
+#include "frontend/ExperimentMonitoringTab.h"
+#include "frontend/MonitoringSettingsDialog.h"
 #include <spdlog/spdlog.h>
 #include <chrono>
 #include <QtConcurrent/QtConcurrent>
@@ -60,6 +62,23 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         }
         ProcessingSettingsDialog dlg(backend_, playbackPanel, this);
         dlg.exec(); });
+    
+    auto *monitoringSettingsAct = settingsMenu->addAction(tr("Monitoring Settings..."));
+    connect(monitoringSettingsAct, &QAction::triggered, this, [this]()
+            {
+        SPDLOG_INFO("Opening Monitoring Settings dialog");
+        // Find ExperimentMonitoringTab
+        frontend::ExperimentMonitoringTab* monitoringTab = nullptr;
+        if (tabs_) {
+            // Monitoring tab is at index 3
+            if (tabs_->count() > 3) {
+                monitoringTab = qobject_cast<frontend::ExperimentMonitoringTab*>(tabs_->widget(3));
+            }
+        }
+        if (monitoringTab) {
+            MonitoringSettingsDialog dlg(monitoringTab, this);
+            dlg.exec();
+        } });
 
     auto *helpMenu = menuBar()->addMenu(tr("Help"));
     auto *aboutAct = helpMenu->addAction(tr("About"));
@@ -105,14 +124,16 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
             SPDLOG_INFO("Auto-flushed {} frames to HDF5", flushed);
         } });
 
-    // Tabs: Connect + Preview + Review
+    // Tabs: Connect + Preview + Review + Monitoring
     tabs_ = new QTabWidget(this);
     auto *connectTab = new frontend::ConnectTab(backend_, tabs_);
     auto *previewPage = new frontend::PreviewPage(backend_, tabs_);
     auto *hdfReviewTab = new frontend::HdfReviewTab(backend_, tabs_);
+    auto *monitoringTab = new frontend::ExperimentMonitoringTab(backend_, tabs_);
     tabs_->addTab(connectTab, tr("Connect"));
     tabs_->addTab(previewPage, tr("Preview"));
     tabs_->addTab(hdfReviewTab, tr("Review"));
+    tabs_->addTab(monitoringTab, tr("Monitoring"));
     setCentralWidget(tabs_);
 
     connect(connectTab, &frontend::ConnectTab::connected, this, [this]()

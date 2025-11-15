@@ -13,7 +13,7 @@ if(MSVC)
     add_compile_options(/wd4828)
 endif()
 
-find_package(Qt6 COMPONENTS Widgets Gui REQUIRED)
+find_package(Qt6 COMPONENTS Widgets Gui Charts REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG QUIET)
 find_package(OpenCV CONFIG REQUIRED)
@@ -136,6 +136,10 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/ProcessingSettingsDialog.h
     src/frontend/MockConfigDialog.cpp
     include/frontend/MockConfigDialog.h
+    src/frontend/ExperimentMonitoringTab.cpp
+    include/frontend/ExperimentMonitoringTab.h
+    src/frontend/MonitoringSettingsDialog.cpp
+    include/frontend/MonitoringSettingsDialog.h
 )
 
 add_executable(mib_studio_qt
@@ -160,12 +164,14 @@ target_include_directories(mock_studio_qt PRIVATE
 
 target_link_libraries(mib_studio_qt PRIVATE
     Qt6::Widgets
+    Qt6::Charts
     mib_backend
     spdlog::spdlog
 )
 
 target_link_libraries(mock_studio_qt PRIVATE
     Qt6::Widgets
+    Qt6::Charts
     mib_backend
     spdlog::spdlog
 )

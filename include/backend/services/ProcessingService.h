@@ -104,6 +104,11 @@ public:
     std::vector<ProcessedFrame> getInvalidFrames() const;
     void clearAccumulatedFrames();
     
+    // Monitoring frames (always available, even without experiment)
+    std::vector<ProcessedFrame> getMonitoringValidFrames() const;
+    std::vector<ProcessedFrame> getMonitoringInvalidFrames() const;
+    void clearMonitoringFrames();
+    
     // Round-robin buffer flush (for crash resilience)
     // Returns number of frames flushed
     size_t flushBufferedFrames(class Hdf5Service& hdf5);
@@ -156,6 +161,12 @@ private:
     std::vector<ProcessedFrame> validFrames_;
     std::vector<ProcessedFrame> invalidFrames_;
     std::atomic<bool> experimentActive_{false};
+    
+    // Monitoring frames (always accumulated, separate from experiment)
+    mutable std::mutex monitoringFramesMutex_;
+    std::vector<ProcessedFrame> monitoringValidFrames_;
+    std::vector<ProcessedFrame> monitoringInvalidFrames_;
+    static constexpr size_t MAX_MONITORING_FRAMES = 1000; // Keep last 1000 frames for monitoring
     mutable ProcessingConfig processingConfig_;
     mutable std::mutex configMutex_;
     
