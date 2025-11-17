@@ -190,6 +190,11 @@ ProcessingConfig ProcessingService::getProcessingConfig() const {
     return processingConfig_;
 }
 
+void ProcessingService::setRingRatioCallback(RingRatioCallback callback) {
+    std::scoped_lock lk(ringRatioCallbackMutex_);
+    ringRatioCallback_ = std::move(callback);
+}
+
 size_t ProcessingService::flushBufferedFrames(class Hdf5Service& hdf5) {
     std::vector<ProcessedFrame> validToFlush;
     std::vector<ProcessedFrame> invalidToFlush;
@@ -582,6 +587,14 @@ void ProcessingService::realtimeLoop() {
                     // Trim to max size
                     if (monitoringValidFrames_.size() > MAX_MONITORING_FRAMES) {
                         monitoringValidFrames_.erase(monitoringValidFrames_.begin());
+                    }
+                    
+                    // Notify autofocus service of ring ratio from validated frames
+                    if (validation.ringRatio > 0.0) {
+                        std::scoped_lock callbackLk(ringRatioCallbackMutex_);
+                        if (ringRatioCallback_) {
+                            ringRatioCallback_(validation.ringRatio, f.timestamp);
+                        }
                     }
                 } else {
                     monitoringInvalidFrames_.emplace_back(std::move(monitoringFrame));

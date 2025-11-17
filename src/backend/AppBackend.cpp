@@ -10,6 +10,7 @@
 #include "camera/common/EGrabberCamera.h"
 #include "camera/mock/MockCamera.h"
 #include "backend/services/CameraControlService.h"
+#include "backend/services/AutofocusService.h"
 
 #include <algorithm>
 #include <chrono>
@@ -37,6 +38,7 @@ namespace backend
         processingService_ = std::make_unique<services::ProcessingService>();
         playbackService_ = std::make_unique<services::PlaybackService>();
         cameraControlService_ = std::make_unique<services::CameraControlService>();
+        autofocusService_ = std::make_unique<services::AutofocusService>();
         frameStore_ = std::make_shared<playback::FrameStore>(512);
 
         sqliteService_->initialize((std::filesystem::path(dataDir) / "app.sqlite3").string());
@@ -44,6 +46,13 @@ namespace backend
 
         processingService_->start();
         processingService_->startRealtime(frameStore_);
+
+        // Wire autofocus service to receive ring ratios from processing service
+        processingService_->setRingRatioCallback([this](double ringRatio, int64_t timestampNs) {
+            if (autofocusService_) {
+                autofocusService_->onRingRatio(ringRatio, timestampNs);
+            }
+        });
 
         // Wire capture -> frame store for playback/display
         captureService_->setFrameStore(frameStore_);
@@ -126,6 +135,7 @@ namespace backend
     services::ProcessingService &AppBackend::processing() { return *processingService_; }
     services::PlaybackService &AppBackend::playback() { return *playbackService_; }
     services::CameraControlService &AppBackend::cameraControl() { return *cameraControlService_; }
+    services::AutofocusService &AppBackend::autofocus() { return *autofocusService_; }
 
 void AppBackend::configureMockCamera(const camera::mock::MockCameraOptions& options) {
     if (!captureService_) return;
