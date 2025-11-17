@@ -10,6 +10,7 @@ class CaptureService;
 class ProcessingService;
 class PlaybackService;
 class CameraControlService;
+class AutofocusService;
 }
 
 namespace backend { namespace playback { class FrameStore; } }
@@ -30,6 +31,7 @@ public:
     services::ProcessingService& processing();
     services::PlaybackService& playback();
     services::CameraControlService& cameraControl();
+    services::AutofocusService& autofocus();
 
     void configureMockCamera(const camera::mock::MockCameraOptions& options);
 
@@ -47,6 +49,7 @@ private:
     std::unique_ptr<services::ProcessingService> processingService_;
     std::unique_ptr<services::PlaybackService> playbackService_;
     std::unique_ptr<services::CameraControlService> cameraControlService_;
+    std::unique_ptr<services::AutofocusService> autofocusService_;
     std::shared_ptr<playback::FrameStore> frameStore_;
 
     // Last selected hardware device (for script apply)

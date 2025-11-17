@@ -33,6 +33,7 @@ endif()
 # Include directories (EGrabber headers on Windows install path)
 include_directories("C:/Program Files/Euresys/eGrabber/include")
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor)
 
 # Backend library (services, APIs)
 add_library(mib_backend STATIC
@@ -46,6 +47,7 @@ add_library(mib_backend STATIC
     src/backend/services/RecorderService.cpp
     src/backend/services/ProcessingService.cpp
     src/backend/services/PlaybackService.cpp
+    src/backend/services/AutofocusService.cpp
     src/backend/playback/FrameStore.cpp
     src/camera/common/EGrabberCamera.cpp
     src/camera/mock/MockCamera.cpp
@@ -53,12 +55,16 @@ add_library(mib_backend STATIC
 
 target_include_directories(mib_backend PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor
     "C:/Program Files/Euresys/eGrabber/include"
 )
 
+# Coremor library
+set(COREMOR_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor)
 target_link_libraries(mib_backend PUBLIC
     spdlog::spdlog
     Qt6::Gui
+    ${COREMOR_LIB_DIR}/XMT_DLL_SER.lib
 )
 
 if(TARGET opencv_world)
@@ -233,6 +239,13 @@ if(WIN32)
                 VERBATIM
             )
         endforeach()
+        # Copy Coremor DLL
+        add_custom_command(TARGET ${app_target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor/XMT_DLL_SER.dll"
+                    "$<TARGET_FILE_DIR:${app_target}>/"
+            COMMENT "Copy Coremor DLL: ${app_target}"
+        )
     endforeach()
 endif()
 

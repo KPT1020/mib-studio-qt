@@ -125,6 +125,10 @@ public:
     void setProcessingConfig(const ProcessingConfig& config);
     ProcessingConfig getProcessingConfig() const;
 
+    // Ring ratio callback for autofocus (called when validated frames are processed)
+    using RingRatioCallback = std::function<void(double ringRatio, int64_t timestampNs)>;
+    void setRingRatioCallback(RingRatioCallback callback);
+
 private:
     void workerLoop();
     void realtimeLoop();
@@ -177,6 +181,10 @@ private:
     // Invalid frame sampling
     std::atomic<size_t> invalidFrameSamplingRate_{100}; // Save every 100th invalid frame by default
     std::atomic<size_t> invalidFrameCounter_{0}; // Counter for sampling
+    
+    // Ring ratio callback for autofocus
+    mutable std::mutex ringRatioCallbackMutex_;
+    RingRatioCallback ringRatioCallback_;
 };
 
 } // namespace backend::services

@@ -17,9 +17,22 @@
     "save_directory": "testing",
     "scatter_plot_enabled": true,
     "target_fps": 5000,
+    "autofocus_com_port": 6,
+    "autofocus_baud_rate": 115200,
+    "autofocus_device_address": 1,
+    "autofocus_focus_setpoint": 20.0,
+    "autofocus_focus_range": 0.5,
+    "autofocus_voltage_step": 1.0,
+    "autofocus_fine_voltage_step": 0.2,
+    "autofocus_max_voltage": 100.0,
+    "autofocus_min_voltage": 0.0,
+    "autofocus_initial_voltage": 50.0,
+    "autofocus_manual_voltage_step": 1.0,
     "autofocus_min_samples_per_step": 100,
     "ring_ratio_stale_ms": 1500,
-    "require_new_sample_per_step": true
+    "require_new_sample_per_step": true,
+    "safe_shutdown_voltage": 0.0,
+    "focus_direction": true
 }
 
 
