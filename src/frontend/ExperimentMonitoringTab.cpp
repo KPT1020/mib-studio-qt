@@ -72,6 +72,8 @@ ExperimentMonitoringTab::ExperimentMonitoringTab(backend::AppBackend& backend, Q
     
     histogramXAxis_ = new QValueAxis();
     histogramXAxis_->setTitleText("Ring Ratio");
+    histogramXAxis_->setLabelsAngle(-90);
+    histogramXAxis_->setLabelFormat("%.2f");
     histogramChart_->addAxis(histogramXAxis_, Qt::AlignBottom);
     
     barSeries_ = new QBarSeries();
@@ -324,7 +326,8 @@ void ExperimentMonitoringTab::updateHistogram(const std::vector<backend::service
 
     // Set X-axis range to cover all bins
     histogramXAxis_->setRange(minVal, maxVal);
-    histogramXAxis_->setTickCount(HISTOGRAM_BINS + 1);
+    // Use fewer ticks to prevent label overlap (show ~5-6 labels instead of 21)
+    histogramXAxis_->setTickCount(6);
 
     // Set Y-axis range
     histogramYAxis_->setRange(0, maxCount > 0 ? maxCount : 1);
