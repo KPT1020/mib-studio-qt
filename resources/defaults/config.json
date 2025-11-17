@@ -19,7 +19,6 @@
     "target_fps": 5000,
     "autofocus_min_samples_per_step": 100,
     "ring_ratio_stale_ms": 1500,
-    "require_new_sample_per_step": true
+    "require_new_sample_per_step": true,
+    "display_fps": 60
 }
-
-

@@ -13,8 +13,12 @@
 #include <QShortcut>
 #include <QKeySequence>
 #include <QSize>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <limits>
 #include <algorithm>
+#include <cmath>
 
 #include "backend/AppBackend.h"
 #include "backend/services/CaptureService.h"
@@ -308,11 +312,30 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
         onSetBackground();
     };
 
-    // Timer for periodic refresh (~30 FPS)
+    // Timer for periodic refresh (configurable display_fps, default 60 Hz)
+    int displayFps = 60;
+    {
+        QFile f(":/defaults/config.json");
+        if (f.open(QIODevice::ReadOnly)) {
+            const QByteArray data = f.readAll();
+            const QJsonDocument doc = QJsonDocument::fromJson(data);
+            if (doc.isObject()) {
+                const QJsonObject obj = doc.object();
+                if (obj.contains("display_fps"))
+                    displayFps = obj.value("display_fps").toInt(displayFps);
+            }
+        }
+    }
+    if (displayFps < 1) displayFps = 1;
+    if (displayFps > 240) displayFps = 240;
+    const int intervalMs = std::max(1, static_cast<int>(std::lround(1000.0 / static_cast<double>(displayFps))));
+
     timer_ = new QTimer(this);
-    timer_->setInterval(33);
+    timer_->setTimerType(Qt::PreciseTimer);
+    timer_->setInterval(intervalMs);
     connect(timer_, &QTimer::timeout, this, &PlaybackPanel::onTick);
     timer_->start();
+    SPDLOG_INFO("Playback preview: display_fps={} (~{} ms)", displayFps, intervalMs);
 
     // Timer for periodic metrics logging (1 second interval)
     metricsTimer_ = new QTimer(this);
