@@ -39,6 +39,7 @@ struct ProcessingConfig {
     bool enable_border_check{true};
     bool enable_area_range_check{true};
     bool require_single_inner_contour{true};
+    int empty_frame_pixel_threshold{100};
 };
 
 struct FilterResult {
@@ -93,6 +94,7 @@ public:
     void setRealtimeRoi(const Roi& roi);
     Roi getRealtimeRoi() const;
     void setRealtimeBackgroundGray(const cv::Mat& bg);
+    cv::Mat getRealtimeBackgroundGray() const;
     bool getLatestSnapshot(RealtimeSnapshot& out);
 
     // Experiment lifecycle
@@ -124,6 +126,13 @@ public:
     // Configuration
     void setProcessingConfig(const ProcessingConfig& config);
     ProcessingConfig getProcessingConfig() const;
+
+    // Helper function to check if a raw frame is empty (for filtering during save)
+    // Returns true if frame is empty (pixel count below threshold)
+    static bool isFrameEmpty(const backend::playback::Frame& frame,
+                            const ProcessingConfig& config,
+                            const Roi& roi,
+                            const cv::Mat& background = cv::Mat());
 
     // Ring ratio callback for autofocus (called when validated frames are processed)
     using RingRatioCallback = std::function<void(double ringRatio, int64_t timestampNs)>;

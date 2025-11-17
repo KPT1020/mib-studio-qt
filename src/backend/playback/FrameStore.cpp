@@ -73,17 +73,18 @@ size_t FrameStore::availableCount() const {
     return static_cast<size_t>(std::min<uint64_t>(w, static_cast<uint64_t>(capacity_)));
 }
 
-bool FrameStore::saveFramesToDisk(const std::string& outputDir) const {
+bool FrameStore::saveFramesToDisk(const std::string& outputDir, std::function<bool(const Frame&)> filterFn) const {
     const uint64_t earliest = earliestAvailableIndex();
     const uint64_t latest = latestAvailableIndex();
     if (latest < earliest) {
         SPDLOG_WARN("FrameStore: No frames available to save");
         return false;
     }
-    return saveFramesToDisk(outputDir, earliest, latest);
+    return saveFramesToDisk(outputDir, earliest, latest, filterFn);
 }
 
-bool FrameStore::saveFramesToDisk(const std::string& outputDir, uint64_t startIndex, uint64_t endIndex) const {
+bool FrameStore::saveFramesToDisk(const std::string& outputDir, uint64_t startIndex, uint64_t endIndex,
+                                  std::function<bool(const Frame&)> filterFn) const {
     std::unique_lock<std::mutex> lk(mutex_);
 
     const uint64_t earliest = earliestAvailableIndex();
@@ -143,9 +144,16 @@ bool FrameStore::saveFramesToDisk(const std::string& outputDir, uint64_t startIn
     size_t savedCount = 0;
     size_t failedCount = 0;
 
+    size_t filteredCount = 0;
     for (const auto& pair : framesToSave) {
         const uint64_t idx = pair.first;
         const Frame& frame = pair.second;
+        
+        // Apply filter if provided
+        if (filterFn && filterFn(frame)) {
+            ++filteredCount;
+            continue;
+        }
         
         // Format filename with zero-padded 6-digit index: frame_000000.tiff
         char filenameBuf[64];
@@ -160,6 +168,10 @@ bool FrameStore::saveFramesToDisk(const std::string& outputDir, uint64_t startIn
             SPDLOG_WARN("FrameStore: Failed to save frame at index {} to {}", idx, filename);
         }
     }
+    
+    if (filteredCount > 0) {
+        SPDLOG_INFO("FrameStore: Filtered out {} empty frames", filteredCount);
+    }
 
     SPDLOG_INFO("FrameStore: Saved {}/{} frames to {}", savedCount, clampedEnd - clampedStart + 1, outputDir);
     if (failedCount > 0) {
@@ -169,10 +181,11 @@ bool FrameStore::saveFramesToDisk(const std::string& outputDir, uint64_t startIn
     return failedCount == 0;
 }
 
-bool FrameStore::saveFramesToDisk(const std::string& outputDir, uint64_t startTimestamp, uint64_t endTimestamp, bool useTimestamps) const {
+bool FrameStore::saveFramesToDisk(const std::string& outputDir, uint64_t startTimestamp, uint64_t endTimestamp, bool useTimestamps,
+                                  std::function<bool(const Frame&)> filterFn) const {
     if (!useTimestamps) {
         // If useTimestamps is false, treat as indices
-        return saveFramesToDisk(outputDir, startTimestamp, endTimestamp);
+        return saveFramesToDisk(outputDir, startTimestamp, endTimestamp, filterFn);
     }
 
     uint64_t startIndex = 0;
@@ -182,7 +195,7 @@ bool FrameStore::saveFramesToDisk(const std::string& outputDir, uint64_t startTi
         return false;
     }
 
-    return saveFramesToDisk(outputDir, startIndex, endIndex);
+    return saveFramesToDisk(outputDir, startIndex, endIndex, filterFn);
 }
 
 bool FrameStore::resize(size_t newCapacity) {

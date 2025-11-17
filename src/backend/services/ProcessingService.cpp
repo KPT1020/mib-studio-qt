@@ -118,6 +118,14 @@ void ProcessingService::setRealtimeBackgroundGray(const cv::Mat& bg) {
     }
 }
 
+cv::Mat ProcessingService::getRealtimeBackgroundGray() const {
+    std::scoped_lock lk(rtMutex_);
+    if (!rtBgGray_.empty()) {
+        return rtBgGray_.clone();
+    }
+    return cv::Mat();
+}
+
 bool ProcessingService::getLatestSnapshot(RealtimeSnapshot& out) {
     std::scoped_lock lk(snapshotMutex_);
     if (latestSnapshot_.mask.empty() && latestSnapshot_.contours.empty()) return false;
@@ -188,6 +196,50 @@ void ProcessingService::setProcessingConfig(const ProcessingConfig& config) {
 ProcessingConfig ProcessingService::getProcessingConfig() const {
     std::scoped_lock lk(configMutex_);
     return processingConfig_;
+}
+
+bool ProcessingService::isFrameEmpty(const backend::playback::Frame& frame,
+                                    const ProcessingConfig& config,
+                                    const Roi& roi,
+                                    const cv::Mat& background) {
+    if (frame.width == 0 || frame.height == 0 || frame.data.empty()) {
+        return true;
+    }
+
+    cv::Mat gray = makeGrayCopy(frame.width, frame.height, frame.linePitch, frame.data.data());
+
+    // Determine ROI
+    Roi effectiveRoi = roi;
+    if (effectiveRoi.w <= 0 || effectiveRoi.h <= 0) {
+        effectiveRoi.x = 0;
+        effectiveRoi.y = 0;
+        effectiveRoi.w = static_cast<int>(gray.cols);
+        effectiveRoi.h = static_cast<int>(gray.rows);
+    }
+    effectiveRoi.x = std::max(0, std::min(effectiveRoi.x, gray.cols - 1));
+    effectiveRoi.y = std::max(0, std::min(effectiveRoi.y, gray.rows - 1));
+    effectiveRoi.w = std::max(1, std::min(effectiveRoi.w, gray.cols - effectiveRoi.x));
+    effectiveRoi.h = std::max(1, std::min(effectiveRoi.h, gray.rows - effectiveRoi.y));
+
+    cv::Rect cvRoi(effectiveRoi.x, effectiveRoi.y, effectiveRoi.w, effectiveRoi.h);
+    cv::Mat roiCurr = gray(cvRoi);
+
+    // Apply same processing as realtime loop
+    cv::Mat blurredCurr, blurredBg, diff, thresh;
+    cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(3, 3), 0);
+    
+    if (!background.empty() && background.size() == gray.size() && background.type() == CV_8UC1) {
+        cv::GaussianBlur(background(cvRoi), blurredBg, cv::Size(3, 3), 0);
+        cv::subtract(blurredCurr, blurredBg, diff);
+    } else {
+        diff = blurredCurr;
+    }
+    
+    cv::threshold(diff, thresh, config.bg_subtract_threshold, 255, cv::THRESH_BINARY);
+    
+    // Count non-zero pixels
+    int pixelCount = cv::countNonZero(thresh);
+    return pixelCount < config.empty_frame_pixel_threshold;
 }
 
 void ProcessingService::setRingRatioCallback(RingRatioCallback callback) {
@@ -535,6 +587,13 @@ void ProcessingService::realtimeLoop() {
 
             cv::Rect cvRoi(roi.x, roi.y, roi.w, roi.h);
 
+            // Get config early for empty frame check
+            ProcessingConfig config;
+            {
+                std::scoped_lock cfgLk(configMutex_);
+                config = processingConfig_;
+            }
+
             // Build full-size mask
             cv::Mat mask(gray.rows, gray.cols, CV_8UC1, cv::Scalar(0));
             cv::Mat roiCurr = gray(cvRoi);
@@ -549,6 +608,16 @@ void ProcessingService::realtimeLoop() {
                 diff = blurredCurr;
             }
             cv::threshold(diff, thresh, 8, 255, cv::THRESH_BINARY);
+            
+            // Check for empty frame: count non-zero pixels after binary threshold
+            int pixelCount = cv::countNonZero(thresh);
+            if (pixelCount < config.empty_frame_pixel_threshold) {
+                SPDLOG_DEBUG("Empty frame detected (idx={}, pixel_count={}, threshold={}), skipping further processing", 
+                            idx, pixelCount, config.empty_frame_pixel_threshold);
+                rtLastProcessed_.store(idx);
+                continue; // Skip morphology, contours, validation, and frame accumulation
+            }
+            
             cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(3, 3));
             cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), 1);
             cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), 1);
@@ -559,11 +628,6 @@ void ProcessingService::realtimeLoop() {
             cv::findContours(mask, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
             // Always run validation for monitoring (even without experiment)
-            ProcessingConfig config;
-            {
-                std::scoped_lock cfgLk(configMutex_);
-                config = processingConfig_;
-            }
             
             FilterResult validation = filterProcessedImage(mask, cvRoi, config, gray);
             const auto algoEnd = clock::now();

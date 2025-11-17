@@ -5,6 +5,7 @@
 #include <mutex>
 #include <atomic>
 #include <string>
+#include <functional>
 
 namespace backend::playback
 {
@@ -67,13 +68,19 @@ namespace backend::playback
 
         // Save frames to disk as TIFF images
         // Saves all available frames if range not specified
-        bool saveFramesToDisk(const std::string& outputDir) const;
+        // filterFn: optional function that returns true if frame should be skipped (empty frames)
+        bool saveFramesToDisk(const std::string& outputDir, 
+                              std::function<bool(const Frame&)> filterFn = nullptr) const;
 
         // Save frames by index range (startIndex inclusive, endIndex inclusive)
-        bool saveFramesToDisk(const std::string& outputDir, uint64_t startIndex, uint64_t endIndex) const;
+        // filterFn: optional function that returns true if frame should be skipped (empty frames)
+        bool saveFramesToDisk(const std::string& outputDir, uint64_t startIndex, uint64_t endIndex,
+                              std::function<bool(const Frame&)> filterFn = nullptr) const;
 
         // Save frames by timestamp range (startTimestamp inclusive, endTimestamp inclusive)
-        bool saveFramesToDisk(const std::string& outputDir, uint64_t startTimestamp, uint64_t endTimestamp, bool useTimestamps) const;
+        // filterFn: optional function that returns true if frame should be skipped (empty frames)
+        bool saveFramesToDisk(const std::string& outputDir, uint64_t startTimestamp, uint64_t endTimestamp, bool useTimestamps,
+                              std::function<bool(const Frame&)> filterFn = nullptr) const;
 
         // Resize buffer capacity safely
         // Preserves existing frames when possible (if new size >= current available frames)

@@ -54,19 +54,21 @@ size_t PlaybackService::capacity() const {
     return store_->capacity();
 }
 
-bool PlaybackService::saveFramesToDisk(const std::string& outputDir) const {
+bool PlaybackService::saveFramesToDisk(const std::string& outputDir, std::function<bool(const backend::playback::Frame&)> filterFn) const {
     if (!store_) return false;
-    return store_->saveFramesToDisk(outputDir);
+    return store_->saveFramesToDisk(outputDir, filterFn);
 }
 
-bool PlaybackService::saveFramesToDisk(const std::string& outputDir, uint64_t startIndex, uint64_t endIndex) const {
+bool PlaybackService::saveFramesToDisk(const std::string& outputDir, uint64_t startIndex, uint64_t endIndex,
+                                      std::function<bool(const backend::playback::Frame&)> filterFn) const {
     if (!store_) return false;
-    return store_->saveFramesToDisk(outputDir, startIndex, endIndex);
+    return store_->saveFramesToDisk(outputDir, startIndex, endIndex, filterFn);
 }
 
-bool PlaybackService::saveFramesToDisk(const std::string& outputDir, uint64_t startTimestamp, uint64_t endTimestamp, bool useTimestamps) const {
+bool PlaybackService::saveFramesToDisk(const std::string& outputDir, uint64_t startTimestamp, uint64_t endTimestamp, bool useTimestamps,
+                                      std::function<bool(const backend::playback::Frame&)> filterFn) const {
     if (!store_) return false;
-    return store_->saveFramesToDisk(outputDir, startTimestamp, endTimestamp, useTimestamps);
+    return store_->saveFramesToDisk(outputDir, startTimestamp, endTimestamp, useTimestamps, filterFn);
 }
 
 bool PlaybackService::resize(size_t newCapacity) {

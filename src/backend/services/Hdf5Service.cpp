@@ -887,6 +887,15 @@ namespace backend::services
             H5Aclose(attr13);
         }
 
+        int32_t emptyFramePixelThreshold = static_cast<int32_t>(processingConfig.empty_frame_pixel_threshold);
+        hid_t attr14a = H5Acreate2(infoGroupId, "processing_config_empty_frame_pixel_threshold", H5T_NATIVE_INT32, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attr14a >= 0)
+        {
+            H5Awrite(attr14a, H5T_NATIVE_INT32, &emptyFramePixelThreshold);
+            H5Aclose(attr14a);
+        }
+
         // Write ROI attributes
         int32_t roiX = static_cast<int32_t>(roi.x);
         hid_t attr14 = H5Acreate2(infoGroupId, "roi_x", H5T_NATIVE_INT32, scalarSpaceId,

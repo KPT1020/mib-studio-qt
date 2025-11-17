@@ -10,6 +10,7 @@ class QRadioButton;
 class QSpinBox;
 class QLabel;
 class QGroupBox;
+class QCheckBox;
 
 namespace frontend {
 
@@ -56,6 +57,9 @@ private:
     QLabel* currentCapacityLabel_ = nullptr;
     QSpinBox* newCapacitySpin_ = nullptr;
     QPushButton* applyResizeBtn_ = nullptr;
+
+    // Filter options
+    QCheckBox* filterEmptyFramesCheck_ = nullptr;
 
     // Status and buttons
     QLabel* statusLabel_ = nullptr;

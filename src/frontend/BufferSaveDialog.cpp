@@ -15,14 +15,17 @@
 #include <QVBoxLayout>
 #include <QStandardPaths>
 #include <QDir>
+#include <QCheckBox>
 
 #include <climits>
 #include <algorithm>
+#include <functional>
 
 #include <spdlog/spdlog.h>
 
 #include "backend/AppBackend.h"
 #include "backend/services/PlaybackService.h"
+#include "backend/services/ProcessingService.h"
 #include "backend/playback/FrameStore.h"
 
 namespace frontend {
@@ -125,6 +128,15 @@ BufferSaveDialog::BufferSaveDialog(backend::AppBackend& backend, QWidget* parent
     rootLayout->addWidget(bufferSizeGroup_);
 
     connect(applyResizeBtn_, &QPushButton::clicked, this, &BufferSaveDialog::onApplyResize);
+
+    // Filter options section
+    auto* filterGroup = new QGroupBox(tr("Filter Options"), this);
+    auto* filterLayout = new QVBoxLayout(filterGroup);
+    filterEmptyFramesCheck_ = new QCheckBox(tr("Remove empty frames"), this);
+    filterEmptyFramesCheck_->setToolTip(tr("Skip frames with pixel count below threshold after binary threshold"));
+    filterEmptyFramesCheck_->setChecked(false);
+    filterLayout->addWidget(filterEmptyFramesCheck_);
+    rootLayout->addWidget(filterGroup);
 
     // Status label
     statusLabel_ = new QLabel(tr("Ready"), this);
@@ -229,16 +241,27 @@ void BufferSaveDialog::onSaveFrames() {
     bool success = false;
     std::string outputDirStd = outputDir.toStdString();
 
+    // Create filter function if empty frame filtering is enabled
+    std::function<bool(const backend::playback::Frame&)> filterFn = nullptr;
+    if (filterEmptyFramesCheck_ && filterEmptyFramesCheck_->isChecked()) {
+        auto config = backend_.processing().getProcessingConfig();
+        auto roi = backend_.processing().getRealtimeRoi();
+        auto bg = backend_.processing().getRealtimeBackgroundGray();
+        filterFn = [config, roi, bg](const backend::playback::Frame& frame) {
+            return backend::services::ProcessingService::isFrameEmpty(frame, config, roi, bg);
+        };
+    }
+
     if (allFramesRadio_->isChecked()) {
-        success = backend_.playback().saveFramesToDisk(outputDirStd);
+        success = backend_.playback().saveFramesToDisk(outputDirStd, filterFn);
     } else if (indexRangeRadio_->isChecked()) {
         const uint64_t start = static_cast<uint64_t>(startIndexSpin_->value());
         const uint64_t end = static_cast<uint64_t>(endIndexSpin_->value());
-        success = backend_.playback().saveFramesToDisk(outputDirStd, start, end);
+        success = backend_.playback().saveFramesToDisk(outputDirStd, start, end, filterFn);
     } else if (timestampRangeRadio_->isChecked()) {
         const uint64_t start = static_cast<uint64_t>(startTimestampSpin_->value());
         const uint64_t end = static_cast<uint64_t>(endTimestampSpin_->value());
-        success = backend_.playback().saveFramesToDisk(outputDirStd, start, end, true);
+        success = backend_.playback().saveFramesToDisk(outputDirStd, start, end, true, filterFn);
     }
 
     saveBtn_->setEnabled(true);
