@@ -7,6 +7,8 @@
 #include <QPolygon>
 #include <cstdint>
 #include <memory>
+#include <vector>
+#include <deque>
 
 namespace backend { class AppBackend; }
 
@@ -37,6 +39,7 @@ private slots:
     void onSetBackground();
     void onToggleCapture();
     void onSaveBuffer();
+    void onLogMetrics();
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -44,9 +47,12 @@ protected:
 private:
     void computeProcessedOverlay();
     void updateOverlayButtonUi();
+    void resetMetrics();
+    void trackFrameDisplay(uint64_t frameIndex, uint64_t frameTimestamp, uint64_t displayTime);
 
     backend::AppBackend& backend_;
     QTimer* timer_ = nullptr;
+    QTimer* metricsTimer_ = nullptr;   // Timer for periodic metrics logging
     QWidget* canvas_ = nullptr;
     QSlider* slider_ = nullptr;
     QToolButton* overlayBtn_ = nullptr;
@@ -65,6 +71,19 @@ private:
     QImage backgroundGray_;            // stored as grayscale QImage
     QImage overlayImage_;              // RGBA overlay (mask)
     QList<QPolygon> overlayContours_;  // image-space contours for drawing
+
+    // Metrics tracking
+    struct MetricsSample {
+        uint64_t displayTimeUs;        // When frame was displayed (microseconds)
+        uint64_t frameTimestamp;       // Frame capture timestamp (same units as frame.timestamp)
+        uint64_t frameIndex;           // Frame index for drop detection
+    };
+
+    std::deque<MetricsSample> metricsWindow_;  // Rolling window of samples (last 1 second)
+    uint64_t lastDisplayedIndex_ = 0;          // Last displayed frame index for drop detection
+    uint64_t lastDisplayTimeUs_ = 0;           // Last display time for window pruning
+    bool metricsInitialized_ = false;           // Track if we've seen first frame
+    uint64_t totalDrops_ = 0;                   // Total frame drops detected
 };
 
 

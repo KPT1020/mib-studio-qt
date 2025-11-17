@@ -21,9 +21,11 @@
 #include "backend/services/PlaybackService.h"
 #include "backend/services/ProcessingService.h"
 #include "backend/playback/FrameStore.h"
+#include "backend/Tools.h"
 #include "frontend/BufferSaveDialog.h"
 
 #include <spdlog/spdlog.h>
+#include <fmt/format.h>
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
@@ -312,6 +314,13 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     connect(timer_, &QTimer::timeout, this, &PlaybackPanel::onTick);
     timer_->start();
 
+    // Timer for periodic metrics logging (1 second interval)
+    metricsTimer_ = new QTimer(this);
+    metricsTimer_->setInterval(1000);
+    connect(metricsTimer_, &QTimer::timeout, this, &PlaybackPanel::onLogMetrics);
+    metricsTimer_->start();
+
+    resetMetrics();
     updateOverlayButtonUi();
 }
 
@@ -360,11 +369,16 @@ QSize PlaybackPanel::getImageDimensions() const {
 
 void PlaybackPanel::onTick()
 {
-    // Detect capture start transition: resume live follow on start
+    // Detect capture start/stop transitions
     const bool running = backend_.capture().isRunning();
     if (running && !prevCaptureRunning_)
     {
         followLive_ = true;
+        resetMetrics(); // Reset metrics when capture starts
+    }
+    else if (!running && prevCaptureRunning_)
+    {
+        resetMetrics(); // Reset metrics when capture stops
     }
     prevCaptureRunning_ = running;
 
@@ -440,6 +454,28 @@ void PlaybackPanel::onTick()
         }
         if (canvas_)
             canvas_->update();
+
+        // Track metrics for live playback only (not scrubbing or review mode)
+        if (running && followLive_ && !scrubbing_ && hasRange)
+        {
+            const uint64_t displayTimeUs = backend::Tools::getTimestamp();
+            // Use latest index when following live (only track if range is available)
+            const uint64_t frameIndex = latest;
+            // Only track if this is a new frame (index changed) to avoid duplicate samples
+            // Display FPS will be calculated from actual frame updates, not just UI refreshes
+            if (!metricsInitialized_ || frameIndex != lastDisplayedIndex_)
+            {
+                // Frame timestamp may be in nanoseconds, convert to microseconds for consistency
+                // Assuming frame timestamps are in nanoseconds (common for Euresys SDK)
+                uint64_t frameTimestampUs = f.timestamp;
+                // If timestamp is likely in nanoseconds (> 1e12), convert to microseconds
+                if (f.timestamp > 1'000'000'000'000ULL)
+                {
+                    frameTimestampUs = f.timestamp / 1000ULL;
+                }
+                trackFrameDisplay(frameIndex, frameTimestampUs, displayTimeUs);
+            }
+        }
     }
 
     // Enable/disable background button: allowed when scrubbing or not following live
@@ -783,4 +819,113 @@ bool PlaybackPanel::eventFilter(QObject *watched, QEvent *event)
         }
     }
     return QWidget::eventFilter(watched, event);
+}
+
+void PlaybackPanel::resetMetrics() {
+    metricsWindow_.clear();
+    lastDisplayedIndex_ = 0;
+    lastDisplayTimeUs_ = 0;
+    metricsInitialized_ = false;
+    totalDrops_ = 0;
+}
+
+void PlaybackPanel::trackFrameDisplay(uint64_t frameIndex, uint64_t frameTimestamp, uint64_t displayTime) {
+    const uint64_t windowDurationUs = 1'000'000ULL; // 1 second in microseconds
+
+    // Prune old samples outside the 1-second window
+    while (!metricsWindow_.empty() && (displayTime - metricsWindow_.front().displayTimeUs) > windowDurationUs) {
+        metricsWindow_.pop_front();
+    }
+
+    // Detect frame drops by comparing sequential indices
+    if (metricsInitialized_) {
+        if (frameIndex > lastDisplayedIndex_ + 1) {
+            // Frames were skipped
+            const uint64_t drops = frameIndex - lastDisplayedIndex_ - 1;
+            totalDrops_ += drops;
+        }
+    } else {
+        metricsInitialized_ = true;
+    }
+
+    // Add new sample to window
+    MetricsSample sample;
+    sample.displayTimeUs = displayTime;
+    sample.frameTimestamp = frameTimestamp;
+    sample.frameIndex = frameIndex;
+    metricsWindow_.push_back(sample);
+
+    lastDisplayedIndex_ = frameIndex;
+    lastDisplayTimeUs_ = displayTime;
+}
+
+void PlaybackPanel::onLogMetrics() {
+    const bool captureRunning = backend_.capture().isRunning();
+    
+    // Only log metrics during live playback when capture is running
+    if (!captureRunning || !followLive_ || scrubbing_) {
+        return;
+    }
+
+    if (metricsWindow_.empty()) {
+        return;
+    }
+
+    const uint64_t nowUs = backend::Tools::getTimestamp();
+    const uint64_t windowDurationUs = 1'000'000ULL; // 1 second
+
+    // Prune samples outside the window
+    while (!metricsWindow_.empty() && (nowUs - metricsWindow_.front().displayTimeUs) > windowDurationUs) {
+        metricsWindow_.pop_front();
+    }
+
+    if (metricsWindow_.empty()) {
+        return;
+    }
+
+    // Calculate display FPS: number of frames displayed in the window
+    const size_t displayCount = metricsWindow_.size();
+    const uint64_t windowStartUs = metricsWindow_.front().displayTimeUs;
+    const uint64_t windowEndUs = metricsWindow_.back().displayTimeUs;
+    const double windowDurationSeconds = (windowEndUs > windowStartUs) 
+        ? static_cast<double>(windowEndUs - windowStartUs) / 1'000'000.0 
+        : 1.0; // Fallback to 1 second if timestamps are equal
+    
+    const double displayFps = static_cast<double>(displayCount) / windowDurationSeconds;
+
+    // Calculate average latency
+    // Note: Frame timestamps from camera may be in nanoseconds, display time is in microseconds
+    // We'll assume frame timestamps are also in microseconds for latency calculation
+    // If they're in nanoseconds, we'd need to divide by 1000
+    double totalLatencyUs = 0.0;
+    size_t validLatencySamples = 0;
+    
+    for (const auto& sample : metricsWindow_) {
+        // Calculate latency: display_time - capture_time
+        // Handle potential overflow/wraparound by checking if display time is after capture time
+        if (sample.displayTimeUs >= sample.frameTimestamp) {
+            const double latencyUs = static_cast<double>(sample.displayTimeUs - sample.frameTimestamp);
+            totalLatencyUs += latencyUs;
+            validLatencySamples++;
+        }
+    }
+
+    const double avgLatencyMs = (validLatencySamples > 0) 
+        ? (totalLatencyUs / static_cast<double>(validLatencySamples)) / 1000.0 
+        : 0.0;
+
+    // Get drops in the current window (recent drops)
+    uint64_t windowDrops = 0;
+    if (metricsWindow_.size() > 1) {
+        auto it = metricsWindow_.begin();
+        auto prev = it++;
+        for (; it != metricsWindow_.end(); ++it, ++prev) {
+            if (it->frameIndex > prev->frameIndex + 1) {
+                windowDrops += (it->frameIndex - prev->frameIndex - 1);
+            }
+        }
+    }
+
+    SPDLOG_INFO("Playback metrics: display_fps={:.1f}, avg_latency_ms={:.2f}, drops={} (window_drops={})",
+                displayFps, avgLatencyMs, totalDrops_, windowDrops);
 }
