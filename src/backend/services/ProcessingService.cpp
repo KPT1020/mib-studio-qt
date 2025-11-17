@@ -198,6 +198,14 @@ ProcessingConfig ProcessingService::getProcessingConfig() const {
     return processingConfig_;
 }
 
+static inline cv::Mat makeGrayCopy(uint64_t width, uint64_t height, size_t linePitch, const uint8_t* data) {
+    const int w = static_cast<int>(width);
+    const int h = static_cast<int>(height);
+    const size_t step = (linePitch == 0 ? static_cast<size_t>(width) : linePitch);
+    cv::Mat view(h, w, CV_8UC1, const_cast<uint8_t*>(data), step);
+    return view.clone();
+}
+
 bool ProcessingService::isFrameEmpty(const backend::playback::Frame& frame,
                                     const ProcessingConfig& config,
                                     const Roi& roi,
@@ -511,14 +519,6 @@ FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedIma
     }
 
     return result;
-}
-
-static inline cv::Mat makeGrayCopy(uint64_t width, uint64_t height, size_t linePitch, const uint8_t* data) {
-    const int w = static_cast<int>(width);
-    const int h = static_cast<int>(height);
-    const size_t step = (linePitch == 0 ? static_cast<size_t>(width) : linePitch);
-    cv::Mat view(h, w, CV_8UC1, const_cast<uint8_t*>(data), step);
-    return view.clone();
 }
 
 void ProcessingService::realtimeLoop() {

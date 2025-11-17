@@ -13,7 +13,7 @@
 #include <deque>
 #include <cmath>
 
-namespace backend { namespace playback { class FrameStore; } }
+namespace backend { namespace playback { class FrameStore; struct Frame; } }
 
 namespace backend::services {
 
