@@ -13,3 +13,6 @@ Usage
 - Run app with logging enabled (default). Inspect `data/logs/app.log` for DEBUG/TRACE lines to identify the point of failure when opening large files first.
 
 
+
+
+
