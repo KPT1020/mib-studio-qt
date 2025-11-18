@@ -252,14 +252,18 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
 
     // Log datasets info for debugging
     size_t count = 0; int h = 0, w = 0, c = 0;
+    size_t validImagesCount = 0;
+    size_t invalidImagesCount = 0;
     if (hdfReader_->getDatasetInfo("/valid_frames/images", count, h, w, c)) {
         SPDLOG_INFO("Dataset /valid_frames/images: count={}, H={}, W={}, C={}", count, h, w, c);
+        validImagesCount = count;
     }
     if (hdfReader_->getDatasetInfo("/valid_frames/masks", count, h, w, c)) {
         SPDLOG_INFO("Dataset /valid_frames/masks:  count={}, H={}, W={}, C={}", count, h, w, c);
     }
     if (hdfReader_->getDatasetInfo("/invalid_frames/images", count, h, w, c)) {
         SPDLOG_INFO("Dataset /invalid_frames/images: count={}, H={}, W={}, C={}", count, h, w, c);
+        invalidImagesCount = count;
     }
     if (hdfReader_->getDatasetInfo("/invalid_frames/masks", count, h, w, c)) {
         SPDLOG_INFO("Dataset /invalid_frames/masks:  count={}, H={}, W={}, C={}", count, h, w, c);
@@ -292,6 +296,17 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
         roiOverlayCheck_->setEnabled(true);
     }
 
+    // Prefer actual dataset/metadata counts for status display (experiment info may be stale)
+    {
+        const size_t shownValid = !validFrames_.empty() ? validFrames_.size()
+                                 : (validImagesCount > 0 ? validImagesCount : totalValid);
+        const size_t shownInvalid = !invalidFrames_.empty() ? invalidFrames_.size()
+                                   : (invalidImagesCount > 0 ? invalidImagesCount : totalInvalid);
+        statusLabel_->setText(QString("Valid: %1, Invalid: %2")
+                              .arg(static_cast<qulonglong>(shownValid))
+                              .arg(static_cast<qulonglong>(shownInvalid)));
+    }
+
     SPDLOG_INFO("Loaded HDF file: {} valid frames, {} invalid frames", 
                validFrames_.size(), invalidFrames_.size());
 }
@@ -319,6 +334,8 @@ void HdfReviewTab::clearDisplay() {
     roi_ = {0, 0, 0, 0};
     showRoiOverlay_ = false;
     thumbnailCache_.clear();
+    validScrollValue_ = 0;
+    invalidScrollValue_ = 0;
     
     // Disable export button and ROI overlay when no data
     exportMetricsBtn_->setEnabled(false);
@@ -333,6 +350,7 @@ void HdfReviewTab::clearDisplay() {
     }
     // After clearing, the spacer pointer may be dangling; reset it
     validBottomSpacer_ = nullptr;
+    validTopSpacer_ = nullptr;
 
     // Clear invalid frames grid
     while ((item = invalidImageGrid_->takeAt(0)) != nullptr) {
@@ -341,6 +359,7 @@ void HdfReviewTab::clearDisplay() {
     }
     // After clearing, the spacer pointer may be dangling; reset it
     invalidBottomSpacer_ = nullptr;
+    invalidTopSpacer_ = nullptr;
 
     if (validMetricsModel_) validMetricsModel_->setSource(&validFrames_);
     if (invalidMetricsModel_) invalidMetricsModel_->setSource(&invalidFrames_);
@@ -549,14 +568,18 @@ void HdfReviewTab::onScrollValueChanged(int value) {
     size_t& loadedCount = isShowingValid_ ? validThumbnailsLoaded_ : invalidThumbnailsLoaded_;
     
     if (frames.empty() || loadedCount >= frames.size()) {
+        // Still ensure visible items reflect current overlay state
+        refreshVisibleThumbnails(isShowingValid_);
+        pruneOffscreenThumbnails(isShowingValid_);
         return;
     }
     
-    // Check if user scrolled near the bottom (within 2 rows of loaded content)
+    // Trigger loading when near the bottom of the CURRENT content (post-pruning).
+    // Using scrollbar maximum ensures we don't depend on internal loaded counters.
     QScrollBar* scrollBar = scrollArea->verticalScrollBar();
-    int maxValue = scrollBar->maximum();
-    int threshold = maxValue - (THUMBNAIL_SIZE * 2); // 2 rows worth
-    
+    const int cellH = THUMBNAIL_SIZE + 8; // keep in sync with grid estimation
+    int threshold = std::max(0, scrollBar->maximum() - (cellH * 2));
+
     if (value >= threshold && loadedCount < frames.size()) {
         // Load next batch
         size_t batchSize = std::min(BATCH_THUMBNAIL_COUNT, frames.size() - loadedCount);
@@ -565,6 +588,10 @@ void HdfReviewTab::onScrollValueChanged(int value) {
         
         SPDLOG_DEBUG("Loaded thumbnail batch: {} total loaded out of {}", loadedCount, frames.size());
     }
+
+    // Always refresh visible thumbnails (ensures overlay changes apply lazily)
+    refreshVisibleThumbnails(isShowingValid_);
+    pruneOffscreenThumbnails(isShowingValid_);
 }
 
 void HdfReviewTab::updateMetricsTable(const std::vector<backend::services::ProcessedFrame>& frames) {
@@ -614,15 +641,36 @@ QImage HdfReviewTab::matToQImage(const cv::Mat& mat) const {
 }
 
 void HdfReviewTab::onTabChanged(int index) {
+    // Save previous tab's scroll position
+    {
+        QScrollArea* prevScroll = isShowingValid_ ? validImageScroll_ : invalidImageScroll_;
+        if (prevScroll && prevScroll->verticalScrollBar()) {
+            int prevVal = prevScroll->verticalScrollBar()->value();
+            if (isShowingValid_) {
+                validScrollValue_ = prevVal;
+            } else {
+                invalidScrollValue_ = prevVal;
+            }
+        }
+    }
+
     isShowingValid_ = (index == 0);
+
+    // Do not rebuild image grids on tab switch; just refresh metrics view
     if (isShowingValid_) {
-        updateImageGrid(validFrames_);
         updateMetricsTable(validFrames_);
     } else {
-        updateImageGrid(invalidFrames_);
         updateMetricsTable(invalidFrames_);
     }
-    selectedFrameIndex_ = -1;
+
+    // Restore saved scroll position for the new tab
+    {
+        QScrollArea* currScroll = isShowingValid_ ? validImageScroll_ : invalidImageScroll_;
+        if (currScroll && currScroll->verticalScrollBar()) {
+            int targetVal = isShowingValid_ ? validScrollValue_ : invalidScrollValue_;
+            currScroll->verticalScrollBar()->setValue(targetVal);
+        }
+    }
 }
 
 void HdfReviewTab::onThumbnailClicked(int frameIndex) {
@@ -775,10 +823,30 @@ void HdfReviewTab::onToggleRoiOverlay(bool enabled) {
     showRoiOverlay_ = enabled;
     SPDLOG_INFO("ROI overlay toggled: {}, ROI: x={}, y={}, w={}, h={}", 
                 enabled, roi_.x, roi_.y, roi_.w, roi_.h);
+    // Clear thumbnail cache so images get rebuilt with new overlay state
     thumbnailCache_.clear();
-    // Refresh thumbnails to show/hide overlay for both valid and invalid frames
-    updateImageGrid(validFrames_);
-    updateImageGrid(invalidFrames_);
+
+    // Preserve current scroll positions
+    if (validImageScroll_ && validImageScroll_->verticalScrollBar()) {
+        validScrollValue_ = validImageScroll_->verticalScrollBar()->value();
+    }
+    if (invalidImageScroll_ && invalidImageScroll_->verticalScrollBar()) {
+        invalidScrollValue_ = invalidImageScroll_->verticalScrollBar()->value();
+    }
+
+    // Refresh only what is visible in each tab (carousel-like behavior)
+    refreshVisibleThumbnails(true);
+    refreshVisibleThumbnails(false);
+    pruneOffscreenThumbnails(true);
+    pruneOffscreenThumbnails(false);
+
+    // Restore scroll positions
+    if (validImageScroll_ && validImageScroll_->verticalScrollBar()) {
+        validImageScroll_->verticalScrollBar()->setValue(validScrollValue_);
+    }
+    if (invalidImageScroll_ && invalidImageScroll_->verticalScrollBar()) {
+        invalidImageScroll_->verticalScrollBar()->setValue(invalidScrollValue_);
+    }
 }
 
 QImage HdfReviewTab::drawRoiOverlay(const QImage& image, int imgWidth, int imgHeight) const {
@@ -847,6 +915,220 @@ QImage HdfReviewTab::createProcessingOverlay(const cv::Mat& original, const cv::
     
     QImage img(overlay.data, overlay.cols, overlay.rows, static_cast<int>(overlay.step), QImage::Format_RGB888);
     return img.copy();
+}
+
+void HdfReviewTab::computeVisibleRange(bool isValid, size_t &outStartIndex, size_t &outEndIndex) const {
+    const auto& frames = isValid ? validFrames_ : invalidFrames_;
+    outStartIndex = 0;
+    outEndIndex = 0;
+    if (frames.empty()) return;
+
+    const QScrollArea* scrollArea = isValid ? validImageScroll_ : invalidImageScroll_;
+    if (!scrollArea || !scrollArea->verticalScrollBar()) return;
+
+    const int cellH = THUMBNAIL_SIZE + 8;
+    const int value = scrollArea->verticalScrollBar()->value();
+    const int viewportH = scrollArea->viewport()->height();
+
+    int startRow = value / cellH;
+    startRow = std::max(0, startRow - 1); // buffer one row above
+    int rowsVisible = (viewportH + cellH - 1) / cellH + 2; // buffer two rows
+    int endRow = startRow + rowsVisible;
+
+    const size_t totalRows = (frames.size() + GRID_COLUMNS - 1) / GRID_COLUMNS;
+    endRow = std::min<int>(endRow, static_cast<int>(totalRows));
+
+    outStartIndex = static_cast<size_t>(startRow) * GRID_COLUMNS;
+    outEndIndex = std::min(frames.size(), static_cast<size_t>(endRow) * GRID_COLUMNS);
+}
+
+QImage HdfReviewTab::buildThumbnailForIndex(size_t index, bool isValid) {
+    // Cache key: [valid_flag (1 bit)] [reserved (15 bits)] [index (48 bits)]
+    const qulonglong key = (static_cast<qulonglong>(isValid ? 1 : 0) << 63)
+                         | (static_cast<qulonglong>(index) & 0x0000FFFFFFFFFFFFull);
+
+    if (QImage* cached = thumbnailCache_.object(key)) {
+        return *cached;
+    }
+
+    const std::string imgPath = isValid ? "/valid_frames/images" : "/invalid_frames/images";
+    const std::string maskPath = isValid ? "/valid_frames/masks"  : "/invalid_frames/masks";
+
+    QImage thumbImage;
+    cv::Mat original;
+    if (!hdfReader_ || !hdfReader_->readImageByIndex(imgPath, index, original)) {
+        SPDLOG_DEBUG("buildThumbnailForIndex: missing original {}[{}]", imgPath, index);
+        return thumbImage;
+    }
+
+    if (showRoiOverlay_) {
+        cv::Mat mask;
+        if (hdfReader_->readImageByIndex(maskPath, index, mask) && !mask.empty()) {
+            thumbImage = createProcessingOverlay(original, mask);
+        } else {
+            thumbImage = matToQImage(original);
+        }
+        if (!thumbImage.isNull() && roi_.w > 0 && roi_.h > 0) {
+            thumbImage = drawRoiOverlay(thumbImage, original.cols, original.rows);
+        }
+    } else {
+        thumbImage = matToQImage(original);
+    }
+
+    if (!thumbImage.isNull()) {
+        QImage scaled = thumbImage.scaled(THUMBNAIL_SIZE, THUMBNAIL_SIZE,
+                                          Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        auto* stored = new QImage(scaled);
+        thumbnailCache_.insert(key, stored, 1);
+        return scaled;
+    }
+    return thumbImage;
+}
+
+void HdfReviewTab::refreshVisibleThumbnails(bool isValid) {
+    const auto& frames = isValid ? validFrames_ : invalidFrames_;
+    if (frames.empty()) return;
+
+    size_t startIndex = 0, endIndex = 0;
+    computeVisibleRange(isValid, startIndex, endIndex);
+    if (endIndex <= startIndex) return;
+
+    QGridLayout* grid = isValid ? validImageGrid_ : invalidImageGrid_;
+
+    // Remove existing thumbnail labels
+    QVector<QWidget*> toRemove;
+    for (int i = 0; i < grid->count(); ++i) {
+        QLayoutItem* it = grid->itemAt(i);
+        if (!it) continue;
+        QWidget* w = it->widget();
+        if (w && qobject_cast<ThumbnailLabel*>(w)) {
+            toRemove.push_back(w);
+        }
+    }
+    for (QWidget* w : toRemove) {
+        grid->removeWidget(w);
+        w->deleteLater();
+    }
+
+    // Update top spacer height for rows before startIndex
+    const int cellH = THUMBNAIL_SIZE + 8;
+    const size_t totalRows = (frames.size() + GRID_COLUMNS - 1) / GRID_COLUMNS;
+    const size_t startRow = startIndex / GRID_COLUMNS;
+    const size_t visibleRows = ((endIndex - startIndex) + GRID_COLUMNS - 1) / GRID_COLUMNS;
+
+    if (isValid) {
+        if (validTopSpacer_) {
+            validImageGrid_->removeItem(validTopSpacer_);
+            delete validTopSpacer_;
+        }
+        validTopSpacer_ = new QSpacerItem(0, static_cast<int>(startRow) * cellH, QSizePolicy::Minimum, QSizePolicy::Fixed);
+        validImageGrid_->addItem(validTopSpacer_, 0, 0, 1, GRID_COLUMNS);
+    } else {
+        if (invalidTopSpacer_) {
+            invalidImageGrid_->removeItem(invalidTopSpacer_);
+            delete invalidTopSpacer_;
+        }
+        invalidTopSpacer_ = new QSpacerItem(0, static_cast<int>(startRow) * cellH, QSizePolicy::Minimum, QSizePolicy::Fixed);
+        invalidImageGrid_->addItem(invalidTopSpacer_, 0, 0, 1, GRID_COLUMNS);
+    }
+
+    // Add visible thumbnails as a contiguous block after the top spacer
+    int localRowBase = 1; // row 0 is reserved for top spacer
+    for (size_t i = startIndex; i < endIndex; ++i) {
+        int localRow = localRowBase + static_cast<int>((i - startIndex) / GRID_COLUMNS);
+        int col = static_cast<int>(i % GRID_COLUMNS);
+        auto* label = new ThumbnailLabel(static_cast<int>(i), THUMBNAIL_SIZE, grid->parentWidget());
+        QImage img = buildThumbnailForIndex(i, isValid);
+        if (!img.isNull()) {
+            label->setPixmap(QPixmap::fromImage(img));
+        }
+        grid->addWidget(label, localRow, col);
+        connect(label, &ThumbnailLabel::clicked, this, &HdfReviewTab::onThumbnailClicked);
+        connect(label, &ThumbnailLabel::doubleClicked, this, &HdfReviewTab::onThumbnailDoubleClicked);
+    }
+
+    // Adjust bottom spacer for rows after endIndex
+    const size_t remainingRows = (totalRows > (startRow + visibleRows)) ? (totalRows - (startRow + visibleRows)) : 0;
+    const int bottomH = static_cast<int>(remainingRows) * cellH;
+    if (isValid) {
+        if (validBottomSpacer_) {
+            validImageGrid_->removeItem(validBottomSpacer_);
+            delete validBottomSpacer_;
+        }
+        validBottomSpacer_ = new QSpacerItem(0, bottomH, QSizePolicy::Minimum, QSizePolicy::Fixed);
+        validImageGrid_->addItem(validBottomSpacer_, localRowBase + static_cast<int>(visibleRows), 0, 1, GRID_COLUMNS);
+    } else {
+        if (invalidBottomSpacer_) {
+            invalidImageGrid_->removeItem(invalidBottomSpacer_);
+            delete invalidBottomSpacer_;
+        }
+        invalidBottomSpacer_ = new QSpacerItem(0, bottomH, QSizePolicy::Minimum, QSizePolicy::Fixed);
+        invalidImageGrid_->addItem(invalidBottomSpacer_, localRowBase + static_cast<int>(visibleRows), 0, 1, GRID_COLUMNS);
+    }
+}
+
+void HdfReviewTab::pruneOffscreenThumbnails(bool isValid) {
+    const auto& frames = isValid ? validFrames_ : invalidFrames_;
+    if (frames.empty()) return;
+
+    size_t keepStart = 0, keepEnd = 0;
+    computeVisibleRange(isValid, keepStart, keepEnd);
+    if (keepEnd <= keepStart) return;
+
+    QGridLayout* grid = isValid ? validImageGrid_ : invalidImageGrid_;
+
+    // Collect labels to remove (outside keep range)
+    QVector<QWidget*> toRemove;
+    for (int i = 0; i < grid->count(); ++i) {
+        QLayoutItem* it = grid->itemAt(i);
+        if (!it) continue;
+        QWidget* w = it->widget();
+        if (!w) continue; // skip non-widget items like QSpacerItem
+        auto* label = qobject_cast<ThumbnailLabel*>(w);
+        if (!label) continue;
+        const size_t idx = static_cast<size_t>(label->frameIndex());
+        if (idx < keepStart || idx >= keepEnd) {
+            toRemove.push_back(w);
+        }
+    }
+    for (QWidget* w : toRemove) {
+        grid->removeWidget(w);
+        w->deleteLater();
+    }
+
+    // Recompute bottom spacer height based on max index currently present
+    size_t maxIndexPresent = 0;
+    bool any = false;
+    for (int i = 0; i < grid->count(); ++i) {
+        QLayoutItem* it = grid->itemAt(i);
+        if (!it) continue;
+        QWidget* w = it->widget();
+        auto* label = qobject_cast<ThumbnailLabel*>(w);
+        if (!label) continue;
+        any = true;
+        size_t idx = static_cast<size_t>(label->frameIndex());
+        if (idx > maxIndexPresent) maxIndexPresent = idx;
+    }
+    const size_t totalRows = (frames.size() + GRID_COLUMNS - 1) / GRID_COLUMNS;
+    size_t loadedRows = any ? ((maxIndexPresent + 1 + GRID_COLUMNS - 1) / GRID_COLUMNS) : 0;
+    const int cellH = THUMBNAIL_SIZE + 8;
+    const int remainingRows = static_cast<int>(totalRows > loadedRows ? (totalRows - loadedRows) : 0);
+    const int spacerH = remainingRows * cellH;
+    if (isValid) {
+        if (validBottomSpacer_) {
+            validImageGrid_->removeItem(validBottomSpacer_);
+            delete validBottomSpacer_;
+        }
+        validBottomSpacer_ = new QSpacerItem(0, spacerH, QSizePolicy::Minimum, QSizePolicy::Fixed);
+        validImageGrid_->addItem(validBottomSpacer_, static_cast<int>(loadedRows), 0, 1, GRID_COLUMNS);
+    } else {
+        if (invalidBottomSpacer_) {
+            invalidImageGrid_->removeItem(invalidBottomSpacer_);
+            delete invalidBottomSpacer_;
+        }
+        invalidBottomSpacer_ = new QSpacerItem(0, spacerH, QSizePolicy::Minimum, QSizePolicy::Fixed);
+        invalidImageGrid_->addItem(invalidBottomSpacer_, static_cast<int>(loadedRows), 0, 1, GRID_COLUMNS);
+    }
 }
 
 void HdfReviewTab::showFrameViewer(int frameIndex) {

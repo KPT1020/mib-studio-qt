@@ -73,6 +73,11 @@ namespace frontend
         QImage drawRoiOverlay(const QImage &image, int imgWidth, int imgHeight) const;
         QImage createProcessingOverlay(const cv::Mat &original, const cv::Mat &mask) const;
         void showFrameViewer(int frameIndex);
+        // Carousel/refresh helpers
+        void computeVisibleRange(bool isValid, size_t &outStartIndex, size_t &outEndIndex) const;
+        void refreshVisibleThumbnails(bool isValid);
+        void pruneOffscreenThumbnails(bool isValid);
+        QImage buildThumbnailForIndex(size_t index, bool isValid);
 
         backend::AppBackend &backend_;
         std::unique_ptr<backend::services::Hdf5Service> hdfReader_;
@@ -93,6 +98,7 @@ namespace frontend
         QTableView *validMetricsTable_ = nullptr;
         HdfMetricsModel *validMetricsModel_ = nullptr;
         QSpacerItem *validBottomSpacer_ = nullptr;
+        QSpacerItem *validTopSpacer_ = nullptr;
 
         // Invalid frames tab
         QWidget *invalidFramesWidget_ = nullptr;
@@ -102,6 +108,7 @@ namespace frontend
         QTableView *invalidMetricsTable_ = nullptr;
         HdfMetricsModel *invalidMetricsModel_ = nullptr;
         QSpacerItem *invalidBottomSpacer_ = nullptr;
+        QSpacerItem *invalidTopSpacer_ = nullptr;
 
         // Data
         std::vector<backend::services::ProcessedFrame> validFrames_;
@@ -121,6 +128,10 @@ namespace frontend
 
         // Thumbnail cache (key encodes frame type + index)
         QCache<qulonglong, QImage> thumbnailCache_;
+
+        // Preserve scroll positions per tab
+        int validScrollValue_ = 0;
+        int invalidScrollValue_ = 0;
     };
 
 } // namespace frontend
