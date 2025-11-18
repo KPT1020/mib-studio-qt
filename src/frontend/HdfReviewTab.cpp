@@ -4,6 +4,7 @@
 #include <QLabel>
 #include <QTabWidget>
 #include <QTableWidget>
+#include <QTableView>
 #include <QGridLayout>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -16,6 +17,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QFrame>
+#include <QSpacerItem>
 #include <QFile>
 #include <QTextStream>
 #include <QCheckBox>
@@ -25,10 +27,17 @@
 #include "backend/services/Hdf5Service.h"
 #include "backend/services/ProcessingService.h"
 #include "frontend/FrameViewerDialog.h"
+#include "frontend/HdfMetricsModel.h"
 
 #include <spdlog/spdlog.h>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace frontend {
 
@@ -85,6 +94,10 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
     rootLayout->setContentsMargins(6, 6, 6, 6);
     rootLayout->setSpacing(6);
 
+    // Configure thumbnail cache (store up to ~2048 thumbnails)
+    thumbnailCache_.setMaxCost(2048);
+    SPDLOG_INFO("HdfReviewTab: thumbnail cache size set to {}", 2048);
+
     // File selection row
     auto* fileRow = new QHBoxLayout();
     selectFileBtn_ = new QPushButton(tr("Select HDF File..."), this);
@@ -121,21 +134,18 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
     validImageScroll_->setWidgetResizable(true);
     validImageScroll_->setMinimumWidth(400);
     validImageScroll_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    validBottomSpacer_ = new QSpacerItem(0, 0, QSizePolicy::Minimum, QSizePolicy::Fixed);
+    validImageGrid_->addItem(validBottomSpacer_, 0, 0, 1, GRID_COLUMNS);
     connect(validImageScroll_->verticalScrollBar(), &QScrollBar::valueChanged,
             this, &HdfReviewTab::onScrollValueChanged);
     
-    validMetricsTable_ = new QTableWidget(validFramesWidget_);
-    validMetricsTable_->setColumnCount(15);
-    QStringList headers = {
-        "Index", "Timestamp", "Deformability", "Area", "Area Ratio", "Ring Ratio",
-        "Valid", "Touches Border", "Single Inner", "In Range", "Inner Count",
-        "Bright Q1", "Bright Q2", "Bright Q3", "Bright Q4"
-    };
-    validMetricsTable_->setHorizontalHeaderLabels(headers);
+    validMetricsTable_ = new QTableView(validFramesWidget_);
     validMetricsTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
     validMetricsTable_->setSelectionMode(QAbstractItemView::SingleSelection);
-    validMetricsTable_->setSortingEnabled(true);
     validMetricsTable_->horizontalHeader()->setStretchLastSection(true);
+    validMetricsModel_ = new HdfMetricsModel(validMetricsTable_);
+    validMetricsModel_->setSource(&validFrames_);
+    validMetricsTable_->setModel(validMetricsModel_);
     
     validLayout->addWidget(validImageScroll_, 1);
     validLayout->addWidget(validMetricsTable_, 1);
@@ -155,16 +165,18 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
     invalidImageScroll_->setWidgetResizable(true);
     invalidImageScroll_->setMinimumWidth(400);
     invalidImageScroll_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    invalidBottomSpacer_ = new QSpacerItem(0, 0, QSizePolicy::Minimum, QSizePolicy::Fixed);
+    invalidImageGrid_->addItem(invalidBottomSpacer_, 0, 0, 1, GRID_COLUMNS);
     connect(invalidImageScroll_->verticalScrollBar(), &QScrollBar::valueChanged,
             this, &HdfReviewTab::onScrollValueChanged);
     
-    invalidMetricsTable_ = new QTableWidget(invalidFramesWidget_);
-    invalidMetricsTable_->setColumnCount(15);
-    invalidMetricsTable_->setHorizontalHeaderLabels(headers);
+    invalidMetricsTable_ = new QTableView(invalidFramesWidget_);
     invalidMetricsTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
     invalidMetricsTable_->setSelectionMode(QAbstractItemView::SingleSelection);
-    invalidMetricsTable_->setSortingEnabled(true);
     invalidMetricsTable_->horizontalHeader()->setStretchLastSection(true);
+    invalidMetricsModel_ = new HdfMetricsModel(invalidMetricsTable_);
+    invalidMetricsModel_->setSource(&invalidFrames_);
+    invalidMetricsTable_->setModel(invalidMetricsModel_);
     
     invalidLayout->addWidget(invalidImageScroll_, 1);
     invalidLayout->addWidget(invalidMetricsTable_, 1);
@@ -175,21 +187,17 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
 
     connect(frameTypeTabs_, QOverload<int>::of(&QTabWidget::currentChanged), 
             this, &HdfReviewTab::onTabChanged);
-    connect(validMetricsTable_, &QTableWidget::itemSelectionChanged,
+    connect(validMetricsTable_->selectionModel(), &QItemSelectionModel::selectionChanged,
             this, &HdfReviewTab::onTableSelectionChanged);
-    connect(invalidMetricsTable_, &QTableWidget::itemSelectionChanged,
+    connect(invalidMetricsTable_->selectionModel(), &QItemSelectionModel::selectionChanged,
             this, &HdfReviewTab::onTableSelectionChanged);
-    connect(validMetricsTable_, &QTableWidget::itemDoubleClicked,
-            this, [this](QTableWidgetItem* item) {
-                if (item) {
-                    onViewFrameDetails(item->row());
-                }
+    connect(validMetricsTable_, &QTableView::doubleClicked,
+            this, [this](const QModelIndex& idx) {
+                if (idx.isValid()) onViewFrameDetails(idx.row());
             });
-    connect(invalidMetricsTable_, &QTableWidget::itemDoubleClicked,
-            this, [this](QTableWidgetItem* item) {
-                if (item) {
-                    onViewFrameDetails(item->row());
-                }
+    connect(invalidMetricsTable_, &QTableView::doubleClicked,
+            this, [this](const QModelIndex& idx) {
+                if (idx.isValid()) onViewFrameDetails(idx.row());
             });
 }
 
@@ -213,9 +221,11 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
     filePathLabel_->setText(filePath);
     clearDisplay();
 
-    // Use a temporary Hdf5Service instance for reading
-    backend::services::Hdf5Service hdf5Service;
-    if (!hdf5Service.loadFile(filePath.toStdString())) {
+    SPDLOG_INFO("HdfReviewTab: opening file '{}'", filePath.toStdString());
+    // Open and retain HDF5 file for the lifetime of this review session
+    hdfReader_.reset();
+    hdfReader_ = std::make_unique<backend::services::Hdf5Service>();
+    if (!hdfReader_->loadFile(filePath.toStdString())) {
         QMessageBox::critical(this, tr("Error"), 
                              tr("Failed to open HDF file:\n%1").arg(filePath));
         statusLabel_->setText(tr("Error loading file"));
@@ -226,7 +236,7 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
     uint64_t startTimeNs = 0, endTimeNs = 0;
     size_t totalValid = 0, totalInvalid = 0;
     backend::services::ProcessingService::Roi loadedRoi{0, 0, 0, 0};
-    if (hdf5Service.readExperimentInfo(startTimeNs, endTimeNs, totalValid, totalInvalid, &loadedRoi)) {
+    if (hdfReader_->readExperimentInfo(startTimeNs, endTimeNs, totalValid, totalInvalid, &loadedRoi)) {
         statusLabel_->setText(QString("Valid: %1, Invalid: %2")
                              .arg(totalValid).arg(totalInvalid));
         roi_ = loadedRoi;
@@ -240,18 +250,33 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
         roiOverlayCheck_->setEnabled(false);
     }
 
-    // Read frames
-    if (!hdf5Service.readValidFrames(validFrames_)) {
-        SPDLOG_WARN("Failed to read valid frames or no valid frames found");
+    // Log datasets info for debugging
+    size_t count = 0; int h = 0, w = 0, c = 0;
+    if (hdfReader_->getDatasetInfo("/valid_frames/images", count, h, w, c)) {
+        SPDLOG_INFO("Dataset /valid_frames/images: count={}, H={}, W={}, C={}", count, h, w, c);
+    }
+    if (hdfReader_->getDatasetInfo("/valid_frames/masks", count, h, w, c)) {
+        SPDLOG_INFO("Dataset /valid_frames/masks:  count={}, H={}, W={}, C={}", count, h, w, c);
+    }
+    if (hdfReader_->getDatasetInfo("/invalid_frames/images", count, h, w, c)) {
+        SPDLOG_INFO("Dataset /invalid_frames/images: count={}, H={}, W={}, C={}", count, h, w, c);
+    }
+    if (hdfReader_->getDatasetInfo("/invalid_frames/masks", count, h, w, c)) {
+        SPDLOG_INFO("Dataset /invalid_frames/masks:  count={}, H={}, W={}, C={}", count, h, w, c);
+    }
+
+    // Read metadata only (images/masks will be fetched on-demand)
+    if (!hdfReader_->readValidMetadata(validFrames_)) {
+        SPDLOG_WARN("Failed to read valid metadata or none found");
         validFrames_.clear();
     }
 
-    if (!hdf5Service.readInvalidFrames(invalidFrames_)) {
-        SPDLOG_WARN("Failed to read invalid frames or no invalid frames found");
+    if (!hdfReader_->readInvalidMetadata(invalidFrames_)) {
+        SPDLOG_WARN("Failed to read invalid metadata or none found");
         invalidFrames_.clear();
     }
 
-    hdf5Service.closeFile();
+    // Keep file open in hdfReader_ for subsequent on-demand reads (thumbnails/viewer)
 
     // Populate UI
     updateImageGrid(validFrames_);
@@ -293,6 +318,7 @@ void HdfReviewTab::clearDisplay() {
     invalidThumbnailsLoaded_ = 0;
     roi_ = {0, 0, 0, 0};
     showRoiOverlay_ = false;
+    thumbnailCache_.clear();
     
     // Disable export button and ROI overlay when no data
     exportMetricsBtn_->setEnabled(false);
@@ -305,27 +331,39 @@ void HdfReviewTab::clearDisplay() {
         delete item->widget();
         delete item;
     }
+    // After clearing, the spacer pointer may be dangling; reset it
+    validBottomSpacer_ = nullptr;
 
     // Clear invalid frames grid
     while ((item = invalidImageGrid_->takeAt(0)) != nullptr) {
         delete item->widget();
         delete item;
     }
+    // After clearing, the spacer pointer may be dangling; reset it
+    invalidBottomSpacer_ = nullptr;
 
-    validMetricsTable_->setRowCount(0);
-    invalidMetricsTable_->setRowCount(0);
+    if (validMetricsModel_) validMetricsModel_->setSource(&validFrames_);
+    if (invalidMetricsModel_) invalidMetricsModel_->setSource(&invalidFrames_);
 }
 
 void HdfReviewTab::updateImageGrid(const std::vector<backend::services::ProcessedFrame>& frames) {
     // Determine which grid to use based on which frames vector we're updating
     bool isValid = (&frames == &validFrames_);
     QGridLayout* grid = isValid ? validImageGrid_ : invalidImageGrid_;
+    SPDLOG_DEBUG("HdfReviewTab: updateImageGrid {} frames={}",
+                 isValid ? "valid" : "invalid", frames.size());
     
     // Clear existing thumbnails
     QLayoutItem* item;
     while ((item = grid->takeAt(0)) != nullptr) {
         delete item->widget();
         delete item;
+    }
+    // Reset spacer pointer for this grid since all items were removed
+    if (isValid) {
+        validBottomSpacer_ = nullptr;
+    } else {
+        invalidBottomSpacer_ = nullptr;
     }
 
     // Reset loaded count
@@ -346,27 +384,26 @@ void HdfReviewTab::updateImageGrid(const std::vector<backend::services::Processe
         invalidThumbnailsLoaded_ = initialCount;
     }
 
-    // Add placeholder labels for remaining frames if any
-    if (frames.size() > initialCount) {
-        size_t totalRows = (frames.size() + GRID_COLUMNS - 1) / GRID_COLUMNS;
-        size_t loadedRows = (initialCount + GRID_COLUMNS - 1) / GRID_COLUMNS;
-        
-        for (size_t row = loadedRows; row < totalRows; ++row) {
-            for (int col = 0; col < GRID_COLUMNS; ++col) {
-                size_t frameIndex = row * GRID_COLUMNS + col;
-                if (frameIndex >= frames.size()) {
-                    break;
-                }
-                // Create placeholder label
-                auto* placeholder = new QLabel(grid->parentWidget());
-                placeholder->setMinimumSize(THUMBNAIL_SIZE, THUMBNAIL_SIZE);
-                placeholder->setMaximumSize(THUMBNAIL_SIZE, THUMBNAIL_SIZE);
-                placeholder->setStyleSheet("QLabel { border: 1px solid gray; background-color: #f0f0f0; }");
-                placeholder->setAlignment(Qt::AlignCenter);
-                placeholder->setText(QString("Frame %1\n(Click to load)").arg(frameIndex));
-                grid->addWidget(placeholder, static_cast<int>(row), col);
-            }
+    // Virtualize remaining space: adjust bottom spacer height instead of creating thousands of placeholders
+    const size_t totalRows = (frames.size() + GRID_COLUMNS - 1) / GRID_COLUMNS;
+    const size_t loadedRows = (initialCount + GRID_COLUMNS - 1) / GRID_COLUMNS;
+    const int cellH = THUMBNAIL_SIZE + 8; // approximate spacing/margins
+    const int remainingRows = static_cast<int>(totalRows > loadedRows ? (totalRows - loadedRows) : 0);
+    const int spacerH = remainingRows * cellH;
+    if (isValid) {
+        if (validBottomSpacer_) {
+            validImageGrid_->removeItem(validBottomSpacer_);
+            delete validBottomSpacer_;
         }
+        validBottomSpacer_ = new QSpacerItem(0, spacerH, QSizePolicy::Minimum, QSizePolicy::Fixed);
+        validImageGrid_->addItem(validBottomSpacer_, static_cast<int>(loadedRows), 0, 1, GRID_COLUMNS);
+    } else {
+        if (invalidBottomSpacer_) {
+            invalidImageGrid_->removeItem(invalidBottomSpacer_);
+            delete invalidBottomSpacer_;
+        }
+        invalidBottomSpacer_ = new QSpacerItem(0, spacerH, QSizePolicy::Minimum, QSizePolicy::Fixed);
+        invalidImageGrid_->addItem(invalidBottomSpacer_, static_cast<int>(loadedRows), 0, 1, GRID_COLUMNS);
     }
 }
 
@@ -374,30 +411,80 @@ void HdfReviewTab::loadThumbnailsBatch(const std::vector<backend::services::Proc
                                         size_t startIndex, size_t count, bool isValid) {
     QGridLayout* grid = isValid ? validImageGrid_ : invalidImageGrid_;
     size_t endIndex = std::min(startIndex + count, frames.size());
+    SPDLOG_DEBUG("HdfReviewTab: loadThumbnailsBatch {} start={} count={} end={}",
+                 isValid ? "valid" : "invalid", startIndex, count, endIndex);
+#ifdef _WIN32
+    {
+        MEMORYSTATUSEX st;
+        st.dwLength = sizeof(st);
+        if (GlobalMemoryStatusEx(&st)) {
+            SPDLOG_INFO("Mem before batch: load={}%, avail_phys_MB={}, avail_page_MB={}",
+                        st.dwMemoryLoad,
+                        static_cast<unsigned long long>(st.ullAvailPhys / (1024 * 1024)),
+                        static_cast<unsigned long long>(st.ullAvailPageFile / (1024 * 1024)));
+        }
+    }
+#endif
     
     for (size_t i = startIndex; i < endIndex; ++i) {
-        const auto& frame = frames[i];
-        QImage thumbnail;
-        
-        // Apply processing mask overlay if enabled
-        if (showRoiOverlay_ && !frame.processedImage.empty() && !frame.originalImage.empty()) {
-            thumbnail = createProcessingOverlay(frame.originalImage, frame.processedImage);
+        // Cache key: [valid_flag (1 bit)] [reserved (15 bits)] [index (48 bits)]
+        const qulonglong key = (static_cast<qulonglong>(isValid ? 1 : 0) << 63)
+                             | (static_cast<qulonglong>(i) & 0x0000FFFFFFFFFFFFull);
+
+        QImage* cached = thumbnailCache_.object(key);
+        QImage thumbImage;
+        if (cached) {
+            thumbImage = *cached;
         } else {
-            thumbnail = matToQImage(frame.originalImage);
-        }
-        
-        // Apply ROI rectangle overlay if enabled
-        if (showRoiOverlay_ && roi_.w > 0 && roi_.h > 0 && !thumbnail.isNull()) {
-            thumbnail = drawRoiOverlay(thumbnail, frame.originalImage.cols, frame.originalImage.rows);
+            // Dataset paths
+            const std::string imgPath = isValid ? "/valid_frames/images" : "/invalid_frames/images";
+            const std::string maskPath = isValid ? "/valid_frames/masks"  : "/invalid_frames/masks";
+
+            // Read original image by dataset position (i), not by frame.index
+            cv::Mat original;
+            if (!hdfReader_ || !hdfReader_->readImageByIndex(imgPath, i, original)) {
+                SPDLOG_WARN("HdfReviewTab: failed to read original image {}[{}]", imgPath, i);
+                // If image cannot be read, leave placeholder (already added)
+                continue;
+            }
+
+            // Optional processing overlay if ROI/checkbox is enabled and mask exists
+            if (showRoiOverlay_) {
+                cv::Mat mask;
+                if (hdfReader_->readImageByIndex(maskPath, i, mask) && !mask.empty()) {
+                    thumbImage = createProcessingOverlay(original, mask);
+                } else {
+                    SPDLOG_DEBUG("HdfReviewTab: mask not available for {}[{}] (overlay on)", maskPath, i);
+                    thumbImage = matToQImage(original);
+                }
+
+                // ROI rectangle overlay
+                if (!thumbImage.isNull() && roi_.w > 0 && roi_.h > 0) {
+                    thumbImage = drawRoiOverlay(thumbImage, original.cols, original.rows);
+                }
+            } else {
+                thumbImage = matToQImage(original);
+            }
+
+            // Scale and cache
+            if (!thumbImage.isNull()) {
+                QImage scaled = thumbImage.scaled(THUMBNAIL_SIZE, THUMBNAIL_SIZE, 
+                                                  Qt::KeepAspectRatio, Qt::SmoothTransformation);
+                auto* stored = new QImage(scaled);
+                thumbnailCache_.insert(key, stored, 1);
+                thumbImage = scaled;
+                SPDLOG_TRACE("HdfReviewTab: cached thumbnail key={} ({}), size={}x{}",
+                             key, isValid ? "valid" : "invalid",
+                             scaled.width(), scaled.height());
+            }
         }
         
         // Scale to thumbnail size
-        QImage scaled = thumbnail.scaled(THUMBNAIL_SIZE, THUMBNAIL_SIZE, 
-                                         Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        QImage scaled = thumbImage; // already scaled if newly created; if from cache, should be scaled too
         
         auto* label = new ThumbnailLabel(static_cast<int>(i), THUMBNAIL_SIZE, grid->parentWidget());
         label->setPixmap(QPixmap::fromImage(scaled));
-        label->setToolTip(QString("Frame %1\nIndex: %2\nDouble-click to view details").arg(i).arg(frame.index));
+        label->setToolTip(QString("Frame %1\nDouble-click to view details").arg(i));
         
         connect(label, &ThumbnailLabel::clicked, this, &HdfReviewTab::onThumbnailClicked);
         connect(label, &ThumbnailLabel::doubleClicked, this, &HdfReviewTab::onThumbnailDoubleClicked);
@@ -417,7 +504,43 @@ void HdfReviewTab::loadThumbnailsBatch(const std::vector<backend::services::Proc
         }
         
         grid->addWidget(label, row, col);
+
+        SPDLOG_DEBUG("HdfReviewTab: loaded thumbnail {} ({})", i, isValid ? "valid" : "invalid");
     }
+
+    // Adjust spacer height to reflect newly loaded rows
+    const size_t totalRows = (frames.size() + GRID_COLUMNS - 1) / GRID_COLUMNS;
+    const size_t loadedRows = (endIndex + GRID_COLUMNS - 1) / GRID_COLUMNS;
+    const int cellH = THUMBNAIL_SIZE + 8;
+    const int remainingRows = static_cast<int>(totalRows > loadedRows ? (totalRows - loadedRows) : 0);
+    const int spacerH = remainingRows * cellH;
+    if (isValid) {
+        if (validBottomSpacer_) {
+            validImageGrid_->removeItem(validBottomSpacer_);
+            delete validBottomSpacer_;
+        }
+        validBottomSpacer_ = new QSpacerItem(0, spacerH, QSizePolicy::Minimum, QSizePolicy::Fixed);
+        validImageGrid_->addItem(validBottomSpacer_, static_cast<int>(loadedRows), 0, 1, GRID_COLUMNS);
+    } else {
+        if (invalidBottomSpacer_) {
+            invalidImageGrid_->removeItem(invalidBottomSpacer_);
+            delete invalidBottomSpacer_;
+        }
+        invalidBottomSpacer_ = new QSpacerItem(0, spacerH, QSizePolicy::Minimum, QSizePolicy::Fixed);
+        invalidImageGrid_->addItem(invalidBottomSpacer_, static_cast<int>(loadedRows), 0, 1, GRID_COLUMNS);
+    }
+#ifdef _WIN32
+    {
+        MEMORYSTATUSEX st;
+        st.dwLength = sizeof(st);
+        if (GlobalMemoryStatusEx(&st)) {
+            SPDLOG_INFO("Mem after batch: load={}%, avail_phys_MB={}, avail_page_MB={}",
+                        st.dwMemoryLoad,
+                        static_cast<unsigned long long>(st.ullAvailPhys / (1024 * 1024)),
+                        static_cast<unsigned long long>(st.ullAvailPageFile / (1024 * 1024)));
+        }
+    }
+#endif
 }
 
 void HdfReviewTab::onScrollValueChanged(int value) {
@@ -445,34 +568,19 @@ void HdfReviewTab::onScrollValueChanged(int value) {
 }
 
 void HdfReviewTab::updateMetricsTable(const std::vector<backend::services::ProcessedFrame>& frames) {
-    // Determine which table to use based on which frames vector we're updating
+    // Determine which model to use based on which frames vector we're updating
     bool isValid = (&frames == &validFrames_);
-    QTableWidget* table = isValid ? validMetricsTable_ : invalidMetricsTable_;
-    table->setRowCount(static_cast<int>(frames.size()));
-
-    for (size_t i = 0; i < frames.size(); ++i) {
-        const auto& frame = frames[i];
-        const auto& val = frame.validation;
-
-        int row = static_cast<int>(i);
-        table->setItem(row, 0, new QTableWidgetItem(QString::number(frame.index)));
-        table->setItem(row, 1, new QTableWidgetItem(QString::number(frame.timestampNs)));
-        table->setItem(row, 2, new QTableWidgetItem(QString::number(val.deformability, 'f', 3)));
-        table->setItem(row, 3, new QTableWidgetItem(QString::number(val.area, 'f', 2)));
-        table->setItem(row, 4, new QTableWidgetItem(QString::number(val.areaRatio, 'f', 3)));
-        table->setItem(row, 5, new QTableWidgetItem(QString::number(val.ringRatio, 'f', 3)));
-        table->setItem(row, 6, new QTableWidgetItem(val.isValid ? "Yes" : "No"));
-        table->setItem(row, 7, new QTableWidgetItem(val.touchesBorder ? "Yes" : "No"));
-        table->setItem(row, 8, new QTableWidgetItem(val.hasSingleInnerContour ? "Yes" : "No"));
-        table->setItem(row, 9, new QTableWidgetItem(val.inRange ? "Yes" : "No"));
-        table->setItem(row, 10, new QTableWidgetItem(QString::number(val.innerContourCount)));
-        table->setItem(row, 11, new QTableWidgetItem(QString::number(val.brightness.q1, 'f', 2)));
-        table->setItem(row, 12, new QTableWidgetItem(QString::number(val.brightness.q2, 'f', 2)));
-        table->setItem(row, 13, new QTableWidgetItem(QString::number(val.brightness.q3, 'f', 2)));
-        table->setItem(row, 14, new QTableWidgetItem(QString::number(val.brightness.q4, 'f', 2)));
+    if (isValid) {
+        if (validMetricsModel_) {
+            validMetricsModel_->setSource(&validFrames_);
+            validMetricsTable_->resizeColumnsToContents();
+        }
+    } else {
+        if (invalidMetricsModel_) {
+            invalidMetricsModel_->setSource(&invalidFrames_);
+            invalidMetricsTable_->resizeColumnsToContents();
+        }
     }
-
-    table->resizeColumnsToContents();
 }
 
 QImage HdfReviewTab::matToQImage(const cv::Mat& mat) const {
@@ -530,11 +638,11 @@ void HdfReviewTab::onViewFrameDetails(int frameIndex) {
 }
 
 void HdfReviewTab::onTableSelectionChanged() {
-    QTableWidget* table = isShowingValid_ ? validMetricsTable_ : invalidMetricsTable_;
-    QList<QTableWidgetItem*> selected = table->selectedItems();
-    if (!selected.isEmpty()) {
-        int row = selected[0]->row();
-        setSelectedFrame(row);
+    QTableView* table = isShowingValid_ ? validMetricsTable_ : invalidMetricsTable_;
+    if (!table || !table->selectionModel()) return;
+    const QModelIndexList rows = table->selectionModel()->selectedRows();
+    if (!rows.isEmpty()) {
+        setSelectedFrame(rows.first().row());
     }
 }
 
@@ -564,9 +672,14 @@ void HdfReviewTab::setSelectedFrame(int frameIndex) {
     }
 
     // Update table selection
-    QTableWidget* table = isShowingValid_ ? validMetricsTable_ : invalidMetricsTable_;
-    table->selectRow(frameIndex);
-    table->scrollToItem(table->item(frameIndex, 0));
+    QTableView* table = isShowingValid_ ? validMetricsTable_ : invalidMetricsTable_;
+    if (table && table->model()) {
+        QModelIndex idx = table->model()->index(frameIndex, 0);
+        if (idx.isValid() && table->selectionModel()) {
+            table->selectionModel()->setCurrentIndex(idx, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+            table->scrollTo(idx);
+        }
+    }
 }
 
 void HdfReviewTab::onExportMetrics() {
@@ -662,6 +775,7 @@ void HdfReviewTab::onToggleRoiOverlay(bool enabled) {
     showRoiOverlay_ = enabled;
     SPDLOG_INFO("ROI overlay toggled: {}, ROI: x={}, y={}, w={}, h={}", 
                 enabled, roi_.x, roi_.y, roi_.w, roi_.h);
+    thumbnailCache_.clear();
     // Refresh thumbnails to show/hide overlay for both valid and invalid frames
     updateImageGrid(validFrames_);
     updateImageGrid(invalidFrames_);
@@ -736,23 +850,42 @@ QImage HdfReviewTab::createProcessingOverlay(const cv::Mat& original, const cv::
 }
 
 void HdfReviewTab::showFrameViewer(int frameIndex) {
-    const auto& frames = isShowingValid_ ? validFrames_ : invalidFrames_;
-    if (frameIndex < 0 || frameIndex >= static_cast<int>(frames.size())) {
+    const auto& framesMeta = isShowingValid_ ? validFrames_ : invalidFrames_;
+    if (frameIndex < 0 || frameIndex >= static_cast<int>(framesMeta.size())) {
         return;
     }
+    SPDLOG_INFO("HdfReviewTab: showFrameViewer index={} ({})", frameIndex, isShowingValid_ ? "valid" : "invalid");
 
-    const auto& frame = frames[frameIndex];
+    // Build a full ProcessedFrame by fetching images on demand
+    backend::services::ProcessedFrame initialFrame = framesMeta[frameIndex];
+    const std::string imgPath = isShowingValid_ ? "/valid_frames/images" : "/invalid_frames/images";
+    const std::string maskPath = isShowingValid_ ? "/valid_frames/masks"  : "/invalid_frames/masks";
+
+    if (hdfReader_) {
+        cv::Mat original, mask;
+        if (hdfReader_->readImageByIndex(imgPath, static_cast<size_t>(frameIndex), original)) {
+            initialFrame.originalImage = original;
+            SPDLOG_TRACE("HdfReviewTab: viewer loaded original {}[{}] ({}x{}x{})",
+                         imgPath, frameIndex, original.cols, original.rows, original.channels());
+        }
+        if (hdfReader_->readImageByIndex(maskPath, static_cast<size_t>(frameIndex), mask)) {
+            initialFrame.processedImage = mask;
+            SPDLOG_TRACE("HdfReviewTab: viewer loaded mask {}[{}] ({}x{}x{})",
+                         maskPath, frameIndex, mask.cols, mask.rows, mask.channels());
+        }
+    }
     
     // Create dialog
-    auto* dialog = new FrameViewerDialog(frame, roi_, showRoiOverlay_, this);
+    auto* dialog = new FrameViewerDialog(initialFrame, roi_, showRoiOverlay_, this);
     
     // Store current index in a way that can be modified by lambdas
     struct NavigationState {
         int currentIndex;
         const std::vector<backend::services::ProcessedFrame>* framesPtr;
+        bool isValidSet;
     };
     
-    auto* navState = new NavigationState{frameIndex, &frames};
+    auto* navState = new NavigationState{frameIndex, &framesMeta, isShowingValid_};
     
     // Connect navigation signals
     connect(dialog, &FrameViewerDialog::requestPreviousFrame, this, [this, dialog, navState]() {
@@ -761,7 +894,20 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
             navState->currentIndex = static_cast<int>(navState->framesPtr->size()) - 1; // Wrap to last
         }
         if (navState->currentIndex >= 0 && navState->currentIndex < static_cast<int>(navState->framesPtr->size())) {
-            dialog->setFrame((*navState->framesPtr)[navState->currentIndex]);
+            // Fetch images on demand
+            backend::services::ProcessedFrame pf = (*navState->framesPtr)[navState->currentIndex];
+            const std::string imgPath2 = navState->isValidSet ? "/valid_frames/images" : "/invalid_frames/images";
+            const std::string maskPath2 = navState->isValidSet ? "/valid_frames/masks"  : "/invalid_frames/masks";
+            if (hdfReader_) {
+                cv::Mat original2, mask2;
+                if (hdfReader_->readImageByIndex(imgPath2, static_cast<size_t>(navState->currentIndex), original2)) {
+                    pf.originalImage = original2;
+                }
+                if (hdfReader_->readImageByIndex(maskPath2, static_cast<size_t>(navState->currentIndex), mask2)) {
+                    pf.processedImage = mask2;
+                }
+            }
+            dialog->setFrame(pf);
             // Update selected frame in main view
             setSelectedFrame(navState->currentIndex);
         }
@@ -773,7 +919,19 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
             navState->currentIndex = 0; // Wrap to first
         }
         if (navState->currentIndex >= 0 && navState->currentIndex < static_cast<int>(navState->framesPtr->size())) {
-            dialog->setFrame((*navState->framesPtr)[navState->currentIndex]);
+            backend::services::ProcessedFrame pf = (*navState->framesPtr)[navState->currentIndex];
+            const std::string imgPath2 = navState->isValidSet ? "/valid_frames/images" : "/invalid_frames/images";
+            const std::string maskPath2 = navState->isValidSet ? "/valid_frames/masks"  : "/invalid_frames/masks";
+            if (hdfReader_) {
+                cv::Mat original2, mask2;
+                if (hdfReader_->readImageByIndex(imgPath2, static_cast<size_t>(navState->currentIndex), original2)) {
+                    pf.originalImage = original2;
+                }
+                if (hdfReader_->readImageByIndex(maskPath2, static_cast<size_t>(navState->currentIndex), mask2)) {
+                    pf.processedImage = mask2;
+                }
+            }
+            dialog->setFrame(pf);
             // Update selected frame in main view
             setSelectedFrame(navState->currentIndex);
         }

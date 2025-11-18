@@ -1430,3 +1430,293 @@ namespace backend::services
     }
 
 } // namespace backend::services
+
+// New scalable read APIs
+namespace backend::services {
+
+    bool Hdf5Service::getDatasetInfo(const std::string& datasetPath,
+                                     size_t& outCount,
+                                     int& outHeight,
+                                     int& outWidth,
+                                     int& outChannels) const
+    {
+        outCount = 0;
+        outHeight = 0;
+        outWidth = 0;
+        outChannels = 0;
+
+        if (!isFileOpen())
+        {
+            SPDLOG_ERROR("getDatasetInfo: HDF5 file is not open");
+            return false;
+        }
+
+        // Check existence
+        htri_t exists = H5Lexists(impl_->fileId_, datasetPath.c_str(), H5P_DEFAULT);
+        if (exists <= 0)
+        {
+            SPDLOG_WARN("getDatasetInfo: dataset {} does not exist", datasetPath);
+            return false;
+        }
+
+        hid_t datasetId = H5Dopen2(impl_->fileId_, datasetPath.c_str(), H5P_DEFAULT);
+        if (datasetId < 0)
+        {
+            SPDLOG_ERROR("getDatasetInfo: failed to open dataset {}", datasetPath);
+            return false;
+        }
+
+        hid_t dataspaceId = H5Dget_space(datasetId);
+        if (dataspaceId < 0)
+        {
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("getDatasetInfo: failed to get dataspace for {}", datasetPath);
+            return false;
+        }
+
+        int ndims = H5Sget_simple_extent_ndims(dataspaceId);
+        hsize_t dims[4] = {0, 0, 0, 0};
+        if (H5Sget_simple_extent_dims(dataspaceId, dims, nullptr) < 0)
+        {
+            H5Sclose(dataspaceId);
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("getDatasetInfo: failed to get extent for {}", datasetPath);
+            return false;
+        }
+
+        H5Sclose(dataspaceId);
+        H5Dclose(datasetId);
+
+        if (ndims < 3 || ndims > 4)
+        {
+            SPDLOG_ERROR("getDatasetInfo: unsupported ndims={} for {}", ndims, datasetPath);
+            return false;
+        }
+
+        outCount = static_cast<size_t>(dims[0]);
+        outHeight = static_cast<int>(dims[1]);
+        outWidth = static_cast<int>(dims[2]);
+        outChannels = (ndims == 4) ? static_cast<int>(dims[3]) : 1;
+
+        SPDLOG_DEBUG("HDF5: dataset info {} -> count={}, H={}, W={}, C={}, ndims={}",
+                     datasetPath, outCount, outHeight, outWidth, outChannels, ndims);
+        return true;
+    }
+
+    bool Hdf5Service::readImageByIndex(const std::string& datasetPath,
+                                       size_t index,
+                                       cv::Mat& outImage) const
+    {
+        outImage.release();
+
+        if (!isFileOpen())
+        {
+            SPDLOG_ERROR("readImageByIndex: HDF5 file is not open");
+            return false;
+        }
+
+        SPDLOG_TRACE("readImageByIndex: path='{}', index={}", datasetPath, index);
+        // Check existence
+        htri_t exists = H5Lexists(impl_->fileId_, datasetPath.c_str(), H5P_DEFAULT);
+        if (exists <= 0)
+        {
+            SPDLOG_WARN("readImageByIndex: dataset {} does not exist", datasetPath);
+            return false;
+        }
+
+        // Open dataset
+        hid_t datasetId = H5Dopen2(impl_->fileId_, datasetPath.c_str(), H5P_DEFAULT);
+        if (datasetId < 0)
+        {
+            SPDLOG_ERROR("readImageByIndex: failed to open dataset {}", datasetPath);
+            return false;
+        }
+
+        // Introspect shape
+        hid_t filespaceId = H5Dget_space(datasetId);
+        if (filespaceId < 0)
+        {
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("readImageByIndex: failed to get dataspace for {}", datasetPath);
+            return false;
+        }
+
+        int ndims = H5Sget_simple_extent_ndims(filespaceId);
+        hsize_t dims[4] = {0, 0, 0, 0};
+        if (H5Sget_simple_extent_dims(filespaceId, dims, nullptr) < 0)
+        {
+            H5Sclose(filespaceId);
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("readImageByIndex: failed to get extent for {}", datasetPath);
+            return false;
+        }
+
+        if (ndims < 3 || ndims > 4)
+        {
+            H5Sclose(filespaceId);
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("readImageByIndex: unsupported ndims={} for {}", ndims, datasetPath);
+            return false;
+        }
+
+        const hsize_t numFrames = dims[0];
+        const int height = static_cast<int>(dims[1]);
+        const int width = static_cast<int>(dims[2]);
+        const int channels = (ndims == 4) ? static_cast<int>(dims[3]) : 1;
+
+        SPDLOG_TRACE("readImageByIndex: dims: N={}, H={}, W={}, C={}, ndims={}",
+                     numFrames, height, width, channels, ndims);
+        if (index >= static_cast<size_t>(numFrames))
+        {
+            H5Sclose(filespaceId);
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("readImageByIndex: index {} out of range [0, {}) for {}", index, numFrames, datasetPath);
+            return false;
+        }
+
+        // Prepare selection in filespace
+        hsize_t start[4] = {static_cast<hsize_t>(index), 0, 0, 0};
+        hsize_t count[4];
+        if (channels == 1)
+        {
+            // 3D dataset: (1, H, W)
+            count[0] = 1;
+            count[1] = static_cast<hsize_t>(height);
+            count[2] = static_cast<hsize_t>(width);
+            H5Sselect_hyperslab(filespaceId, H5S_SELECT_SET, start, nullptr, count, nullptr);
+        }
+        else
+        {
+            // 4D dataset: (1, H, W, C)
+            count[0] = 1;
+            count[1] = static_cast<hsize_t>(height);
+            count[2] = static_cast<hsize_t>(width);
+            count[3] = static_cast<hsize_t>(channels);
+            H5Sselect_hyperslab(filespaceId, H5S_SELECT_SET, start, nullptr, count, nullptr);
+        }
+
+        // Create matching memspace
+        hid_t memspaceId = H5Screate_simple((channels == 1) ? 3 : 4, count, nullptr);
+        if (memspaceId < 0)
+        {
+            H5Sclose(filespaceId);
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("readImageByIndex: failed to create memspace for {}", datasetPath);
+            return false;
+        }
+
+        // Prepare OpenCV Mat
+        const int type = CV_8UC(channels);
+        outImage = cv::Mat(height, width, type);
+        if (!outImage.isContinuous())
+        {
+            // Guarantee contiguous buffer
+            outImage = outImage.clone();
+        }
+
+        // Read directly into Mat buffer
+        herr_t status = H5Dread(datasetId, H5T_NATIVE_UINT8, memspaceId, filespaceId, H5P_DEFAULT, outImage.data);
+
+        H5Sclose(memspaceId);
+        H5Sclose(filespaceId);
+        H5Dclose(datasetId);
+
+        if (status < 0)
+        {
+            outImage.release();
+            SPDLOG_ERROR("readImageByIndex: H5Dread failed for {}[{}]", datasetPath, index);
+            return false;
+        }
+
+        SPDLOG_TRACE("readImageByIndex: success for {}[{}], bytes={}",
+                     datasetPath, index, static_cast<size_t>(height) * width * channels);
+        return true;
+    }
+
+    bool Hdf5Service::readImagesRange(const std::string& datasetPath,
+                                      size_t startIndex,
+                                      size_t count,
+                                      std::vector<cv::Mat>& outImages) const
+    {
+        outImages.clear();
+
+        // Validate dataset and get count
+        size_t total = 0;
+        int h = 0, w = 0, c = 0;
+        if (!getDatasetInfo(datasetPath, total, h, w, c))
+        {
+            return false;
+        }
+        if (startIndex >= total)
+        {
+            SPDLOG_WARN("readImagesRange: startIndex {} out of range for {} (total={})", startIndex, datasetPath, total);
+            return false;
+        }
+
+        if (count > 4096)
+        {
+            SPDLOG_WARN("readImagesRange: requested count {} is large for {}, consider batching to avoid memory spikes", count, datasetPath);
+        }
+
+        SPDLOG_DEBUG("readImagesRange: path='{}', start={}, count={}, total={}, H={}, W={}, C={}",
+                     datasetPath, startIndex, count, total, h, w, c);
+        const size_t endIndex = std::min(total, startIndex + count);
+        outImages.reserve(endIndex - startIndex);
+        for (size_t i = startIndex; i < endIndex; ++i)
+        {
+            cv::Mat img;
+            if (!readImageByIndex(datasetPath, i, img))
+            {
+                SPDLOG_ERROR("readImagesRange: failed to read {}[{}]", datasetPath, i);
+                return false;
+            }
+            outImages.push_back(std::move(img));
+        }
+        SPDLOG_DEBUG("readImagesRange: loaded {} images from {}", outImages.size(), datasetPath);
+        return true;
+    }
+
+    bool Hdf5Service::readValidMetadata(std::vector<ProcessedFrame>& frames)
+    {
+        if (!isFileOpen())
+        {
+            SPDLOG_ERROR("readValidMetadata: HDF5 file is not open");
+            return false;
+        }
+        frames.clear();
+        if (!readMetadataDataset(impl_->fileId_, "/valid_frames/metadata", frames))
+        {
+            return false;
+        }
+        // Ensure image payloads are empty for metadata-only reads
+        for (auto& f : frames)
+        {
+            f.originalImage.release();
+            f.processedImage.release();
+        }
+        SPDLOG_INFO("readValidMetadata: {} entries", frames.size());
+        return true;
+    }
+
+    bool Hdf5Service::readInvalidMetadata(std::vector<ProcessedFrame>& frames)
+    {
+        if (!isFileOpen())
+        {
+            SPDLOG_ERROR("readInvalidMetadata: HDF5 file is not open");
+            return false;
+        }
+        frames.clear();
+        if (!readMetadataDataset(impl_->fileId_, "/invalid_frames/metadata", frames))
+        {
+            return false;
+        }
+        for (auto& f : frames)
+        {
+            f.originalImage.release();
+            f.processedImage.release();
+        }
+        SPDLOG_INFO("readInvalidMetadata: {} entries", frames.size());
+        return true;
+    }
+
+} // namespace backend::services

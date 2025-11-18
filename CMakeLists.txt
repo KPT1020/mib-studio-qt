@@ -146,6 +146,8 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/MockConfigDialog.h
     src/frontend/ExperimentMonitoringTab.cpp
     include/frontend/ExperimentMonitoringTab.h
+    src/frontend/HdfMetricsModel.cpp
+    include/frontend/HdfMetricsModel.h
     src/frontend/MonitoringSettingsDialog.cpp
     include/frontend/MonitoringSettingsDialog.h
 )

@@ -53,6 +53,31 @@ public:
                              size_t& totalValidFrames, size_t& totalInvalidFrames,
                              ProcessingService::Roi* roi = nullptr);
 
+    // Scalable read APIs for review (lazy, on-demand)
+    // Retrieve dataset shape information. Returns false if dataset missing or file not open.
+    bool getDatasetInfo(const std::string& datasetPath,
+                        size_t& outCount,
+                        int& outHeight,
+                        int& outWidth,
+                        int& outChannels) const;
+
+    // Read a single image at index using hyperslab selection (bounded memory).
+    // Supports both 3D (N,H,W) and 4D (N,H,W,C) datasets; outputs CV_8UC1 or CV_8UC(C).
+    bool readImageByIndex(const std::string& datasetPath,
+                          size_t index,
+                          cv::Mat& outImage) const;
+
+    // Read a small range of images [startIndex, startIndex+count) using iterative hyperslabs.
+    // Designed for small batches (e.g., thumbnails). Returns false if any read fails.
+    bool readImagesRange(const std::string& datasetPath,
+                         size_t startIndex,
+                         size_t count,
+                         std::vector<cv::Mat>& outImages) const;
+
+    // Metadata-only reads (do not load image/mask payloads)
+    bool readValidMetadata(std::vector<ProcessedFrame>& frames);
+    bool readInvalidMetadata(std::vector<ProcessedFrame>& frames);
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
