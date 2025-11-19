@@ -138,6 +138,8 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/PreviewPage.h
     src/frontend/ConfigTabs.cpp
     include/frontend/ConfigTabs.h
+    src/frontend/NanopositionerTab.cpp
+    include/frontend/NanopositionerTab.h
     src/frontend/ProcessingSettingsDialog.cpp
     include/frontend/ProcessingSettingsDialog.h
     src/frontend/FrameViewerDialog.cpp

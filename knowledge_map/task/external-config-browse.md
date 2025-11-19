@@ -27,3 +27,4 @@ Usage
   - Camera script (egrabberConfig.js): Reload, Save, Apply to Camera, Browse…, Clear. Path label shows the active file.
 
 
+

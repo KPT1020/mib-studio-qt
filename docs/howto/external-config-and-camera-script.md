@@ -29,3 +29,4 @@ This app supports using external files for both the application JSON config and 
 - This mirrors Euresys sample patterns (e.g., high frame rate scripts) by running the script directly on the device.
 
 
+
