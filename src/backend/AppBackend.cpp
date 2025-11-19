@@ -174,4 +174,18 @@ bool AppBackend::applyCameraScriptFromFile(const std::string& path, std::string*
     return cameraControlService_->applyScriptToDevice(selectedIfIndex_, selectedDevIndex_, path, errorOut);
 }
 
+bool AppBackend::resetSelectedHardwareCamera(std::string* errorOut) {
+    if (selectedIfIndex_ < 0 || selectedDevIndex_ < 0) {
+        if (errorOut) *errorOut = "No hardware camera selected";
+        return false;
+    }
+    // Ensure capture thread is stopped
+    if (captureService_ && captureService_->isRunning()) {
+        SPDLOG_INFO("Stopping capture before camera reset");
+        captureService_->stop();
+    }
+    SPDLOG_INFO("Resetting camera {}", selectedLabel_);
+    return cameraControlService_->deviceReset(selectedIfIndex_, selectedDevIndex_, errorOut);
+}
+
 } // namespace backend

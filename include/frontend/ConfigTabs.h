@@ -37,6 +37,7 @@ private slots:
     void onBrowseJs();
     void onClearJs();
     void onApplyJs();
+    void onResetCamera();
 
 private:
     QString appDirIncludePath(const QString& fileName) const;
@@ -70,6 +71,7 @@ private:
     QPushButton* jsReloadBtn_ = nullptr;
     QPushButton* jsSaveBtn_ = nullptr;
     QPushButton* jsApplyBtn_ = nullptr;
+    QPushButton* jsResetBtn_ = nullptr;
     QPushButton* jsBrowseBtn_ = nullptr;
     QPushButton* jsClearBtn_ = nullptr;
     QLabel* jsPathLabel_ = nullptr;

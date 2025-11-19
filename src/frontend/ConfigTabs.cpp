@@ -165,12 +165,14 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         jsReloadBtn_ = new QPushButton(tr("Reload"), page);
         jsSaveBtn_ = new QPushButton(tr("Save"), page);
         jsApplyBtn_ = new QPushButton(tr("Apply to Camera"), page);
+        jsResetBtn_ = new QPushButton(tr("Reset Camera"), page);
         jsBrowseBtn_ = new QPushButton(tr("Browse..."), page);
         jsClearBtn_ = new QPushButton(tr("Clear"), page);
         jsPathLabel_ = new QLabel(page);
         row->addWidget(jsReloadBtn_);
         row->addWidget(jsSaveBtn_);
         row->addWidget(jsApplyBtn_);
+        row->addWidget(jsResetBtn_);
         row->addWidget(jsBrowseBtn_);
         row->addWidget(jsClearBtn_);
         row->addStretch(1);
@@ -182,6 +184,7 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         connect(jsReloadBtn_, &QPushButton::clicked, this, &ConfigTabs::onReloadJs);
         connect(jsSaveBtn_, &QPushButton::clicked, this, &ConfigTabs::onSaveJs);
         connect(jsApplyBtn_, &QPushButton::clicked, this, &ConfigTabs::onApplyJs);
+        connect(jsResetBtn_, &QPushButton::clicked, this, &ConfigTabs::onResetCamera);
         connect(jsBrowseBtn_, &QPushButton::clicked, this, &ConfigTabs::onBrowseJs);
         connect(jsClearBtn_, &QPushButton::clicked, this, &ConfigTabs::onClearJs);
     }
@@ -330,6 +333,41 @@ void ConfigTabs::onSaveJs() {
         return;
     }
     QMessageBox::information(this, tr("Save egrabberConfig.js"), tr("Saved."));
+}
+
+void ConfigTabs::onResetCamera() {
+    const auto reply = QMessageBox::question(
+        this,
+        tr("Reset Camera"),
+        tr("This will send GenICam DeviceReset to the selected camera.\n\n"
+           "Capture will be stopped and the camera may briefly disconnect.\n"
+           "Proceed?"),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::No);
+    if (reply != QMessageBox::Yes) {
+        return;
+    }
+
+    if (jsResetBtn_) jsResetBtn_->setEnabled(false);
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+
+    std::string backendErr;
+    const bool ok = backend_.resetSelectedHardwareCamera(&backendErr);
+
+    QApplication::restoreOverrideCursor();
+    if (jsResetBtn_) jsResetBtn_->setEnabled(true);
+
+    if (!ok) {
+        SPDLOG_ERROR("Reset Camera failed: {}", backendErr);
+        QMessageBox::warning(this, tr("Reset Camera"),
+                             tr("Reset failed: %1").arg(QString::fromStdString(backendErr)));
+        return;
+    }
+
+    QMessageBox::information(
+        this,
+        tr("Reset Camera"),
+        tr("DeviceReset sent. The camera may briefly disconnect and require Refresh in the Connect tab."));
 }
 
 void ConfigTabs::onApplyJs() {

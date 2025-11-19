@@ -42,6 +42,10 @@ public:
     // If capture is running, it will be stopped first. Capture remains stopped.
     bool applyCameraScriptFromFile(const std::string& path, std::string* errorOut = nullptr);
 
+    // Issue GenICam DeviceReset to the selected hardware camera.
+    // If capture is running, it will be stopped first. Capture remains stopped.
+    bool resetSelectedHardwareCamera(std::string* errorOut = nullptr);
+
 private:
     std::unique_ptr<services::SqliteService> sqliteService_;
     std::unique_ptr<services::Hdf5Service> hdf5Service_;

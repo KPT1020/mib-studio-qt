@@ -89,6 +89,33 @@ bool CameraControlService::applyScriptToDevice(int interfaceIndex,
     }
 }
 
+bool CameraControlService::deviceReset(int interfaceIndex,
+                                       int deviceIndex,
+                                       std::string* errorOut) {
+    try {
+        EGenTL genTL;
+        EGrabber<CallbackOnDemand> g(genTL, interfaceIndex, deviceIndex);
+
+        // Best-effort: stop acquisition before reset
+        try {
+            g.execute<RemoteModule>("AcquisitionStop");
+        } catch (const std::exception& ex) {
+            SPDLOG_WARN("AcquisitionStop before reset failed: {}", ex.what());
+        }
+
+        SPDLOG_INFO("Issuing DeviceReset to camera [{}:{}]", interfaceIndex, deviceIndex);
+        g.execute<DeviceModule>("DeviceReset");
+        SPDLOG_INFO("DeviceReset command sent");
+        return true;
+    } catch (const std::exception& ex) {
+        SPDLOG_ERROR("deviceReset failed: {}", ex.what());
+        if (errorOut) {
+            *errorOut = ex.what();
+        }
+        return false;
+    }
+}
+
 } // namespace backend::services
 
 

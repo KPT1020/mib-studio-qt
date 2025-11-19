@@ -35,6 +35,12 @@ public:
                              int deviceIndex,
                              const std::string& scriptPath,
                              std::string* errorOut = nullptr);
+
+    // Issue GenICam SFNC DeviceReset to a specific device.
+    // Best effort stops acquisition first; returns true on success.
+    bool deviceReset(int interfaceIndex,
+                     int deviceIndex,
+                     std::string* errorOut = nullptr);
 };
 
 } // namespace backend::services
