@@ -4,6 +4,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QFileDialog>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
@@ -88,6 +89,8 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         auto* row = new QHBoxLayout();
         jsonReloadBtn_ = new QPushButton(tr("Reload"), page);
         jsonSaveBtn_ = new QPushButton(tr("Save"), page);
+        jsonBrowseBtn_ = new QPushButton(tr("Browse..."), page);
+        jsonClearBtn_ = new QPushButton(tr("Clear"), page);
 		jsonTableToggle_ = new QToolButton(page);
 		jsonTableToggle_->setText(tr("json/table"));
         jsonTableToggle_->setToolTip(tr("Toggle table view"));
@@ -95,6 +98,8 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         jsonPathLabel_ = new QLabel(page);
         row->addWidget(jsonReloadBtn_);
         row->addWidget(jsonSaveBtn_);
+        row->addWidget(jsonBrowseBtn_);
+        row->addWidget(jsonClearBtn_);
 		row->addStretch(1);
 		row->addWidget(jsonPathLabel_);
 		row->addWidget(jsonTableToggle_);
@@ -145,6 +150,8 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         tabs_->addTab(page, tr("App config (config.json)"));
         connect(jsonReloadBtn_, &QPushButton::clicked, this, &ConfigTabs::onReloadJson);
         connect(jsonSaveBtn_, &QPushButton::clicked, this, &ConfigTabs::onSaveJson);
+        connect(jsonBrowseBtn_, &QPushButton::clicked, this, &ConfigTabs::onBrowseJson);
+        connect(jsonClearBtn_, &QPushButton::clicked, this, &ConfigTabs::onClearJson);
     }
 
     // Camera JS script tab
@@ -157,10 +164,14 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         jsReloadBtn_ = new QPushButton(tr("Reload"), page);
         jsSaveBtn_ = new QPushButton(tr("Save"), page);
         jsApplyBtn_ = new QPushButton(tr("Apply to Camera"), page);
+        jsBrowseBtn_ = new QPushButton(tr("Browse..."), page);
+        jsClearBtn_ = new QPushButton(tr("Clear"), page);
         jsPathLabel_ = new QLabel(page);
         row->addWidget(jsReloadBtn_);
         row->addWidget(jsSaveBtn_);
         row->addWidget(jsApplyBtn_);
+        row->addWidget(jsBrowseBtn_);
+        row->addWidget(jsClearBtn_);
         row->addStretch(1);
         row->addWidget(jsPathLabel_);
         v->addLayout(row);
@@ -170,6 +181,8 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         connect(jsReloadBtn_, &QPushButton::clicked, this, &ConfigTabs::onReloadJs);
         connect(jsSaveBtn_, &QPushButton::clicked, this, &ConfigTabs::onSaveJs);
         connect(jsApplyBtn_, &QPushButton::clicked, this, &ConfigTabs::onApplyJs);
+        connect(jsBrowseBtn_, &QPushButton::clicked, this, &ConfigTabs::onBrowseJs);
+        connect(jsClearBtn_, &QPushButton::clicked, this, &ConfigTabs::onClearJs);
     }
 
     layout->addWidget(tabs_, 1);
@@ -182,6 +195,20 @@ QString ConfigTabs::appDirIncludePath(const QString& fileName) const {
     const QString appDir = QCoreApplication::applicationDirPath();
     // Write into a sibling include directory next to the executable dir (build tree)
     return QDir(appDir).absoluteFilePath("../include/" + fileName);
+}
+
+QString ConfigTabs::currentJsonPath() const {
+    QSettings s;
+    const QString ext = s.value("Config/ExternalAppConfigPath").toString().trimmed();
+    if (!ext.isEmpty()) return ext;
+    return defaultJsonPath();
+}
+
+QString ConfigTabs::currentJsPath() const {
+    QSettings s;
+    const QString ext = s.value("Config/ExternalCameraScriptPath").toString().trimmed();
+    if (!ext.isEmpty()) return ext;
+    return defaultJsPath();
 }
 
 bool ConfigTabs::loadFileToEditor(const QString& path, QPlainTextEdit* editor, QString* err) {
@@ -237,8 +264,8 @@ static bool ensureDefaultsFile(const QString& targetPath, const QString& resourc
 }
 
 void ConfigTabs::onReloadJson() {
-    const QString path = appDirIncludePath("config.json");
-    {
+    const QString path = currentJsonPath();
+    if (path == defaultJsonPath()) {
         QString err;
         if (!ensureDefaultsFile(path, ":/defaults/config.json", &err)) {
             SPDLOG_WARN("ensureDefaultsFile(config.json) failed: {}", err.toStdString());
@@ -257,7 +284,7 @@ void ConfigTabs::onReloadJson() {
 }
 
 void ConfigTabs::onSaveJson() {
-    const QString path = appDirIncludePath("config.json");
+    const QString path = currentJsonPath();
     QString err;
     if (!saveEditorToFile(jsonEdit_, path, &err)) {
         SPDLOG_ERROR("Failed to save config.json to {}: {}", path.toStdString(), err.toStdString());
@@ -271,8 +298,8 @@ void ConfigTabs::onSaveJson() {
 }
 
 void ConfigTabs::onReloadJs() {
-    const QString path = appDirIncludePath("egrabberConfig.js");
-    {
+    const QString path = currentJsPath();
+    if (path == defaultJsPath()) {
         QString err;
         if (!ensureDefaultsFile(path, ":/defaults/egrabberConfig.js", &err)) {
             SPDLOG_WARN("ensureDefaultsFile(egrabberConfig.js) failed: {}", err.toStdString());
@@ -288,7 +315,7 @@ void ConfigTabs::onReloadJs() {
 }
 
 void ConfigTabs::onSaveJs() {
-    const QString path = appDirIncludePath("egrabberConfig.js");
+    const QString path = currentJsPath();
     QString err;
     if (!saveEditorToFile(jsEdit_, path, &err)) {
         SPDLOG_ERROR("Failed to save egrabberConfig.js to {}: {}", path.toStdString(), err.toStdString());
@@ -299,7 +326,7 @@ void ConfigTabs::onSaveJs() {
 }
 
 void ConfigTabs::onApplyJs() {
-    const QString path = appDirIncludePath("egrabberConfig.js");
+    const QString path = currentJsPath();
     QString err;
     // Always save first to ensure the latest content is applied
     {
@@ -318,6 +345,67 @@ void ConfigTabs::onApplyJs() {
         return;
     }
     QMessageBox::information(this, tr("Apply Camera Script"), tr("Applied to camera. Capture remains stopped."));
+}
+
+void ConfigTabs::onBrowseJson() {
+    const QString current = currentJsonPath();
+    const QString initialDir = QFileInfo(current).absolutePath();
+    const QString selected = QFileDialog::getOpenFileName(this,
+                                                          tr("Select App config (config.json)"),
+                                                          initialDir,
+                                                          tr("JSON files (*.json);;All Files (*.*)"));
+    if (selected.isEmpty()) return;
+    {
+        QSettings s;
+        s.setValue("Config/ExternalAppConfigPath", selected);
+    }
+    SPDLOG_INFO("External App config set to {}", selected.toStdString());
+    QString err;
+    if (!loadFileToEditor(selected, jsonEdit_, &err)) {
+        SPDLOG_WARN("Failed to load external config.json from {}: {}", selected.toStdString(), err.toStdString());
+        QMessageBox::warning(this, tr("Load config.json"), tr("Failed to load: %1").arg(err));
+        return;
+    }
+    jsonPathLabel_->setText(selected);
+    if (jsonStack_ && jsonStack_->currentIndex() == 1) {
+        refreshJsonTableModel();
+    }
+}
+
+void ConfigTabs::onClearJson() {
+    QSettings s;
+    s.remove("Config/ExternalAppConfigPath");
+    SPDLOG_INFO("External App config cleared; reverting to default include path");
+    onReloadJson();
+}
+
+void ConfigTabs::onBrowseJs() {
+    const QString current = currentJsPath();
+    const QString initialDir = QFileInfo(current).absolutePath();
+    const QString selected = QFileDialog::getOpenFileName(this,
+                                                          tr("Select Camera script (egrabberConfig.js)"),
+                                                          initialDir,
+                                                          tr("JavaScript files (*.js);;All Files (*.*)"));
+    if (selected.isEmpty()) return;
+    {
+        QSettings s;
+        s.setValue("Config/ExternalCameraScriptPath", selected);
+    }
+    SPDLOG_INFO("External Camera script set to {}", selected.toStdString());
+    QString err;
+    if (!loadFileToEditor(selected, jsEdit_, &err)) {
+        SPDLOG_WARN("Failed to load external egrabberConfig.js from {}: {}", selected.toStdString(), err.toStdString());
+        QMessageBox::warning(this, tr("Load egrabberConfig.js"), tr("Failed to load: %1").arg(err));
+        return;
+    }
+    jsPathLabel_->setText(selected);
+}
+
+void ConfigTabs::onClearJs() {
+    QSettings s;
+    s.remove("Config/ExternalCameraScriptPath");
+    SPDLOG_INFO("External Camera script cleared; reverting to default include path");
+    onReloadJs();
 }
 
 void ConfigTabs::onJsonTableToggled(bool checked) {

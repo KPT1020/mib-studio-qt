@@ -17,6 +17,7 @@
 #include <QTimer>
 #include <QToolButton>
 #include <QVBoxLayout>
+#include <QSettings>
 
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
@@ -276,6 +277,11 @@ void PreviewPage::onUpdateAutofocusStatus() {
 }
 
 QString PreviewPage::configPath() const {
+    QSettings s;
+    const QString external = s.value("Config/ExternalAppConfigPath").toString().trimmed();
+    if (!external.isEmpty()) {
+        return external;
+    }
     const QString appDir = QCoreApplication::applicationDirPath();
     return QDir(appDir).absoluteFilePath("../include/config.json");
 }
