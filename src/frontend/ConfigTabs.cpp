@@ -14,12 +14,65 @@
 #include <QVBoxLayout>
 #include <QFileInfo>
 #include <QStandardPaths>
+#include <QStackedWidget>
+#include <QTableView>
+#include <QToolButton>
+#include <QTimer>
+#include <QSettings>
+#include <QJsonDocument>
+#include <QJsonParseError>
+#include <QHeaderView>
+#include <QJsonObject>
+#include <QJsonArray>
 
 #include <spdlog/spdlog.h>
 
 #include "backend/AppBackend.h"
+#include "frontend/JsonTableModel.h"
+#include "frontend/JsonFlatten.h"
 
 namespace frontend {
+
+namespace {
+
+static QJsonValue parseValueFromString(const QString& text) {
+	const QString t = text.trimmed();
+	if (t == "true") return QJsonValue(true);
+	if (t == "false") return QJsonValue(false);
+	if (t == "null" || t == "undefined") return QJsonValue();
+	// Try number
+	bool ok = false;
+	double d = t.toDouble(&ok);
+	if (ok && !t.isEmpty()) return QJsonValue(d);
+	// Try array/object JSON
+	if ((!t.isEmpty() && (t.front() == '{' || t.front() == '['))) {
+		QJsonParseError err;
+		const QJsonDocument doc = QJsonDocument::fromJson(t.toUtf8(), &err);
+		if (err.error == QJsonParseError::NoError) {
+			if (doc.isObject()) return QJsonValue(doc.object());
+			if (doc.isArray()) return QJsonValue(doc.array());
+		}
+	}
+	return QJsonValue(t);
+}
+
+static void setObjectValueByPath(QJsonObject& obj, const QString& path, const QJsonValue& value) {
+	const QStringList parts = path.split('.', Qt::SkipEmptyParts);
+	std::function<void(QJsonObject&, int)> setByIndex = [&](QJsonObject& node, int idx) {
+		if (idx >= parts.size()) return;
+		const QString& key = parts.at(idx);
+		if (idx == parts.size() - 1) {
+			node.insert(key, value);
+			return;
+		}
+		QJsonObject child = node.value(key).toObject();
+		setByIndex(child, idx + 1);
+		node.insert(key, child);
+	};
+	setByIndex(obj, 0);
+}
+
+} // namespace
 
 ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
     : QWidget(parent), backend_(backend) {
@@ -35,13 +88,59 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         auto* row = new QHBoxLayout();
         jsonReloadBtn_ = new QPushButton(tr("Reload"), page);
         jsonSaveBtn_ = new QPushButton(tr("Save"), page);
+		jsonTableToggle_ = new QToolButton(page);
+		jsonTableToggle_->setText(tr("json/table"));
+        jsonTableToggle_->setToolTip(tr("Toggle table view"));
+        jsonTableToggle_->setCheckable(true);
         jsonPathLabel_ = new QLabel(page);
         row->addWidget(jsonReloadBtn_);
         row->addWidget(jsonSaveBtn_);
-        row->addStretch(1);
-        row->addWidget(jsonPathLabel_);
+		row->addStretch(1);
+		row->addWidget(jsonPathLabel_);
+		row->addWidget(jsonTableToggle_);
         v->addLayout(row);
-        v->addWidget(jsonEdit_, 1);
+
+        jsonModel_ = new JsonTableModel(this);
+        jsonTable_ = new QTableView(page);
+        jsonTable_->setModel(jsonModel_);
+        jsonTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+        jsonTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+        jsonTable_->setAlternatingRowColors(true);
+		jsonTable_->setSortingEnabled(false);
+		jsonTable_->setWordWrap(true);
+		jsonTable_->setTextElideMode(Qt::ElideNone);
+		jsonTable_->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+		jsonTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+		jsonTable_->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
+
+        jsonStack_ = new QStackedWidget(page);
+        jsonStack_->addWidget(jsonEdit_);
+        jsonStack_->addWidget(jsonTable_);
+        v->addWidget(jsonStack_, 1);
+
+        // Persist toggle choice
+        {
+            QSettings s;
+            const bool showTable = s.value("Preview/ShowTable", false).toBool();
+            jsonTableToggle_->setChecked(showTable);
+            jsonStack_->setCurrentIndex(showTable ? 1 : 0);
+        }
+
+        connect(jsonTableToggle_, &QToolButton::toggled, this, &ConfigTabs::onJsonTableToggled);
+		connect(jsonModel_, &QAbstractItemModel::dataChanged, this,
+		        [this](const QModelIndex&, const QModelIndex&, const QVector<int>&) { rebuildJsonFromTable(); });
+
+        // Debounced updates when editing JSON while table is visible
+        jsonDebounceTimer_ = new QTimer(this);
+        jsonDebounceTimer_->setSingleShot(true);
+        jsonDebounceTimer_->setInterval(150);
+        connect(jsonDebounceTimer_, &QTimer::timeout, this, &ConfigTabs::onJsonTextChangedDebounced);
+        connect(jsonEdit_, &QPlainTextEdit::textChanged, this, [this]() {
+            if (jsonStack_ && jsonStack_->currentIndex() == 1) {
+                jsonDebounceTimer_->start();
+            }
+        });
+
         page->setLayout(v);
         tabs_->addTab(page, tr("App config (config.json)"));
         connect(jsonReloadBtn_, &QPushButton::clicked, this, &ConfigTabs::onReloadJson);
@@ -152,6 +251,9 @@ void ConfigTabs::onReloadJson() {
         return;
     }
     jsonPathLabel_->setText(path);
+    if (jsonStack_ && jsonStack_->currentIndex() == 1) {
+        refreshJsonTableModel();
+    }
 }
 
 void ConfigTabs::onSaveJson() {
@@ -163,6 +265,9 @@ void ConfigTabs::onSaveJson() {
         return;
     }
     QMessageBox::information(this, tr("Save config.json"), tr("Saved."));
+    if (jsonStack_ && jsonStack_->currentIndex() == 1) {
+        refreshJsonTableModel();
+    }
 }
 
 void ConfigTabs::onReloadJs() {
@@ -213,6 +318,74 @@ void ConfigTabs::onApplyJs() {
         return;
     }
     QMessageBox::information(this, tr("Apply Camera Script"), tr("Applied to camera. Capture remains stopped."));
+}
+
+void ConfigTabs::onJsonTableToggled(bool checked) {
+    if (!jsonStack_) return;
+    jsonStack_->setCurrentIndex(checked ? 1 : 0);
+    QSettings s;
+    s.setValue("Preview/ShowTable", checked);
+    if (checked) {
+        refreshJsonTableModel();
+    }
+}
+
+void ConfigTabs::onJsonTextChangedDebounced() {
+    if (jsonStack_ && jsonStack_->currentIndex() == 1) {
+        refreshJsonTableModel();
+    }
+}
+
+void ConfigTabs::refreshJsonTableModel() {
+    if (!jsonModel_) return;
+    const QByteArray bytes = jsonEdit_ ? jsonEdit_->toPlainText().toUtf8() : QByteArray();
+    QJsonParseError err;
+    const QJsonDocument doc = QJsonDocument::fromJson(bytes, &err);
+    if (err.error != QJsonParseError::NoError) {
+        SPDLOG_WARN("JSON parse error at offset {}: {}", err.offset, err.errorString().toStdString());
+        jsonModel_->clear();
+        return;
+    }
+    const auto flattened = jsonutil::flattenJsonForTable(doc);
+    jsonModel_->setFromFlatten(flattened.columns, flattened.rows);
+    if (jsonTable_) {
+        jsonTable_->resizeColumnsToContents();
+		jsonTable_->resizeRowsToContents();
+    }
+}
+
+void ConfigTabs::rebuildJsonFromTable() {
+	if (!jsonModel_ || !jsonEdit_) return;
+	const auto& cols = jsonModel_->columns();
+	const auto& rows = jsonModel_->rows();
+	QJsonDocument outDoc;
+	if (cols.size() == 2 && cols.at(0) == "key" && cols.at(1) == "value") {
+		QJsonObject root;
+		for (const auto& r : rows) {
+			if (r.size() < 2) continue;
+			const QString keyPath = r.at(0);
+			const QString valStr = r.at(1);
+			setObjectValueByPath(root, keyPath, parseValueFromString(valStr));
+		}
+		outDoc = QJsonDocument(root);
+	} else {
+		// Treat as array of objects
+		QJsonArray arr;
+		for (const auto& r : rows) {
+			QJsonObject obj;
+			for (int c = 0; c < cols.size() && c < r.size(); ++c) {
+				const QString keyPath = cols.at(c);
+				const QString valStr = r.at(c);
+				setObjectValueByPath(obj, keyPath, parseValueFromString(valStr));
+			}
+			arr.append(obj);
+		}
+		outDoc = QJsonDocument(arr);
+	}
+	// Update editor without triggering table refresh loop
+	const bool blocked = jsonEdit_->blockSignals(true);
+	jsonEdit_->setPlainText(QString::fromUtf8(outDoc.toJson(QJsonDocument::Indented)));
+	jsonEdit_->blockSignals(blocked);
 }
 
 } // namespace frontend

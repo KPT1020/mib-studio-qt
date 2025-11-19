@@ -150,6 +150,10 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/HdfMetricsModel.h
     src/frontend/MonitoringSettingsDialog.cpp
     include/frontend/MonitoringSettingsDialog.h
+    src/frontend/JsonTableModel.cpp
+    include/frontend/JsonTableModel.h
+    src/frontend/JsonFlatten.cpp
+    include/frontend/JsonFlatten.h
 )
 
 add_executable(mib_studio_qt
