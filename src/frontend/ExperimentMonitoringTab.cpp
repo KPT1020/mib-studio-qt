@@ -12,6 +12,18 @@
 #include <QBarSet>
 #include <QChart>
 #include <QValueAxis>
+#ifndef MIB_HAS_QHISTOGRAMSERIES
+#if __has_include(<QHistogramSeries>)
+#define MIB_HAS_QHISTOGRAMSERIES 1
+#else
+#define MIB_HAS_QHISTOGRAMSERIES 0
+#endif
+#endif
+#if MIB_HAS_QHISTOGRAMSERIES
+#include <QHistogramSeries>
+#else
+#include <QBarCategoryAxis>
+#endif
 #include <QFrame>
 #include <QCheckBox>
 #include <QPushButton>
@@ -80,10 +92,30 @@ namespace frontend
         histogramXAxis_->setLabelFormat("%.2f");
         histogramChart_->addAxis(histogramXAxis_, Qt::AlignBottom);
 
+#if MIB_HAS_QHISTOGRAMSERIES
+        histogramSeries_ = new QHistogramSeries();
+        histogramSeries_->setName("Ring Ratio");
+        histogramChart_->addSeries(histogramSeries_);
+        histogramSeries_->attachAxis(histogramXAxis_);
+        histogramSeries_->attachAxis(histogramYAxis_);
+#else
         barSeries_ = new QBarSeries();
         histogramChart_->addSeries(barSeries_);
-        barSeries_->attachAxis(histogramXAxis_);
+        // Fallback: use category axis for X when bar series is used
+        histogramCategoryAxis_ = new QBarCategoryAxis();
+        histogramCategoryAxis_->setTitleText("Ring Ratio");
+        histogramCategoryAxis_->setLabelsAngle(-90);
+        // Remove previously added numeric X axis to avoid overlap
+        if (histogramXAxis_)
+        {
+            histogramChart_->removeAxis(histogramXAxis_);
+            delete histogramXAxis_;
+            histogramXAxis_ = nullptr;
+        }
+        histogramChart_->addAxis(histogramCategoryAxis_, Qt::AlignBottom);
+        barSeries_->attachAxis(histogramCategoryAxis_);
         barSeries_->attachAxis(histogramYAxis_);
+#endif
 
         histogramView_ = new QChartView(histogramChart_);
         histogramView_->setRenderHint(QPainter::Antialiasing);
@@ -307,8 +339,14 @@ namespace frontend
 
     void ExperimentMonitoringTab::updateHistogram(const std::vector<backend::services::ProcessedFrame> &validFrames)
     {
-        // Remove existing bar sets
-        barSeries_->clear();
+        // Reset series
+#if MIB_HAS_QHISTOGRAMSERIES
+        if (histogramSeries_)
+            histogramSeries_->clear();
+#else
+        if (barSeries_)
+            barSeries_->clear();
+#endif
 
         if (validFrames.empty())
         {
@@ -343,7 +381,7 @@ namespace frontend
             binWidth = 1.0;
         }
 
-        // Count values in each bin
+        // Count values in each bin (used for Y-axis headroom and fallback bar series)
         std::vector<int> binCounts(HISTOGRAM_BINS, 0);
         for (double val : ringRatios)
         {
@@ -352,23 +390,69 @@ namespace frontend
             binCounts[binIndex]++;
         }
 
-        // Create bar set
-        auto *barSet = new QBarSet("");
         int maxCount = 0;
         for (int count : binCounts)
         {
-            *barSet << count;
             maxCount = std::max(maxCount, count);
         }
-        barSeries_->append(barSet);
 
-        // Set X-axis range to cover all bins
+#if MIB_HAS_QHISTOGRAMSERIES
+        // Populate histogram series with samples and set bins
+        if (histogramSeries_)
+        {
+            QVector<qreal> samples;
+            samples.reserve(static_cast<int>(ringRatios.size()));
+            for (double v : ringRatios)
+            {
+                samples.append(static_cast<qreal>(v));
+            }
+            histogramSeries_->setBinsCount(HISTOGRAM_BINS);
+            histogramSeries_->setSamples(samples);
+        }
+        // X-axis range and ticks
         histogramXAxis_->setRange(minVal, maxVal);
-        // Use fewer ticks to prevent label overlap (show ~5-6 labels instead of 21)
         histogramXAxis_->setTickCount(6);
-
-        // Set Y-axis range
-        histogramYAxis_->setRange(0, maxCount > 0 ? maxCount : 1);
+        // Y-axis with headroom and nice numbers
+        const int yMax = std::max(1, static_cast<int>(std::ceil(maxCount * 1.1)));
+        histogramYAxis_->setRange(0, yMax);
+        histogramYAxis_->applyNiceNumbers();
+#else
+        // Fallback: build bar set and category axis
+        auto *barSet = new QBarSet("");
+        for (int count : binCounts)
+        {
+            *barSet << count;
+        }
+        barSeries_->append(barSet);
+        // Build/update category axis labels to match bins
+        if (histogramCategoryAxis_)
+        {
+            histogramChart_->removeAxis(histogramCategoryAxis_);
+            delete histogramCategoryAxis_;
+            histogramCategoryAxis_ = nullptr;
+        }
+        histogramCategoryAxis_ = new QBarCategoryAxis();
+        {
+            QStringList categories;
+            categories.reserve(HISTOGRAM_BINS);
+            for (int i = 0; i < HISTOGRAM_BINS; ++i)
+            {
+                const double start = minVal + i * binWidth;
+                const double end = (i == HISTOGRAM_BINS - 1) ? maxVal : (start + binWidth);
+                categories << QString("%1-%2").arg(start, 0, 'f', 2).arg(end, 0, 'f', 2);
+            }
+            histogramCategoryAxis_->append(categories);
+        }
+        histogramCategoryAxis_->setTitleText("Ring Ratio");
+        histogramCategoryAxis_->setLabelsAngle(-90);
+        histogramChart_->addAxis(histogramCategoryAxis_, Qt::AlignBottom);
+        barSeries_->attachAxis(histogramCategoryAxis_);
+        barSeries_->attachAxis(histogramYAxis_);
+        // Y-axis with headroom and nice numbers
+        const int yMax = std::max(1, static_cast<int>(std::ceil(maxCount * 1.1)));
+        histogramYAxis_->setRange(0, yMax);
+        histogramYAxis_->applyNiceNumbers();
+#endif
     }
 
     void ExperimentMonitoringTab::updateValidFramesGrid(const std::vector<backend::services::ProcessedFrame> &validFrames)

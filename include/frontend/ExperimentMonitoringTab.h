@@ -14,6 +14,8 @@ class QChartView;
 class QScatterSeries;
 class QBarSeries;
 class QBarSet;
+class QHistogramSeries;
+class QBarCategoryAxis;
 class QChart;
 class QValueAxis;
 class QScrollArea;
@@ -75,7 +77,19 @@ private:
     // Panel 2: Histogram
     QChartView* histogramView_ = nullptr;
     QChart* histogramChart_ = nullptr;
+#ifndef MIB_HAS_QHISTOGRAMSERIES
+#if __has_include(<QHistogramSeries>)
+#define MIB_HAS_QHISTOGRAMSERIES 1
+#else
+#define MIB_HAS_QHISTOGRAMSERIES 0
+#endif
+#endif
+#if MIB_HAS_QHISTOGRAMSERIES
+    QHistogramSeries* histogramSeries_ = nullptr;
+#else
     QBarSeries* barSeries_ = nullptr;
+    QBarCategoryAxis* histogramCategoryAxis_ = nullptr;
+#endif
     QValueAxis* histogramYAxis_ = nullptr;
     QValueAxis* histogramXAxis_ = nullptr;
 
