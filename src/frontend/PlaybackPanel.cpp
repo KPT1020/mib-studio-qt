@@ -689,6 +689,7 @@ static QImage maskToTintedOverlay(const cv::Mat &mask, const QColor &color, int 
 
 void PlaybackPanel::computeProcessedOverlay()
 {
+    const uint64_t t0us = backend::Tools::getTimestamp();
     overlayImage_ = QImage();
     overlayContours_.clear();
     if (overlayMode_ == OverlayMode::Off)
@@ -763,6 +764,10 @@ void PlaybackPanel::computeProcessedOverlay()
             overlayContours_.append(poly);
         }
     }
+
+    // Record timing
+    const uint64_t t1us = backend::Tools::getTimestamp();
+    lastOverlayComputeMs_ = static_cast<double>(t1us - t0us) / 1000.0;
 }
 
 void PlaybackPanel::updateOverlayButtonUi()
@@ -949,6 +954,13 @@ void PlaybackPanel::onLogMetrics() {
         }
     }
 
-    SPDLOG_INFO("Playback metrics: display_fps={:.1f}, avg_latency_ms={:.2f}, drops={} (window_drops={})",
-                displayFps, avgLatencyMs, totalDrops_, windowDrops);
+    // Overlay/ROI stats
+    const int imgW = frameImage_.width();
+    const int imgH = frameImage_.height();
+    const int ovW = overlayImage_.isNull() ? 0 : overlayImage_.width();
+    const int ovH = overlayImage_.isNull() ? 0 : overlayImage_.height();
+    const uint64_t roiArea = roiActive_ ? static_cast<uint64_t>(imageRoi_.width()) * static_cast<uint64_t>(imageRoi_.height())
+                                        : static_cast<uint64_t>(std::max(0, imgW)) * static_cast<uint64_t>(std::max(0, imgH));
+    SPDLOG_INFO("Playback metrics: display_fps={:.1f}, avg_latency_ms={:.2f}, drops={} (window_drops={}), overlay_ms={:.2f}, roi_area={}, img={}x{}, overlay={}x{}, overlay_mode={}",
+                displayFps, avgLatencyMs, totalDrops_, windowDrops, lastOverlayComputeMs_, roiArea, imgW, imgH, ovW, ovH, static_cast<int>(overlayMode_));
 }

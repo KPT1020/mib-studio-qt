@@ -51,6 +51,7 @@ private:
     void trackFrameDisplay(uint64_t frameIndex, uint64_t frameTimestamp, uint64_t displayTime);
 
     backend::AppBackend& backend_;
+
     QTimer* timer_ = nullptr;
     QTimer* metricsTimer_ = nullptr;   // Timer for periodic metrics logging
     QWidget* canvas_ = nullptr;
@@ -71,6 +72,9 @@ private:
     QImage backgroundGray_;            // stored as grayscale QImage
     QImage overlayImage_;              // RGBA overlay (mask)
     QList<QPolygon> overlayContours_;  // image-space contours for drawing
+
+    // Last overlay computation timing (ms)
+    double lastOverlayComputeMs_ = 0.0;
 
     // Metrics tracking
     struct MetricsSample {

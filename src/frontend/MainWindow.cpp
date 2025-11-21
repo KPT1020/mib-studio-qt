@@ -13,6 +13,7 @@
 #include "backend/services/CaptureService.h"
 #include "backend/services/ProcessingService.h"
 #include "backend/services/Hdf5Service.h"
+#include "backend/services/PlaybackService.h"
 #include "frontend/PlaybackPanel.h"
 #include "frontend/ConnectTab.h"
 #include "frontend/PreviewPage.h"
@@ -30,6 +31,7 @@
 #include <QMenuBar>
 #include <QMenu>
 #include "frontend/ProcessingSettingsDialog.h"
+#include "backend/Tools.h"
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -320,6 +322,11 @@ void MainWindow::onUpdateStats()
     const auto &cap = backend_.capture();
     const auto &s = cap.stats();
     auto &proc = backend_.processing();
+    const uint64_t tFetchStartUs = backend::Tools::getTimestamp();
+    auto validFrames = proc.getValidFrames();
+    auto invalidFrames = proc.getInvalidFrames();
+    const uint64_t tFetchEndUs = backend::Tools::getTimestamp();
+    const double fetchMs = static_cast<double>(tFetchEndUs - tFetchStartUs) / 1000.0;
 
     QString status;
     if (cap.isRunning())
@@ -337,8 +344,6 @@ void MainWindow::onUpdateStats()
 
     if (experimentActive_)
     {
-        auto validFrames = proc.getValidFrames();
-        auto invalidFrames = proc.getInvalidFrames();
         size_t totalBuffered = validFrames.size() + invalidFrames.size();
 
         // Check if we need to flush (round-robin buffer)
@@ -378,6 +383,19 @@ void MainWindow::onUpdateStats()
         if (flushInProgress_)
         {
             status += " (flushing...)";
+        }
+
+        // Throttled diagnostic log (~1 Hz)
+        static uint64_t lastDiagLogUs = 0;
+        const uint64_t nowUs = backend::Tools::getTimestamp();
+        if (nowUs - lastDiagLogUs >= 1'000'000ULL) {
+            uint64_t earliest = 0, latest = 0;
+            size_t count = 0;
+            backend_.playback().queryRange(earliest, latest, count);
+            const double memMB = backend::Tools::getProcessMemoryMB();
+            SPDLOG_INFO("MainWindow stats: buffer_fetch_ms={:.3f}, valid={}, invalid={}, total={}, playback_range=[{},{}] count={}, flush_interval={}, flushing={}, mem_mb={:.1f}",
+                        fetchMs, validFrames.size(), invalidFrames.size(), totalBuffered, earliest, latest, count, flushNeeded, flushInProgress_ ? 1 : 0, memMB);
+            lastDiagLogUs = nowUs;
         }
     }
     else

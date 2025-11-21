@@ -24,6 +24,8 @@ class QCheckBox;
 class QPushButton;
 class QHBoxLayout;
 class QVBoxLayout;
+class QShowEvent;
+class QHideEvent;
 
 namespace frontend {
 
@@ -43,6 +45,10 @@ private slots:
     void onUpdate();
     void onToggleOverlay(bool enabled);
     void onClearBuffer();
+
+protected:
+    void showEvent(QShowEvent* event) override;
+    void hideEvent(QHideEvent* event) override;
 
 private:
     void updateScatterplot(const std::vector<backend::services::ProcessedFrame>& validFrames);

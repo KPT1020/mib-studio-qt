@@ -4,6 +4,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <psapi.h>
+#pragma comment(lib, "Psapi.lib")
 #else
 #include <time.h>
 #endif
@@ -30,6 +32,41 @@ uint64_t Tools::getTimestamp() {
 
 void Tools::log(const std::string& msg) {
     SPDLOG_INFO("{}", msg);
+}
+
+#ifdef _WIN32
+static inline double bytesToMB(SIZE_T bytes) {
+    return static_cast<double>(bytes) / (1024.0 * 1024.0);
+}
+#endif
+
+double Tools::getProcessMemoryMB() {
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS_EX pmc{};
+    if (GetProcessMemoryInfo(GetCurrentProcess(),
+                             reinterpret_cast<PPROCESS_MEMORY_COUNTERS>(&pmc),
+                             sizeof(pmc))) {
+        // Prefer PrivateUsage when available, fallback to WorkingSetSize
+        const SIZE_T bytes = pmc.PrivateUsage ? pmc.PrivateUsage : pmc.WorkingSetSize;
+        return bytesToMB(bytes);
+    }
+    return 0.0;
+#else
+    return 0.0;
+#endif
+}
+
+double Tools::getPeakProcessMemoryMB() {
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS pmc{};
+    if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc))) {
+        // PeakWorkingSetSize is commonly used; PeakPagefileUsage could also be considered
+        return bytesToMB(pmc.PeakWorkingSetSize);
+    }
+    return 0.0;
+#else
+    return 0.0;
+#endif
 }
 
 } // namespace backend

@@ -177,8 +177,49 @@ private:
     
     // Monitoring frames (always accumulated, separate from experiment)
     mutable std::mutex monitoringFramesMutex_;
-    std::vector<ProcessedFrame> monitoringValidFrames_;
-    std::vector<ProcessedFrame> monitoringInvalidFrames_;
+
+    // Simple circular buffer for ProcessedFrame (fixed capacity, keeps the most recent frames)
+    class FrameRingBuffer {
+    public:
+        explicit FrameRingBuffer(size_t capacity = 1000)
+            : capacity_(capacity), data_(capacity) {}
+
+        void clear() {
+            size_ = 0;
+            head_ = 0;
+        }
+
+        size_t size() const { return size_; }
+        size_t capacity() const { return capacity_; }
+
+        void push_back(ProcessedFrame&& frame) {
+            data_[head_] = std::move(frame);
+            head_ = (head_ + 1) % capacity_;
+            if (size_ < capacity_) {
+                ++size_;
+            }
+        }
+
+        // Copy out as oldest -> newest
+        std::vector<ProcessedFrame> toVector() const {
+            std::vector<ProcessedFrame> out;
+            out.reserve(size_);
+            const size_t start = (head_ + capacity_ - size_) % capacity_;
+            for (size_t i = 0; i < size_; ++i) {
+                out.push_back(data_[(start + i) % capacity_]);
+            }
+            return out;
+        }
+
+    private:
+        size_t capacity_{0};
+        std::vector<ProcessedFrame> data_;
+        size_t size_{0};
+        size_t head_{0}; // next write position
+    };
+
+    FrameRingBuffer monitoringValidFrames_{1000};
+    FrameRingBuffer monitoringInvalidFrames_{1000};
     static constexpr size_t MAX_MONITORING_FRAMES = 1000; // Keep last 1000 frames for monitoring
     mutable ProcessingConfig processingConfig_;
     mutable std::mutex configMutex_;

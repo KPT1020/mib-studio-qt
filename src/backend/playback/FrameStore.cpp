@@ -34,6 +34,13 @@ void FrameStore::pushFrame(const uint8_t* src,
     f.timestamp = timestamp;
     f.data.resize(size);
     std::copy_n(src, size, f.data.begin());
+
+    // Periodic stats
+    if ((w % 1000ULL) == 0ULL) {
+        const size_t avail = availableCount();
+        SPDLOG_DEBUG("FrameStore: totalWritten={} available={} capacity={}",
+                     static_cast<unsigned long long>(w), avail, capacity_);
+    }
 }
 
 bool FrameStore::getLatest(Frame& out) const {

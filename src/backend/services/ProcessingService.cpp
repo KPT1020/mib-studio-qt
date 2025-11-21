@@ -1,6 +1,7 @@
 #include "backend/services/ProcessingService.h"
 #include "backend/services/Hdf5Service.h"
 #include "backend/playback/FrameStore.h"
+#include "backend/Tools.h"
 
 #include <spdlog/spdlog.h>
 
@@ -174,12 +175,12 @@ void ProcessingService::clearAccumulatedFrames() {
 
 std::vector<ProcessedFrame> ProcessingService::getMonitoringValidFrames() const {
     std::scoped_lock lk(monitoringFramesMutex_);
-    return monitoringValidFrames_;
+    return monitoringValidFrames_.toVector();
 }
 
 std::vector<ProcessedFrame> ProcessingService::getMonitoringInvalidFrames() const {
     std::scoped_lock lk(monitoringFramesMutex_);
-    return monitoringInvalidFrames_;
+    return monitoringInvalidFrames_.toVector();
 }
 
 void ProcessingService::clearMonitoringFrames() {
@@ -258,6 +259,7 @@ void ProcessingService::setRingRatioCallback(RingRatioCallback callback) {
 size_t ProcessingService::flushBufferedFrames(class Hdf5Service& hdf5) {
     std::vector<ProcessedFrame> validToFlush;
     std::vector<ProcessedFrame> invalidToFlush;
+    const double memBeforeMB = backend::Tools::getProcessMemoryMB();
     
     {
         std::scoped_lock lk(framesMutex_);
@@ -277,25 +279,26 @@ size_t ProcessingService::flushBufferedFrames(class Hdf5Service& hdf5) {
         using clock = std::chrono::steady_clock;
         const size_t validCount = validToFlush.size();
         const size_t invalidCount = invalidToFlush.size();
-        SPDLOG_INFO("HDF5 flush start: valid={}, invalid={}", validCount, invalidCount);
+        SPDLOG_INFO("HDF5 flush start: valid={}, invalid={}, mem_mb_before={:.1f}", validCount, invalidCount, memBeforeMB);
         const auto t0 = clock::now();
         const bool ok = hdf5.appendFrames(validToFlush, invalidToFlush);
         const auto t1 = clock::now();
         const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        const double memAfterMB = backend::Tools::getProcessMemoryMB();
 
         if (ok) {
             size_t flushed = validCount + invalidCount;
             framesSinceLastFlush_.store(0, std::memory_order_relaxed);
-            SPDLOG_INFO("HDF5 flush end: flushed={} (valid={}, invalid={}) duration_ms={:.3f}",
-                        flushed, validCount, invalidCount, ms);
+            SPDLOG_INFO("HDF5 flush end: flushed={} (valid={}, invalid={}) duration_ms={:.3f} mem_mb_after={:.1f}",
+                        flushed, validCount, invalidCount, ms, memAfterMB);
             return flushed;
         } else {
             // Flush failed, put frames back
             std::scoped_lock lk(framesMutex_);
             validFrames_.insert(validFrames_.end(), validToFlush.begin(), validToFlush.end());
             invalidFrames_.insert(invalidFrames_.end(), invalidToFlush.begin(), invalidToFlush.end());
-            SPDLOG_ERROR("HDF5 flush failed after {:.3f} ms; frames restored (valid={}, invalid={})",
-                         ms, validCount, invalidCount);
+            SPDLOG_ERROR("HDF5 flush failed after {:.3f} ms; frames restored (valid={}, invalid={}), mem_mb_after_fail={:.1f}",
+                         ms, validCount, invalidCount, memAfterMB);
             return 0;
         }
     }
@@ -640,18 +643,15 @@ void ProcessingService::realtimeLoop() {
                 monitoringFrame.index = idx;
                 monitoringFrame.timestampNs = f.timestamp;
                 monitoringFrame.validation = validation;
-                // Only clone images for monitoring if we have space (to reduce memory usage)
-                // For monitoring, we can use smaller images or skip some frames
-                monitoringFrame.originalImage = gray.clone();
-                monitoringFrame.processedImage = mask.clone();
+                // Store ROI-only images to reduce memory usage
+                cv::Mat roiOriginal = gray(cvRoi).clone();
+                cv::Mat roiMask = mask(cvRoi).clone();
+                monitoringFrame.originalImage = std::move(roiOriginal);
+                monitoringFrame.processedImage = std::move(roiMask);
                 
                 std::scoped_lock monitoringLk(monitoringFramesMutex_);
                 if (validation.isValid) {
-                    monitoringValidFrames_.emplace_back(std::move(monitoringFrame));
-                    // Trim to max size
-                    if (monitoringValidFrames_.size() > MAX_MONITORING_FRAMES) {
-                        monitoringValidFrames_.erase(monitoringValidFrames_.begin());
-                    }
+                    monitoringValidFrames_.push_back(std::move(monitoringFrame));
                     
                     // Notify autofocus service of ring ratio from validated frames
                     if (validation.ringRatio > 0.0) {
@@ -661,12 +661,34 @@ void ProcessingService::realtimeLoop() {
                         }
                     }
                 } else {
-                    monitoringInvalidFrames_.emplace_back(std::move(monitoringFrame));
-                    // Trim to max size
-                    if (monitoringInvalidFrames_.size() > MAX_MONITORING_FRAMES) {
-                        monitoringInvalidFrames_.erase(monitoringInvalidFrames_.begin());
-                    }
+                    monitoringInvalidFrames_.push_back(std::move(monitoringFrame));
                 }
+
+                // Throttled DEBUG: accumulation sizes and process memory
+                if ((idx % 500ULL) == 0ULL) {
+                    size_t vSz = 0;
+                    size_t iSz = 0;
+                    {
+                        std::scoped_lock fLk(framesMutex_);
+                        vSz = validFrames_.size();
+                        iSz = invalidFrames_.size();
+                    }
+                    SPDLOG_DEBUG("Accumulated frames (idx={}): valid={}, invalid={}, flush_interval={}, since_last_flush={}, mem_mb={:.1f}",
+                                 idx, vSz, iSz, flushInterval_.load(), framesSinceLastFlush_.load(), backend::Tools::getProcessMemoryMB());
+                }
+            }
+
+            // Throttled DEBUG: monitoring buffer sizes and process memory
+            if ((idx % 500ULL) == 0ULL) {
+                size_t monValidSz = 0;
+                size_t monInvalidSz = 0;
+                {
+                    std::scoped_lock mLk(monitoringFramesMutex_);
+                    monValidSz = monitoringValidFrames_.size();
+                    monInvalidSz = monitoringInvalidFrames_.size();
+                }
+                SPDLOG_DEBUG("Realtime monitoring sizes (idx={}): mon_valid={}, mon_invalid={}, mem_mb={:.1f}",
+                             idx, monValidSz, monInvalidSz, backend::Tools::getProcessMemoryMB());
             }
             
             // Also accumulate frames for experiment if active
@@ -742,6 +764,32 @@ void ProcessingService::realtimeLoop() {
                 const double fps = windowMs > 0.0 ? (static_cast<double>(framesSinceSummary) * 1000.0 / windowMs) : 0.0;
                 SPDLOG_INFO("Realtime processing summary: processed={} skipped={} window_ms={:.0f} avg_ms={:.3f} algo_avg_ms={:.3f} ~fps={:.1f}",
                             framesSinceSummary, framesSkippedSinceSummary, windowMs, avgMs, algoAvgMs, fps);
+
+                // Extended summary: buffers, ROI, background, and process memory
+                size_t vSz = 0, iSz = 0, monValidSz = 0, monInvalidSz = 0;
+                {
+                    std::scoped_lock fLk(framesMutex_);
+                    vSz = validFrames_.size();
+                    iSz = invalidFrames_.size();
+                }
+                {
+                    std::scoped_lock mLk(monitoringFramesMutex_);
+                    monValidSz = monitoringValidFrames_.size();
+                    monInvalidSz = monitoringInvalidFrames_.size();
+                }
+                Roi roi{};
+                bool hasBg = false;
+                {
+                    std::scoped_lock rtLk(rtMutex_);
+                    roi = rtRoi_;
+                    hasBg = !rtBgGray_.empty();
+                }
+                const size_t flushInt = flushInterval_.load();
+                const size_t sinceFlush = framesSinceLastFlush_.load();
+                const double memMB = backend::Tools::getProcessMemoryMB();
+                const double peakMB = backend::Tools::getPeakProcessMemoryMB();
+                SPDLOG_INFO("Realtime buffers: acc_valid={} acc_invalid={} mon_valid={} mon_invalid={} flush_interval={} since_last_flush={} roi={}x{} bg={} mem_mb={:.1f} peak_mb={:.1f}",
+                            vSz, iSz, monValidSz, monInvalidSz, flushInt, sinceFlush, roi.w, roi.h, hasBg ? 1 : 0, memMB, peakMB);
                 lastSummaryTs = now;
                 framesSinceSummary = 0;
                 framesSkippedSinceSummary = 0;

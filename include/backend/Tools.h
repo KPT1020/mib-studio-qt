@@ -11,6 +11,12 @@ public:
     // High-precision timestamp in microseconds (matches SDK pattern)
     static uint64_t getTimestamp();
 
+    // Process memory usage (MB). Windows-first; returns 0 on unsupported platforms.
+    static double getProcessMemoryMB();
+
+    // Peak process memory usage (MB). Windows-first; returns 0 on unsupported platforms.
+    static double getPeakProcessMemoryMB();
+
     // String conversion utilities
     template <typename T>
     static std::string toString(const T& v) {
