@@ -29,6 +29,9 @@ public:
     void setRoi(const QRect& roi);
     QRect getRoi() const;
     QSize getImageDimensions() const;
+    
+    // Metrics
+    double getDisplayFps() const { return lastDisplayFps_; }
 
 private slots:
     void onTick();
@@ -88,6 +91,7 @@ private:
     uint64_t lastDisplayTimeUs_ = 0;           // Last display time for window pruning
     bool metricsInitialized_ = false;           // Track if we've seen first frame
     uint64_t totalDrops_ = 0;                   // Total frame drops detected
+    double lastDisplayFps_ = 0.0;               // Last computed display FPS (1s window)
 };
 
 

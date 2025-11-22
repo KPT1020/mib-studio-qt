@@ -855,6 +855,7 @@ void PlaybackPanel::resetMetrics() {
     lastDisplayTimeUs_ = 0;
     metricsInitialized_ = false;
     totalDrops_ = 0;
+    lastDisplayFps_ = 0.0;
 }
 
 void PlaybackPanel::trackFrameDisplay(uint64_t frameIndex, uint64_t frameTimestamp, uint64_t displayTime) {
@@ -920,6 +921,7 @@ void PlaybackPanel::onLogMetrics() {
         : 1.0; // Fallback to 1 second if timestamps are equal
     
     const double displayFps = static_cast<double>(displayCount) / windowDurationSeconds;
+    lastDisplayFps_ = displayFps;
 
     // Calculate average latency
     // Note: Frame timestamps from camera may be in nanoseconds, display time is in microseconds

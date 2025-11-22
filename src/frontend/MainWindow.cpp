@@ -168,6 +168,7 @@ void MainWindow::onStopCapture()
     // Stop capture only (don't end experiment)
     cap.stop();
     statsTimer_->stop();
+    backend_.processing().resetRealtimeMetrics();
 
     if (experimentActive_)
     {
@@ -271,6 +272,7 @@ void MainWindow::onStopExperiment()
     }
 
     processing.endExperiment();
+    backend_.processing().resetRealtimeMetrics();
 
     // Get final frame counts (should be empty after flush, but check anyway)
     auto validFrames = processing.getValidFrames();
@@ -329,17 +331,36 @@ void MainWindow::onUpdateStats()
     const double fetchMs = static_cast<double>(tFetchEndUs - tFetchStartUs) / 1000.0;
 
     QString status;
-    if (cap.isRunning())
-    {
-        status = "Camera: running";
-        status += QString(" | frames=%1, fps=%2, MB/s=%3")
-                      .arg(QString::number(s.framesProcessed.load()))
+    // Display / algo / classification rates and totals
+    double displayFps = 0.0;
+    if (tabs_ && tabs_->count() > 1) {
+        auto* previewPage = qobject_cast<frontend::PreviewPage*>(tabs_->widget(1));
+        if (previewPage) {
+            auto* playbackPanel = previewPage->getPlaybackPanel();
+            if (playbackPanel) {
+                displayFps = playbackPanel->getDisplayFps();
+            }
+        }
+    }
+    const double algoAvgUs = proc.getAlgoAvgUs1s();
+    const double validFps = proc.getValidFps1s();
+    const double invalidFps = proc.getInvalidFps1s();
+    const uint64_t totalValidFlushed = proc.getTotalValidFlushed();
+
+    status = QString("Display=%1 fps | Algo=%2 us | Valid=%3/s | Invalid=%4/s | Flushed(valid)=%5")
+                 .arg(QString::number(displayFps, 'f', 1))
+                 .arg(QString::number(algoAvgUs, 'f', 1))
+                 .arg(QString::number(validFps, 'f', 1))
+                 .arg(QString::number(invalidFps, 'f', 1))
+                 .arg(QString::number(static_cast<qulonglong>(totalValidFlushed)));
+
+    // Camera transport stats
+    if (cap.isRunning()) {
+        status += QString(" | Camera=%1 fps, %2 MB/s")
                       .arg(QString::number(s.lastFrameRate.load()))
                       .arg(QString::number(s.lastDataRateMBps.load()));
-    }
-    else
-    {
-        status = "Camera: stopped";
+    } else {
+        status += " | Camera: stopped";
     }
 
     if (experimentActive_)

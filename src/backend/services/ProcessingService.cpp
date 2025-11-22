@@ -146,6 +146,8 @@ void ProcessingService::startExperiment() {
     invalidFrames_.reserve(flushInterval_.load() * 10); // More invalid frames expected
     framesSinceLastFlush_.store(0);
     invalidFrameCounter_.store(0);
+    totalValidFlushed_.store(0, std::memory_order_relaxed);
+    resetRealtimeMetrics();
     experimentActive_.store(true);
     SPDLOG_INFO("ProcessingService: experiment started, frame buffers cleared (flush interval: {} frames, invalid sampling: every {}th)", 
                 flushInterval_.load(), invalidFrameSamplingRate_.load());
@@ -289,6 +291,9 @@ size_t ProcessingService::flushBufferedFrames(class Hdf5Service& hdf5) {
         if (ok) {
             size_t flushed = validCount + invalidCount;
             framesSinceLastFlush_.store(0, std::memory_order_relaxed);
+            if (validCount > 0) {
+                totalValidFlushed_.fetch_add(static_cast<uint64_t>(validCount), std::memory_order_relaxed);
+            }
             SPDLOG_INFO("HDF5 flush end: flushed={} (valid={}, invalid={}) duration_ms={:.3f} mem_mb_after={:.1f}",
                         flushed, validCount, invalidCount, ms, memAfterMB);
             return flushed;
@@ -532,6 +537,8 @@ void ProcessingService::realtimeLoop() {
     uint64_t framesSkippedSinceSummary = 0;
     double msSinceSummary = 0.0;
     double algoMsSinceSummary = 0.0;
+    uint64_t validSinceSummary = 0;
+    uint64_t invalidSinceSummary = 0;
 
     while (rtRunning_.load()) {
         if (!rtStore_) {
@@ -636,6 +643,11 @@ void ProcessingService::realtimeLoop() {
             const auto algoEnd = clock::now();
             const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
             algoMsSinceSummary += algoMs;
+            if (validation.isValid) {
+                ++validSinceSummary;
+            } else {
+                ++invalidSinceSummary;
+            }
             
             // Always accumulate frames for monitoring (with size limit)
             {
@@ -762,6 +774,13 @@ void ProcessingService::realtimeLoop() {
                 const double avgMs = framesSinceSummary > 0 ? (msSinceSummary / static_cast<double>(framesSinceSummary)) : 0.0;
                 const double algoAvgMs = framesSinceSummary > 0 ? (algoMsSinceSummary / static_cast<double>(framesSinceSummary)) : 0.0;
                 const double fps = windowMs > 0.0 ? (static_cast<double>(framesSinceSummary) * 1000.0 / windowMs) : 0.0;
+                const double vfps = windowMs > 0.0 ? (static_cast<double>(validSinceSummary) * 1000.0 / windowMs) : 0.0;
+                const double ifps = windowMs > 0.0 ? (static_cast<double>(invalidSinceSummary) * 1000.0 / windowMs) : 0.0;
+                algoFps1s_.store(fps, std::memory_order_relaxed);
+                validFps1s_.store(vfps, std::memory_order_relaxed);
+                invalidFps1s_.store(ifps, std::memory_order_relaxed);
+                const double algoAvgUs = algoAvgMs * 1000.0;
+                algoAvgUs1s_.store(algoAvgUs, std::memory_order_relaxed);
                 SPDLOG_INFO("Realtime processing summary: processed={} skipped={} window_ms={:.0f} avg_ms={:.3f} algo_avg_ms={:.3f} ~fps={:.1f}",
                             framesSinceSummary, framesSkippedSinceSummary, windowMs, avgMs, algoAvgMs, fps);
 
@@ -795,6 +814,8 @@ void ProcessingService::realtimeLoop() {
                 framesSkippedSinceSummary = 0;
                 msSinceSummary = 0.0;
                 algoMsSinceSummary = 0.0;
+                validSinceSummary = 0;
+                invalidSinceSummary = 0;
             }
         }
     }

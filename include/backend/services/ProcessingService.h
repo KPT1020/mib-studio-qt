@@ -126,6 +126,22 @@ public:
     // Configuration
     void setProcessingConfig(const ProcessingConfig& config);
     ProcessingConfig getProcessingConfig() const;
+    
+    // Realtime throughput metrics (1-second window)
+    double getAlgoFps1s() const { return algoFps1s_.load(std::memory_order_relaxed); }
+    double getValidFps1s() const { return validFps1s_.load(std::memory_order_relaxed); }
+    double getInvalidFps1s() const { return invalidFps1s_.load(std::memory_order_relaxed); }
+    void resetRealtimeMetrics() {
+        algoFps1s_.store(0.0, std::memory_order_relaxed);
+        validFps1s_.store(0.0, std::memory_order_relaxed);
+        invalidFps1s_.store(0.0, std::memory_order_relaxed);
+        algoAvgUs1s_.store(0.0, std::memory_order_relaxed);
+    }
+    
+    // Totals for current experiment
+    uint64_t getTotalValidFlushed() const { return totalValidFlushed_.load(std::memory_order_relaxed); }
+    // Average algorithm processing time per frame over last 1s window (microseconds)
+    double getAlgoAvgUs1s() const { return algoAvgUs1s_.load(std::memory_order_relaxed); }
 
     // Helper function to check if a raw frame is empty (for filtering during save)
     // Returns true if frame is empty (pixel count below threshold)
@@ -235,6 +251,15 @@ private:
     // Ring ratio callback for autofocus
     mutable std::mutex ringRatioCallbackMutex_;
     RingRatioCallback ringRatioCallback_;
+    
+    // Realtime throughput metrics (published once per ~1s window)
+    std::atomic<double> algoFps1s_{0.0};
+    std::atomic<double> validFps1s_{0.0};
+    std::atomic<double> invalidFps1s_{0.0};
+    std::atomic<double> algoAvgUs1s_{0.0};
+    
+    // Experiment totals
+    std::atomic<uint64_t> totalValidFlushed_{0};
 };
 
 } // namespace backend::services

@@ -127,7 +127,7 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         // Persist toggle choice
         {
             QSettings s;
-            const bool showTable = s.value("Preview/ShowTable", false).toBool();
+            const bool showTable = s.value("Preview/ShowTable", true).toBool();
             jsonTableToggle_->setChecked(showTable);
             jsonStack_->setCurrentIndex(showTable ? 1 : 0);
         }
