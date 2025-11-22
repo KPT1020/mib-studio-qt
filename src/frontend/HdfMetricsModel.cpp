@@ -84,3 +84,4 @@ Qt::ItemFlags HdfMetricsModel::flags(const QModelIndex& index) const {
 
 
 
+
