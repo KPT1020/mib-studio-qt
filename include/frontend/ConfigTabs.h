@@ -24,6 +24,9 @@ class ConfigTabs : public QWidget {
 public:
     explicit ConfigTabs(backend::AppBackend& backend, QWidget* parent = nullptr);
 
+signals:
+	void appConfigPathChanged(const QString& path);
+
 private slots:
     void onReloadJson();
     void onSaveJson();
@@ -64,6 +67,7 @@ private:
     QPushButton* jsonBrowseBtn_ = nullptr;
     QPushButton* jsonClearBtn_ = nullptr;
     QLabel* jsonPathLabel_ = nullptr;
+	QLabel* jsonUnsavedLabel_ = nullptr;
     QTimer* jsonDebounceTimer_ = nullptr;
 
     // JS tab
@@ -75,6 +79,7 @@ private:
     QPushButton* jsBrowseBtn_ = nullptr;
     QPushButton* jsClearBtn_ = nullptr;
     QLabel* jsPathLabel_ = nullptr;
+	QLabel* jsUnsavedLabel_ = nullptr;
 };
 
 } // namespace frontend

@@ -97,12 +97,18 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         jsonTableToggle_->setToolTip(tr("Toggle table view"));
         jsonTableToggle_->setCheckable(true);
         jsonPathLabel_ = new QLabel(page);
+        jsonUnsavedLabel_ = new QLabel(page);
+        jsonUnsavedLabel_->setText(tr("Unsaved changes – click Save to apply."));
+        jsonUnsavedLabel_->setVisible(false);
+        jsonUnsavedLabel_->setStyleSheet("color: #d17a00;");
         row->addWidget(jsonReloadBtn_);
         row->addWidget(jsonSaveBtn_);
         row->addWidget(jsonBrowseBtn_);
         row->addWidget(jsonClearBtn_);
 		row->addStretch(1);
 		row->addWidget(jsonPathLabel_);
+        row->addSpacing(8);
+        row->addWidget(jsonUnsavedLabel_);
 		row->addWidget(jsonTableToggle_);
         v->addLayout(row);
 
@@ -145,6 +151,7 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
             if (jsonStack_ && jsonStack_->currentIndex() == 1) {
                 jsonDebounceTimer_->start();
             }
+            if (jsonUnsavedLabel_) jsonUnsavedLabel_->setVisible(true);
         });
 
         page->setLayout(v);
@@ -169,6 +176,10 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         jsBrowseBtn_ = new QPushButton(tr("Browse..."), page);
         jsClearBtn_ = new QPushButton(tr("Clear"), page);
         jsPathLabel_ = new QLabel(page);
+        jsUnsavedLabel_ = new QLabel(page);
+        jsUnsavedLabel_->setText(tr("Unsaved changes – click Save to apply."));
+        jsUnsavedLabel_->setVisible(false);
+        jsUnsavedLabel_->setStyleSheet("color: #d17a00;");
         row->addWidget(jsReloadBtn_);
         row->addWidget(jsSaveBtn_);
         row->addWidget(jsApplyBtn_);
@@ -177,6 +188,8 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         row->addWidget(jsClearBtn_);
         row->addStretch(1);
         row->addWidget(jsPathLabel_);
+        row->addSpacing(8);
+        row->addWidget(jsUnsavedLabel_);
         v->addLayout(row);
         v->addWidget(jsEdit_, 1);
         page->setLayout(v);
@@ -187,6 +200,9 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         connect(jsResetBtn_, &QPushButton::clicked, this, &ConfigTabs::onResetCamera);
         connect(jsBrowseBtn_, &QPushButton::clicked, this, &ConfigTabs::onBrowseJs);
         connect(jsClearBtn_, &QPushButton::clicked, this, &ConfigTabs::onClearJs);
+        connect(jsEdit_, &QPlainTextEdit::textChanged, this, [this]() {
+            if (jsUnsavedLabel_) jsUnsavedLabel_->setVisible(true);
+        });
     }
 
     // Nanopositioner tab
@@ -228,7 +244,11 @@ bool ConfigTabs::loadFileToEditor(const QString& path, QPlainTextEdit* editor, Q
         return false;
     }
     QTextStream in(&f);
+    const bool blocked = editor->blockSignals(true);
     editor->setPlainText(in.readAll());
+    editor->blockSignals(blocked);
+    if (editor == jsonEdit_ && jsonUnsavedLabel_) jsonUnsavedLabel_->setVisible(false);
+    if (editor == jsEdit_ && jsUnsavedLabel_) jsUnsavedLabel_->setVisible(false);
     return true;
 }
 
@@ -288,6 +308,7 @@ void ConfigTabs::onReloadJson() {
         return;
     }
     jsonPathLabel_->setText(path);
+    if (jsonUnsavedLabel_) jsonUnsavedLabel_->setVisible(false);
     if (jsonStack_ && jsonStack_->currentIndex() == 1) {
         refreshJsonTableModel();
     }
@@ -302,6 +323,7 @@ void ConfigTabs::onSaveJson() {
         return;
     }
     QMessageBox::information(this, tr("Save config.json"), tr("Saved."));
+    if (jsonUnsavedLabel_) jsonUnsavedLabel_->setVisible(false);
     if (jsonStack_ && jsonStack_->currentIndex() == 1) {
         refreshJsonTableModel();
     }
@@ -322,6 +344,7 @@ void ConfigTabs::onReloadJs() {
         return;
     }
     jsPathLabel_->setText(path);
+    if (jsUnsavedLabel_) jsUnsavedLabel_->setVisible(false);
 }
 
 void ConfigTabs::onSaveJs() {
@@ -333,6 +356,7 @@ void ConfigTabs::onSaveJs() {
         return;
     }
     QMessageBox::information(this, tr("Save egrabberConfig.js"), tr("Saved."));
+    if (jsUnsavedLabel_) jsUnsavedLabel_->setVisible(false);
 }
 
 void ConfigTabs::onResetCamera() {
@@ -405,6 +429,7 @@ void ConfigTabs::onBrowseJson() {
         s.setValue("Config/ExternalAppConfigPath", selected);
     }
     SPDLOG_INFO("External App config set to {}", selected.toStdString());
+	emit appConfigPathChanged(selected);
     QString err;
     if (!loadFileToEditor(selected, jsonEdit_, &err)) {
         SPDLOG_WARN("Failed to load external config.json from {}: {}", selected.toStdString(), err.toStdString());
@@ -412,6 +437,7 @@ void ConfigTabs::onBrowseJson() {
         return;
     }
     jsonPathLabel_->setText(selected);
+    if (jsonUnsavedLabel_) jsonUnsavedLabel_->setVisible(false);
     if (jsonStack_ && jsonStack_->currentIndex() == 1) {
         refreshJsonTableModel();
     }
@@ -421,7 +447,15 @@ void ConfigTabs::onClearJson() {
     QSettings s;
     s.remove("Config/ExternalAppConfigPath");
     SPDLOG_INFO("External App config cleared; reverting to default include path");
-    onReloadJson();
+	emit appConfigPathChanged(currentJsonPath());
+    const auto ret = QMessageBox::question(this,
+                                           tr("Config Path Cleared"),
+                                           tr("External App config path cleared.\nReload from default include path now?\n\nNote: Save to apply any changes."),
+                                           QMessageBox::Yes | QMessageBox::No,
+                                           QMessageBox::Yes);
+    if (ret == QMessageBox::Yes) {
+        onReloadJson();
+    }
 }
 
 void ConfigTabs::onBrowseJs() {
@@ -444,13 +478,21 @@ void ConfigTabs::onBrowseJs() {
         return;
     }
     jsPathLabel_->setText(selected);
+    if (jsUnsavedLabel_) jsUnsavedLabel_->setVisible(false);
 }
 
 void ConfigTabs::onClearJs() {
     QSettings s;
     s.remove("Config/ExternalCameraScriptPath");
     SPDLOG_INFO("External Camera script cleared; reverting to default include path");
-    onReloadJs();
+    const auto ret = QMessageBox::question(this,
+                                           tr("Camera Script Path Cleared"),
+                                           tr("External Camera script path cleared.\nReload from default include path now?\n\nNote: Save to apply any changes."),
+                                           QMessageBox::Yes | QMessageBox::No,
+                                           QMessageBox::Yes);
+    if (ret == QMessageBox::Yes) {
+        onReloadJs();
+    }
 }
 
 void ConfigTabs::onJsonTableToggled(bool checked) {
@@ -519,6 +561,7 @@ void ConfigTabs::rebuildJsonFromTable() {
 	const bool blocked = jsonEdit_->blockSignals(true);
 	jsonEdit_->setPlainText(QString::fromUtf8(outDoc.toJson(QJsonDocument::Indented)));
 	jsonEdit_->blockSignals(blocked);
+	if (jsonUnsavedLabel_) jsonUnsavedLabel_->setVisible(true);
 }
 
 } // namespace frontend

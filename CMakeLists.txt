@@ -156,6 +156,8 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/JsonTableModel.h
     src/frontend/JsonFlatten.cpp
     include/frontend/JsonFlatten.h
+    src/frontend/AppConfigWatcher.cpp
+    include/frontend/AppConfigWatcher.h
 )
 
 add_executable(mib_studio_qt

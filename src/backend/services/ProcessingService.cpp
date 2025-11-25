@@ -610,14 +610,20 @@ void ProcessingService::realtimeLoop() {
             cv::Mat roiDst = mask(cvRoi);
             cv::Mat blurredCurr, blurredBg, diff, thresh;
             const auto algoStart = clock::now();
-            cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(3, 3), 0);
+            auto toOdd = [](int v) -> int { if (v < 1) v = 1; if ((v % 2) == 0) v += 1; return v; };
+            const int blurK = toOdd(config.gaussian_blur_size);
+            const int morphK = toOdd(config.morph_kernel_size);
+            const int morphIter = std::max(1, config.morph_iterations);
+            const int threshVal = std::max(0, config.bg_subtract_threshold);
+
+            cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(blurK, blurK), 0);
             if (!bg.empty() && bg.size() == gray.size() && bg.type() == CV_8UC1) {
-                cv::GaussianBlur(bg(cvRoi), blurredBg, cv::Size(3, 3), 0);
+                cv::GaussianBlur(bg(cvRoi), blurredBg, cv::Size(blurK, blurK), 0);
                 cv::subtract(blurredCurr, blurredBg, diff);
             } else {
                 diff = blurredCurr;
             }
-            cv::threshold(diff, thresh, 8, 255, cv::THRESH_BINARY);
+            cv::threshold(diff, thresh, threshVal, 255, cv::THRESH_BINARY);
             
             // Check for empty frame: count non-zero pixels after binary threshold
             int pixelCount = cv::countNonZero(thresh);
@@ -628,9 +634,9 @@ void ProcessingService::realtimeLoop() {
                 continue; // Skip morphology, contours, validation, and frame accumulation
             }
             
-            cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(3, 3));
-            cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), 1);
-            cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), 1);
+            cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+            cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
+            cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
             // Contours
             std::vector<std::vector<cv::Point>> contours;

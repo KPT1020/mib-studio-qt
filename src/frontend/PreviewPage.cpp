@@ -17,6 +17,7 @@
 #include "backend/services/CaptureService.h"
 #include "frontend/PlaybackPanel.h"
 #include "frontend/ConfigTabs.h"
+#include "frontend/AppConfigWatcher.h"
 
 namespace frontend
 {
@@ -74,6 +75,11 @@ namespace frontend
 
         root->addWidget(overlayContainer, 3);
         root->addWidget(configTabs_, 2);
+
+        // Live config watcher: watch current path and apply changes to services and playback
+        configWatcher_ = new AppConfigWatcher(backend_, playback_, this);
+        connect(configTabs_, &ConfigTabs::appConfigPathChanged, configWatcher_, &AppConfigWatcher::setWatchedPath);
+        configWatcher_->start();
 
         onUpdateOverlay();
     }

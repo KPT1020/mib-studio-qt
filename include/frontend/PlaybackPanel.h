@@ -32,6 +32,7 @@ public:
     
     // Metrics
     double getDisplayFps() const { return lastDisplayFps_; }
+		void setDisplayFps(int fps);
 
 private slots:
     void onTick();

@@ -16,6 +16,9 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSettings>
+#include <QCoreApplication>
+#include <QDir>
 #include <limits>
 #include <algorithm>
 #include <cmath>
@@ -315,15 +318,30 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     // Timer for periodic refresh (configurable display_fps, default 60 Hz)
     int displayFps = 60;
     {
-        QFile f(":/defaults/config.json");
-        if (f.open(QIODevice::ReadOnly)) {
-            const QByteArray data = f.readAll();
-            const QJsonDocument doc = QJsonDocument::fromJson(data);
-            if (doc.isObject()) {
-                const QJsonObject obj = doc.object();
-                if (obj.contains("display_fps"))
-                    displayFps = obj.value("display_fps").toInt(displayFps);
-            }
+        // Prefer active config path (external if set), else fall back to resource defaults
+        auto readFpsFrom = [&](const QString& cfgPath) -> bool {
+            QFile f(cfgPath);
+            if (!f.open(QIODevice::ReadOnly)) return false;
+            const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+            if (!doc.isObject()) return false;
+            const QJsonObject obj = doc.object();
+            if (!obj.contains("display_fps")) return false;
+            displayFps = obj.value("display_fps").toInt(displayFps);
+            return true;
+        };
+        QSettings s;
+        const QString ext = s.value("Config/ExternalAppConfigPath").toString().trimmed();
+        bool loaded = false;
+        if (!ext.isEmpty()) {
+            loaded = readFpsFrom(ext);
+        }
+        if (!loaded) {
+            const QString appDir = QCoreApplication::applicationDirPath();
+            const QString defaultPath = QDir(appDir).absoluteFilePath("../include/config.json");
+            loaded = readFpsFrom(defaultPath);
+        }
+        if (!loaded) {
+            readFpsFrom(":/defaults/config.json");
         }
     }
     if (displayFps < 1) displayFps = 1;
@@ -349,7 +367,8 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
 
 PlaybackPanel::~PlaybackPanel() = default;
 
-void PlaybackPanel::setRoi(const QRect& roi) {
+void PlaybackPanel::setRoi(const QRect &roi)
+{
     imageRoi_ = roi;
     roiActive_ = roi.isValid() && !roi.isNull();
     SPDLOG_INFO("PlaybackPanel: ROI {}",
@@ -380,11 +399,13 @@ void PlaybackPanel::setRoi(const QRect& roi) {
         canvas_->update();
 }
 
-QRect PlaybackPanel::getRoi() const {
+QRect PlaybackPanel::getRoi() const
+{
     return imageRoi_;
 }
 
-QSize PlaybackPanel::getImageDimensions() const {
+QSize PlaybackPanel::getImageDimensions() const
+{
     if (frameImage_.isNull())
         return QSize(0, 0);
     return frameImage_.size();
@@ -697,6 +718,18 @@ void PlaybackPanel::computeProcessedOverlay()
     if (frameImage_.isNull())
         return;
 
+    // Pull processing config to ensure parity with backend
+    backend::services::ProcessingConfig cfg = backend_.processing().getProcessingConfig();
+    auto odd = [](int v) -> int {
+        if (v < 1) v = 1;
+        if ((v % 2) == 0) v += 1;
+        return v;
+    };
+    const int blurK = odd(cfg.gaussian_blur_size);
+    const int morphK = odd(cfg.morph_kernel_size);
+    const int morphIter = std::max(1, cfg.morph_iterations);
+    const int threshVal = std::max(0, cfg.bg_subtract_threshold);
+
     // ROI
     QRect roi = roiActive_ ? imageRoi_ : QRect(0, 0, frameImage_.width(), frameImage_.height());
     roi = roi.intersected(QRect(0, 0, frameImage_.width(), frameImage_.height()));
@@ -723,21 +756,21 @@ void PlaybackPanel::computeProcessedOverlay()
     cv::Mat dstR = mask(cvRoi);
     cv::Mat tmpCurr, tmpBg, diff, thresh;
     // Blur both
-    cv::GaussianBlur(currR, tmpCurr, cv::Size(3, 3), 0);
+    cv::GaussianBlur(currR, tmpCurr, cv::Size(blurK, blurK), 0);
     if (canUseBg)
     {
         cv::Mat bgR = bg(cvRoi);
-        cv::GaussianBlur(bgR, tmpBg, cv::Size(3, 3), 0);
+        cv::GaussianBlur(bgR, tmpBg, cv::Size(blurK, blurK), 0);
         cv::subtract(tmpCurr, tmpBg, diff);
     }
     else
     {
         diff = tmpCurr;
     }
-    cv::threshold(diff, thresh, 8, 255, cv::THRESH_BINARY);
-    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(3, 3));
-    cv::morphologyEx(thresh, dstR, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), 1);
-    cv::morphologyEx(dstR, dstR, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), 1);
+    cv::threshold(diff, thresh, threshVal, 255, cv::THRESH_BINARY);
+    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+    cv::morphologyEx(thresh, dstR, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
+    cv::morphologyEx(dstR, dstR, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
     // Build overlay image
     if (overlayMode_ == OverlayMode::Mask || overlayMode_ == OverlayMode::Both)
@@ -768,6 +801,17 @@ void PlaybackPanel::computeProcessedOverlay()
     // Record timing
     const uint64_t t1us = backend::Tools::getTimestamp();
     lastOverlayComputeMs_ = static_cast<double>(t1us - t0us) / 1000.0;
+}
+
+void PlaybackPanel::setDisplayFps(int fps)
+{
+    if (fps < 1) fps = 1;
+    if (fps > 240) fps = 240;
+    const int intervalMs = std::max(1, static_cast<int>(std::lround(1000.0 / static_cast<double>(fps))));
+    if (timer_) {
+        timer_->setInterval(intervalMs);
+        SPDLOG_INFO("Playback preview: display_fps={} (~{} ms) [updated]", fps, intervalMs);
+    }
 }
 
 void PlaybackPanel::updateOverlayButtonUi()
@@ -849,7 +893,8 @@ bool PlaybackPanel::eventFilter(QObject *watched, QEvent *event)
     return QWidget::eventFilter(watched, event);
 }
 
-void PlaybackPanel::resetMetrics() {
+void PlaybackPanel::resetMetrics()
+{
     metricsWindow_.clear();
     lastDisplayedIndex_ = 0;
     lastDisplayTimeUs_ = 0;
@@ -858,22 +903,28 @@ void PlaybackPanel::resetMetrics() {
     lastDisplayFps_ = 0.0;
 }
 
-void PlaybackPanel::trackFrameDisplay(uint64_t frameIndex, uint64_t frameTimestamp, uint64_t displayTime) {
+void PlaybackPanel::trackFrameDisplay(uint64_t frameIndex, uint64_t frameTimestamp, uint64_t displayTime)
+{
     const uint64_t windowDurationUs = 1'000'000ULL; // 1 second in microseconds
 
     // Prune old samples outside the 1-second window
-    while (!metricsWindow_.empty() && (displayTime - metricsWindow_.front().displayTimeUs) > windowDurationUs) {
+    while (!metricsWindow_.empty() && (displayTime - metricsWindow_.front().displayTimeUs) > windowDurationUs)
+    {
         metricsWindow_.pop_front();
     }
 
     // Detect frame drops by comparing sequential indices
-    if (metricsInitialized_) {
-        if (frameIndex > lastDisplayedIndex_ + 1) {
+    if (metricsInitialized_)
+    {
+        if (frameIndex > lastDisplayedIndex_ + 1)
+        {
             // Frames were skipped
             const uint64_t drops = frameIndex - lastDisplayedIndex_ - 1;
             totalDrops_ += drops;
         }
-    } else {
+    }
+    else
+    {
         metricsInitialized_ = true;
     }
 
@@ -888,15 +939,18 @@ void PlaybackPanel::trackFrameDisplay(uint64_t frameIndex, uint64_t frameTimesta
     lastDisplayTimeUs_ = displayTime;
 }
 
-void PlaybackPanel::onLogMetrics() {
+void PlaybackPanel::onLogMetrics()
+{
     const bool captureRunning = backend_.capture().isRunning();
-    
+
     // Only log metrics during live playback when capture is running
-    if (!captureRunning || !followLive_ || scrubbing_) {
+    if (!captureRunning || !followLive_ || scrubbing_)
+    {
         return;
     }
 
-    if (metricsWindow_.empty()) {
+    if (metricsWindow_.empty())
+    {
         return;
     }
 
@@ -904,11 +958,13 @@ void PlaybackPanel::onLogMetrics() {
     const uint64_t windowDurationUs = 1'000'000ULL; // 1 second
 
     // Prune samples outside the window
-    while (!metricsWindow_.empty() && (nowUs - metricsWindow_.front().displayTimeUs) > windowDurationUs) {
+    while (!metricsWindow_.empty() && (nowUs - metricsWindow_.front().displayTimeUs) > windowDurationUs)
+    {
         metricsWindow_.pop_front();
     }
 
-    if (metricsWindow_.empty()) {
+    if (metricsWindow_.empty())
+    {
         return;
     }
 
@@ -916,10 +972,10 @@ void PlaybackPanel::onLogMetrics() {
     const size_t displayCount = metricsWindow_.size();
     const uint64_t windowStartUs = metricsWindow_.front().displayTimeUs;
     const uint64_t windowEndUs = metricsWindow_.back().displayTimeUs;
-    const double windowDurationSeconds = (windowEndUs > windowStartUs) 
-        ? static_cast<double>(windowEndUs - windowStartUs) / 1'000'000.0 
-        : 1.0; // Fallback to 1 second if timestamps are equal
-    
+    const double windowDurationSeconds = (windowEndUs > windowStartUs)
+                                             ? static_cast<double>(windowEndUs - windowStartUs) / 1'000'000.0
+                                             : 1.0; // Fallback to 1 second if timestamps are equal
+
     const double displayFps = static_cast<double>(displayCount) / windowDurationSeconds;
     lastDisplayFps_ = displayFps;
 
@@ -929,28 +985,33 @@ void PlaybackPanel::onLogMetrics() {
     // If they're in nanoseconds, we'd need to divide by 1000
     double totalLatencyUs = 0.0;
     size_t validLatencySamples = 0;
-    
-    for (const auto& sample : metricsWindow_) {
+
+    for (const auto &sample : metricsWindow_)
+    {
         // Calculate latency: display_time - capture_time
         // Handle potential overflow/wraparound by checking if display time is after capture time
-        if (sample.displayTimeUs >= sample.frameTimestamp) {
+        if (sample.displayTimeUs >= sample.frameTimestamp)
+        {
             const double latencyUs = static_cast<double>(sample.displayTimeUs - sample.frameTimestamp);
             totalLatencyUs += latencyUs;
             validLatencySamples++;
         }
     }
 
-    const double avgLatencyMs = (validLatencySamples > 0) 
-        ? (totalLatencyUs / static_cast<double>(validLatencySamples)) / 1000.0 
-        : 0.0;
+    const double avgLatencyMs = (validLatencySamples > 0)
+                                    ? (totalLatencyUs / static_cast<double>(validLatencySamples)) / 1000.0
+                                    : 0.0;
 
     // Get drops in the current window (recent drops)
     uint64_t windowDrops = 0;
-    if (metricsWindow_.size() > 1) {
+    if (metricsWindow_.size() > 1)
+    {
         auto it = metricsWindow_.begin();
         auto prev = it++;
-        for (; it != metricsWindow_.end(); ++it, ++prev) {
-            if (it->frameIndex > prev->frameIndex + 1) {
+        for (; it != metricsWindow_.end(); ++it, ++prev)
+        {
+            if (it->frameIndex > prev->frameIndex + 1)
+            {
                 windowDrops += (it->frameIndex - prev->frameIndex - 1);
             }
         }

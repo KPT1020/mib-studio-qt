@@ -12,6 +12,7 @@ class QPushButton;
 class QCheckBox;
 class QLabel;
 class QTimer;
+namespace frontend { class AppConfigWatcher; }
 
 namespace frontend {
 
@@ -36,6 +37,7 @@ private:
     ConfigTabs* configTabs_ = nullptr;
     QToolButton* playBtn_ = nullptr;
     QToolButton* stopBtn_ = nullptr;
+	AppConfigWatcher* configWatcher_ = nullptr;
 };
 
 } // namespace frontend
