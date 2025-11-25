@@ -135,7 +135,8 @@ AutofocusService::Config AutofocusService::getConfig() const {
 }
 
 void AutofocusService::onRingRatio(double ringRatio, int64_t timestampNs) {
-    if (!connected_.load() || ringRatio <= 0.0) {
+    // Always accept samples to compute statistics, even if not connected
+    if (ringRatio <= 0.0) {
         return;
     }
 

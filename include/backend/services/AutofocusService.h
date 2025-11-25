@@ -54,6 +54,9 @@ public:
     // Ring ratio feed (called by ProcessingService)
     void onRingRatio(double ringRatio, int64_t timestampNs);
 
+    // Expose running average of ring ratio for UI/status
+    double getAverageRingRatio() const { return averageRingRatio_.load(std::memory_order_relaxed); }
+
     // Status callbacks for UI
     using StatusCallback = std::function<void(const std::string& message)>;
     void setStatusCallback(StatusCallback callback);

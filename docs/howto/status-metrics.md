@@ -6,12 +6,14 @@ What’s shown (right of the status bar):
 - Valid/Invalid: classification rates per second (1‑second window)
 - Flushed(valid): total valid frames flushed to HDF5 during the active experiment
 - Camera: transport stats from the SDK (frame rate, MB/s)
+- Ringwidth(mean): running average of ring ratio from validated frames
 
 Sources:
 - Display FPS: `PlaybackPanel::onLogMetrics()` → `getDisplayFps()`
 - Algo/Valid/Invalid FPS: `ProcessingService::realtimeLoop()` → atomics
 - Flushed(valid): `ProcessingService::flushBufferedFrames()` after successful append
 - Camera stats: `CaptureService::stats()` (EGrabber sample pattern)
+- Ringwidth(mean): `AutofocusService::getAverageRingRatio()` (updated via `onRingRatio` from `ProcessingService`)
 
 Lifecycle:
 - On Start Experiment: rates reset to 0; `totalValidFlushed` reset to 0

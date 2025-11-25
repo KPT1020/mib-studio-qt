@@ -14,6 +14,7 @@
 #include "backend/services/ProcessingService.h"
 #include "backend/services/Hdf5Service.h"
 #include "backend/services/PlaybackService.h"
+#include "backend/services/AutofocusService.h"
 #include "frontend/PlaybackPanel.h"
 #include "frontend/ConnectTab.h"
 #include "frontend/PreviewPage.h"
@@ -361,6 +362,12 @@ void MainWindow::onUpdateStats()
                       .arg(QString::number(s.lastDataRateMBps.load()));
     } else {
         status += " | Camera: stopped";
+    }
+
+    // Append live mean ringwidth (from AutofocusService running average)
+    {
+        const double meanRing = backend_.autofocus().getAverageRingRatio();
+        status += QString(" | Ringwidth(mean)=%1").arg(QString::number(meanRing, 'f', 3));
     }
 
     if (experimentActive_)
