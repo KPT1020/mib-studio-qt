@@ -14,6 +14,8 @@ class QStackedWidget;
 class QTableView;
 class QToolButton;
 class QTimer;
+class QComboBox;
+class QCheckBox;
 
 namespace frontend { class JsonTableModel; }
 
@@ -41,6 +43,12 @@ private slots:
     void onClearJs();
     void onApplyJs();
     void onResetCamera();
+	// Profiles
+	void onProfileSelectionChanged(int index);
+	void onSaveProfile();
+	void onDeleteProfile();
+	void onRenameProfile();
+	void onIncludeJsToggled(bool checked);
 
 private:
     QString appDirIncludePath(const QString& fileName) const;
@@ -51,6 +59,18 @@ private:
     bool loadFileToEditor(const QString& path, QPlainTextEdit* editor, QString* err);
     bool saveEditorToFile(QPlainTextEdit* editor, const QString& path, QString* err);
     void refreshJsonTableModel();
+	// Profiles helpers
+	QString profilesBaseDir() const;
+	bool ensureProfilesDirExists(QString* err = nullptr) const;
+	QStringList listProfiles() const;
+	void refreshProfilesList();
+	QString sanitizeProfileName(const QString& name) const;
+	bool writeTextFile(const QString& path, const QString& content, QString* err) const;
+	bool readTextFile(const QString& path, QString* out, QString* err) const;
+	QString profileDirPath(const QString& profileName) const;
+	QString profileJsonPath(const QString& profileName) const;
+	QString profileJsPath(const QString& profileName) const;
+	void loadSelectedProfileInternal(const QString& profileName);
 
     backend::AppBackend& backend_;
 
@@ -68,6 +88,10 @@ private:
     QPushButton* jsonClearBtn_ = nullptr;
     QLabel* jsonPathLabel_ = nullptr;
 	QLabel* jsonUnsavedLabel_ = nullptr;
+	QComboBox* profileSelect_ = nullptr;
+	QPushButton* saveProfileBtn_ = nullptr;
+	QPushButton* deleteProfileBtn_ = nullptr;
+	QPushButton* renameProfileBtn_ = nullptr;
     QTimer* jsonDebounceTimer_ = nullptr;
 
     // JS tab
@@ -80,6 +104,7 @@ private:
     QPushButton* jsClearBtn_ = nullptr;
     QLabel* jsPathLabel_ = nullptr;
 	QLabel* jsUnsavedLabel_ = nullptr;
+	QCheckBox* profilesIncludeJsCheck_ = nullptr;
 };
 
 } // namespace frontend

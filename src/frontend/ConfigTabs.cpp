@@ -25,6 +25,10 @@
 #include <QHeaderView>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QComboBox>
+#include <QCheckBox>
+#include <QInputDialog>
+#include <QRegularExpression>
 
 #include <spdlog/spdlog.h>
 
@@ -88,7 +92,7 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         jsonEdit_ = new QPlainTextEdit(page);
         jsonEdit_->setWordWrapMode(QTextOption::NoWrap);
         auto* row = new QHBoxLayout();
-        jsonReloadBtn_ = new QPushButton(tr("Reload"), page);
+        jsonReloadBtn_ = new QPushButton(tr("Reset"), page);
         jsonSaveBtn_ = new QPushButton(tr("Save"), page);
         jsonBrowseBtn_ = new QPushButton(tr("Browse..."), page);
         jsonClearBtn_ = new QPushButton(tr("Clear"), page);
@@ -101,6 +105,10 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         jsonUnsavedLabel_->setText(tr("Unsaved changes – click Save to apply."));
         jsonUnsavedLabel_->setVisible(false);
         jsonUnsavedLabel_->setStyleSheet("color: #d17a00;");
+        profileSelect_ = new QComboBox(page);
+        saveProfileBtn_ = new QPushButton(tr("Save Profile"), page);
+        deleteProfileBtn_ = new QPushButton(tr("Delete"), page);
+        renameProfileBtn_ = new QPushButton(tr("Rename"), page);
         row->addWidget(jsonReloadBtn_);
         row->addWidget(jsonSaveBtn_);
         row->addWidget(jsonBrowseBtn_);
@@ -109,6 +117,12 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
 		row->addWidget(jsonPathLabel_);
         row->addSpacing(8);
         row->addWidget(jsonUnsavedLabel_);
+        row->addSpacing(8);
+        row->addWidget(new QLabel(tr("Profile:"), page));
+        row->addWidget(profileSelect_);
+        row->addWidget(saveProfileBtn_);
+        row->addWidget(renameProfileBtn_);
+        row->addWidget(deleteProfileBtn_);
 		row->addWidget(jsonTableToggle_);
         v->addLayout(row);
 
@@ -169,7 +183,7 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         jsEdit_ = new QPlainTextEdit(page);
         jsEdit_->setWordWrapMode(QTextOption::NoWrap);
         auto* row = new QHBoxLayout();
-        jsReloadBtn_ = new QPushButton(tr("Reload"), page);
+        jsReloadBtn_ = new QPushButton(tr("Reset"), page);
         jsSaveBtn_ = new QPushButton(tr("Save"), page);
         jsApplyBtn_ = new QPushButton(tr("Apply to Camera"), page);
         jsResetBtn_ = new QPushButton(tr("Reset Camera"), page);
@@ -180,6 +194,11 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         jsUnsavedLabel_->setText(tr("Unsaved changes – click Save to apply."));
         jsUnsavedLabel_->setVisible(false);
         jsUnsavedLabel_->setStyleSheet("color: #d17a00;");
+        profilesIncludeJsCheck_ = new QCheckBox(tr("Profiles include Camera script"), page);
+        {
+            QSettings s;
+            profilesIncludeJsCheck_->setChecked(s.value("Profiles/IncludeJs", true).toBool());
+        }
         row->addWidget(jsReloadBtn_);
         row->addWidget(jsSaveBtn_);
         row->addWidget(jsApplyBtn_);
@@ -190,6 +209,8 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         row->addWidget(jsPathLabel_);
         row->addSpacing(8);
         row->addWidget(jsUnsavedLabel_);
+        row->addSpacing(8);
+        row->addWidget(profilesIncludeJsCheck_);
         v->addLayout(row);
         v->addWidget(jsEdit_, 1);
         page->setLayout(v);
@@ -203,6 +224,7 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         connect(jsEdit_, &QPlainTextEdit::textChanged, this, [this]() {
             if (jsUnsavedLabel_) jsUnsavedLabel_->setVisible(true);
         });
+        connect(profilesIncludeJsCheck_, &QCheckBox::toggled, this, &ConfigTabs::onIncludeJsToggled);
     }
 
     // Nanopositioner tab
@@ -215,6 +237,14 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
 
     onReloadJson();
     onReloadJs();
+
+    // Profiles: populate and wire
+    refreshProfilesList();
+    connect(profileSelect_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &ConfigTabs::onProfileSelectionChanged);
+    connect(saveProfileBtn_, &QPushButton::clicked, this, &ConfigTabs::onSaveProfile);
+    connect(deleteProfileBtn_, &QPushButton::clicked, this, &ConfigTabs::onDeleteProfile);
+    connect(renameProfileBtn_, &QPushButton::clicked, this, &ConfigTabs::onRenameProfile);
 }
 
 QString ConfigTabs::appDirIncludePath(const QString& fileName) const {
@@ -304,7 +334,7 @@ void ConfigTabs::onReloadJson() {
     QString err;
     if (!loadFileToEditor(path, jsonEdit_, &err)) {
         SPDLOG_WARN("Failed to load config.json from {}: {}", path.toStdString(), err.toStdString());
-        QMessageBox::warning(this, tr("Load config.json"), tr("Failed to load: %1").arg(err));
+        QMessageBox::warning(this, tr("Reset config.json"), tr("Failed to load: %1").arg(err));
         return;
     }
     jsonPathLabel_->setText(path);
@@ -340,7 +370,7 @@ void ConfigTabs::onReloadJs() {
     QString err;
     if (!loadFileToEditor(path, jsEdit_, &err)) {
         SPDLOG_WARN("Failed to load egrabberConfig.js from {}: {}", path.toStdString(), err.toStdString());
-        QMessageBox::warning(this, tr("Load egrabberConfig.js"), tr("Failed to load: %1").arg(err));
+        QMessageBox::warning(this, tr("Reset egrabberConfig.js"), tr("Failed to load: %1").arg(err));
         return;
     }
     jsPathLabel_->setText(path);
@@ -433,7 +463,7 @@ void ConfigTabs::onBrowseJson() {
     QString err;
     if (!loadFileToEditor(selected, jsonEdit_, &err)) {
         SPDLOG_WARN("Failed to load external config.json from {}: {}", selected.toStdString(), err.toStdString());
-        QMessageBox::warning(this, tr("Load config.json"), tr("Failed to load: %1").arg(err));
+        QMessageBox::warning(this, tr("Reset config.json"), tr("Failed to load: %1").arg(err));
         return;
     }
     jsonPathLabel_->setText(selected);
@@ -450,7 +480,7 @@ void ConfigTabs::onClearJson() {
 	emit appConfigPathChanged(currentJsonPath());
     const auto ret = QMessageBox::question(this,
                                            tr("Config Path Cleared"),
-                                           tr("External App config path cleared.\nReload from default include path now?\n\nNote: Save to apply any changes."),
+                                           tr("External App config path cleared.\nReset from default include path now?\n\nNote: Save to apply any changes."),
                                            QMessageBox::Yes | QMessageBox::No,
                                            QMessageBox::Yes);
     if (ret == QMessageBox::Yes) {
@@ -474,7 +504,7 @@ void ConfigTabs::onBrowseJs() {
     QString err;
     if (!loadFileToEditor(selected, jsEdit_, &err)) {
         SPDLOG_WARN("Failed to load external egrabberConfig.js from {}: {}", selected.toStdString(), err.toStdString());
-        QMessageBox::warning(this, tr("Load egrabberConfig.js"), tr("Failed to load: %1").arg(err));
+        QMessageBox::warning(this, tr("Reset egrabberConfig.js"), tr("Failed to load: %1").arg(err));
         return;
     }
     jsPathLabel_->setText(selected);
@@ -487,7 +517,7 @@ void ConfigTabs::onClearJs() {
     SPDLOG_INFO("External Camera script cleared; reverting to default include path");
     const auto ret = QMessageBox::question(this,
                                            tr("Camera Script Path Cleared"),
-                                           tr("External Camera script path cleared.\nReload from default include path now?\n\nNote: Save to apply any changes."),
+                                           tr("External Camera script path cleared.\nReset from default include path now?\n\nNote: Save to apply any changes."),
                                            QMessageBox::Yes | QMessageBox::No,
                                            QMessageBox::Yes);
     if (ret == QMessageBox::Yes) {
@@ -562,6 +592,307 @@ void ConfigTabs::rebuildJsonFromTable() {
 	jsonEdit_->setPlainText(QString::fromUtf8(outDoc.toJson(QJsonDocument::Indented)));
 	jsonEdit_->blockSignals(blocked);
 	if (jsonUnsavedLabel_) jsonUnsavedLabel_->setVisible(true);
+}
+
+// ===== Profiles helpers =====
+QString ConfigTabs::profilesBaseDir() const {
+    const QString appDir = QCoreApplication::applicationDirPath();
+    return QDir(appDir).absoluteFilePath("../include/profiles");
+}
+
+bool ConfigTabs::ensureProfilesDirExists(QString* err) const {
+    QDir dir(profilesBaseDir());
+    if (dir.exists()) return true;
+    if (!dir.mkpath(".")) {
+        if (err) *err = tr("Failed to create profiles dir: %1").arg(dir.absolutePath());
+        return false;
+    }
+    return true;
+}
+
+QStringList ConfigTabs::listProfiles() const {
+    QStringList result;
+    QDir dir(profilesBaseDir());
+    if (!dir.exists()) return result;
+    const QFileInfoList entries = dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    for (const QFileInfo& fi : entries) {
+        const QString cfg = QDir(fi.absoluteFilePath()).absoluteFilePath("config.json");
+        if (QFile::exists(cfg)) {
+            result << fi.fileName();
+        }
+    }
+    return result;
+}
+
+void ConfigTabs::refreshProfilesList() {
+    if (!profileSelect_) return;
+    const QString last = QSettings().value("Profiles/LastProfileName").toString();
+    const QStringList profiles = listProfiles();
+    const bool blocked = profileSelect_->blockSignals(true);
+    profileSelect_->clear();
+    profileSelect_->addItem(tr("<no profile>"), "");
+    for (const QString& p : profiles) {
+        profileSelect_->addItem(p, p);
+    }
+    int idx = profileSelect_->findData(last);
+    if (idx < 0) idx = 0;
+    profileSelect_->setCurrentIndex(idx);
+    profileSelect_->blockSignals(blocked);
+    // Auto-load if not <no profile>
+    if (idx > 0) {
+        onProfileSelectionChanged(idx);
+    }
+}
+
+QString ConfigTabs::sanitizeProfileName(const QString& name) const {
+    QString n = name.trimmed();
+    // Remove invalid chars for folder names on Windows and *nix
+    n.replace(QRegularExpression(QString("[\\\\/:*?\"<>|]")), QString("_"));
+    if (n == "." || n == "..") n = "profile";
+    if (n.isEmpty()) n = "profile";
+    if (n.size() > 64) n = n.left(64);
+    return n;
+}
+
+bool ConfigTabs::writeTextFile(const QString& path, const QString& content, QString* err) const {
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        if (err) *err = f.errorString();
+        return false;
+    }
+    QTextStream out(&f);
+    out << content;
+    return true;
+}
+
+bool ConfigTabs::readTextFile(const QString& path, QString* out, QString* err) const {
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        if (err) *err = f.errorString();
+        return false;
+    }
+    QTextStream in(&f);
+    *out = in.readAll();
+    return true;
+}
+
+QString ConfigTabs::profileDirPath(const QString& profileName) const {
+    return QDir(profilesBaseDir()).absoluteFilePath(profileName);
+}
+QString ConfigTabs::profileJsonPath(const QString& profileName) const {
+    return QDir(profileDirPath(profileName)).absoluteFilePath("config.json");
+}
+QString ConfigTabs::profileJsPath(const QString& profileName) const {
+    return QDir(profileDirPath(profileName)).absoluteFilePath("egrabberConfig.js");
+}
+
+void ConfigTabs::loadSelectedProfileInternal(const QString& profileName) {
+    if (profileName.isEmpty()) return;
+    const QString cfgPath = profileJsonPath(profileName);
+    if (!QFile::exists(cfgPath)) {
+        QMessageBox::warning(this, tr("Load Profile"), tr("Profile missing config.json: %1").arg(profileName));
+        return;
+    }
+    // Set external paths and reload
+    {
+        QSettings s;
+        s.setValue("Config/ExternalAppConfigPath", cfgPath);
+        s.setValue("Profiles/LastProfileName", profileName);
+    }
+    SPDLOG_INFO("Profiles: loading profile '{}' (json: {})", profileName.toStdString(), cfgPath.toStdString());
+    emit appConfigPathChanged(cfgPath);
+    onReloadJson();
+    // JS optional
+    const bool includeJs = profilesIncludeJsCheck_ ? profilesIncludeJsCheck_->isChecked() : true;
+    const QString jsPath = profileJsPath(profileName);
+    if (includeJs && QFile::exists(jsPath)) {
+        QSettings().setValue("Config/ExternalCameraScriptPath", jsPath);
+        onReloadJs();
+    }
+}
+
+// ===== Profiles slots =====
+void ConfigTabs::onProfileSelectionChanged(int index) {
+    if (!profileSelect_) return;
+    const QString profileName = profileSelect_->itemData(index).toString();
+    if (profileName.isEmpty()) {
+        // Switch back to default include path (no active profile)
+        QSettings s;
+        s.remove("Profiles/LastProfileName");
+        s.remove("Config/ExternalAppConfigPath");
+        s.remove("Config/ExternalCameraScriptPath");
+        SPDLOG_INFO("Profiles: cleared active profile; reverting to default include paths");
+        onReloadJson();
+        onReloadJs();
+        return;
+    }
+    loadSelectedProfileInternal(profileName);
+}
+
+void ConfigTabs::onSaveProfile() {
+    QString name = QInputDialog::getText(this, tr("Save Profile"),
+                                         tr("Profile name:"), QLineEdit::Normal);
+    if (name.isNull()) return; // cancelled
+    name = sanitizeProfileName(name);
+    if (name.isEmpty()) {
+        QMessageBox::warning(this, tr("Save Profile"), tr("Invalid profile name."));
+        return;
+    }
+    QString err;
+    if (!ensureProfilesDirExists(&err)) {
+        QMessageBox::warning(this, tr("Save Profile"), err);
+        return;
+    }
+    const QString dir = profileDirPath(name);
+    QDir().mkpath(dir);
+    const QString cfgPath = profileJsonPath(name);
+    const QString jsPath = profileJsPath(name);
+    const bool includeJs = profilesIncludeJsCheck_ ? profilesIncludeJsCheck_->isChecked() : true;
+
+    // Prepare JSON (pretty) from editor; validate
+    QJsonParseError perr;
+    const QJsonDocument doc = QJsonDocument::fromJson(jsonEdit_ ? jsonEdit_->toPlainText().toUtf8() : QByteArray(), &perr);
+    QString jsonToWrite;
+    if (perr.error == QJsonParseError::NoError) {
+        jsonToWrite = QString::fromUtf8(doc.toJson(QJsonDocument::Indented));
+    } else {
+        const auto ret = QMessageBox::question(this, tr("Invalid JSON"),
+                                               tr("JSON in editor is invalid.\nError: %1\n\nForce-save raw text to profile anyway?")
+                                               .arg(perr.errorString()),
+                                               QMessageBox::Yes | QMessageBox::No,
+                                               QMessageBox::No);
+        if (ret != QMessageBox::Yes) return;
+        jsonToWrite = jsonEdit_ ? jsonEdit_->toPlainText() : QString();
+    }
+
+    // Confirm overwrite if target exists
+    if (QFile::exists(cfgPath)) {
+        const auto ret = QMessageBox::question(this, tr("Overwrite"),
+                                               tr("Profile already has config.json. Overwrite?"),
+                                               QMessageBox::Yes | QMessageBox::No,
+                                               QMessageBox::No);
+        if (ret != QMessageBox::Yes) return;
+    }
+    if (!writeTextFile(cfgPath, jsonToWrite, &err)) {
+        QMessageBox::warning(this, tr("Save Profile"), tr("Failed to write config.json: %1").arg(err));
+        return;
+    }
+
+    if (includeJs) {
+        const QString jsText = jsEdit_ ? jsEdit_->toPlainText() : QString();
+        if (!jsText.isEmpty()) {
+            if (QFile::exists(jsPath)) {
+                const auto ret2 = QMessageBox::question(this, tr("Overwrite"),
+                                                        tr("Profile already has egrabberConfig.js. Overwrite?"),
+                                                        QMessageBox::Yes | QMessageBox::No,
+                                                        QMessageBox::No);
+                if (ret2 != QMessageBox::Yes) return;
+            }
+            if (!writeTextFile(jsPath, jsText, &err)) {
+                QMessageBox::warning(this, tr("Save Profile"), tr("Failed to write egrabberConfig.js: %1").arg(err));
+                return;
+            }
+        }
+    }
+
+    // Update QSettings, refresh list, select and load
+    {
+        QSettings s;
+        s.setValue("Profiles/LastProfileName", name);
+    }
+    refreshProfilesList();
+    const int idx = profileSelect_ ? profileSelect_->findData(name) : -1;
+    if (idx >= 0 && profileSelect_->currentIndex() != idx) {
+        profileSelect_->setCurrentIndex(idx); // will trigger load
+    } else {
+        loadSelectedProfileInternal(name);
+    }
+    SPDLOG_INFO("Profiles: saved profile '{}' (json={}, js_included={})",
+                name.toStdString(), cfgPath.toStdString(), includeJs ? 1 : 0);
+}
+
+void ConfigTabs::onDeleteProfile() {
+    if (!profileSelect_ || profileSelect_->currentIndex() <= 0) {
+        QMessageBox::information(this, tr("Delete Profile"), tr("No profile selected."));
+        return;
+    }
+    const QString name = profileSelect_->currentData().toString();
+    const auto ret = QMessageBox::question(this, tr("Delete Profile"),
+                                           tr("Delete profile '%1'?\nThis cannot be undone.").arg(name),
+                                           QMessageBox::Yes | QMessageBox::No,
+                                           QMessageBox::No);
+    if (ret != QMessageBox::Yes) return;
+    // If active, revert to default before delete
+    const QString activeJson = currentJsonPath();
+    const QString nameJson = profileJsonPath(name);
+    if (QFileInfo(activeJson).absoluteFilePath() == QFileInfo(nameJson).absoluteFilePath()) {
+        QSettings s;
+        s.remove("Config/ExternalAppConfigPath");
+        s.remove("Config/ExternalCameraScriptPath");
+        s.remove("Profiles/LastProfileName");
+        SPDLOG_INFO("Profiles: deleting active profile, reverting to defaults");
+        onReloadJson();
+        onReloadJs();
+    }
+    QDir dir(profileDirPath(name));
+    bool ok = dir.removeRecursively();
+    if (!ok) {
+        QMessageBox::warning(this, tr("Delete Profile"), tr("Failed to delete profile directory."));
+        return;
+    }
+    SPDLOG_INFO("Profiles: deleted profile '{}'", name.toStdString());
+    refreshProfilesList();
+}
+
+void ConfigTabs::onRenameProfile() {
+    if (!profileSelect_ || profileSelect_->currentIndex() <= 0) {
+        QMessageBox::information(this, tr("Rename Profile"), tr("No profile selected."));
+        return;
+    }
+    const QString oldName = profileSelect_->currentData().toString();
+    QString newName = QInputDialog::getText(this, tr("Rename Profile"),
+                                            tr("New profile name:"), QLineEdit::Normal,
+                                            oldName);
+    if (newName.isNull()) return;
+    newName = sanitizeProfileName(newName);
+    if (newName == oldName) return;
+    if (newName.isEmpty()) {
+        QMessageBox::warning(this, tr("Rename Profile"), tr("Invalid profile name."));
+        return;
+    }
+    const QString oldDir = profileDirPath(oldName);
+    const QString newDir = profileDirPath(newName);
+    if (QFile::exists(newDir)) {
+        QMessageBox::warning(this, tr("Rename Profile"), tr("A profile with that name already exists."));
+        return;
+    }
+    QDir base(profilesBaseDir());
+    if (!base.rename(oldName, newName)) {
+        QMessageBox::warning(this, tr("Rename Profile"), tr("Failed to rename profile directory."));
+        return;
+    }
+    // If active, update settings
+    const QString activeJson = currentJsonPath();
+    const QString oldJson = profileJsonPath(oldName);
+    if (QFileInfo(activeJson).absoluteFilePath() == QFileInfo(oldJson).absoluteFilePath()) {
+        QSettings s;
+        s.setValue("Config/ExternalAppConfigPath", profileJsonPath(newName));
+        const bool includeJs = profilesIncludeJsCheck_ ? profilesIncludeJsCheck_->isChecked() : true;
+        if (includeJs && QFile::exists(profileJsPath(newName))) {
+            s.setValue("Config/ExternalCameraScriptPath", profileJsPath(newName));
+        }
+        s.setValue("Profiles/LastProfileName", newName);
+        SPDLOG_INFO("Profiles: active profile renamed to '{}'", newName.toStdString());
+        onReloadJson();
+        onReloadJs();
+    }
+    refreshProfilesList();
+    const int idx = profileSelect_->findData(newName);
+    if (idx >= 0) profileSelect_->setCurrentIndex(idx);
+}
+
+void ConfigTabs::onIncludeJsToggled(bool checked) {
+    QSettings().setValue("Profiles/IncludeJs", checked);
 }
 
 } // namespace frontend

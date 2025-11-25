@@ -11,7 +11,7 @@ Implementation
   - `Config/ExternalAppConfigPath` (JSON)
   - `Config/ExternalCameraScriptPath` (JS)
 - Path resolution:
-  - JSON/JS Reload/Save use the current path (external if set; otherwise default include path).
+  - JSON/JS Reset/Save use the current path (external if set; otherwise default include path).
   - “Apply to Camera” saves and applies from the current JS path.
 - `PreviewPage::configPath()` returns the external JSON path when set; else falls back to app include path.
 
@@ -23,8 +23,8 @@ Notes
 
 Usage
 - In Config tabs:
-  - App config (config.json): Reload, Save, Browse…, Clear. Path label shows the active file.
-  - Camera script (egrabberConfig.js): Reload, Save, Apply to Camera, Browse…, Clear. Path label shows the active file.
+  - App config (config.json): Reset, Save, Browse…, Clear. Path label shows the active file.
+  - Camera script (egrabberConfig.js): Reset, Save, Apply to Camera, Browse…, Clear. Path label shows the active file.
 
 
 
