@@ -33,12 +33,39 @@
 
 #include <spdlog/spdlog.h>
 #include <fmt/format.h>
+#ifdef _WIN32
+#define NOMINMAX  // Prevent Windows.h from defining min/max macros
+#include <windows.h>
+#include <shlobj.h>
+#endif
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 
 namespace
 {
+    // Get user-writable config directory, falling back to ../include/ for development
+    static QString getUserConfigDir() {
+        QString appDir = QCoreApplication::applicationDirPath();
+        QString appDirLower = appDir.toLower();
+        
+#ifdef _WIN32
+        // Check if installed in Program Files (requires admin to write)
+        if (appDirLower.contains("program files") || 
+            appDirLower.contains("program files (x86)")) {
+            // Use user-writable location
+            char appDataPath[MAX_PATH];
+            if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, appDataPath))) {
+                QString userConfigDir = QDir(QString::fromStdString(std::string(appDataPath) + "\\MIB_Studio_Qt\\include")).absolutePath();
+                // Ensure directory exists
+                QDir().mkpath(userConfigDir);
+                return userConfigDir;
+            }
+        }
+#endif
+        // Development: use ../include/ relative to executable
+        return QDir(appDir).absoluteFilePath("../include");
+    }
 
     class ImageCanvas : public QWidget
     {
@@ -336,8 +363,8 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
             loaded = readFpsFrom(ext);
         }
         if (!loaded) {
-            const QString appDir = QCoreApplication::applicationDirPath();
-            const QString defaultPath = QDir(appDir).absoluteFilePath("../include/config.json");
+            // Use centralized helper to get user-writable config directory
+            const QString defaultPath = QDir(getUserConfigDir()).absoluteFilePath("config.json");
             loaded = readFpsFrom(defaultPath);
         }
         if (!loaded) {

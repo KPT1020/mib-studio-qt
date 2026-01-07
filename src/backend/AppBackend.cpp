@@ -19,9 +19,44 @@
 #include <cctype>
 #include <string>
 #include <spdlog/spdlog.h>
+#ifdef _WIN32
+#include <windows.h>
+#include <shlobj.h>
+#endif
 
 namespace backend
 {
+    namespace {
+        // Get a user-writable log path, falling back to dataDir if needed
+        std::string getLogPath(const std::string& dataDir) {
+            std::filesystem::path dataPath(dataDir);
+            std::string logPath;
+            
+#ifdef _WIN32
+            // Check if dataDir is in Program Files (requires admin to write)
+            std::string dataDirLower = dataDir;
+            std::transform(dataDirLower.begin(), dataDirLower.end(), dataDirLower.begin(), 
+                          [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            
+            // Check if path contains "program files" (common install location)
+            if (dataDirLower.find("program files") != std::string::npos || 
+                dataDirLower.find("program files (x86)") != std::string::npos) {
+                // Use user-writable location instead
+                char appDataPath[MAX_PATH];
+                if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, appDataPath))) {
+                    std::filesystem::path userLogDir = std::filesystem::path(appDataPath) / "MIB_Studio_Qt" / "logs";
+                    std::filesystem::create_directories(userLogDir);
+                    logPath = (userLogDir / "app.log").string();
+                    return logPath;
+                }
+            }
+#endif
+            // Default: use dataDir/logs/app.log
+            std::filesystem::create_directories(dataPath / "logs");
+            logPath = (dataPath / "logs" / "app.log").string();
+            return logPath;
+        }
+    }
 
     AppBackend::AppBackend() = default;
     AppBackend::~AppBackend() = default;
@@ -30,7 +65,9 @@ namespace backend
     {
         std::filesystem::create_directories(dataDir);
 
-        backend::services::Logger::init((std::filesystem::path(dataDir) / "logs" / "app.log").string());
+        // Use user-writable location for logs if dataDir is in Program Files
+        std::string logPath = getLogPath(dataDir);
+        backend::services::Logger::init(logPath);
 
         sqliteService_ = std::make_unique<services::SqliteService>();
         hdf5Service_ = std::make_unique<services::Hdf5Service>();

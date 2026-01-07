@@ -31,6 +31,11 @@
 #include <QRegularExpression>
 
 #include <spdlog/spdlog.h>
+#ifdef _WIN32
+#define NOMINMAX  // Prevent Windows.h from defining min/max macros
+#include <windows.h>
+#include <shlobj.h>
+#endif
 
 #include "backend/AppBackend.h"
 #include "frontend/JsonTableModel.h"
@@ -40,6 +45,29 @@
 namespace frontend {
 
 namespace {
+
+// Get user-writable config directory, falling back to ../include/ for development
+static QString getUserConfigDir() {
+    QString appDir = QCoreApplication::applicationDirPath();
+    QString appDirLower = appDir.toLower();
+    
+#ifdef _WIN32
+    // Check if installed in Program Files (requires admin to write)
+    if (appDirLower.contains("program files") || 
+        appDirLower.contains("program files (x86)")) {
+        // Use user-writable location
+        char appDataPath[MAX_PATH];
+        if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, appDataPath))) {
+            QString userConfigDir = QDir(QString::fromStdString(std::string(appDataPath) + "\\MIB_Studio_Qt\\include")).absolutePath();
+            // Ensure directory exists
+            QDir().mkpath(userConfigDir);
+            return userConfigDir;
+        }
+    }
+#endif
+    // Development: use ../include/ relative to executable
+    return QDir(appDir).absoluteFilePath("../include");
+}
 
 static QJsonValue parseValueFromString(const QString& text) {
 	const QString t = text.trimmed();
@@ -248,9 +276,8 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
 }
 
 QString ConfigTabs::appDirIncludePath(const QString& fileName) const {
-    const QString appDir = QCoreApplication::applicationDirPath();
-    // Write into a sibling include directory next to the executable dir (build tree)
-    return QDir(appDir).absoluteFilePath("../include/" + fileName);
+    // Use centralized helper to get user-writable config directory
+    return QDir(getUserConfigDir()).absoluteFilePath(fileName);
 }
 
 QString ConfigTabs::currentJsonPath() const {
@@ -596,8 +623,8 @@ void ConfigTabs::rebuildJsonFromTable() {
 
 // ===== Profiles helpers =====
 QString ConfigTabs::profilesBaseDir() const {
-    const QString appDir = QCoreApplication::applicationDirPath();
-    return QDir(appDir).absoluteFilePath("../include/profiles");
+    // Use centralized helper to get user-writable config directory
+    return QDir(getUserConfigDir()).absoluteFilePath("profiles");
 }
 
 bool ConfigTabs::ensureProfilesDirExists(QString* err) const {
