@@ -81,6 +81,16 @@ The installer includes:
 - **Desktop Shortcut**: Optional desktop icon
 - **Uninstaller**: Complete uninstallation support
 
+### Visual C++ Redistributable Installation
+
+During installation, users can choose to install the bundled Visual C++ Redistributable:
+
+- The installer checks if Visual C++ 2015-2022 runtime is already installed via registry keys
+- If already installed, skips the installation step
+- If selected and runtime not found, runs the VC++ redistributable installer silently
+- VC++ redistributable is required for the application to run (fixes error 0xc0000142)
+- VC++ installer is located at: `resources/installers/vc_redist.x64.exe`
+
 ### eGrabber Installation
 
 During installation, users can choose to install the bundled eGrabber SDK:

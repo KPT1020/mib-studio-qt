@@ -10,6 +10,7 @@
 #define BuildDir "build\Release"
 #define SourceDir "..\..\"
 #define EgrabberInstaller "egrabber-win-x86_64-25.10.0.57.exe"
+#define VCRedistInstaller "vc_redist.x64.exe"
 
 [Setup]
 ; App identification
@@ -37,6 +38,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "installvcredist"; Description: "Install Visual C++ Redistributable (required for application to run)"; GroupDescription: "Additional components"
 Name: "installegrabber"; Description: "Install eGrabber SDK (required for camera functionality)"; GroupDescription: "Additional components"
 
 [Files]
@@ -65,6 +67,9 @@ Source: "{#SourceDir}{#BuildDir}\tls\*"; DestDir: "{app}\tls"; Flags: ignorevers
 ; Note: This copies existing data files if present in build directory
 Source: "{#SourceDir}{#BuildDir}\data\*"; DestDir: "{app}\data"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+; Visual C++ Redistributable installer (bundled but only run if user selects the task and runtime is not already installed)
+Source: "{#SourceDir}resources\installers\{#VCRedistInstaller}"; DestDir: "{tmp}"; Flags: deleteafterinstall; Tasks: installvcredist
+
 ; eGrabber installer (bundled but only run if user selects the task)
 Source: "{#SourceDir}resources\installers\{#EgrabberInstaller}"; DestDir: "{tmp}"; Flags: deleteafterinstall; Tasks: installegrabber
 
@@ -81,8 +86,78 @@ Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
+; Run VC++ Redistributable installer if selected and runtime not already installed
+Filename: "{tmp}\{#VCRedistInstaller}"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing Visual C++ Redistributable..."; Tasks: installvcredist; Flags: runhidden waituntilterminated; Check: VCRuntimeNotInstalled
+
 ; Run eGrabber installer if selected (silent mode)
 Filename: "{tmp}\{#EgrabberInstaller}"; Parameters: "/S"; StatusMsg: "Installing eGrabber SDK..."; Tasks: installegrabber; Flags: runhidden waituntilterminated
 
 [Code]
+
+// Function to check if Visual C++ 2015-2022 runtime is already installed
+function VCRuntimeNotInstalled: Boolean;
+var
+  Version: Cardinal;
+begin
+  // Check for VC++ 2015-2022 runtime (14.0.x.x) - registry method
+  if RegQueryDWordValue(HKEY_LOCAL_MACHINE, 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Installed', Version) then
+  begin
+    if Version = 1 then
+    begin
+      Result := False; // Already installed
+      Exit;
+    end;
+  end;
+
+  // Fallback: Check for VC++ 2015-2019 runtime (14.0.x.x) - older key
+  if RegQueryDWordValue(HKEY_LOCAL_MACHINE, 'SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Installed', Version) then
+  begin
+    if Version = 1 then
+    begin
+      Result := False; // Already installed
+      Exit;
+    end;
+  end;
+
+  // Additional fallback: Check for presence of key runtime DLLs in System32
+  if FileExists(ExpandConstant('{syswow64}\msvcp140.dll')) and FileExists(ExpandConstant('{syswow64}\vcruntime140.dll')) then
+  begin
+    Result := False; // Runtime DLLs found
+    Exit;
+  end;
+
+  // If none of the checks pass, assume runtime is not installed
+  Result := True;
+end;
+
+// Function to check if eGrabber is already installed (similar to original logic)
+function EGrabberNotInstalled: Boolean;
+var
+  Version: String;
+begin
+  // Check for eGrabber installation
+  if RegQueryStringValue(HKEY_LOCAL_MACHINE, 'SOFTWARE\Euresys\eGrabber', 'Version', Version) then
+  begin
+    Result := False; // Already installed
+    Exit;
+  end;
+
+  // Additional check for eGrabber in different registry locations
+  if RegQueryStringValue(HKEY_LOCAL_MACHINE, 'SOFTWARE\Euresys', 'eGrabber', Version) then
+  begin
+    Result := False; // Already installed
+    Exit;
+  end;
+
+  // If not found, assume not installed
+  Result := True;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+  begin
+    // Additional post-install checks can be added here if needed
+  end;
+end;
 

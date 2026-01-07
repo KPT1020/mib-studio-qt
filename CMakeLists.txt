@@ -239,7 +239,7 @@ if(WIN32)
     foreach(app_target IN ITEMS mib_studio_qt mock_studio_qt)
         add_custom_command(TARGET ${app_target} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E env "PATH=${VCPKG_BIN_DIR};$ENV{PATH}"
-                    "${WINDEPLOYQT}" --release "$<TARGET_FILE:${app_target}>"
+                    "${WINDEPLOYQT}" --release --compiler-runtime "$<TARGET_FILE:${app_target}>"
             COMMENT "windeployqt (Release): ${app_target}"
         )
         # Copy extra codec/runtime DLLs if present
