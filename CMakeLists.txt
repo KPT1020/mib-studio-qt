@@ -165,17 +165,7 @@ add_executable(mib_studio_qt
     ${FRONTEND_COMMON_SOURCES}
 )
 
-add_executable(mock_studio_qt
-    src/frontend/mock_main.cpp
-    ${FRONTEND_COMMON_SOURCES}
-)
-
 target_include_directories(mib_studio_qt PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    "C:/Program Files/Euresys/eGrabber/include"
-)
-
-target_include_directories(mock_studio_qt PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     "C:/Program Files/Euresys/eGrabber/include"
 )
@@ -187,47 +177,51 @@ target_link_libraries(mib_studio_qt PRIVATE
     spdlog::spdlog
 )
 
-target_link_libraries(mock_studio_qt PRIVATE
-    Qt6::Widgets
-    Qt6::Charts
-    mib_backend
-    spdlog::spdlog
-)
-
 # OpenCV linking (prefer imported targets; fallback to variables)
 if(TARGET opencv_world)
     target_link_libraries(mib_studio_qt PRIVATE opencv_world)
-    target_link_libraries(mock_studio_qt PRIVATE opencv_world)
 elseif(TARGET opencv_core)
     target_link_libraries(mib_studio_qt PRIVATE opencv_core opencv_imgproc opencv_imgcodecs)
-    target_link_libraries(mock_studio_qt PRIVATE opencv_core opencv_imgproc opencv_imgcodecs)
 elseif(DEFINED OpenCV_LIBS)
     target_include_directories(mib_studio_qt PRIVATE ${OpenCV_INCLUDE_DIRS})
     target_link_libraries(mib_studio_qt PRIVATE ${OpenCV_LIBS})
-    target_include_directories(mock_studio_qt PRIVATE ${OpenCV_INCLUDE_DIRS})
-    target_link_libraries(mock_studio_qt PRIVATE ${OpenCV_LIBS})
 endif()
 
 # Qt deployment via windeployqt (vcpkg)
 if(WIN32)
     set(VCPKG_BIN_DIR ${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/bin)
-    set(WINDEPLOYQT ${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/tools/qt6/bin/windeployqt.exe)
+    set(VCPKG_DEBUG_BIN_DIR ${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/debug/bin)
+    set(WINDEPLOYQT_RELEASE ${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/tools/Qt6/bin/windeployqt.exe)
+    set(WINDEPLOYQT_DEBUG ${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/tools/Qt6/bin/windeployqt.debug.bat)
 
     # Discover extra third-party codec runtimes used by Qt imageformats plugins (copy after windeployqt)
     # This helps ensure qjpeg/qtiff/qwebp/qjp2 load on machines without vcpkg in PATH.
     set(_EXTRA_CODEC_PATTERNS
+        # Release + Debug bins, so Debug runs work too
         "${VCPKG_BIN_DIR}/jpeg*.dll"
+        "${VCPKG_DEBUG_BIN_DIR}/jpeg*.dll"
         "${VCPKG_BIN_DIR}/libjpeg*.dll"
+        "${VCPKG_DEBUG_BIN_DIR}/libjpeg*.dll"
         "${VCPKG_BIN_DIR}/tiff*.dll"
+        "${VCPKG_DEBUG_BIN_DIR}/tiff*.dll"
         "${VCPKG_BIN_DIR}/libtiff*.dll"
+        "${VCPKG_DEBUG_BIN_DIR}/libtiff*.dll"
         "${VCPKG_BIN_DIR}/liblzma*.dll"
+        "${VCPKG_DEBUG_BIN_DIR}/liblzma*.dll"
         "${VCPKG_BIN_DIR}/libwebp*.dll"
+        "${VCPKG_DEBUG_BIN_DIR}/libwebp*.dll"
         "${VCPKG_BIN_DIR}/libwebpdemux*.dll"
+        "${VCPKG_DEBUG_BIN_DIR}/libwebpdemux*.dll"
         "${VCPKG_BIN_DIR}/libwebpmux*.dll"
+        "${VCPKG_DEBUG_BIN_DIR}/libwebpmux*.dll"
         "${VCPKG_BIN_DIR}/libsharpyuv*.dll"
+        "${VCPKG_DEBUG_BIN_DIR}/libsharpyuv*.dll"
         "${VCPKG_BIN_DIR}/openjp*.dll"      # openjp2 for qjp2
+        "${VCPKG_DEBUG_BIN_DIR}/openjp*.dll"
         "${VCPKG_BIN_DIR}/zstd*.dll"
+        "${VCPKG_DEBUG_BIN_DIR}/zstd*.dll"
         "${VCPKG_BIN_DIR}/libdeflate*.dll"
+        "${VCPKG_DEBUG_BIN_DIR}/libdeflate*.dll"
     )
     set(_EXTRA_CODEC_DLLS "")
     foreach(_pat IN LISTS _EXTRA_CODEC_PATTERNS)
@@ -236,11 +230,15 @@ if(WIN32)
     endforeach()
     list(REMOVE_DUPLICATES _EXTRA_CODEC_DLLS)
 
-    foreach(app_target IN ITEMS mib_studio_qt mock_studio_qt)
+    foreach(app_target IN ITEMS mib_studio_qt)
+        # Use different windeployqt for Debug vs Release
         add_custom_command(TARGET ${app_target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E env "PATH=${VCPKG_BIN_DIR};$ENV{PATH}"
-                    "${WINDEPLOYQT}" --release --compiler-runtime "$<TARGET_FILE:${app_target}>"
-            COMMENT "windeployqt (Release): ${app_target}"
+            COMMAND ${CMAKE_COMMAND} -E env "PATH=$<IF:$<STREQUAL:$<CONFIG>,Debug>,${VCPKG_DEBUG_BIN_DIR},${VCPKG_BIN_DIR}>;$ENV{PATH}"
+                    "$<IF:$<STREQUAL:$<CONFIG>,Debug>,${WINDEPLOYQT_DEBUG},${WINDEPLOYQT_RELEASE}>"
+                    $<IF:$<STREQUAL:$<CONFIG>,Debug>,--debug,--release>
+                    --compiler-runtime
+                    "$<TARGET_FILE:${app_target}>"
+            COMMENT "windeployqt ($<CONFIG>): ${app_target}"
         )
         # Copy extra codec/runtime DLLs if present
         foreach(_dll IN LISTS _EXTRA_CODEC_DLLS)
@@ -261,23 +259,7 @@ endif()
 
 if(TARGET nlohmann_json::nlohmann_json)
     target_link_libraries(mib_studio_qt PRIVATE nlohmann_json::nlohmann_json)
-    target_link_libraries(mock_studio_qt PRIVATE nlohmann_json::nlohmann_json)
 endif()
-
-# Console test: capture + processing (CPU-only)
-add_executable(capture_processing_test
-    src/tests/capture_processing_test.cpp
-)
-
-target_include_directories(capture_processing_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    "C:/Program Files/Euresys/eGrabber/include"
-)
-
-target_link_libraries(capture_processing_test PRIVATE
-    mib_backend
-    spdlog::spdlog
-)
 
 # Windows installer packaging (InnoSetup)
 if(WIN32)
@@ -306,13 +288,12 @@ if(WIN32)
             COMMAND ${CMAKE_COMMAND} -E echo "Release directory: ${CMAKE_BINARY_DIR}/Release"
             # Verify main executables exist
             COMMAND ${CMAKE_COMMAND} -E echo "Checking for ${CMAKE_BINARY_DIR}/Release/mib_studio_qt.exe..."
-            COMMAND ${CMAKE_COMMAND} -E echo "Checking for ${CMAKE_BINARY_DIR}/Release/mock_studio_qt.exe..."
             # Build installer
             COMMAND ${CMAKE_COMMAND} -E echo "Compiling InnoSetup script..."
             COMMAND "${ISCC_EXE}" "${INNOSETUP_SCRIPT}"
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             COMMENT "Building Windows installer with InnoSetup"
-            DEPENDS mib_studio_qt mock_studio_qt
+            DEPENDS mib_studio_qt
         )
         
         message(STATUS "InnoSetup found: ${ISCC_EXE}")
