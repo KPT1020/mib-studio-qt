@@ -35,6 +35,12 @@ public:
      * Poll device statistics. Returns false if stats are unavailable.
      */
     virtual bool pollStats(CameraStats& out) const = 0;
+
+    /**
+     * Check if device is healthy and responsive. Returns false if device is unresponsive.
+     * Can be called periodically to detect device failures.
+     */
+    virtual bool checkDeviceHealth() const { return true; }
 };
 
 } // namespace camera::common
