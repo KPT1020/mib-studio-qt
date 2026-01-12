@@ -87,7 +87,6 @@ namespace frontend
         histogramChart_->addAxis(histogramYAxis_, Qt::AlignLeft);
 
         histogramXAxis_ = new QValueAxis();
-        histogramXAxis_->setTitleText("Ring Width");
         histogramXAxis_->setLabelsAngle(-90);
         histogramXAxis_->setLabelFormat("%.2f");
         histogramChart_->addAxis(histogramXAxis_, Qt::AlignBottom);
@@ -103,7 +102,6 @@ namespace frontend
         histogramChart_->addSeries(barSeries_);
         // Fallback: use category axis for X when bar series is used
         histogramCategoryAxis_ = new QBarCategoryAxis();
-        histogramCategoryAxis_->setTitleText("Ring Width");
         histogramCategoryAxis_->setLabelsAngle(-90);
         // Remove previously added numeric X axis to avoid overlap
         if (histogramXAxis_)
@@ -396,11 +394,10 @@ namespace frontend
                 categories << QString("%1-%2").arg(start, 0, 'f', 1).arg(end, 0, 'f', 1);
             }
             histogramCategoryAxis_->append(categories);
-            histogramCategoryAxis_->setTitleText("Ring Width");
             histogramCategoryAxis_->setLabelsAngle(-90);
             histogramChart_->addAxis(histogramCategoryAxis_, Qt::AlignBottom);
             barSeries_->attachAxis(histogramCategoryAxis_);
-            barSeries_->attachAxis(histogramYAxis_);
+            // Note: histogramYAxis_ is already attached in constructor, no need to reattach
 #endif
             return;
         }
@@ -473,11 +470,10 @@ namespace frontend
             }
             histogramCategoryAxis_->append(categories);
         }
-        histogramCategoryAxis_->setTitleText("Ring Width");
         histogramCategoryAxis_->setLabelsAngle(-90);
         histogramChart_->addAxis(histogramCategoryAxis_, Qt::AlignBottom);
         barSeries_->attachAxis(histogramCategoryAxis_);
-        barSeries_->attachAxis(histogramYAxis_);
+        // Note: histogramYAxis_ is already attached in constructor, no need to reattach
 #endif
     }
 

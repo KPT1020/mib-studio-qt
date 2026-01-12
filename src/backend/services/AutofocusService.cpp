@@ -314,6 +314,7 @@ void AutofocusService::controlLoop() {
                         ringRatioTimestamps_.clear();
                         ringRatioSequence_.store(0);
                         lastRingRatioTimestampNs_.store(0);
+                        updateStatistics(); // Update statistics to reflect empty buffer
                     }
 
                     SPDLOG_DEBUG("AutofocusService: Adjusted voltage to {}V (ring ratio: {:.3f}, deviation: {:.3f})",
