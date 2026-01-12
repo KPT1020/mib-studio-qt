@@ -7,6 +7,7 @@ class QTimer;
 class PlaybackPanel;
 class QTabWidget;
 class QSpinBox;
+class QAction;
 template<typename T> class QFutureWatcher;
 
 namespace backend { class AppBackend; }
@@ -24,6 +25,7 @@ private slots:
     void onUpdateStats();
 
 private:
+    void updateExperimentButtonStates();
     backend::AppBackend& backend_;
     QLabel* statusLabel_ = nullptr;
     QTimer* statsTimer_ = nullptr;
@@ -33,4 +35,7 @@ private:
     bool experimentActive_{false};
     bool flushInProgress_{false};
     QFutureWatcher<size_t>* flushWatcher_{nullptr};
+    QAction* startExperimentAct_ = nullptr;
+    QAction* stopExperimentAct_ = nullptr;
+    QLabel* experimentIndicator_ = nullptr;
 };

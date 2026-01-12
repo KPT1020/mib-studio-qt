@@ -8,6 +8,8 @@
 #include <QTabWidget>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QSizePolicy>
+#include <QWidget>
 
 #include "backend/AppBackend.h"
 #include "backend/services/CaptureService.h"
@@ -95,11 +97,25 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     auto *stopCaptureAct = new QAction("Stop Camera", this);
     toolbar->addAction(startCaptureAct);
     toolbar->addAction(stopCaptureAct);
+    
+    // Add spacer to push experiment buttons to the right
+    auto *spacer = new QWidget(this);
+    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    toolbar->addWidget(spacer);
+    
     toolbar->addSeparator();
-    auto *startExperimentAct = new QAction("Start Experiment", this);
-    auto *stopExperimentAct = new QAction("Stop Experiment", this);
-    toolbar->addAction(startExperimentAct);
-    toolbar->addAction(stopExperimentAct);
+    
+    // Create experiment indicator widget (colored rectangle) - add to toolbar before experiment buttons
+    experimentIndicator_ = new QLabel(this);
+    experimentIndicator_->setFixedSize(20, 20);
+    experimentIndicator_->setStyleSheet("background-color: gray; border: 1px solid black;");
+    experimentIndicator_->setToolTip(tr("Experiment status indicator"));
+    toolbar->addWidget(experimentIndicator_);
+    
+    startExperimentAct_ = new QAction("Start Experiment", this);
+    stopExperimentAct_ = new QAction("Stop Experiment", this);
+    toolbar->addAction(startExperimentAct_);
+    toolbar->addAction(stopExperimentAct_);
 
     // Initialize defaults for this session
     backend_.processing().setInvalidFrameSamplingRate(200);
@@ -107,8 +123,8 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
 
     connect(startCaptureAct, &QAction::triggered, this, &MainWindow::onStartCapture);
     connect(stopCaptureAct, &QAction::triggered, this, &MainWindow::onStopCapture);
-    connect(startExperimentAct, &QAction::triggered, this, &MainWindow::onStartExperiment);
-    connect(stopExperimentAct, &QAction::triggered, this, &MainWindow::onStopExperiment);
+    connect(startExperimentAct_, &QAction::triggered, this, &MainWindow::onStartExperiment);
+    connect(stopExperimentAct_, &QAction::triggered, this, &MainWindow::onStopExperiment);
 
     statusLabel_ = new QLabel("Idle");
     statusBar()->addPermanentWidget(statusLabel_);
@@ -142,6 +158,37 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     connect(connectTab, &frontend::ConnectTab::connected, this, [this]()
             {
         if (tabs_) tabs_->setCurrentIndex(1); });
+
+    // Initialize button states (start enabled, stop disabled)
+    updateExperimentButtonStates();
+}
+
+void MainWindow::updateExperimentButtonStates()
+{
+    if (startExperimentAct_ && stopExperimentAct_)
+    {
+        // Disable start when experiment is active, enable when inactive
+        startExperimentAct_->setEnabled(!experimentActive_);
+        // Disable stop when experiment is inactive, enable when active
+        stopExperimentAct_->setEnabled(experimentActive_);
+    }
+
+    // Update visual indicator
+    if (experimentIndicator_)
+    {
+        if (experimentActive_)
+        {
+            // Green/active color when experiment is running
+            experimentIndicator_->setStyleSheet("background-color: #00ff00; border: 1px solid black;");
+            experimentIndicator_->setToolTip(tr("Experiment is running"));
+        }
+        else
+        {
+            // Gray/inactive color when no experiment
+            experimentIndicator_->setStyleSheet("background-color: gray; border: 1px solid black;");
+            experimentIndicator_->setToolTip(tr("No experiment running"));
+        }
+    }
 }
 
 void MainWindow::onStartCapture()
@@ -241,6 +288,7 @@ void MainWindow::onStartExperiment()
 
     experimentActive_ = true;
     statusLabel_->setText("Experiment started");
+    updateExperimentButtonStates();
 }
 
 void MainWindow::onStopExperiment()
@@ -318,6 +366,7 @@ void MainWindow::onStopExperiment()
     }
 
     experimentActive_ = false;
+    updateExperimentButtonStates();
 }
 
 void MainWindow::onUpdateStats()
