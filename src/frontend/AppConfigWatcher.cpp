@@ -279,6 +279,45 @@ namespace frontend
 				af.focusDirection = root.value("focus_direction").toBool(af.focusDirection);
 			backend_.autofocus().setConfig(af);
 		}
+
+		// 5) ROI config (restore if valid and image dimensions match)
+		if (playbackPanel_ && root.contains("roi") && root.value("roi").isObject())
+		{
+			const QJsonObject roiObj = root.value("roi").toObject();
+			if (roiObj.contains("x") && roiObj.contains("y") && roiObj.contains("w") && roiObj.contains("h"))
+			{
+				const int roiX = roiObj.value("x").toInt();
+				const int roiY = roiObj.value("y").toInt();
+				const int roiW = roiObj.value("w").toInt();
+				const int roiH = roiObj.value("h").toInt();
+				
+				// Validate ROI bounds against current image dimensions
+				QSize imgDims = playbackPanel_->getImageDimensions();
+				if (imgDims.width() > 0 && imgDims.height() > 0)
+				{
+					// Check if ROI is valid and within image bounds
+					if (roiW > 0 && roiH > 0 && 
+						roiX >= 0 && roiY >= 0 &&
+						roiX + roiW <= imgDims.width() &&
+						roiY + roiH <= imgDims.height())
+					{
+						QRect roi(roiX, roiY, roiW, roiH);
+						playbackPanel_->setRoi(roi);
+						SPDLOG_INFO("AppConfigWatcher: restored ROI x={}, y={}, w={}, h={}", roiX, roiY, roiW, roiH);
+					}
+					else
+					{
+						SPDLOG_WARN("AppConfigWatcher: ROI from config is invalid or out of bounds, ignoring");
+					}
+				}
+				else
+				{
+					// Image dimensions not available yet, store ROI for later application
+					// This will be handled when image becomes available
+					SPDLOG_DEBUG("AppConfigWatcher: ROI found but image dimensions not available yet");
+				}
+			}
+		}
 	}
 
 } // namespace frontend

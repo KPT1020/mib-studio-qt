@@ -282,11 +282,16 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     setBgBtn_ = new QToolButton(controls);
     setBgBtn_->setText("Set Background");
     setBgBtn_->setToolTip("Capture current frame as background (when paused)");
+    clearRoiBtn_ = new QToolButton(controls);
+    clearRoiBtn_->setText("Clear ROI");
+    clearRoiBtn_->setToolTip("Clear the region of interest (ROI)");
+    clearRoiBtn_->setEnabled(false);
     saveBufferBtn_ = new QToolButton(controls);
     saveBufferBtn_->setText("Save Buffer");
     saveBufferBtn_->setToolTip("Save buffer frames to disk and manage buffer size");
     controlsLayout->addWidget(overlayBtn_);
     controlsLayout->addWidget(setBgBtn_);
+    controlsLayout->addWidget(clearRoiBtn_);
     controlsLayout->addWidget(saveBufferBtn_);
     controlsLayout->addStretch(1);
     layout->addWidget(controls);
@@ -298,6 +303,7 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     connect(slider_, &QSlider::valueChanged, this, &PlaybackPanel::onSliderValueChanged);
     connect(overlayBtn_, &QToolButton::clicked, this, &PlaybackPanel::onToggleOverlay);
     connect(setBgBtn_, &QToolButton::clicked, this, &PlaybackPanel::onSetBackground);
+    connect(clearRoiBtn_, &QToolButton::clicked, this, &PlaybackPanel::onClearRoi);
     connect(saveBufferBtn_, &QToolButton::clicked, this, &PlaybackPanel::onSaveBuffer);
 
     // Space shortcut to start/stop capture
@@ -310,6 +316,7 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     auto *canvas = static_cast<ImageCanvas *>(canvas_);
     canvas->onRoiSelected = [this](const QRect &r)
     {
+        imageRoi_ = r;
         roiActive_ = r.isValid() && !r.isNull();
         SPDLOG_INFO("PlaybackPanel: ROI {}",
                     roiActive_ ? fmt::format("x={}, y={}, w={}, h={}", r.x(), r.y(), r.width(), r.height())
@@ -336,6 +343,14 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
             computeProcessedOverlay();
         }
         canvas_->update();
+        
+        // Update Clear ROI button state
+        if (clearRoiBtn_) {
+            clearRoiBtn_->setEnabled(roiActive_);
+        }
+        
+        // Save ROI to config.json
+        saveRoiToConfig(r);
     };
     canvas->onRequestBackground = [this]()
     {
@@ -424,6 +439,14 @@ void PlaybackPanel::setRoi(const QRect &roi)
     }
     if (canvas_)
         canvas_->update();
+    
+    // Update Clear ROI button state
+    if (clearRoiBtn_) {
+        clearRoiBtn_->setEnabled(roiActive_);
+    }
+    
+    // Save ROI to config.json
+    saveRoiToConfig(roi);
 }
 
 QRect PlaybackPanel::getRoi() const
@@ -672,6 +695,18 @@ void PlaybackPanel::onSetBackground()
         cv::Mat bg(gray.height(), gray.width(), CV_8UC1, const_cast<uchar *>(gray.bits()), gray.bytesPerLine());
         backend_.processing().setRealtimeBackgroundGray(bg.clone());
     }
+    
+    // Update background indicator on button
+    updateBackgroundIndicator();
+}
+
+void PlaybackPanel::onClearRoi()
+{
+    if (!roiActive_) return;
+    
+    // Clear ROI by setting to empty rect
+    QRect emptyRoi;
+    setRoi(emptyRoi);
 }
 
 void PlaybackPanel::onSaveBuffer()
@@ -1053,4 +1088,84 @@ void PlaybackPanel::onLogMetrics()
                                         : static_cast<uint64_t>(std::max(0, imgW)) * static_cast<uint64_t>(std::max(0, imgH));
     SPDLOG_INFO("Playback metrics: display_fps={:.1f}, avg_latency_ms={:.2f}, drops={} (window_drops={}), overlay_ms={:.2f}, roi_area={}, img={}x{}, overlay={}x{}, overlay_mode={}",
                 displayFps, avgLatencyMs, totalDrops_, windowDrops, lastOverlayComputeMs_, roiArea, imgW, imgH, ovW, ovH, static_cast<int>(overlayMode_));
+}
+
+QString PlaybackPanel::getConfigPath() const {
+    QSettings s;
+    const QString ext = s.value("Config/ExternalAppConfigPath").toString().trimmed();
+    if (!ext.isEmpty()) return ext;
+    return QDir(getUserConfigDir()).absoluteFilePath("config.json");
+}
+
+void PlaybackPanel::saveRoiToConfig(const QRect& roi) {
+    const QString configPath = getConfigPath();
+    QFile file(configPath);
+    
+    if (!file.exists()) {
+        SPDLOG_DEBUG("PlaybackPanel: config.json does not exist, skipping ROI save");
+        return;
+    }
+    
+    if (!file.open(QIODevice::ReadWrite | QIODevice::Text)) {
+        SPDLOG_WARN("PlaybackPanel: failed to open config.json for ROI save: {}", file.errorString().toStdString());
+        return;
+    }
+    
+    QByteArray data = file.readAll();
+    QJsonParseError parseError;
+    QJsonDocument doc = QJsonDocument::fromJson(data, &parseError);
+    
+    if (parseError.error != QJsonParseError::NoError) {
+        SPDLOG_WARN("PlaybackPanel: failed to parse config.json for ROI save: {}", parseError.errorString().toStdString());
+        file.close();
+        return;
+    }
+    
+    if (!doc.isObject()) {
+        SPDLOG_WARN("PlaybackPanel: config.json root is not an object, skipping ROI save");
+        file.close();
+        return;
+    }
+    
+    QJsonObject root = doc.object();
+    
+    // Update or create ROI object
+    QJsonObject roiObj;
+    if (roi.isValid() && !roi.isNull()) {
+        roiObj.insert("x", roi.x());
+        roiObj.insert("y", roi.y());
+        roiObj.insert("w", roi.width());
+        roiObj.insert("h", roi.height());
+    } else {
+        // Clear ROI - set to empty or remove
+        roiObj.insert("x", 0);
+        roiObj.insert("y", 0);
+        roiObj.insert("w", 0);
+        roiObj.insert("h", 0);
+    }
+    
+    root.insert("roi", roiObj);
+    doc.setObject(root);
+    
+    // Write back to file
+    file.resize(0);
+    file.seek(0);
+    QTextStream out(&file);
+    out << doc.toJson(QJsonDocument::Indented);
+    file.close();
+    
+    SPDLOG_DEBUG("PlaybackPanel: saved ROI to config.json: x={}, y={}, w={}, h={}", 
+                 roi.x(), roi.y(), roi.width(), roi.height());
+}
+
+void PlaybackPanel::updateBackgroundIndicator() {
+    if (!setBgBtn_) return;
+    
+    if (hasBackground_ && !backgroundGray_.isNull()) {
+        setBgBtn_->setText(QString("Set Background (Set: %1x%2)").arg(backgroundGray_.width()).arg(backgroundGray_.height()));
+        setBgBtn_->setToolTip(QString("Background image is set (%1x%2). Click to update.").arg(backgroundGray_.width()).arg(backgroundGray_.height()));
+    } else {
+        setBgBtn_->setText("Set Background");
+        setBgBtn_->setToolTip("Capture current frame as background (when paused)");
+    }
 }

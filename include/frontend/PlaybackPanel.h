@@ -41,6 +41,7 @@ private slots:
     void onSliderValueChanged(int value);
     void onToggleOverlay();
     void onSetBackground();
+    void onClearRoi();
     void onToggleCapture();
     void onSaveBuffer();
     void onLogMetrics();
@@ -53,6 +54,9 @@ private:
     void updateOverlayButtonUi();
     void resetMetrics();
     void trackFrameDisplay(uint64_t frameIndex, uint64_t frameTimestamp, uint64_t displayTime);
+    void saveRoiToConfig(const QRect& roi);
+    QString getConfigPath() const;
+    void updateBackgroundIndicator();
 
     backend::AppBackend& backend_;
 
@@ -62,6 +66,7 @@ private:
     QSlider* slider_ = nullptr;
     QToolButton* overlayBtn_ = nullptr;
     QToolButton* setBgBtn_ = nullptr;
+    QToolButton* clearRoiBtn_ = nullptr;
     QToolButton* saveBufferBtn_ = nullptr;
     bool scrubbing_ = false;
     bool followLive_ = true;           // auto-follow latest when true

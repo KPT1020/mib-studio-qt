@@ -116,6 +116,146 @@ FlattenTable flattenJsonForTable(const QJsonDocument& doc) {
 	return table;
 }
 
+QMap<QString, FlattenTable> groupJsonBySections(const QJsonDocument& doc) {
+	QMap<QString, FlattenTable> result;
+
+	if (doc.isNull()) {
+		return result;
+	}
+
+	// Only handle top-level objects for grouping
+	if (!doc.isObject()) {
+		// For arrays or scalars, put everything in "General" section
+		FlattenTable general = flattenJsonForTable(doc);
+		if (!general.rows.isEmpty()) {
+			// Convert to 3-column format if needed
+			if (general.columns.size() == 2) {
+				general.columns = {"key", "value", "type"};
+				for (auto& row : general.rows) {
+					if (row.size() == 2) {
+						row.append(""); // Add empty type column
+					}
+				}
+			} else if (general.columns.size() == 1) {
+				general.columns = {"key", "value", "type"};
+				for (auto& row : general.rows) {
+					QString val = row.isEmpty() ? QString() : row[0];
+					row = QVector<QString>{"(value)", val, ""};
+				}
+			}
+			result.insert("General", general);
+		}
+		return result;
+	}
+
+	const QJsonObject root = doc.object();
+	QMap<QString, QString> generalItems;
+
+	// Process each top-level key as a section
+	for (auto it = root.begin(); it != root.end(); ++it) {
+		const QString sectionName = it.key();
+		const QJsonValue sectionValue = it.value();
+
+		FlattenTable sectionTable;
+		
+		if (sectionValue.isObject()) {
+			// Flatten the nested object
+			QMap<QString, QString> flat;
+			flattenInto(sectionValue, QString(), flat);
+			
+			// Create 3-column table: key (relative to section), value, type
+			sectionTable.columns = {"key", "value", "type"};
+			for (auto flatIt = flat.constBegin(); flatIt != flat.constEnd(); ++flatIt) {
+				sectionTable.rows.append(QVector<QString>{
+					flatIt.key(),  // relative key path within section
+					flatIt.value(), // value
+					""              // type (empty for now)
+				});
+			}
+		} else if (sectionValue.isArray()) {
+			// For arrays, flatten each element if objects, otherwise treat as single value
+			const QJsonArray arr = sectionValue.toArray();
+			if (arr.isEmpty()) {
+				continue;
+			}
+			
+			const bool allObjects = std::all_of(arr.begin(), arr.end(), 
+				[](const QJsonValue& v) { return v.isObject(); });
+			
+			if (allObjects) {
+				// Array of objects - create table with union of keys
+				QSet<QString> keySet;
+				QVector<QMap<QString, QString>> flattened;
+				flattened.reserve(arr.size());
+				for (const QJsonValue& v : arr) {
+					QMap<QString, QString> flat;
+					flattenInto(v.toObject(), QString(), flat);
+					for (auto flatIt = flat.constBegin(); flatIt != flat.constEnd(); ++flatIt) {
+						keySet.insert(flatIt.key());
+					}
+					flattened.append(std::move(flat));
+				}
+				sectionTable.columns = QStringList(keySet.cbegin(), keySet.cend());
+				sectionTable.columns.sort(Qt::CaseInsensitive);
+				sectionTable.columns.prepend("key");
+				sectionTable.columns.append("type");
+				
+				for (const auto& flatMap : flattened) {
+					QVector<QString> row;
+					row.append(""); // key column (empty for array elements)
+					row.reserve(sectionTable.columns.size());
+					for (int i = 1; i < sectionTable.columns.size() - 1; ++i) {
+						const QString& col = sectionTable.columns[i];
+						row.append(flatMap.value(col));
+					}
+					row.append(""); // type column
+					sectionTable.rows.append(std::move(row));
+				}
+			} else {
+				// Array of scalars - single row
+				QStringList items;
+				items.reserve(arr.size());
+				for (const QJsonValue& v : arr) {
+					items << toScalarString(v);
+				}
+				sectionTable.columns = {"key", "value", "type"};
+				sectionTable.rows.append(QVector<QString>{
+					"(value)",
+					items.join(", "),
+					""
+				});
+			}
+		} else {
+			// Scalar value - add to general section
+			generalItems.insert(sectionName, toScalarString(sectionValue));
+		}
+
+		if (!sectionTable.rows.isEmpty()) {
+			result.insert(sectionName, sectionTable);
+		}
+	}
+
+	// Add general section for root-level scalars if any
+	if (!generalItems.isEmpty()) {
+		FlattenTable generalTable;
+		generalTable.columns = {"key", "value", "type"};
+		for (auto it = generalItems.constBegin(); it != generalItems.constEnd(); ++it) {
+			generalTable.rows.append(QVector<QString>{it.key(), it.value(), ""});
+		}
+		if (!result.contains("General")) {
+			result.insert("General", generalTable);
+		} else {
+			// Merge with existing General section
+			FlattenTable& existing = result["General"];
+			for (const auto& row : generalTable.rows) {
+				existing.rows.append(row);
+			}
+		}
+	}
+
+	return result;
+}
+
 } // namespace frontend::jsonutil
 
 

@@ -204,13 +204,23 @@ void MainWindow::onStartCapture()
     auto &cap = backend_.capture();
     if (cap.isRunning())
     {
-        return; // Already running
+        QMessageBox::information(this, tr("Start Camera"),
+                                 tr("Camera is already running."));
+        return;
     }
 
     // Start capture only (no experiment)
-    cap.start();
-    statsTimer_->start();
-    statusLabel_->setText("Camera running");
+    if (cap.start())
+    {
+        statsTimer_->start();
+        statusLabel_->setText("Camera running");
+    }
+    else
+    {
+        QMessageBox::warning(this, tr("Start Camera"),
+                             tr("Failed to start camera. Please check camera connection and try again."));
+        statusLabel_->setText("Camera start failed");
+    }
 }
 
 void MainWindow::onStopCapture()
@@ -218,7 +228,9 @@ void MainWindow::onStopCapture()
     auto &cap = backend_.capture();
     if (!cap.isRunning())
     {
-        return; // Not running
+        QMessageBox::information(this, tr("Stop Camera"),
+                                 tr("Camera is not currently running."));
+        return;
     }
 
     // Stop capture only (don't end experiment)

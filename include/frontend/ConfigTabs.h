@@ -16,6 +16,8 @@ class QToolButton;
 class QTimer;
 class QComboBox;
 class QCheckBox;
+class QScrollArea;
+class QGridLayout;
 
 namespace frontend { class JsonTableModel; }
 
@@ -79,8 +81,13 @@ private:
     // JSON tab
     QPlainTextEdit* jsonEdit_ = nullptr;
     QStackedWidget* jsonStack_ = nullptr;
-    QTableView* jsonTable_ = nullptr;
-    JsonTableModel* jsonModel_ = nullptr;
+    QTableView* jsonTable_ = nullptr;  // Legacy single table (kept for backward compatibility during transition)
+    JsonTableModel* jsonModel_ = nullptr;  // Legacy model
+    QScrollArea* jsonScrollArea_ = nullptr;  // Scroll area for grouped tables
+    QWidget* jsonGridContainer_ = nullptr;  // Container widget with grid layout
+    QGridLayout* jsonGridLayout_ = nullptr;  // Grid layout (3 columns) for grouped tables
+    QMap<QString, QTableView*> jsonSectionTables_;  // Map of section name -> table widget
+    QMap<QString, JsonTableModel*> jsonSectionModels_;  // Map of section name -> table model
     QToolButton* jsonTableToggle_ = nullptr;
     QPushButton* jsonReloadBtn_ = nullptr;
     QPushButton* jsonSaveBtn_ = nullptr;

@@ -29,6 +29,8 @@
 #include <QCheckBox>
 #include <QInputDialog>
 #include <QRegularExpression>
+#include <QScrollArea>
+#include <QGridLayout>
 
 #include <spdlog/spdlog.h>
 #ifdef _WIN32
@@ -129,10 +131,16 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         jsonTableToggle_->setToolTip(tr("Toggle table view"));
         jsonTableToggle_->setCheckable(true);
         jsonPathLabel_ = new QLabel(page);
+        jsonPathLabel_->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
+        jsonPathLabel_->setTextFormat(Qt::PlainText);
+        jsonPathLabel_->setWordWrap(false);
+        jsonPathLabel_->setMinimumWidth(0);
+        jsonPathLabel_->setMaximumWidth(400);
         jsonUnsavedLabel_ = new QLabel(page);
         jsonUnsavedLabel_->setText(tr("Unsaved changes – click Save to apply."));
         jsonUnsavedLabel_->setVisible(false);
         jsonUnsavedLabel_->setStyleSheet("color: #d17a00;");
+        jsonUnsavedLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
         profileSelect_ = new QComboBox(page);
         saveProfileBtn_ = new QPushButton(tr("Save Profile"), page);
         deleteProfileBtn_ = new QPushButton(tr("Delete"), page);
@@ -154,8 +162,9 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
 		row->addWidget(jsonTableToggle_);
         v->addLayout(row);
 
+        // Legacy single table (for backward compatibility)
         jsonModel_ = new JsonTableModel(this);
-        jsonTable_ = new QTableView(page);
+        jsonTable_ = new QTableView();
         jsonTable_->setModel(jsonModel_);
         jsonTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
         jsonTable_->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -168,8 +177,30 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
 		jsonTable_->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
 
         jsonStack_ = new QStackedWidget(page);
+        
+        // New grouped tables layout
+        jsonScrollArea_ = new QScrollArea();
+        jsonScrollArea_->setWidgetResizable(true);
+        jsonScrollArea_->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        jsonScrollArea_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        
+        jsonGridContainer_ = new QWidget();
+        jsonGridLayout_ = new QGridLayout(jsonGridContainer_);
+        jsonGridLayout_->setColumnStretch(0, 1);
+        jsonGridLayout_->setColumnStretch(1, 1);
+        jsonGridLayout_->setColumnStretch(2, 1);
+        jsonGridLayout_->setSpacing(10);
+        jsonGridLayout_->setContentsMargins(5, 5, 5, 5);
+        
+        jsonScrollArea_->setWidget(jsonGridContainer_);
+
         jsonStack_->addWidget(jsonEdit_);
-        jsonStack_->addWidget(jsonTable_);
+        jsonStack_->addWidget(jsonScrollArea_);  // Use scroll area instead of single table
+        // Legacy table is not added to stack - it's kept for backward compatibility but hidden
+        if (jsonTable_) {
+            jsonTable_->setParent(nullptr);
+            jsonTable_->hide();
+        }
         v->addWidget(jsonStack_, 1);
 
         // Persist toggle choice
@@ -569,15 +600,130 @@ void ConfigTabs::onJsonTextChangedDebounced() {
 }
 
 void ConfigTabs::refreshJsonTableModel() {
-    if (!jsonModel_) return;
+    if (!jsonModel_ || !jsonGridLayout_) return;
     const QByteArray bytes = jsonEdit_ ? jsonEdit_->toPlainText().toUtf8() : QByteArray();
     QJsonParseError err;
     const QJsonDocument doc = QJsonDocument::fromJson(bytes, &err);
     if (err.error != QJsonParseError::NoError) {
         SPDLOG_WARN("JSON parse error at offset {}: {}", err.offset, err.errorString().toStdString());
         jsonModel_->clear();
+        // Clear all section tables
+        for (auto* model : jsonSectionModels_) {
+            if (model) model->clear();
+        }
         return;
     }
+    
+    // Use grouped layout
+    const auto grouped = jsonutil::groupJsonBySections(doc);
+    
+    // Get list of current section names
+    QStringList currentSections = jsonSectionTables_.keys();
+    QStringList newSections = grouped.keys();
+    
+    // Remove sections that no longer exist
+    for (const QString& sectionName : currentSections) {
+        if (!newSections.contains(sectionName)) {
+            QTableView* table = jsonSectionTables_.take(sectionName);
+            JsonTableModel* model = jsonSectionModels_.take(sectionName);
+            if (table && jsonGridLayout_) {
+                // Find and remove label
+                QLabel* label = jsonGridContainer_->findChild<QLabel*>(QString("label_%1").arg(sectionName));
+                if (label) {
+                    jsonGridLayout_->removeWidget(label);
+                    label->deleteLater();
+                }
+                jsonGridLayout_->removeWidget(table);
+                table->deleteLater();
+            }
+            if (model) {
+                model->deleteLater();
+            }
+        }
+    }
+    
+    // Clear grid layout (but keep widgets)
+    if (jsonGridLayout_) {
+        while (jsonGridLayout_->count() > 0) {
+            QLayoutItem* item = jsonGridLayout_->takeAt(0);
+            if (item && item->widget()) {
+                item->widget()->hide();
+            }
+            delete item;
+        }
+    }
+    
+    // Update or create section tables and add to grid
+    const int colsPerRow = 3;
+    QStringList sortedSections = grouped.keys();
+    sortedSections.sort(Qt::CaseInsensitive);
+    
+    int gridRow = 0;
+    int gridCol = 0;
+    
+    for (const QString& sectionName : sortedSections) {
+        const jsonutil::FlattenTable& sectionTable = grouped[sectionName];
+        
+        QTableView* table = jsonSectionTables_.value(sectionName, nullptr);
+        JsonTableModel* model = jsonSectionModels_.value(sectionName, nullptr);
+        
+        if (!table) {
+            // Create new table and model
+            model = new JsonTableModel(this);
+            table = new QTableView(jsonGridContainer_);
+            table->setModel(model);
+            table->setSelectionBehavior(QAbstractItemView::SelectRows);
+            table->setSelectionMode(QAbstractItemView::SingleSelection);
+            table->setAlternatingRowColors(true);
+            table->setSortingEnabled(false);
+            table->setWordWrap(true);
+            table->setTextElideMode(Qt::ElideNone);
+            table->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+            table->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
+            table->setMinimumHeight(150);
+            table->setMaximumHeight(400);
+            
+            // Connect dataChanged signal
+            connect(model, &QAbstractItemModel::dataChanged, this,
+                    [this](const QModelIndex&, const QModelIndex&, const QVector<int>&) { rebuildJsonFromTable(); });
+            
+            jsonSectionTables_[sectionName] = table;
+            jsonSectionModels_[sectionName] = model;
+        }
+        
+        // Update model data
+        if (model) {
+            model->setFromFlatten(sectionTable.columns, sectionTable.rows);
+        }
+        
+        // Create or get section label
+        QLabel* label = jsonGridContainer_->findChild<QLabel*>(QString("label_%1").arg(sectionName));
+        if (!label) {
+            label = new QLabel(QString("<b>%1</b>").arg(sectionName), jsonGridContainer_);
+            label->setObjectName(QString("label_%1").arg(sectionName));
+        }
+        label->show();
+        table->show();
+        
+        // Add to grid: label in row gridRow*2, table in row gridRow*2+1
+        jsonGridLayout_->addWidget(label, gridRow * 2, gridCol, 1, 1);
+        jsonGridLayout_->addWidget(table, gridRow * 2 + 1, gridCol, 1, 1);
+        
+        // Resize columns
+        if (table) {
+            table->resizeColumnsToContents();
+            table->resizeRowsToContents();
+        }
+        
+        // Move to next column, wrap to next row if needed
+        gridCol++;
+        if (gridCol >= colsPerRow) {
+            gridCol = 0;
+            gridRow++;
+        }
+    }
+    
+    // Also update legacy single table for backward compatibility
     const auto flattened = jsonutil::flattenJsonForTable(doc);
     jsonModel_->setFromFlatten(flattened.columns, flattened.rows);
     if (jsonTable_) {
@@ -587,33 +733,93 @@ void ConfigTabs::refreshJsonTableModel() {
 }
 
 void ConfigTabs::rebuildJsonFromTable() {
-	if (!jsonModel_ || !jsonEdit_) return;
-	const auto& cols = jsonModel_->columns();
-	const auto& rows = jsonModel_->rows();
-	QJsonDocument outDoc;
-	if (cols.size() == 2 && cols.at(0) == "key" && cols.at(1) == "value") {
-		QJsonObject root;
-		for (const auto& r : rows) {
-			if (r.size() < 2) continue;
-			const QString keyPath = r.at(0);
-			const QString valStr = r.at(1);
-			setObjectValueByPath(root, keyPath, parseValueFromString(valStr));
-		}
-		outDoc = QJsonDocument(root);
-	} else {
-		// Treat as array of objects
-		QJsonArray arr;
-		for (const auto& r : rows) {
-			QJsonObject obj;
-			for (int c = 0; c < cols.size() && c < r.size(); ++c) {
-				const QString keyPath = cols.at(c);
-				const QString valStr = r.at(c);
-				setObjectValueByPath(obj, keyPath, parseValueFromString(valStr));
+	if (!jsonEdit_) return;
+	
+	QJsonObject root;
+	
+	// Collect data from all section tables
+	for (auto it = jsonSectionModels_.constBegin(); it != jsonSectionModels_.constEnd(); ++it) {
+		const QString& sectionName = it.key();
+		JsonTableModel* model = it.value();
+		if (!model) continue;
+		
+		const auto& cols = model->columns();
+		const auto& rows = model->rows();
+		
+		if (cols.size() >= 2 && cols.at(0) == "key" && cols.at(1) == "value") {
+			// Key-value format: build nested object under section name
+			QJsonObject sectionObj;
+			for (const auto& r : rows) {
+				if (r.size() < 2) continue;
+				const QString keyPath = r.at(0);
+				const QString valStr = r.at(1);
+				if (!keyPath.isEmpty() && keyPath != "(value)") {
+					setObjectValueByPath(sectionObj, keyPath, parseValueFromString(valStr));
+				} else if (keyPath == "(value)") {
+					// Scalar value for the section itself
+					root.insert(sectionName, parseValueFromString(valStr));
+					sectionObj = QJsonObject(); // Clear, we've set it directly
+					break;
+				}
 			}
-			arr.append(obj);
+			if (!sectionObj.isEmpty()) {
+				root.insert(sectionName, sectionObj);
+			}
+		} else if (cols.size() > 2) {
+			// Array of objects format: build array under section name
+			QJsonArray arr;
+			for (const auto& r : rows) {
+				QJsonObject obj;
+				for (int c = 0; c < cols.size() && c < r.size(); ++c) {
+					const QString keyPath = cols.at(c);
+					const QString valStr = r.at(c);
+					if (!keyPath.isEmpty() && keyPath != "key" && keyPath != "type") {
+						setObjectValueByPath(obj, keyPath, parseValueFromString(valStr));
+					}
+				}
+				if (!obj.isEmpty()) {
+					arr.append(obj);
+				}
+			}
+			if (!arr.isEmpty()) {
+				root.insert(sectionName, arr);
+			}
 		}
-		outDoc = QJsonDocument(arr);
 	}
+	
+	// Fallback to legacy single table if no section tables exist
+	if (root.isEmpty() && jsonModel_) {
+		const auto& cols = jsonModel_->columns();
+		const auto& rows = jsonModel_->rows();
+		if (cols.size() == 2 && cols.at(0) == "key" && cols.at(1) == "value") {
+			for (const auto& r : rows) {
+				if (r.size() < 2) continue;
+				const QString keyPath = r.at(0);
+				const QString valStr = r.at(1);
+				setObjectValueByPath(root, keyPath, parseValueFromString(valStr));
+			}
+		} else {
+			QJsonArray arr;
+			for (const auto& r : rows) {
+				QJsonObject obj;
+				for (int c = 0; c < cols.size() && c < r.size(); ++c) {
+					const QString keyPath = cols.at(c);
+					const QString valStr = r.at(c);
+					setObjectValueByPath(obj, keyPath, parseValueFromString(valStr));
+				}
+				arr.append(obj);
+			}
+			QJsonDocument arrDoc(arr);
+			// Update editor without triggering table refresh loop
+			const bool blocked = jsonEdit_->blockSignals(true);
+			jsonEdit_->setPlainText(QString::fromUtf8(arrDoc.toJson(QJsonDocument::Indented)));
+			jsonEdit_->blockSignals(blocked);
+			if (jsonUnsavedLabel_) jsonUnsavedLabel_->setVisible(true);
+			return;
+		}
+	}
+	
+	QJsonDocument outDoc(root);
 	// Update editor without triggering table refresh loop
 	const bool blocked = jsonEdit_->blockSignals(true);
 	jsonEdit_->setPlainText(QString::fromUtf8(outDoc.toJson(QJsonDocument::Indented)));

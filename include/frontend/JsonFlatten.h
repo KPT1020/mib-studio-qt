@@ -5,6 +5,7 @@
 #include <QJsonArray>
 #include <QStringList>
 #include <QVector>
+#include <QMap>
 
 namespace frontend::jsonutil {
 
@@ -19,6 +20,11 @@ struct FlattenTable {
 // - Other arrays => joined string in a single "(value)" column.
 // - Scalars => single "(value)" column.
 FlattenTable flattenJsonForTable(const QJsonDocument& doc);
+
+// Groups JSON by top-level object keys, returning a map of section name -> flattened table.
+// Root-level scalar values are grouped into a "General" section.
+// Each section's table has 3 columns: key (relative to section), value, and type (empty for now).
+QMap<QString, FlattenTable> groupJsonBySections(const QJsonDocument& doc);
 
 } // namespace frontend::jsonutil
 
