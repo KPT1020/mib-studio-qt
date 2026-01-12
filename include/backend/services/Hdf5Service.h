@@ -80,6 +80,9 @@ public:
 
     // Chart snapshot saving (for saving chart images to HDF5)
     bool saveChartSnapshot(const std::string& datasetPath, const cv::Mat& image);
+    
+    // Chart snapshot reading (for reading 2D/3D chart images without batch dimension)
+    bool readChartSnapshot(const std::string& datasetPath, cv::Mat& outImage) const;
 
 private:
     struct Impl;

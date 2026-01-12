@@ -7,7 +7,7 @@
 namespace camera::common {
 
 struct CameraConfig {
-    int bufferPartCount = 100;
+    int bufferPartCount = 1;
     int numBuffers = 20;
 };
 

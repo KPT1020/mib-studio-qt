@@ -32,6 +32,17 @@ class QVBoxLayout;
 class QHBoxLayout;
 class QCheckBox;
 class QSpacerItem;
+class QChartView;
+class QChart;
+class QScatterSeries;
+class QLineSeries;
+class QValueAxis;
+#if __has_include(<QHistogramSeries>)
+class QHistogramSeries;
+#else
+class QBarSeries;
+class QBarCategoryAxis;
+#endif
 
 namespace frontend
 {
@@ -83,6 +94,11 @@ namespace frontend
         void exportAllImagesToTiff(const QString& baseDir);
         bool exportChartFromHdf5(const std::string& datasetPath, const QString& filePath);
         void exportAllData(const QString& baseDir);
+        void updateCharts();
+        void generateScatterPlot(const std::vector<backend::services::ProcessedFrame>& validFrames);
+        void generateHistogram(const std::vector<backend::services::ProcessedFrame>& validFrames);
+        void loadIsoelasticCurves();
+        QPixmap chartToPixmap(QChartView* chartView) const;
 
         backend::AppBackend &backend_;
         std::unique_ptr<backend::services::Hdf5Service> hdfReader_;
@@ -116,6 +132,26 @@ namespace frontend
         HdfMetricsModel *invalidMetricsModel_ = nullptr;
         QSpacerItem *invalidBottomSpacer_ = nullptr;
         QSpacerItem *invalidTopSpacer_ = nullptr;
+
+        // Charts tab
+        QWidget *chartsWidget_ = nullptr;
+        QHBoxLayout *chartsLayout_ = nullptr;
+        QChartView *scatterPlotView_ = nullptr;
+        QChart *scatterPlotChart_ = nullptr;
+        QScatterSeries *scatterSeries_ = nullptr;
+        QValueAxis *scatterXAxis_ = nullptr;
+        QValueAxis *scatterYAxis_ = nullptr;
+        std::vector<QLineSeries*> isoelasticCurves_;
+        QChartView *histogramView_ = nullptr;
+        QChart *histogramChart_ = nullptr;
+#if __has_include(<QHistogramSeries>)
+        QHistogramSeries *histogramSeries_ = nullptr;
+#else
+        QBarSeries *histogramBarSeries_ = nullptr;
+        QBarCategoryAxis *histogramCategoryAxis_ = nullptr;
+#endif
+        QValueAxis *histogramXAxis_ = nullptr;
+        QValueAxis *histogramYAxis_ = nullptr;
 
         // Data
         std::vector<backend::services::ProcessedFrame> validFrames_;

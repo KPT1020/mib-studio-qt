@@ -1879,4 +1879,110 @@ namespace backend::services {
         return true;
     }
 
+    bool Hdf5Service::readChartSnapshot(const std::string& datasetPath, cv::Mat& outImage) const
+    {
+        outImage.release();
+
+        if (!isFileOpen())
+        {
+            SPDLOG_ERROR("readChartSnapshot: HDF5 file is not open");
+            return false;
+        }
+
+        // Check existence - suppress HDF5 diagnostic errors for non-existent links
+        H5E_auto_t old_func;
+        void* old_client_data;
+        H5Eget_auto(H5E_DEFAULT, &old_func, &old_client_data);
+        H5Eset_auto(H5E_DEFAULT, nullptr, nullptr);
+        
+        htri_t exists = H5Lexists(impl_->fileId_, datasetPath.c_str(), H5P_DEFAULT);
+        
+        // Restore error handling
+        H5Eset_auto(H5E_DEFAULT, old_func, old_client_data);
+        
+        if (exists <= 0)
+        {
+            SPDLOG_DEBUG("readChartSnapshot: dataset {} does not exist", datasetPath);
+            return false;
+        }
+
+        // Open dataset
+        hid_t datasetId = H5Dopen2(impl_->fileId_, datasetPath.c_str(), H5P_DEFAULT);
+        if (datasetId < 0)
+        {
+            SPDLOG_ERROR("readChartSnapshot: failed to open dataset {}", datasetPath);
+            return false;
+        }
+
+        // Get dataspace
+        hid_t dataspaceId = H5Dget_space(datasetId);
+        if (dataspaceId < 0)
+        {
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("readChartSnapshot: failed to get dataspace for {}", datasetPath);
+            return false;
+        }
+
+        // Get dimensions
+        int ndims = H5Sget_simple_extent_ndims(dataspaceId);
+        hsize_t dims[4] = {0, 0, 0, 0};
+        if (H5Sget_simple_extent_dims(dataspaceId, dims, nullptr) < 0)
+        {
+            H5Sclose(dataspaceId);
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("readChartSnapshot: failed to get extent for {}", datasetPath);
+            return false;
+        }
+
+        // Chart snapshots are stored as 2D (H, W) or 3D (H, W, C)
+        int height = 0;
+        int width = 0;
+        int channels = 1;
+
+        if (ndims == 2)
+        {
+            // 2D: (H, W) - grayscale
+            height = static_cast<int>(dims[0]);
+            width = static_cast<int>(dims[1]);
+            channels = 1;
+        }
+        else if (ndims == 3)
+        {
+            // 3D: (H, W, C) - color
+            height = static_cast<int>(dims[0]);
+            width = static_cast<int>(dims[1]);
+            channels = static_cast<int>(dims[2]);
+        }
+        else
+        {
+            H5Sclose(dataspaceId);
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("readChartSnapshot: unsupported ndims={} for {} (expected 2 or 3)", ndims, datasetPath);
+            return false;
+        }
+
+        SPDLOG_DEBUG("readChartSnapshot: reading {}x{}x{} from {}", height, width, channels, datasetPath);
+
+        // Allocate output image
+        int cvType = (channels == 1) ? CV_8UC1 : CV_8UC3;
+        outImage = cv::Mat(height, width, cvType);
+
+        // Read data
+        herr_t status = H5Dread(datasetId, H5T_NATIVE_UINT8, H5S_ALL, H5S_ALL, H5P_DEFAULT, outImage.data);
+        
+        H5Sclose(dataspaceId);
+        H5Dclose(datasetId);
+
+        if (status < 0)
+        {
+            outImage.release();
+            SPDLOG_ERROR("readChartSnapshot: failed to read data from {}", datasetPath);
+            return false;
+        }
+
+        // Note: Charts are saved as BGR (OpenCV format), matToQImage will handle BGR->RGB conversion
+        SPDLOG_DEBUG("readChartSnapshot: successfully read {}x{}x{} from {}", height, width, channels, datasetPath);
+        return true;
+    }
+
 } // namespace backend::services

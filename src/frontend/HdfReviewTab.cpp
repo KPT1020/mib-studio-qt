@@ -21,7 +21,31 @@
 #include <QFile>
 #include <QTextStream>
 #include <QCheckBox>
+#include <QChartView>
+#include <QLineSeries>
+#include <QCoreApplication>
+#include <QDir>
+#include <QEventLoop>
+#include <map>
+#include <QScatterSeries>
+#include <QChart>
+#include <QValueAxis>
 #include <algorithm>
+#include <limits>
+#ifndef MIB_HAS_QHISTOGRAMSERIES
+#if __has_include(<QHistogramSeries>)
+#define MIB_HAS_QHISTOGRAMSERIES 1
+#else
+#define MIB_HAS_QHISTOGRAMSERIES 0
+#endif
+#endif
+#if MIB_HAS_QHISTOGRAMSERIES
+#include <QHistogramSeries>
+#else
+#include <QBarSeries>
+#include <QBarSet>
+#include <QBarCategoryAxis>
+#endif
 
 #include "backend/AppBackend.h"
 #include "backend/services/Hdf5Service.h"
@@ -192,6 +216,89 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
     
     frameTypeTabs_->addTab(invalidFramesWidget_, tr("Invalid Frames"));
 
+    // Charts tab
+    chartsWidget_ = new QWidget(this);
+    chartsLayout_ = new QHBoxLayout(chartsWidget_);
+    chartsLayout_->setContentsMargins(6, 6, 6, 6);
+    chartsLayout_->setSpacing(6);
+    
+    // Left side: Scatter plot chart
+    auto* scatterContainer = new QWidget(chartsWidget_);
+    auto* scatterContainerLayout = new QVBoxLayout(scatterContainer);
+    scatterContainerLayout->setContentsMargins(0, 0, 0, 0);
+    scatterContainerLayout->setSpacing(4);
+    
+    scatterPlotChart_ = new QChart();
+    scatterSeries_ = new QScatterSeries();
+    scatterSeries_->setMarkerSize(6.0);
+    scatterSeries_->setName("Valid Frames");
+    scatterPlotChart_->addSeries(scatterSeries_);
+    scatterPlotChart_->setTitle("Deformability vs Area (μm²)");
+    scatterPlotChart_->legend()->setVisible(false);
+    
+    scatterXAxis_ = new QValueAxis();
+    scatterXAxis_->setTitleText("Area (μm²)");
+    scatterYAxis_ = new QValueAxis();
+    scatterYAxis_->setTitleText("Deformability");
+    scatterPlotChart_->addAxis(scatterXAxis_, Qt::AlignBottom);
+    scatterPlotChart_->addAxis(scatterYAxis_, Qt::AlignLeft);
+    scatterSeries_->attachAxis(scatterXAxis_);
+    scatterSeries_->attachAxis(scatterYAxis_);
+    
+    // Load isoelastic curves overlay
+    loadIsoelasticCurves();
+    
+    scatterPlotView_ = new QChartView(scatterPlotChart_, scatterContainer);
+    scatterPlotView_->setRenderHint(QPainter::Antialiasing);
+    scatterPlotView_->setMinimumHeight(300);
+    scatterContainerLayout->addWidget(new QLabel(tr("Scatter Plot"), scatterContainer));
+    scatterContainerLayout->addWidget(scatterPlotView_, 1);
+    chartsLayout_->addWidget(scatterContainer, 1);
+    
+    // Right side: Histogram chart
+    auto* histogramContainer = new QWidget(chartsWidget_);
+    auto* histogramContainerLayout = new QVBoxLayout(histogramContainer);
+    histogramContainerLayout->setContentsMargins(0, 0, 0, 0);
+    histogramContainerLayout->setSpacing(4);
+    
+    histogramChart_ = new QChart();
+    histogramChart_->setTitle("Ring Width Distribution");
+    histogramChart_->legend()->setVisible(false);
+    
+    histogramYAxis_ = new QValueAxis();
+    histogramYAxis_->setTitleText("Frequency");
+    histogramChart_->addAxis(histogramYAxis_, Qt::AlignLeft);
+    
+#if MIB_HAS_QHISTOGRAMSERIES
+    histogramSeries_ = new QHistogramSeries();
+    histogramSeries_->setName("Ring Width");
+    histogramChart_->addSeries(histogramSeries_);
+    histogramXAxis_ = new QValueAxis();
+    histogramXAxis_->setLabelsAngle(-90);
+    histogramXAxis_->setLabelFormat("%.2f");
+    histogramChart_->addAxis(histogramXAxis_, Qt::AlignBottom);
+    histogramSeries_->attachAxis(histogramXAxis_);
+    histogramSeries_->attachAxis(histogramYAxis_);
+#else
+    histogramBarSeries_ = new QBarSeries();
+    histogramChart_->addSeries(histogramBarSeries_);
+    histogramCategoryAxis_ = new QBarCategoryAxis();
+    histogramCategoryAxis_->setLabelsAngle(-90);
+    histogramChart_->addAxis(histogramCategoryAxis_, Qt::AlignBottom);
+    histogramBarSeries_->attachAxis(histogramCategoryAxis_);
+    histogramBarSeries_->attachAxis(histogramYAxis_);
+    histogramXAxis_ = nullptr;
+#endif
+    
+    histogramView_ = new QChartView(histogramChart_, histogramContainer);
+    histogramView_->setRenderHint(QPainter::Antialiasing);
+    histogramView_->setMinimumHeight(300);
+    histogramContainerLayout->addWidget(new QLabel(tr("Histogram"), histogramContainer));
+    histogramContainerLayout->addWidget(histogramView_, 1);
+    chartsLayout_->addWidget(histogramContainer, 1);
+    
+    frameTypeTabs_->addTab(chartsWidget_, tr("Charts"));
+
     rootLayout->addWidget(frameTypeTabs_, 1);
 
     connect(frameTypeTabs_, QOverload<int>::of(&QTabWidget::currentChanged), 
@@ -210,7 +317,16 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
             });
 }
 
-HdfReviewTab::~HdfReviewTab() = default;
+HdfReviewTab::~HdfReviewTab() {
+    // Clean up isoelastic curve line series
+    for (auto it = isoelasticCurves_.begin(); it != isoelasticCurves_.end(); ++it) {
+        QLineSeries* series = *it;
+        if (series) {
+            delete series;
+        }
+    }
+    isoelasticCurves_.clear();
+}
 
 void HdfReviewTab::onSelectFile() {
     QString filePath = QFileDialog::getOpenFileName(
@@ -308,6 +424,9 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
         roiOverlayCheck_->setEnabled(true);
     }
 
+    // Update charts tab with snapshots from HDF5
+    updateCharts();
+
     // Prefer actual dataset/metadata counts for status display (experiment info may be stale)
     {
         const size_t shownValid = !validFrames_.empty() ? validFrames_.size()
@@ -377,6 +496,36 @@ void HdfReviewTab::clearDisplay() {
 
     if (validMetricsModel_) validMetricsModel_->setSource(&validFrames_);
     if (invalidMetricsModel_) invalidMetricsModel_->setSource(&invalidFrames_);
+
+    // Clear charts
+    if (scatterSeries_) {
+        scatterSeries_->clear();
+    }
+    // Clear isoelastic curves (they will be reloaded when charts are regenerated)
+    for (auto it = isoelasticCurves_.begin(); it != isoelasticCurves_.end(); ++it) {
+        QLineSeries* series = *it;
+        if (series) {
+            scatterPlotChart_->removeSeries(series);
+            delete series;
+        }
+    }
+    isoelasticCurves_.clear();
+    if (scatterXAxis_ && scatterYAxis_) {
+        scatterXAxis_->setRange(0, 1000);
+        scatterYAxis_->setRange(0, 1);
+    }
+#if MIB_HAS_QHISTOGRAMSERIES
+    if (histogramSeries_) {
+        histogramSeries_->clear();
+    }
+#else
+    if (histogramBarSeries_) {
+        histogramBarSeries_->clear();
+    }
+#endif
+    if (histogramYAxis_) {
+        histogramYAxis_->setRange(0, 1);
+    }
 }
 
 void HdfReviewTab::updateImageGrid(const std::vector<backend::services::ProcessedFrame>& frames) {
@@ -1260,9 +1409,9 @@ void HdfReviewTab::onExportAll() {
 }
 
 void HdfReviewTab::onExportCharts() {
-    if (!hdfReader_) {
+    if (validFrames_.empty() && invalidFrames_.empty()) {
         QMessageBox::warning(this, tr("Export Error"),
-                            tr("No HDF5 file loaded."));
+                            tr("No data available to export charts."));
         return;
     }
 
@@ -1275,15 +1424,51 @@ void HdfReviewTab::onExportCharts() {
     QDir dir(dirPath);
     bool success = true;
     
-    // Export histogram
-    QString histogramPath = dir.filePath("ring_width_histogram.tiff");
-    if (!exportChartFromHdf5("/experiment_info/chart_snapshots/ring_width_histogram", histogramPath)) {
-        success = false;
-    }
+    // Generate charts from current data
+    generateScatterPlot(validFrames_);
+    generateHistogram(validFrames_);
     
     // Export scatter plot
     QString scatterPath = dir.filePath("scatter_plot.tiff");
-    if (!exportChartFromHdf5("/experiment_info/chart_snapshots/scatter_plot", scatterPath)) {
+    QPixmap scatterPixmap = chartToPixmap(scatterPlotView_);
+    if (!scatterPixmap.isNull()) {
+        QImage scatterImage = scatterPixmap.toImage();
+        // Convert to RGB32 format for consistent handling
+        scatterImage = scatterImage.convertToFormat(QImage::Format_RGB32);
+        cv::Mat scatterMat(scatterImage.height(), scatterImage.width(), CV_8UC4, 
+                          const_cast<uchar*>(scatterImage.constBits()), 
+                          scatterImage.bytesPerLine());
+        cv::Mat scatterBGR;
+        cv::cvtColor(scatterMat, scatterBGR, cv::COLOR_RGBA2BGR);
+        if (!cv::imwrite(scatterPath.toStdString(), scatterBGR)) {
+            SPDLOG_WARN("Failed to write scatter plot TIFF: {}", scatterPath.toStdString());
+            success = false;
+        } else {
+            SPDLOG_INFO("Exported scatter plot {}x{} to {}", scatterBGR.cols, scatterBGR.rows, scatterPath.toStdString());
+        }
+    } else {
+        success = false;
+    }
+    
+    // Export histogram
+    QString histogramPath = dir.filePath("ring_width_histogram.tiff");
+    QPixmap histogramPixmap = chartToPixmap(histogramView_);
+    if (!histogramPixmap.isNull()) {
+        QImage histogramImage = histogramPixmap.toImage();
+        // Convert to RGB32 format for consistent handling
+        histogramImage = histogramImage.convertToFormat(QImage::Format_RGB32);
+        cv::Mat histogramMat(histogramImage.height(), histogramImage.width(), CV_8UC4, 
+                            const_cast<uchar*>(histogramImage.constBits()), 
+                            histogramImage.bytesPerLine());
+        cv::Mat histogramBGR;
+        cv::cvtColor(histogramMat, histogramBGR, cv::COLOR_RGBA2BGR);
+        if (!cv::imwrite(histogramPath.toStdString(), histogramBGR)) {
+            SPDLOG_WARN("Failed to write histogram TIFF: {}", histogramPath.toStdString());
+            success = false;
+        } else {
+            SPDLOG_INFO("Exported histogram {}x{} to {}", histogramBGR.cols, histogramBGR.rows, histogramPath.toStdString());
+        }
+    } else {
         success = false;
     }
     
@@ -1292,7 +1477,7 @@ void HdfReviewTab::onExportCharts() {
                                 tr("Charts exported successfully to:\n%1").arg(dirPath));
     } else {
         QMessageBox::warning(this, tr("Export Warning"),
-                            tr("Some charts may not have been exported. Chart snapshots may not exist in HDF5 file."));
+                            tr("Some charts may not have been exported."));
     }
 }
 
@@ -1420,14 +1605,47 @@ void HdfReviewTab::exportAllData(const QString& baseDir) {
         }
     }
 
-    // Export charts
-    QString histogramPath = dir.filePath("ring_width_histogram.tiff");
-    if (!exportChartFromHdf5("/experiment_info/chart_snapshots/ring_width_histogram", histogramPath)) {
+    // Generate and export charts from current data
+    generateScatterPlot(validFrames_);
+    generateHistogram(validFrames_);
+    
+    QString scatterPath = dir.filePath("scatter_plot.tiff");
+    QPixmap scatterPixmap = chartToPixmap(scatterPlotView_);
+    if (!scatterPixmap.isNull()) {
+        QImage scatterImage = scatterPixmap.toImage();
+        // Convert to RGB32 format for consistent handling
+        scatterImage = scatterImage.convertToFormat(QImage::Format_RGB32);
+        cv::Mat scatterMat(scatterImage.height(), scatterImage.width(), CV_8UC4, 
+                          const_cast<uchar*>(scatterImage.constBits()), 
+                          scatterImage.bytesPerLine());
+        cv::Mat scatterBGR;
+        cv::cvtColor(scatterMat, scatterBGR, cv::COLOR_RGBA2BGR);
+        if (!cv::imwrite(scatterPath.toStdString(), scatterBGR)) {
+            chartsExported = false;
+        } else {
+            SPDLOG_INFO("Exported scatter plot {}x{} to {}", scatterBGR.cols, scatterBGR.rows, scatterPath.toStdString());
+        }
+    } else {
         chartsExported = false;
     }
     
-    QString scatterPath = dir.filePath("scatter_plot.tiff");
-    if (!exportChartFromHdf5("/experiment_info/chart_snapshots/scatter_plot", scatterPath)) {
+    QString histogramPath = dir.filePath("ring_width_histogram.tiff");
+    QPixmap histogramPixmap = chartToPixmap(histogramView_);
+    if (!histogramPixmap.isNull()) {
+        QImage histogramImage = histogramPixmap.toImage();
+        // Convert to RGB32 format for consistent handling
+        histogramImage = histogramImage.convertToFormat(QImage::Format_RGB32);
+        cv::Mat histogramMat(histogramImage.height(), histogramImage.width(), CV_8UC4, 
+                            const_cast<uchar*>(histogramImage.constBits()), 
+                            histogramImage.bytesPerLine());
+        cv::Mat histogramBGR;
+        cv::cvtColor(histogramMat, histogramBGR, cv::COLOR_RGBA2BGR);
+        if (!cv::imwrite(histogramPath.toStdString(), histogramBGR)) {
+            chartsExported = false;
+        } else {
+            SPDLOG_INFO("Exported histogram {}x{} to {}", histogramBGR.cols, histogramBGR.rows, histogramPath.toStdString());
+        }
+    } else {
         chartsExported = false;
     }
 
@@ -1440,6 +1658,347 @@ void HdfReviewTab::exportAllData(const QString& baseDir) {
     QMessageBox::information(this, tr("Export Complete"), message);
     SPDLOG_INFO("Exported all data: CSV={}, Images={}/{}, Charts={}, Location={}",
                 csvExported, exportedImages, totalImages, chartsExported, baseDir.toStdString());
+}
+
+void HdfReviewTab::updateCharts() {
+    if (!scatterPlotChart_ || !histogramChart_) {
+        SPDLOG_WARN("HdfReviewTab::updateCharts: chart widgets are null");
+        return;
+    }
+
+    // Generate charts from loaded frame data
+    generateScatterPlot(validFrames_);
+    generateHistogram(validFrames_);
+    
+    // Reload isoelastic curves if they were cleared (e.g., after clearDisplay)
+    if (isoelasticCurves_.empty()) {
+        loadIsoelasticCurves();
+    }
+    
+    SPDLOG_INFO("HdfReviewTab::updateCharts: Generated charts from {} valid frames", validFrames_.size());
+}
+
+void HdfReviewTab::generateScatterPlot(const std::vector<backend::services::ProcessedFrame>& validFrames) {
+    if (!scatterSeries_ || !scatterXAxis_ || !scatterYAxis_) {
+        return;
+    }
+
+    scatterSeries_->clear();
+
+    if (validFrames.empty()) {
+        scatterXAxis_->setRange(0, 1000);
+        scatterYAxis_->setRange(0, 1);
+        return;
+    }
+
+    // Get conversion factor from backend (pixels to microns)
+    const double conversionFactor = backend_.processing().getPixelToMicronFactor();
+    // Area conversion: pixels² to microns² = pixels² * (microns/pixel)²
+    const double areaConversionFactor = conversionFactor * conversionFactor;
+
+    // Collect points
+    std::vector<std::pair<double, double>> points;
+    double minArea = std::numeric_limits<double>::max();
+    double maxArea = std::numeric_limits<double>::lowest();
+    double minDeform = std::numeric_limits<double>::max();
+    double maxDeform = std::numeric_limits<double>::lowest();
+
+    for (const auto& frame : validFrames) {
+        if (frame.validation.isValid) {
+            // Convert area from pixels² to microns²
+            double areaPixels = frame.validation.area;
+            double areaMicrons = areaPixels * areaConversionFactor;
+            double deform = frame.validation.deformability;
+            points.push_back({areaMicrons, deform});
+
+            minArea = std::min(minArea, areaMicrons);
+            maxArea = std::max(maxArea, areaMicrons);
+            minDeform = std::min(minDeform, deform);
+            maxDeform = std::max(maxDeform, deform);
+        }
+    }
+
+    if (points.empty()) {
+        scatterXAxis_->setRange(0, 1000);
+        scatterYAxis_->setRange(0, 1);
+        return;
+    }
+
+    // Add scatter points
+    for (const auto& p : points) {
+        scatterSeries_->append(p.first, p.second);
+    }
+
+    // Set axis ranges with padding
+    if (minArea < maxArea) {
+        double areaPadding = (maxArea - minArea) * 0.1;
+        scatterXAxis_->setRange(minArea - areaPadding, maxArea + areaPadding);
+    } else {
+        scatterXAxis_->setRange(0, 1000);
+    }
+
+    if (minDeform < maxDeform) {
+        double deformPadding = (maxDeform - minDeform) * 0.1;
+        scatterYAxis_->setRange(minDeform - deformPadding, maxDeform + deformPadding);
+    } else {
+        scatterYAxis_->setRange(0, 1);
+    }
+}
+
+void HdfReviewTab::generateHistogram(const std::vector<backend::services::ProcessedFrame>& validFrames) {
+    // Use fixed range for consistent comparison across datasets
+    constexpr double HISTOGRAM_MIN = 15.0;
+    constexpr double HISTOGRAM_MAX = 25.0;
+    constexpr double HISTOGRAM_BIN_WIDTH = 0.5;
+    constexpr int HISTOGRAM_BINS = static_cast<int>((HISTOGRAM_MAX - HISTOGRAM_MIN) / HISTOGRAM_BIN_WIDTH);
+
+    // Reset series
+#if MIB_HAS_QHISTOGRAMSERIES
+    if (histogramSeries_) {
+        histogramSeries_->clear();
+    }
+#else
+    if (histogramBarSeries_) {
+        histogramBarSeries_->clear();
+    }
+#endif
+
+    // Always set fixed x-axis range regardless of data
+#if MIB_HAS_QHISTOGRAMSERIES
+    if (histogramXAxis_) {
+        histogramXAxis_->setRange(HISTOGRAM_MIN, HISTOGRAM_MAX);
+        histogramXAxis_->setTickCount(6);
+    }
+#endif
+
+    // Collect ring ratio values from valid frames
+    std::vector<double> ringRatios;
+    for (const auto& frame : validFrames) {
+        if (frame.validation.isValid && frame.validation.ringRatio > 0.0) {
+            ringRatios.push_back(frame.validation.ringRatio);
+        }
+    }
+
+    // If no data, show empty histogram with fixed range
+    if (ringRatios.empty()) {
+        if (histogramYAxis_) {
+            histogramYAxis_->setRange(0, 1);
+        }
+#if !MIB_HAS_QHISTOGRAMSERIES
+        if (histogramCategoryAxis_) {
+            histogramChart_->removeAxis(histogramCategoryAxis_);
+            delete histogramCategoryAxis_;
+            histogramCategoryAxis_ = nullptr;
+        }
+        histogramCategoryAxis_ = new QBarCategoryAxis();
+        QStringList categories;
+        categories.reserve(HISTOGRAM_BINS);
+        for (int i = 0; i < HISTOGRAM_BINS; ++i) {
+            const double start = HISTOGRAM_MIN + i * HISTOGRAM_BIN_WIDTH;
+            const double end = (i == HISTOGRAM_BINS - 1) ? HISTOGRAM_MAX : (start + HISTOGRAM_BIN_WIDTH);
+            categories << QString("%1-%2").arg(start, 0, 'f', 1).arg(end, 0, 'f', 1);
+        }
+        histogramCategoryAxis_->append(categories);
+        histogramCategoryAxis_->setLabelsAngle(-90);
+        histogramChart_->addAxis(histogramCategoryAxis_, Qt::AlignBottom);
+        if (histogramBarSeries_) {
+            histogramBarSeries_->attachAxis(histogramCategoryAxis_);
+        }
+#endif
+        return;
+    }
+
+    // Count values in each bin
+    std::vector<int> binCounts(HISTOGRAM_BINS, 0);
+    for (double val : ringRatios) {
+        double clampedVal = std::clamp(val, HISTOGRAM_MIN, HISTOGRAM_MAX);
+        int binIndex = static_cast<int>((clampedVal - HISTOGRAM_MIN) / HISTOGRAM_BIN_WIDTH);
+        if (binIndex >= HISTOGRAM_BINS) {
+            binIndex = HISTOGRAM_BINS - 1;
+        }
+        binIndex = std::clamp(binIndex, 0, HISTOGRAM_BINS - 1);
+        binCounts[binIndex]++;
+    }
+
+    int maxCount = 0;
+    for (int count : binCounts) {
+        maxCount = std::max(maxCount, count);
+    }
+
+    // Set Y-axis range
+    if (histogramYAxis_) {
+        const int yMax = std::max(1, static_cast<int>(std::ceil(maxCount * 1.1)));
+        histogramYAxis_->setRange(0, yMax);
+        histogramYAxis_->applyNiceNumbers();
+    }
+
+#if MIB_HAS_QHISTOGRAMSERIES
+    // Populate histogram series
+    if (histogramSeries_) {
+        QVector<qreal> samples;
+        samples.reserve(static_cast<int>(ringRatios.size()));
+        for (double v : ringRatios) {
+            samples.append(static_cast<qreal>(v));
+        }
+        histogramSeries_->setBinsCount(HISTOGRAM_BINS);
+        histogramSeries_->setSamples(samples);
+    }
+#else
+    // Fallback: build bar set and category axis
+    auto* barSet = new QBarSet("");
+    for (int count : binCounts) {
+        *barSet << count;
+    }
+    if (histogramBarSeries_) {
+        histogramBarSeries_->append(barSet);
+    }
+    
+    if (histogramCategoryAxis_) {
+        histogramChart_->removeAxis(histogramCategoryAxis_);
+        delete histogramCategoryAxis_;
+        histogramCategoryAxis_ = nullptr;
+    }
+    histogramCategoryAxis_ = new QBarCategoryAxis();
+    QStringList categories;
+    categories.reserve(HISTOGRAM_BINS);
+    for (int i = 0; i < HISTOGRAM_BINS; ++i) {
+        const double start = HISTOGRAM_MIN + i * HISTOGRAM_BIN_WIDTH;
+        const double end = (i == HISTOGRAM_BINS - 1) ? HISTOGRAM_MAX : (start + HISTOGRAM_BIN_WIDTH);
+        categories << QString("%1-%2").arg(start, 0, 'f', 1).arg(end, 0, 'f', 1);
+    }
+    histogramCategoryAxis_->append(categories);
+    histogramCategoryAxis_->setLabelsAngle(-90);
+    histogramChart_->addAxis(histogramCategoryAxis_, Qt::AlignBottom);
+    if (histogramBarSeries_) {
+        histogramBarSeries_->attachAxis(histogramCategoryAxis_);
+    }
+#endif
+}
+
+QPixmap HdfReviewTab::chartToPixmap(QChartView* chartView) const {
+    if (!chartView || !chartView->chart()) {
+        return QPixmap();
+    }
+    
+    // Render chart at high resolution for export (square format: 1200x1200 pixels)
+    const int exportSize = 1200;
+    
+    // Save original chart view size and minimum size
+    QSize originalSize = chartView->size();
+    QSize originalMinSize = chartView->minimumSize();
+    
+    // Temporarily set minimum size and resize the chart view to match export size
+    // This ensures the chart layout is correct for the export dimensions
+    chartView->setMinimumSize(exportSize, exportSize);
+    chartView->resize(exportSize, exportSize);
+    
+    // Force layout update and rendering
+    chartView->updateGeometry();
+    chartView->update();
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    
+    // Grab the chart at the new size
+    QPixmap pixmap = chartView->grab();
+    
+    // Restore original size and minimum size
+    chartView->setMinimumSize(originalMinSize);
+    chartView->resize(originalSize);
+    chartView->update();
+    
+    return pixmap;
+}
+
+void HdfReviewTab::loadIsoelasticCurves() {
+    // Clear any existing curves to avoid duplicates
+    for (auto it = isoelasticCurves_.begin(); it != isoelasticCurves_.end(); ++it) {
+        QLineSeries* series = *it;
+        if (series) {
+            scatterPlotChart_->removeSeries(series);
+            delete series;
+        }
+    }
+    isoelasticCurves_.clear();
+    
+    // Find the isoelastic curve data file
+    QString appDir = QCoreApplication::applicationDirPath();
+    QString filePath = QDir(appDir).absoluteFilePath("../resources/isoelastic_curve/scaled_isoelastic_data_6.16-4.24.txt");
+    
+    // Try alternative path if file doesn't exist
+    if (!QFile::exists(filePath)) {
+        filePath = QDir(appDir).absoluteFilePath("resources/isoelastic_curve/scaled_isoelastic_data_6.16-4.24.txt");
+    }
+    
+    // Try source directory path for development
+    if (!QFile::exists(filePath)) {
+        filePath = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../../resources/isoelastic_curve/scaled_isoelastic_data_6.16-4.24.txt");
+    }
+
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        SPDLOG_WARN("Failed to open isoelastic curve file: {}", filePath.toStdString());
+        return;
+    }
+
+    // Group data points by emodulus value
+    std::map<double, std::vector<std::pair<double, double>>> curvesByModulus;
+
+    QTextStream in(&file);
+    while (!in.atEnd()) {
+        QString line = in.readLine().trimmed();
+        
+        // Skip empty lines and comments
+        if (line.isEmpty() || line.startsWith('#')) {
+            continue;
+        }
+
+        // Parse tab-separated values: area_um, deform, emodulus
+        QStringList parts = line.split('\t', Qt::SkipEmptyParts);
+        if (parts.size() < 3) {
+            continue;
+        }
+
+        bool ok1, ok2, ok3;
+        double areaUm = parts[0].toDouble(&ok1);
+        double deform = parts[1].toDouble(&ok2);
+        double emodulus = parts[2].toDouble(&ok3);
+
+        if (ok1 && ok2 && ok3) {
+            curvesByModulus[emodulus].push_back({areaUm, deform});
+        }
+    }
+
+    file.close();
+
+    if (curvesByModulus.empty()) {
+        SPDLOG_WARN("No isoelastic curve data found in file: {}", filePath.toStdString());
+        return;
+    }
+
+    // Create QLineSeries for each modulus value (in reverse order for legend)
+    for (auto it = curvesByModulus.rbegin(); it != curvesByModulus.rend(); ++it) {
+        const auto& [emodulus, points] = *it;
+        QLineSeries* series = new QLineSeries();
+        series->setName(QString("%1 kPa").arg(emodulus, 0, 'f', 2));
+        
+        // Add points to series
+        for (const auto& [area, deform] : points) {
+            series->append(area, deform);
+        }
+
+        // Add series to chart
+        scatterPlotChart_->addSeries(series);
+        series->attachAxis(scatterXAxis_);
+        series->attachAxis(scatterYAxis_);
+        
+        // Store pointer for cleanup
+        isoelasticCurves_.push_back(series);
+    }
+
+    // Enable legend to show all series and position it on the right
+    scatterPlotChart_->legend()->setVisible(true);
+    scatterPlotChart_->legend()->setAlignment(Qt::AlignRight);
+    
+    SPDLOG_INFO("Loaded {} isoelastic curves from {}", curvesByModulus.size(), filePath.toStdString());
 }
 
 } // namespace frontend

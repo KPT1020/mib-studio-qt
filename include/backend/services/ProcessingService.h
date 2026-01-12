@@ -245,7 +245,7 @@ private:
     mutable std::mutex configMutex_;
     
     // Round-robin buffer for periodic flushing
-    std::atomic<size_t> flushInterval_{1000}; // Flush every 1000 frames by default
+    std::atomic<size_t> flushInterval_{100}; // Flush every 100 frames by default
     std::atomic<size_t> framesSinceLastFlush_{0};
     
     // Invalid frame sampling

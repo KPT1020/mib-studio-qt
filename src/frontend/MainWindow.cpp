@@ -77,9 +77,9 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         // Find ExperimentMonitoringTab
         frontend::ExperimentMonitoringTab* monitoringTab = nullptr;
         if (tabs_) {
-            // Monitoring tab is at index 3
-            if (tabs_->count() > 3) {
-                monitoringTab = qobject_cast<frontend::ExperimentMonitoringTab*>(tabs_->widget(3));
+            // Monitoring tab is at index 2 (0=Connect, 1=Preview, 2=Monitoring, 3=Review)
+            if (tabs_->count() > 2) {
+                monitoringTab = qobject_cast<frontend::ExperimentMonitoringTab*>(tabs_->widget(2));
             }
         }
         if (monitoringTab) {
@@ -376,40 +376,8 @@ void MainWindow::onStopExperiment()
         hdf5.writeExperimentInfo(experimentStartTimeNs_, experimentEndTimeNs,
                                  totalValid, totalInvalid, processingConfig, roi);
 
-        // Capture and save chart snapshots
-        if (tabs_ && tabs_->count() > 3)
-        {
-            auto* monitoringTab = qobject_cast<frontend::ExperimentMonitoringTab*>(tabs_->widget(3));
-            if (monitoringTab)
-            {
-                cv::Mat histogramImage, scatterPlotImage;
-                if (monitoringTab->captureChartSnapshots(histogramImage, scatterPlotImage))
-                {
-                    // Create chart_snapshots group (HDF5 will handle if it already exists)
-                    // Save histogram snapshot
-                    if (!histogramImage.empty())
-                    {
-                        if (!hdf5.saveChartSnapshot("/experiment_info/chart_snapshots/ring_width_histogram", histogramImage))
-                        {
-                            SPDLOG_WARN("Failed to save histogram chart snapshot to HDF5");
-                        }
-                    }
-
-                    // Save scatter plot snapshot
-                    if (!scatterPlotImage.empty())
-                    {
-                        if (!hdf5.saveChartSnapshot("/experiment_info/chart_snapshots/scatter_plot", scatterPlotImage))
-                        {
-                            SPDLOG_WARN("Failed to save scatter plot chart snapshot to HDF5");
-                        }
-                    }
-                }
-                else
-                {
-                    SPDLOG_WARN("Failed to capture chart snapshots");
-                }
-            }
-        }
+        // Note: Chart snapshots are no longer saved during experiment stop.
+        // Charts are now generated on-demand from HDF5 data in the Review tab.
 
         statusLabel_->setText(QString("Experiment saved: %1 valid, %2 invalid frames")
                                   .arg(totalValid)

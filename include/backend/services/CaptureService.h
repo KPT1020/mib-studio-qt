@@ -34,7 +34,7 @@ public:
     using CameraFactory = std::function<std::unique_ptr<camera::common::ICamera>()>;
 
     struct Config {
-        int bufferPartCount = 100;  // number of images per buffer
+        int bufferPartCount = 1;  // number of images per buffer
         int numBuffers = 20;        // ring size
     };
 
