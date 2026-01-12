@@ -12,6 +12,7 @@ namespace backend::services { struct ProcessedFrame; }
 class QTimer;
 class QChartView;
 class QScatterSeries;
+class QLineSeries;
 class QBarSeries;
 class QBarSet;
 class QHistogramSeries;
@@ -35,7 +36,7 @@ class ExperimentMonitoringTab : public QWidget {
     Q_OBJECT
 public:
     explicit ExperimentMonitoringTab(backend::AppBackend& backend, QWidget* parent = nullptr);
-    ~ExperimentMonitoringTab() override = default;
+    ~ExperimentMonitoringTab() override;
     
     // Settings accessors
     double getKdeBandwidth() const { return kdeBandwidth_; }
@@ -53,6 +54,7 @@ protected:
     void hideEvent(QHideEvent* event) override;
 
 private:
+    void loadIsoelasticCurves();
     void updateScatterplot(const std::vector<backend::services::ProcessedFrame>& validFrames);
     void updateHistogram(const std::vector<backend::services::ProcessedFrame>& validFrames);
     void updateValidFramesGrid(const std::vector<backend::services::ProcessedFrame>& validFrames);
@@ -73,6 +75,7 @@ private:
     QScatterSeries* scatterSeries_ = nullptr;
     QValueAxis* scatterXAxis_ = nullptr;
     QValueAxis* scatterYAxis_ = nullptr;
+    std::vector<QLineSeries*> isoelasticCurves_;
 
     // Panel 2: Histogram
     QChartView* histogramView_ = nullptr;

@@ -152,6 +152,8 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/HdfMetricsModel.h
     src/frontend/MonitoringSettingsDialog.cpp
     include/frontend/MonitoringSettingsDialog.h
+    src/frontend/ConversionFactorDialog.cpp
+    include/frontend/ConversionFactorDialog.h
     src/frontend/JsonTableModel.cpp
     include/frontend/JsonTableModel.h
     src/frontend/JsonFlatten.cpp

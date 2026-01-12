@@ -34,5 +34,6 @@
     "require_new_sample_per_step": true,
     "display_fps": 60,
     "safe_shutdown_voltage": 0.0,
-    "focus_direction": true
+    "focus_direction": true,
+    "pixel_to_micron_factor": 0.4886
 }

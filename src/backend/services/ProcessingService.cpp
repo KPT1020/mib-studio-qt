@@ -201,6 +201,14 @@ ProcessingConfig ProcessingService::getProcessingConfig() const {
     return processingConfig_;
 }
 
+void ProcessingService::setPixelToMicronFactor(double factor) {
+    pixelToMicronFactor_.store(factor, std::memory_order_relaxed);
+}
+
+double ProcessingService::getPixelToMicronFactor() const {
+    return pixelToMicronFactor_.load(std::memory_order_relaxed);
+}
+
 static inline cv::Mat makeGrayCopy(uint64_t width, uint64_t height, size_t linePitch, const uint8_t* data) {
     const int w = static_cast<int>(width);
     const int h = static_cast<int>(height);

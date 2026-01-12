@@ -8,6 +8,7 @@
 #include <QPainter>
 #include <QChartView>
 #include <QScatterSeries>
+#include <QLineSeries>
 #include <QBarSeries>
 #include <QBarSet>
 #include <QChart>
@@ -37,6 +38,11 @@
 #include <limits>
 #include <set>
 #include <numeric>
+#include <map>
+#include <QFile>
+#include <QTextStream>
+#include <QCoreApplication>
+#include <QDir>
 
 #include "backend/AppBackend.h"
 #include "backend/services/ProcessingService.h"
@@ -61,11 +67,11 @@ namespace frontend
         scatterSeries_->setMarkerSize(6.0);
         scatterSeries_->setName("Valid Frames");
         scatterplotChart_->addSeries(scatterSeries_);
-        scatterplotChart_->setTitle("Deformability vs Area");
+        scatterplotChart_->setTitle("Deformability vs Area (μm²)");
         scatterplotChart_->legend()->setVisible(false);
 
         scatterXAxis_ = new QValueAxis();
-        scatterXAxis_->setTitleText("Area");
+        scatterXAxis_->setTitleText("Area (μm²)");
         scatterYAxis_ = new QValueAxis();
         scatterYAxis_->setTitleText("Deformability");
         scatterplotChart_->addAxis(scatterXAxis_, Qt::AlignBottom);
@@ -76,6 +82,9 @@ namespace frontend
         scatterplotView_ = new QChartView(scatterplotChart_);
         scatterplotView_->setRenderHint(QPainter::Antialiasing);
         rootLayout->addWidget(scatterplotView_, 1, 0);
+
+        // Load isoelastic curves overlay
+        loadIsoelasticCurves();
 
         // Panel 2: Histogram (top-right)
         histogramChart_ = new QChart();
@@ -267,6 +276,19 @@ namespace frontend
         }
     }
 
+    ExperimentMonitoringTab::~ExperimentMonitoringTab()
+    {
+        // Cleanup isoelastic curve line series
+        for (QLineSeries* series : isoelasticCurves_)
+        {
+            if (series)
+            {
+                delete series;
+            }
+        }
+        isoelasticCurves_.clear();
+    }
+
     void ExperimentMonitoringTab::updateScatterplot(const std::vector<backend::services::ProcessedFrame> &validFrames)
     {
         scatterSeries_->clear();
@@ -277,6 +299,11 @@ namespace frontend
             scatterYAxis_->setRange(0, 1);
             return;
         }
+
+        // Get conversion factor from backend (pixels to microns)
+        const double conversionFactor = backend_.processing().getPixelToMicronFactor();
+        // Area conversion: pixels² to microns² = pixels² * (microns/pixel)²
+        const double areaConversionFactor = conversionFactor * conversionFactor;
 
         // Collect points
         std::vector<std::pair<double, double>> points;
@@ -289,12 +316,14 @@ namespace frontend
         {
             if (frame.validation.isValid)
             {
-                double area = frame.validation.area;
+                // Convert area from pixels² to microns²
+                double areaPixels = frame.validation.area;
+                double areaMicrons = areaPixels * areaConversionFactor;
                 double deform = frame.validation.deformability;
-                points.push_back({area, deform});
+                points.push_back({areaMicrons, deform});
 
-                minArea = std::min(minArea, area);
-                maxArea = std::max(maxArea, area);
+                minArea = std::min(minArea, areaMicrons);
+                maxArea = std::max(maxArea, areaMicrons);
                 minDeform = std::min(minDeform, deform);
                 maxDeform = std::max(maxDeform, deform);
             }
@@ -858,6 +887,100 @@ namespace frontend
         kdeGridResolution_ = resolution;
         // Trigger update to refresh scatterplot
         updateScatterplot(recentValidFrames_);
+    }
+
+    void ExperimentMonitoringTab::loadIsoelasticCurves()
+    {
+        // Find the isoelastic curve data file
+        QString appDir = QCoreApplication::applicationDirPath();
+        QString filePath = QDir(appDir).absoluteFilePath("../resources/isoelastic_curve/scaled_isoelastic_data_6.16-4.24.txt");
+        
+        // Try alternative path if file doesn't exist
+        if (!QFile::exists(filePath))
+        {
+            filePath = QDir(appDir).absoluteFilePath("resources/isoelastic_curve/scaled_isoelastic_data_6.16-4.24.txt");
+        }
+        
+        // Try source directory path for development
+        if (!QFile::exists(filePath))
+        {
+            filePath = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("../../resources/isoelastic_curve/scaled_isoelastic_data_6.16-4.24.txt");
+        }
+
+        QFile file(filePath);
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        {
+            SPDLOG_WARN("Failed to open isoelastic curve file: {}", filePath.toStdString());
+            return;
+        }
+
+        // Group data points by emodulus value
+        std::map<double, std::vector<std::pair<double, double>>> curvesByModulus;
+
+        QTextStream in(&file);
+        while (!in.atEnd())
+        {
+            QString line = in.readLine().trimmed();
+            
+            // Skip empty lines and comments
+            if (line.isEmpty() || line.startsWith('#'))
+            {
+                continue;
+            }
+
+            // Parse tab-separated values: area_um, deform, emodulus
+            QStringList parts = line.split('\t', Qt::SkipEmptyParts);
+            if (parts.size() < 3)
+            {
+                continue;
+            }
+
+            bool ok1, ok2, ok3;
+            double areaUm = parts[0].toDouble(&ok1);
+            double deform = parts[1].toDouble(&ok2);
+            double emodulus = parts[2].toDouble(&ok3);
+
+            if (ok1 && ok2 && ok3)
+            {
+                curvesByModulus[emodulus].push_back({areaUm, deform});
+            }
+        }
+
+        file.close();
+
+        if (curvesByModulus.empty())
+        {
+            SPDLOG_WARN("No isoelastic curve data found in file: {}", filePath.toStdString());
+            return;
+        }
+
+        // Create QLineSeries for each modulus value (in reverse order for legend)
+        for (auto it = curvesByModulus.rbegin(); it != curvesByModulus.rend(); ++it)
+        {
+            const auto& [emodulus, points] = *it;
+            QLineSeries* series = new QLineSeries();
+            series->setName(QString("%1 kPa").arg(emodulus, 0, 'f', 2));
+            
+            // Add points to series
+            for (const auto& [area, deform] : points)
+            {
+                series->append(area, deform);
+            }
+
+            // Add series to chart
+            scatterplotChart_->addSeries(series);
+            series->attachAxis(scatterXAxis_);
+            series->attachAxis(scatterYAxis_);
+            
+            // Store pointer for cleanup
+            isoelasticCurves_.push_back(series);
+        }
+
+        // Enable legend to show all series and position it on the right
+        scatterplotChart_->legend()->setVisible(true);
+        scatterplotChart_->legend()->setAlignment(Qt::AlignRight);
+        
+        SPDLOG_INFO("Loaded {} isoelastic curves from {}", curvesByModulus.size(), filePath.toStdString());
     }
 
 } // namespace frontend

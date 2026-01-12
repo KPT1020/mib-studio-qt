@@ -230,6 +230,17 @@ namespace frontend
 			backend_.processing().setFlushInterval(static_cast<size_t>(flushEvery));
 		}
 
+		// 2.5) Pixel to micron conversion factor
+		if (root.contains("pixel_to_micron_factor"))
+		{
+			const double factor = root.value("pixel_to_micron_factor").toDouble(0.4886);
+			if (factor > 0.0)
+			{
+				backend_.processing().setPixelToMicronFactor(factor);
+				SPDLOG_INFO("AppConfigWatcher: applied pixel_to_micron_factor={}", factor);
+			}
+		}
+
 		// 3) Display FPS for PlaybackPanel
 		if (playbackPanel_ && root.contains("display_fps"))
 		{

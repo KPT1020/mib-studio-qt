@@ -127,6 +127,10 @@ public:
     void setProcessingConfig(const ProcessingConfig& config);
     ProcessingConfig getProcessingConfig() const;
     
+    // Pixel to micron conversion factor (1 pixel = X micron)
+    void setPixelToMicronFactor(double factor);
+    double getPixelToMicronFactor() const;
+    
     // Realtime throughput metrics (1-second window)
     double getAlgoFps1s() const { return algoFps1s_.load(std::memory_order_relaxed); }
     double getValidFps1s() const { return validFps1s_.load(std::memory_order_relaxed); }
@@ -260,6 +264,9 @@ private:
     
     // Experiment totals
     std::atomic<uint64_t> totalValidFlushed_{0};
+    
+    // Pixel to micron conversion factor (default: 0.4886)
+    std::atomic<double> pixelToMicronFactor_{0.4886};
 };
 
 } // namespace backend::services

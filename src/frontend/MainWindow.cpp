@@ -34,6 +34,7 @@
 #include <QMenuBar>
 #include <QMenu>
 #include "frontend/ProcessingSettingsDialog.h"
+#include "frontend/ConversionFactorDialog.h"
 #include "backend/Tools.h"
 #ifdef _WIN32
 #include <windows.h>
@@ -84,6 +85,13 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
             MonitoringSettingsDialog dlg(monitoringTab, this);
             dlg.exec();
         } });
+    
+    auto *conversionFactorAct = settingsMenu->addAction(tr("Pixel to Micron Conversion..."));
+    connect(conversionFactorAct, &QAction::triggered, this, [this]()
+            {
+        SPDLOG_INFO("Opening Pixel to Micron Conversion dialog");
+        ConversionFactorDialog dlg(backend_, this);
+        dlg.exec(); });
 
     auto *helpMenu = menuBar()->addMenu(tr("Help"));
     auto *aboutAct = helpMenu->addAction(tr("About"));
