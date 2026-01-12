@@ -40,6 +40,7 @@ private slots:
     void onZoomIn();
     void onZoomOut();
     void onFitToWindow();
+    void onExportFrame();
 
 signals:
     void requestPreviousFrame();
@@ -74,6 +75,7 @@ private:
     QPushButton* zoomInButton_;
     QPushButton* zoomOutButton_;
     QPushButton* fitToWindowButton_;
+    QPushButton* exportButton_;
     QPushButton* closeButton_;
 };
 

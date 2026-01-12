@@ -32,6 +32,7 @@
 #include <spdlog/spdlog.h>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/imgcodecs.hpp>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -103,12 +104,18 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
     selectFileBtn_ = new QPushButton(tr("Select HDF File..."), this);
     exportMetricsBtn_ = new QPushButton(tr("Export Metrics to CSV..."), this);
     exportMetricsBtn_->setEnabled(false);
+    exportAllBtn_ = new QPushButton(tr("Export All..."), this);
+    exportAllBtn_->setEnabled(false);
+    exportChartsBtn_ = new QPushButton(tr("Export Charts as TIFF..."), this);
+    exportChartsBtn_->setEnabled(false);
     roiOverlayCheck_ = new QCheckBox(tr("Show Overlays"), this);
     roiOverlayCheck_->setEnabled(false);
     filePathLabel_ = new QLabel(tr("No file selected"), this);
     statusLabel_ = new QLabel(tr("Ready"), this);
     fileRow->addWidget(selectFileBtn_);
     fileRow->addWidget(exportMetricsBtn_);
+    fileRow->addWidget(exportAllBtn_);
+    fileRow->addWidget(exportChartsBtn_);
     fileRow->addWidget(roiOverlayCheck_);
     fileRow->addWidget(filePathLabel_, 1);
     fileRow->addWidget(statusLabel_);
@@ -116,6 +123,8 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
 
     connect(selectFileBtn_, &QPushButton::clicked, this, &HdfReviewTab::onSelectFile);
     connect(exportMetricsBtn_, &QPushButton::clicked, this, &HdfReviewTab::onExportMetrics);
+    connect(exportAllBtn_, &QPushButton::clicked, this, &HdfReviewTab::onExportAll);
+    connect(exportChartsBtn_, &QPushButton::clicked, this, &HdfReviewTab::onExportCharts);
     connect(roiOverlayCheck_, &QCheckBox::toggled, this, &HdfReviewTab::onToggleRoiOverlay);
 
     // Tab widget for valid/invalid frames
@@ -288,11 +297,14 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
     updateImageGrid(invalidFrames_);
     updateMetricsTable(invalidFrames_);
 
-    // Enable export button if we have any data
-    exportMetricsBtn_->setEnabled(!validFrames_.empty() || !invalidFrames_.empty());
+    // Enable export buttons if we have any data
+    bool hasData = !validFrames_.empty() || !invalidFrames_.empty();
+    exportMetricsBtn_->setEnabled(hasData);
+    exportAllBtn_->setEnabled(hasData);
+    exportChartsBtn_->setEnabled(hasData);
     
     // Enable overlay checkbox if we have frames (for processing overlay)
-    if (!validFrames_.empty() || !invalidFrames_.empty()) {
+    if (hasData) {
         roiOverlayCheck_->setEnabled(true);
     }
 
@@ -337,8 +349,10 @@ void HdfReviewTab::clearDisplay() {
     validScrollValue_ = 0;
     invalidScrollValue_ = 0;
     
-    // Disable export button and ROI overlay when no data
+    // Disable export buttons and ROI overlay when no data
     exportMetricsBtn_->setEnabled(false);
+    exportAllBtn_->setEnabled(false);
+    exportChartsBtn_->setEnabled(false);
     roiOverlayCheck_->setEnabled(false);
     roiOverlayCheck_->setChecked(false);
 
@@ -1227,6 +1241,205 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
     // Show dialog
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     dialog->exec();
+}
+
+void HdfReviewTab::onExportAll() {
+    if (!hdfReader_ || (validFrames_.empty() && invalidFrames_.empty())) {
+        QMessageBox::warning(this, tr("Export Error"),
+                            tr("No data available to export."));
+        return;
+    }
+
+    QString dirPath = QFileDialog::getExistingDirectory(this, tr("Select Directory to Export All Data"),
+                                                        "", QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+    if (dirPath.isEmpty()) {
+        return;
+    }
+
+    exportAllData(dirPath);
+}
+
+void HdfReviewTab::onExportCharts() {
+    if (!hdfReader_) {
+        QMessageBox::warning(this, tr("Export Error"),
+                            tr("No HDF5 file loaded."));
+        return;
+    }
+
+    QString dirPath = QFileDialog::getExistingDirectory(this, tr("Select Directory to Export Charts"),
+                                                        "", QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+    if (dirPath.isEmpty()) {
+        return;
+    }
+
+    QDir dir(dirPath);
+    bool success = true;
+    
+    // Export histogram
+    QString histogramPath = dir.filePath("ring_width_histogram.tiff");
+    if (!exportChartFromHdf5("/experiment_info/chart_snapshots/ring_width_histogram", histogramPath)) {
+        success = false;
+    }
+    
+    // Export scatter plot
+    QString scatterPath = dir.filePath("scatter_plot.tiff");
+    if (!exportChartFromHdf5("/experiment_info/chart_snapshots/scatter_plot", scatterPath)) {
+        success = false;
+    }
+    
+    if (success) {
+        QMessageBox::information(this, tr("Export Complete"),
+                                tr("Charts exported successfully to:\n%1").arg(dirPath));
+    } else {
+        QMessageBox::warning(this, tr("Export Warning"),
+                            tr("Some charts may not have been exported. Chart snapshots may not exist in HDF5 file."));
+    }
+}
+
+void HdfReviewTab::exportAllImagesToTiff(const QString& baseDir) {
+    if (!hdfReader_) {
+        return;
+    }
+
+    QDir dir(baseDir);
+    if (!dir.exists()) {
+        QMessageBox::critical(this, tr("Export Error"),
+                              tr("Directory does not exist: %1").arg(baseDir));
+        return;
+    }
+
+    int exportedCount = 0;
+    int totalCount = static_cast<int>(validFrames_.size() + invalidFrames_.size());
+
+    // Export valid frames
+    for (size_t i = 0; i < validFrames_.size(); ++i) {
+        cv::Mat image;
+        if (hdfReader_->readImageByIndex("/valid_frames/images", i, image)) {
+            QString fileName = QString("valid_frame_%1.tiff").arg(validFrames_[i].index, 6, 10, QChar('0'));
+            QString filePath = dir.filePath(fileName);
+
+            // Export without compression
+            if (cv::imwrite(filePath.toStdString(), image)) {
+                exportedCount++;
+            }
+        }
+    }
+
+    // Export invalid frames
+    for (size_t i = 0; i < invalidFrames_.size(); ++i) {
+        cv::Mat image;
+        if (hdfReader_->readImageByIndex("/invalid_frames/images", i, image)) {
+            QString fileName = QString("invalid_frame_%1.tiff").arg(invalidFrames_[i].index, 6, 10, QChar('0'));
+            QString filePath = dir.filePath(fileName);
+
+            // Export without compression
+            if (cv::imwrite(filePath.toStdString(), image)) {
+                exportedCount++;
+            }
+        }
+    }
+
+    QMessageBox::information(this, tr("Export Complete"),
+                            tr("Exported %1 of %2 images to:\n%3")
+                            .arg(exportedCount)
+                            .arg(totalCount)
+                            .arg(baseDir));
+    SPDLOG_INFO("Exported {} of {} images to {}", exportedCount, totalCount, baseDir.toStdString());
+}
+
+bool HdfReviewTab::exportChartFromHdf5(const std::string& datasetPath, const QString& filePath) {
+    if (!hdfReader_) {
+        return false;
+    }
+
+    cv::Mat chartImage;
+    if (!hdfReader_->readImageByIndex(datasetPath, 0, chartImage)) {
+        SPDLOG_WARN("Failed to read chart from HDF5: {}", datasetPath);
+        return false;
+    }
+
+    // Charts are saved as BGR, which is what OpenCV imwrite expects
+    // Export without compression
+    if (!cv::imwrite(filePath.toStdString(), chartImage)) {
+        SPDLOG_ERROR("Failed to write chart TIFF: {}", filePath.toStdString());
+        return false;
+    }
+
+    SPDLOG_INFO("Exported chart from {} to {}", datasetPath, filePath.toStdString());
+    return true;
+}
+
+void HdfReviewTab::exportAllData(const QString& baseDir) {
+    if (!hdfReader_) {
+        return;
+    }
+
+    QDir dir(baseDir);
+    if (!dir.exists()) {
+        QMessageBox::critical(this, tr("Export Error"),
+                              tr("Directory does not exist: %1").arg(baseDir));
+        return;
+    }
+
+    int exportedImages = 0;
+    int totalImages = static_cast<int>(validFrames_.size() + invalidFrames_.size());
+    bool csvExported = false;
+    bool chartsExported = true;
+
+    // Export CSV metrics
+    QString csvPath = dir.filePath("metrics.csv");
+    exportMetricsToCsv(csvPath);
+    csvExported = QFile::exists(csvPath);
+
+    // Export all images
+    // Export valid frames
+    for (size_t i = 0; i < validFrames_.size(); ++i) {
+        cv::Mat image;
+        if (hdfReader_->readImageByIndex("/valid_frames/images", i, image)) {
+            QString fileName = QString("valid_frame_%1.tiff").arg(validFrames_[i].index, 6, 10, QChar('0'));
+            QString filePath = dir.filePath(fileName);
+
+            // Export without compression
+            if (cv::imwrite(filePath.toStdString(), image)) {
+                exportedImages++;
+            }
+        }
+    }
+
+    // Export invalid frames
+    for (size_t i = 0; i < invalidFrames_.size(); ++i) {
+        cv::Mat image;
+        if (hdfReader_->readImageByIndex("/invalid_frames/images", i, image)) {
+            QString fileName = QString("invalid_frame_%1.tiff").arg(invalidFrames_[i].index, 6, 10, QChar('0'));
+            QString filePath = dir.filePath(fileName);
+
+            // Export without compression
+            if (cv::imwrite(filePath.toStdString(), image)) {
+                exportedImages++;
+            }
+        }
+    }
+
+    // Export charts
+    QString histogramPath = dir.filePath("ring_width_histogram.tiff");
+    if (!exportChartFromHdf5("/experiment_info/chart_snapshots/ring_width_histogram", histogramPath)) {
+        chartsExported = false;
+    }
+    
+    QString scatterPath = dir.filePath("scatter_plot.tiff");
+    if (!exportChartFromHdf5("/experiment_info/chart_snapshots/scatter_plot", scatterPath)) {
+        chartsExported = false;
+    }
+
+    QString message = tr("Export complete:\n");
+    message += tr("- CSV: %1\n").arg(csvExported ? tr("Yes") : tr("No"));
+    message += tr("- Images: %1 of %2\n").arg(exportedImages).arg(totalImages);
+    message += tr("- Charts: %1\n").arg(chartsExported ? tr("Yes") : tr("Partial/No"));
+    message += tr("\nLocation: %1").arg(baseDir);
+
+    QMessageBox::information(this, tr("Export Complete"), message);
+    SPDLOG_INFO("Exported all data: CSV={}, Images={}/{}, Charts={}, Location={}",
+                csvExported, exportedImages, totalImages, chartsExported, baseDir.toStdString());
 }
 
 } // namespace frontend

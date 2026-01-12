@@ -44,6 +44,14 @@ public:
     void setKdeBandwidth(double bandwidth);
     void setKdeGridResolution(int resolution);
 
+    // Chart snapshot capture for HDF5 saving
+    bool captureChartSnapshots(cv::Mat& histogramImage, cv::Mat& scatterPlotImage) const;
+
+    // Chart export to TIFF
+    bool exportChartAsTiff(QChartView* chartView, const QString& filePath) const;
+    bool exportHistogramAsTiff(const QString& filePath) const;
+    bool exportScatterPlotAsTiff(const QString& filePath) const;
+
 private slots:
     void onUpdate();
     void onToggleOverlay(bool enabled);

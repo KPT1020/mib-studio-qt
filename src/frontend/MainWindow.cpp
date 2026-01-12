@@ -24,6 +24,7 @@
 #include "frontend/ExperimentMonitoringTab.h"
 #include "frontend/MonitoringSettingsDialog.h"
 #include <spdlog/spdlog.h>
+#include <opencv2/core.hpp>
 #include <chrono>
 #include <QtConcurrent/QtConcurrent>
 #include <QFutureWatcher>
@@ -374,6 +375,41 @@ void MainWindow::onStopExperiment()
         auto roi = processing.getRealtimeRoi();
         hdf5.writeExperimentInfo(experimentStartTimeNs_, experimentEndTimeNs,
                                  totalValid, totalInvalid, processingConfig, roi);
+
+        // Capture and save chart snapshots
+        if (tabs_ && tabs_->count() > 3)
+        {
+            auto* monitoringTab = qobject_cast<frontend::ExperimentMonitoringTab*>(tabs_->widget(3));
+            if (monitoringTab)
+            {
+                cv::Mat histogramImage, scatterPlotImage;
+                if (monitoringTab->captureChartSnapshots(histogramImage, scatterPlotImage))
+                {
+                    // Create chart_snapshots group (HDF5 will handle if it already exists)
+                    // Save histogram snapshot
+                    if (!histogramImage.empty())
+                    {
+                        if (!hdf5.saveChartSnapshot("/experiment_info/chart_snapshots/ring_width_histogram", histogramImage))
+                        {
+                            SPDLOG_WARN("Failed to save histogram chart snapshot to HDF5");
+                        }
+                    }
+
+                    // Save scatter plot snapshot
+                    if (!scatterPlotImage.empty())
+                    {
+                        if (!hdf5.saveChartSnapshot("/experiment_info/chart_snapshots/scatter_plot", scatterPlotImage))
+                        {
+                            SPDLOG_WARN("Failed to save scatter plot chart snapshot to HDF5");
+                        }
+                    }
+                }
+                else
+                {
+                    SPDLOG_WARN("Failed to capture chart snapshots");
+                }
+            }
+        }
 
         statusLabel_->setText(QString("Experiment saved: %1 valid, %2 invalid frames")
                                   .arg(totalValid)

@@ -78,6 +78,9 @@ public:
     bool readValidMetadata(std::vector<ProcessedFrame>& frames);
     bool readInvalidMetadata(std::vector<ProcessedFrame>& frames);
 
+    // Chart snapshot saving (for saving chart images to HDF5)
+    bool saveChartSnapshot(const std::string& datasetPath, const cv::Mat& image);
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

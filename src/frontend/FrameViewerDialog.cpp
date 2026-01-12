@@ -12,11 +12,13 @@
 #include <QKeyEvent>
 #include <QMessageBox>
 #include <QEvent>
+#include <QFileDialog>
 
 #include "backend/services/ProcessingService.h"
 #include <spdlog/spdlog.h>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/imgcodecs.hpp>
 
 namespace frontend {
 
@@ -95,6 +97,10 @@ FrameViewerDialog::FrameViewerDialog(const backend::services::ProcessedFrame& fr
     
     controlsLayout->addStretch();
     
+    // Export button
+    exportButton_ = new QPushButton(tr("Export as TIFF..."), this);
+    controlsLayout->addWidget(exportButton_);
+    
     // Close button
     closeButton_ = new QPushButton(tr("Close"), this);
     closeButton_->setDefault(true);
@@ -110,6 +116,7 @@ FrameViewerDialog::FrameViewerDialog(const backend::services::ProcessedFrame& fr
     connect(zoomInButton_, &QPushButton::clicked, this, &FrameViewerDialog::onZoomIn);
     connect(zoomOutButton_, &QPushButton::clicked, this, &FrameViewerDialog::onZoomOut);
     connect(fitToWindowButton_, &QPushButton::clicked, this, &FrameViewerDialog::onFitToWindow);
+    connect(exportButton_, &QPushButton::clicked, this, &FrameViewerDialog::onExportFrame);
     connect(closeButton_, &QPushButton::clicked, this, &QDialog::accept);
 
     // Update display
@@ -342,6 +349,88 @@ void FrameViewerDialog::updateFrameInfo() {
     .arg(val.innerContourCount);
 
     frameInfoLabel_->setText(info);
+}
+
+void FrameViewerDialog::onExportFrame() {
+    if (!frame_ || frame_->originalImage.empty()) {
+        QMessageBox::warning(this, tr("Export Error"),
+                            tr("No frame data available to export."));
+        return;
+    }
+
+    QString filePath = QFileDialog::getSaveFileName(this, tr("Export Frame as TIFF"),
+                                                   QString("frame_%1.tiff").arg(frame_->index),
+                                                   tr("TIFF Files (*.tiff *.tif);;All Files (*)"));
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    // Ensure .tiff extension
+    if (!filePath.endsWith(".tiff", Qt::CaseInsensitive) && !filePath.endsWith(".tif", Qt::CaseInsensitive)) {
+        filePath += ".tiff";
+    }
+
+    // Prepare image for export (use original, not zoomed display)
+    cv::Mat exportImage;
+    
+    if (showProcessingOverlay_ && !frame_->processedImage.empty()) {
+        // Create overlay image
+        if (frame_->originalImage.channels() == 1) {
+            cv::cvtColor(frame_->originalImage, exportImage, cv::COLOR_GRAY2BGR);
+        } else {
+            exportImage = frame_->originalImage.clone();
+            if (exportImage.channels() == 3) {
+                // Already BGR, keep as is
+            } else if (exportImage.channels() == 4) {
+                cv::cvtColor(exportImage, exportImage, cv::COLOR_BGRA2BGR);
+            }
+        }
+        
+        // Apply processing overlay (green tint where mask is non-zero)
+        for (int y = 0; y < exportImage.rows && y < frame_->processedImage.rows; ++y) {
+            for (int x = 0; x < exportImage.cols && x < frame_->processedImage.cols; ++x) {
+                if (frame_->processedImage.at<uchar>(y, x) > 0) {
+                    cv::Vec3b& pixel = exportImage.at<cv::Vec3b>(y, x);
+                    // Blend with green (0, 255, 0) at 30% opacity
+                    pixel[0] = static_cast<uchar>(pixel[0] * 0.7); // B
+                    pixel[1] = static_cast<uchar>(std::min(255.0, pixel[1] * 0.7 + 255.0 * 0.3)); // G
+                    pixel[2] = static_cast<uchar>(pixel[2] * 0.7); // R
+                }
+            }
+        }
+    } else {
+        // Export original image
+        if (frame_->originalImage.channels() == 1) {
+            exportImage = frame_->originalImage.clone();
+        } else if (frame_->originalImage.channels() == 3) {
+            exportImage = frame_->originalImage.clone();
+        } else if (frame_->originalImage.channels() == 4) {
+            cv::cvtColor(frame_->originalImage, exportImage, cv::COLOR_BGRA2BGR);
+        } else {
+            // Convert to grayscale as fallback
+            cv::cvtColor(frame_->originalImage, exportImage, cv::COLOR_BGR2GRAY);
+        }
+    }
+
+    // Draw ROI rectangle if enabled
+    if (showRoiOverlay_ && roi_.w > 0 && roi_.h > 0) {
+        cv::rectangle(exportImage, 
+                     cv::Point(roi_.x, roi_.y), 
+                     cv::Point(roi_.x + roi_.w, roi_.y + roi_.h),
+                     cv::Scalar(0, 0, 255), // Red in BGR
+                     3);
+    }
+
+    // Save as TIFF without compression
+    if (!cv::imwrite(filePath.toStdString(), exportImage)) {
+        QMessageBox::critical(this, tr("Export Error"),
+                              tr("Failed to export frame to:\n%1").arg(filePath));
+        SPDLOG_ERROR("Failed to write TIFF file: {}", filePath.toStdString());
+    } else {
+        SPDLOG_INFO("Exported frame {} to TIFF: {}", frame_->index, filePath.toStdString());
+        QMessageBox::information(this, tr("Export Complete"),
+                                tr("Frame exported successfully to:\n%1").arg(filePath));
+    }
 }
 
 } // namespace frontend

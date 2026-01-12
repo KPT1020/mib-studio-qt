@@ -43,6 +43,8 @@
 #include <QTextStream>
 #include <QCoreApplication>
 #include <QDir>
+#include <QPixmap>
+#include <QFileDialog>
 
 #include "backend/AppBackend.h"
 #include "backend/services/ProcessingService.h"
@@ -50,6 +52,7 @@
 #include <spdlog/spdlog.h>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/imgcodecs.hpp>
 
 namespace frontend
 {
@@ -981,6 +984,114 @@ namespace frontend
         scatterplotChart_->legend()->setAlignment(Qt::AlignRight);
         
         SPDLOG_INFO("Loaded {} isoelastic curves from {}", curvesByModulus.size(), filePath.toStdString());
+    }
+
+    bool ExperimentMonitoringTab::captureChartSnapshots(cv::Mat& histogramImage, cv::Mat& scatterPlotImage) const
+    {
+        histogramImage.release();
+        scatterPlotImage.release();
+
+        if (!histogramView_ || !scatterplotView_)
+        {
+            SPDLOG_WARN("Chart views not available for snapshot capture");
+            return false;
+        }
+
+        // Capture histogram chart
+        QPixmap histogramPixmap = histogramView_->grab();
+        if (histogramPixmap.isNull())
+        {
+            SPDLOG_WARN("Failed to grab histogram chart");
+            return false;
+        }
+
+        // Capture scatter plot chart
+        QPixmap scatterPlotPixmap = scatterplotView_->grab();
+        if (scatterPlotPixmap.isNull())
+        {
+            SPDLOG_WARN("Failed to grab scatter plot chart");
+            return false;
+        }
+
+        // Convert QPixmap to QImage
+        QImage histogramQImage = histogramPixmap.toImage();
+        QImage scatterPlotQImage = scatterPlotPixmap.toImage();
+
+        // Convert QImage to cv::Mat
+        // QImage uses ARGB32 format, need to convert to BGR for OpenCV
+        histogramQImage = histogramQImage.convertToFormat(QImage::Format_RGB32);
+        scatterPlotQImage = scatterPlotQImage.convertToFormat(QImage::Format_RGB32);
+
+        // Create cv::Mat from QImage
+        histogramImage = cv::Mat(histogramQImage.height(), histogramQImage.width(), CV_8UC4, 
+                                  const_cast<uchar*>(histogramQImage.constBits()), 
+                                  histogramQImage.bytesPerLine()).clone();
+        scatterPlotImage = cv::Mat(scatterPlotQImage.height(), scatterPlotQImage.width(), CV_8UC4,
+                                   const_cast<uchar*>(scatterPlotQImage.constBits()),
+                                   scatterPlotQImage.bytesPerLine()).clone();
+
+        // Convert from RGBA to BGR
+        cv::cvtColor(histogramImage, histogramImage, cv::COLOR_RGBA2BGR);
+        cv::cvtColor(scatterPlotImage, scatterPlotImage, cv::COLOR_RGBA2BGR);
+
+        SPDLOG_DEBUG("Captured chart snapshots: histogram {}x{}, scatter plot {}x{}",
+                     histogramImage.cols, histogramImage.rows,
+                     scatterPlotImage.cols, scatterPlotImage.rows);
+        return true;
+    }
+
+    bool ExperimentMonitoringTab::exportChartAsTiff(QChartView* chartView, const QString& filePath) const
+    {
+        if (!chartView)
+        {
+            SPDLOG_ERROR("Chart view is null");
+            return false;
+        }
+
+        // Grab chart as pixmap
+        QPixmap pixmap = chartView->grab();
+        if (pixmap.isNull())
+        {
+            SPDLOG_ERROR("Failed to grab chart view");
+            return false;
+        }
+
+        // Convert QPixmap to QImage
+        QImage qImage = pixmap.toImage();
+        qImage = qImage.convertToFormat(QImage::Format_RGB32);
+
+        // Convert QImage to cv::Mat
+        cv::Mat mat(qImage.height(), qImage.width(), CV_8UC4, 
+                    const_cast<uchar*>(qImage.constBits()), 
+                    qImage.bytesPerLine());
+        
+        // Convert from RGBA to BGR
+        cv::Mat bgrMat;
+        cv::cvtColor(mat, bgrMat, cv::COLOR_RGBA2BGR);
+
+        // Save as TIFF with compression
+        std::vector<int> compression_params;
+        compression_params.push_back(cv::IMWRITE_TIFF_COMPRESSION);
+        compression_params.push_back(1); // LZW compression
+
+        if (!cv::imwrite(filePath.toStdString(), bgrMat, compression_params))
+        {
+            SPDLOG_ERROR("Failed to write TIFF file: {}", filePath.toStdString());
+            return false;
+        }
+
+        SPDLOG_INFO("Exported chart to TIFF: {}", filePath.toStdString());
+        return true;
+    }
+
+    bool ExperimentMonitoringTab::exportHistogramAsTiff(const QString& filePath) const
+    {
+        return exportChartAsTiff(histogramView_, filePath);
+    }
+
+    bool ExperimentMonitoringTab::exportScatterPlotAsTiff(const QString& filePath) const
+    {
+        return exportChartAsTiff(scatterplotView_, filePath);
     }
 
 } // namespace frontend

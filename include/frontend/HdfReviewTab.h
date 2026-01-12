@@ -51,6 +51,8 @@ namespace frontend
     private slots:
         void onSelectFile();
         void onExportMetrics();
+        void onExportAll();
+        void onExportCharts();
         void onToggleRoiOverlay(bool enabled);
         void onTabChanged(int index);
         void onThumbnailClicked(int frameIndex);
@@ -78,6 +80,9 @@ namespace frontend
         void refreshVisibleThumbnails(bool isValid);
         void pruneOffscreenThumbnails(bool isValid);
         QImage buildThumbnailForIndex(size_t index, bool isValid);
+        void exportAllImagesToTiff(const QString& baseDir);
+        bool exportChartFromHdf5(const std::string& datasetPath, const QString& filePath);
+        void exportAllData(const QString& baseDir);
 
         backend::AppBackend &backend_;
         std::unique_ptr<backend::services::Hdf5Service> hdfReader_;
@@ -85,6 +90,8 @@ namespace frontend
         // UI components
         QPushButton *selectFileBtn_ = nullptr;
         QPushButton *exportMetricsBtn_ = nullptr;
+        QPushButton *exportAllBtn_ = nullptr;
+        QPushButton *exportChartsBtn_ = nullptr;
         QCheckBox *roiOverlayCheck_ = nullptr;
         QLabel *filePathLabel_ = nullptr;
         QLabel *statusLabel_ = nullptr;

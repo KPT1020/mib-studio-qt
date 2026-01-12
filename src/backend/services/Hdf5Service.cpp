@@ -1719,4 +1719,164 @@ namespace backend::services {
         return true;
     }
 
+    bool Hdf5Service::saveChartSnapshot(const std::string& datasetPath, const cv::Mat& image)
+    {
+        if (!isFileOpen())
+        {
+            SPDLOG_ERROR("HDF5 file is not open");
+            return false;
+        }
+
+        if (image.empty())
+        {
+            SPDLOG_WARN("Cannot save empty chart snapshot to {}", datasetPath);
+            return false;
+        }
+
+        // Extract parent group path and ensure it exists
+        size_t lastSlash = datasetPath.find_last_of('/');
+        if (lastSlash != std::string::npos && lastSlash > 0)
+        {
+            std::string parentPath = datasetPath.substr(0, lastSlash);
+            htri_t exists = H5Lexists(impl_->fileId_, parentPath.c_str(), H5P_DEFAULT);
+            if (exists <= 0)
+            {
+                // Create parent group (and any intermediate groups)
+                // Split path and create groups recursively
+                std::string currentPath;
+                size_t start = 0;
+                while (start < parentPath.length())
+                {
+                    size_t nextSlash = parentPath.find('/', start);
+                    if (nextSlash == std::string::npos)
+                    {
+                        currentPath = parentPath;
+                        start = parentPath.length();
+                    }
+                    else
+                    {
+                        currentPath = parentPath.substr(0, nextSlash);
+                        start = nextSlash + 1;
+                    }
+                    
+                    if (!currentPath.empty() && currentPath != "/")
+                    {
+                        htri_t groupExists = H5Lexists(impl_->fileId_, currentPath.c_str(), H5P_DEFAULT);
+                        if (groupExists <= 0)
+                        {
+                            hid_t groupId = H5Gcreate2(impl_->fileId_, currentPath.c_str(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+                            if (groupId >= 0)
+                            {
+                                H5Gclose(groupId);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        int height = image.rows;
+        int width = image.cols;
+        int channels = image.channels();
+
+        // Create dataspace for single image
+        hsize_t dims[4];
+        int ndims;
+        if (channels == 1)
+        {
+            ndims = 2; // 2D: height, width
+            dims[0] = static_cast<hsize_t>(height);
+            dims[1] = static_cast<hsize_t>(width);
+        }
+        else
+        {
+            ndims = 3; // 3D: height, width, channels
+            dims[0] = static_cast<hsize_t>(height);
+            dims[1] = static_cast<hsize_t>(width);
+            dims[2] = static_cast<hsize_t>(channels);
+        }
+
+        hid_t dataspaceId = H5Screate_simple(ndims, dims, nullptr);
+        if (dataspaceId < 0)
+        {
+            SPDLOG_ERROR("Failed to create dataspace for chart snapshot {}", datasetPath);
+            return false;
+        }
+
+        // Create dataset
+        hid_t datasetId = H5Dcreate2(impl_->fileId_, datasetPath.c_str(), H5T_NATIVE_UINT8, dataspaceId,
+                                     H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        if (datasetId < 0)
+        {
+            H5Sclose(dataspaceId);
+            SPDLOG_ERROR("Failed to create chart snapshot dataset {}", datasetPath);
+            return false;
+        }
+
+        // Prepare data buffer
+        size_t imageSize = height * width * channels;
+        std::vector<uint8_t> buffer(imageSize);
+        
+        if (image.isContinuous())
+        {
+            std::memcpy(buffer.data(), image.data, image.total() * image.elemSize());
+        }
+        else
+        {
+            size_t offset = 0;
+            for (int r = 0; r < image.rows; r++)
+            {
+                std::memcpy(buffer.data() + offset, image.ptr(r), image.cols * image.elemSize());
+                offset += image.cols * image.elemSize();
+            }
+        }
+
+        // Write data
+        herr_t status = H5Dwrite(datasetId, H5T_NATIVE_UINT8, H5S_ALL, H5S_ALL, H5P_DEFAULT, buffer.data());
+        if (status < 0)
+        {
+            SPDLOG_ERROR("Failed to write chart snapshot {}", datasetPath);
+            H5Dclose(datasetId);
+            H5Sclose(dataspaceId);
+            return false;
+        }
+
+        // Add attributes for metadata
+        hid_t scalarSpaceId = H5Screate(H5S_SCALAR);
+        if (scalarSpaceId >= 0)
+        {
+            int32_t widthAttr = static_cast<int32_t>(width);
+            int32_t heightAttr = static_cast<int32_t>(height);
+            int32_t channelsAttr = static_cast<int32_t>(channels);
+
+            hid_t attrW = H5Acreate2(datasetId, "width", H5T_NATIVE_INT32, scalarSpaceId, H5P_DEFAULT, H5P_DEFAULT);
+            if (attrW >= 0)
+            {
+                H5Awrite(attrW, H5T_NATIVE_INT32, &widthAttr);
+                H5Aclose(attrW);
+            }
+
+            hid_t attrH = H5Acreate2(datasetId, "height", H5T_NATIVE_INT32, scalarSpaceId, H5P_DEFAULT, H5P_DEFAULT);
+            if (attrH >= 0)
+            {
+                H5Awrite(attrH, H5T_NATIVE_INT32, &heightAttr);
+                H5Aclose(attrH);
+            }
+
+            hid_t attrC = H5Acreate2(datasetId, "channels", H5T_NATIVE_INT32, scalarSpaceId, H5P_DEFAULT, H5P_DEFAULT);
+            if (attrC >= 0)
+            {
+                H5Awrite(attrC, H5T_NATIVE_INT32, &channelsAttr);
+                H5Aclose(attrC);
+            }
+
+            H5Sclose(scalarSpaceId);
+        }
+
+        H5Dclose(datasetId);
+        H5Sclose(dataspaceId);
+        SPDLOG_DEBUG("Saved chart snapshot to {} ({}x{}x{})", datasetPath, height, width, channels);
+        return true;
+    }
+
 } // namespace backend::services
