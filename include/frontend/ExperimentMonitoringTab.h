@@ -133,7 +133,10 @@ private:
     static constexpr int MAX_FRAMES_TO_SHOW = 25;
     static constexpr int MAX_RECENT_FRAMES = 1000; // Keep more frames for scatterplot/histogram
     static constexpr int UPDATE_INTERVAL_MS = 500;
-    static constexpr int HISTOGRAM_BINS = 20;
+    static constexpr double HISTOGRAM_BIN_WIDTH = 0.5;
+    static constexpr double HISTOGRAM_MIN = 15.0;
+    static constexpr double HISTOGRAM_MAX = 25.0;
+    static constexpr int HISTOGRAM_BINS = static_cast<int>((HISTOGRAM_MAX - HISTOGRAM_MIN) / HISTOGRAM_BIN_WIDTH);
 };
 
 } // namespace frontend

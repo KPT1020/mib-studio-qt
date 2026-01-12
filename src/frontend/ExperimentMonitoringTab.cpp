@@ -79,7 +79,7 @@ namespace frontend
 
         // Panel 2: Histogram (top-right)
         histogramChart_ = new QChart();
-        histogramChart_->setTitle("Ring Ratio Distribution");
+        histogramChart_->setTitle("Ring Width Distribution");
         histogramChart_->legend()->setVisible(false);
 
         histogramYAxis_ = new QValueAxis();
@@ -87,14 +87,14 @@ namespace frontend
         histogramChart_->addAxis(histogramYAxis_, Qt::AlignLeft);
 
         histogramXAxis_ = new QValueAxis();
-        histogramXAxis_->setTitleText("Ring Ratio");
+        histogramXAxis_->setTitleText("Ring Width");
         histogramXAxis_->setLabelsAngle(-90);
         histogramXAxis_->setLabelFormat("%.2f");
         histogramChart_->addAxis(histogramXAxis_, Qt::AlignBottom);
 
 #if MIB_HAS_QHISTOGRAMSERIES
         histogramSeries_ = new QHistogramSeries();
-        histogramSeries_->setName("Ring Ratio");
+        histogramSeries_->setName("Ring Width");
         histogramChart_->addSeries(histogramSeries_);
         histogramSeries_->attachAxis(histogramXAxis_);
         histogramSeries_->attachAxis(histogramYAxis_);
@@ -103,7 +103,7 @@ namespace frontend
         histogramChart_->addSeries(barSeries_);
         // Fallback: use category axis for X when bar series is used
         histogramCategoryAxis_ = new QBarCategoryAxis();
-        histogramCategoryAxis_->setTitleText("Ring Ratio");
+        histogramCategoryAxis_->setTitleText("Ring Width");
         histogramCategoryAxis_->setLabelsAngle(-90);
         // Remove previously added numeric X axis to avoid overlap
         if (histogramXAxis_)
@@ -348,44 +348,75 @@ namespace frontend
             barSeries_->clear();
 #endif
 
-        if (validFrames.empty())
-        {
-            histogramYAxis_->setRange(0, 1);
-            return;
-        }
+        // Use fixed range for consistent comparison across datasets
+        const double minVal = HISTOGRAM_MIN;
+        const double maxVal = HISTOGRAM_MAX;
+        const double binWidth = HISTOGRAM_BIN_WIDTH;
+
+        // Always set fixed x-axis range regardless of data
+#if MIB_HAS_QHISTOGRAMSERIES
+        histogramXAxis_->setRange(minVal, maxVal);
+        histogramXAxis_->setTickCount(6);
+#else
+        // For fallback, we'll set the category axis later
+#endif
 
         // Collect ring ratio values from valid frames
         std::vector<double> ringRatios;
-        for (const auto &frame : validFrames)
+        if (!validFrames.empty())
         {
-            if (frame.validation.isValid && frame.validation.ringRatio > 0.0)
+            for (const auto &frame : validFrames)
             {
-                ringRatios.push_back(frame.validation.ringRatio);
+                if (frame.validation.isValid && frame.validation.ringRatio > 0.0)
+                {
+                    ringRatios.push_back(frame.validation.ringRatio);
+                }
             }
         }
 
+        // If no data, show empty histogram with fixed range
         if (ringRatios.empty())
         {
             histogramYAxis_->setRange(0, 1);
+#if !MIB_HAS_QHISTOGRAMSERIES
+            // For fallback, create empty category axis with fixed range
+            if (histogramCategoryAxis_)
+            {
+                histogramChart_->removeAxis(histogramCategoryAxis_);
+                delete histogramCategoryAxis_;
+                histogramCategoryAxis_ = nullptr;
+            }
+            histogramCategoryAxis_ = new QBarCategoryAxis();
+            QStringList categories;
+            categories.reserve(HISTOGRAM_BINS);
+            for (int i = 0; i < HISTOGRAM_BINS; ++i)
+            {
+                const double start = minVal + i * binWidth;
+                const double end = (i == HISTOGRAM_BINS - 1) ? maxVal : (start + binWidth);
+                categories << QString("%1-%2").arg(start, 0, 'f', 1).arg(end, 0, 'f', 1);
+            }
+            histogramCategoryAxis_->append(categories);
+            histogramCategoryAxis_->setTitleText("Ring Width");
+            histogramCategoryAxis_->setLabelsAngle(-90);
+            histogramChart_->addAxis(histogramCategoryAxis_, Qt::AlignBottom);
+            barSeries_->attachAxis(histogramCategoryAxis_);
+            barSeries_->attachAxis(histogramYAxis_);
+#endif
             return;
-        }
-
-        // Calculate bin ranges
-        auto minmax = std::minmax_element(ringRatios.begin(), ringRatios.end());
-        double minVal = *minmax.first;
-        double maxVal = *minmax.second;
-        double binWidth = (maxVal - minVal) / HISTOGRAM_BINS;
-
-        if (binWidth <= 0.0)
-        {
-            binWidth = 1.0;
         }
 
         // Count values in each bin (used for Y-axis headroom and fallback bar series)
         std::vector<int> binCounts(HISTOGRAM_BINS, 0);
         for (double val : ringRatios)
         {
-            int binIndex = static_cast<int>((val - minVal) / binWidth);
+            // Clamp values outside the fixed range to first or last bin
+            double clampedVal = std::clamp(val, minVal, maxVal);
+            int binIndex = static_cast<int>((clampedVal - minVal) / binWidth);
+            // Ensure binIndex is within valid range (handle edge case where clampedVal == maxVal)
+            if (binIndex >= HISTOGRAM_BINS)
+            {
+                binIndex = HISTOGRAM_BINS - 1;
+            }
             binIndex = std::clamp(binIndex, 0, HISTOGRAM_BINS - 1);
             binCounts[binIndex]++;
         }
@@ -395,6 +426,11 @@ namespace frontend
         {
             maxCount = std::max(maxCount, count);
         }
+
+        // Set Y-axis range (with headroom for empty data case)
+        const int yMax = std::max(1, static_cast<int>(std::ceil(maxCount * 1.1)));
+        histogramYAxis_->setRange(0, yMax);
+        histogramYAxis_->applyNiceNumbers();
 
 #if MIB_HAS_QHISTOGRAMSERIES
         // Populate histogram series with samples and set bins
@@ -409,13 +445,7 @@ namespace frontend
             histogramSeries_->setBinsCount(HISTOGRAM_BINS);
             histogramSeries_->setSamples(samples);
         }
-        // X-axis range and ticks
-        histogramXAxis_->setRange(minVal, maxVal);
-        histogramXAxis_->setTickCount(6);
-        // Y-axis with headroom and nice numbers
-        const int yMax = std::max(1, static_cast<int>(std::ceil(maxCount * 1.1)));
-        histogramYAxis_->setRange(0, yMax);
-        histogramYAxis_->applyNiceNumbers();
+        // X-axis range already set above (fixed range for consistent comparison)
 #else
         // Fallback: build bar set and category axis
         auto *barSet = new QBarSet("");
@@ -439,19 +469,15 @@ namespace frontend
             {
                 const double start = minVal + i * binWidth;
                 const double end = (i == HISTOGRAM_BINS - 1) ? maxVal : (start + binWidth);
-                categories << QString("%1-%2").arg(start, 0, 'f', 2).arg(end, 0, 'f', 2);
+                categories << QString("%1-%2").arg(start, 0, 'f', 1).arg(end, 0, 'f', 1);
             }
             histogramCategoryAxis_->append(categories);
         }
-        histogramCategoryAxis_->setTitleText("Ring Ratio");
+        histogramCategoryAxis_->setTitleText("Ring Width");
         histogramCategoryAxis_->setLabelsAngle(-90);
         histogramChart_->addAxis(histogramCategoryAxis_, Qt::AlignBottom);
         barSeries_->attachAxis(histogramCategoryAxis_);
         barSeries_->attachAxis(histogramYAxis_);
-        // Y-axis with headroom and nice numbers
-        const int yMax = std::max(1, static_cast<int>(std::ceil(maxCount * 1.1)));
-        histogramYAxis_->setRange(0, yMax);
-        histogramYAxis_->applyNiceNumbers();
 #endif
     }
 
