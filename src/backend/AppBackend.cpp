@@ -76,7 +76,7 @@ namespace backend
         playbackService_ = std::make_unique<services::PlaybackService>();
         cameraControlService_ = std::make_unique<services::CameraControlService>();
         autofocusService_ = std::make_unique<services::AutofocusService>();
-        frameStore_ = std::make_shared<playback::FrameStore>(512);
+        frameStore_ = std::make_shared<playback::FrameStore>(5000);
 
         sqliteService_->initialize((std::filesystem::path(dataDir) / "app.sqlite3").string());
         hdf5Service_->initialize(dataDir);

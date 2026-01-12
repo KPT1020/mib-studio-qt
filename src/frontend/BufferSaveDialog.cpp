@@ -157,9 +157,16 @@ BufferSaveDialog::BufferSaveDialog(backend::AppBackend& backend, QWidget* parent
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     rootLayout->addWidget(buttons);
 
-    // Set default output directory
-    const QString appDir = QCoreApplication::applicationDirPath();
-    const QString defaultDir = QDir(appDir).absoluteFilePath("../data/saved_frames");
+    // Set default output directory using QStandardPaths for portability
+    QString defaultDir;
+    const QString documentsPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (!documentsPath.isEmpty()) {
+        defaultDir = QDir(documentsPath).absoluteFilePath("MIB_Studio_Qt/saved_frames");
+    } else {
+        // Fallback to application directory if DocumentsLocation is unavailable
+        const QString appDir = QCoreApplication::applicationDirPath();
+        defaultDir = QDir(appDir).absoluteFilePath("saved_frames");
+    }
     outputDirEdit_->setText(QDir(defaultDir).absolutePath());
 
     // Initial update
