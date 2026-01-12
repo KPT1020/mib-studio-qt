@@ -26,7 +26,7 @@ public:
     enum class OverlayMode { Off, Mask, Contours, Both };
 
     // ROI management
-    void setRoi(const QRect& roi);
+    void setRoi(const QRect& roi, bool saveToConfig = true);
     QRect getRoi() const;
     QSize getImageDimensions() const;
     

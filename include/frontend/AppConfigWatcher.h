@@ -4,9 +4,11 @@
 #include <QFileSystemWatcher>
 #include <QJsonObject>
 #include <QString>
+#include <QRect>
 
 namespace backend { class AppBackend; }
 class PlaybackPanel;
+class QTimer;
 
 namespace frontend {
 
@@ -21,6 +23,12 @@ public:
 	void start();
 	// Override the watched path explicitly (e.g., after Browse/Clear).
 	void setWatchedPath(const QString& path);
+	// Try to restore pending ROI if image dimensions are now available
+	void tryRestorePendingRoi();
+
+signals:
+	// Emitted when the watched config file changes
+	void configFileChanged(const QString& path);
 
 private slots:
 	void onFileChanged(const QString& path);
@@ -35,6 +43,9 @@ private:
 	PlaybackPanel* playbackPanel_{nullptr};
 	QFileSystemWatcher watcher_;
 	QString watchedPath_;
+	QRect pendingRoi_;  // ROI to restore when image dimensions become available
+	bool hasPendingRoi_ = false;  // Whether there's a pending ROI to restore
+	QTimer* pendingRoiTimer_ = nullptr;  // Timer to periodically check for ROI restoration
 };
 
 } // namespace frontend

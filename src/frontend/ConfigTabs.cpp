@@ -732,6 +732,33 @@ void ConfigTabs::refreshJsonTableModel() {
     }
 }
 
+void ConfigTabs::onExternalConfigFileChanged(const QString& path) {
+    // Only reload if the changed file matches the current JSON path
+    if (path != currentJsonPath()) {
+        return;
+    }
+    
+    // Only reload if there are no unsaved changes to avoid overwriting user edits
+    if (jsonUnsavedLabel_ && jsonUnsavedLabel_->isVisible()) {
+        SPDLOG_DEBUG("ConfigTabs: skipping external file reload due to unsaved changes");
+        return;
+    }
+    
+    // Reload the file into the editor
+    QString err;
+    if (!loadFileToEditor(path, jsonEdit_, &err)) {
+        SPDLOG_WARN("ConfigTabs: failed to reload config.json from {}: {}", path.toStdString(), err.toStdString());
+        return;
+    }
+    
+    // Refresh the JSON table if it's visible
+    if (jsonStack_ && jsonStack_->currentIndex() == 1) {
+        refreshJsonTableModel();
+    }
+    
+    SPDLOG_DEBUG("ConfigTabs: reloaded config.json from external change");
+}
+
 void ConfigTabs::rebuildJsonFromTable() {
 	if (!jsonEdit_) return;
 	

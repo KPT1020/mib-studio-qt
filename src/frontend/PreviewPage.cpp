@@ -79,6 +79,8 @@ namespace frontend
         // Live config watcher: watch current path and apply changes to services and playback
         configWatcher_ = new AppConfigWatcher(backend_, playback_, this);
         connect(configTabs_, &ConfigTabs::appConfigPathChanged, configWatcher_, &AppConfigWatcher::setWatchedPath);
+        // Connect file change signal to ConfigTabs to refresh JSON editor and table
+        connect(configWatcher_, &AppConfigWatcher::configFileChanged, configTabs_, &ConfigTabs::onExternalConfigFileChanged);
         configWatcher_->start();
 
         onUpdateOverlay();

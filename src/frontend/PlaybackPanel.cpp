@@ -409,7 +409,7 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
 
 PlaybackPanel::~PlaybackPanel() = default;
 
-void PlaybackPanel::setRoi(const QRect &roi)
+void PlaybackPanel::setRoi(const QRect &roi, bool saveToConfig)
 {
     imageRoi_ = roi;
     roiActive_ = roi.isValid() && !roi.isNull();
@@ -445,8 +445,11 @@ void PlaybackPanel::setRoi(const QRect &roi)
         clearRoiBtn_->setEnabled(roiActive_);
     }
     
-    // Save ROI to config.json
-    saveRoiToConfig(roi);
+    // Save ROI to config.json only if requested (default true for user actions)
+    if (saveToConfig)
+    {
+        saveRoiToConfig(roi);
+    }
 }
 
 QRect PlaybackPanel::getRoi() const
@@ -1129,22 +1132,18 @@ void PlaybackPanel::saveRoiToConfig(const QRect& roi) {
     
     QJsonObject root = doc.object();
     
-    // Update or create ROI object
-    QJsonObject roiObj;
-    if (roi.isValid() && !roi.isNull()) {
+    // Only save valid ROI (width > 0 and height > 0)
+    if (roi.isValid() && !roi.isNull() && roi.width() > 0 && roi.height() > 0) {
+        QJsonObject roiObj;
         roiObj.insert("x", roi.x());
         roiObj.insert("y", roi.y());
         roiObj.insert("w", roi.width());
         roiObj.insert("h", roi.height());
+        root.insert("roi", roiObj);
     } else {
-        // Clear ROI - set to empty or remove
-        roiObj.insert("x", 0);
-        roiObj.insert("y", 0);
-        roiObj.insert("w", 0);
-        roiObj.insert("h", 0);
+        // Remove ROI from config when cleared or invalid
+        root.remove("roi");
     }
-    
-    root.insert("roi", roiObj);
     doc.setObject(root);
     
     // Write back to file

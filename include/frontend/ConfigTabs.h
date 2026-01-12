@@ -31,6 +31,10 @@ public:
 signals:
 	void appConfigPathChanged(const QString& path);
 
+public slots:
+    // Called when config file changes externally (e.g., when ROI is saved)
+    void onExternalConfigFileChanged(const QString& path);
+
 private slots:
     void onReloadJson();
     void onSaveJson();

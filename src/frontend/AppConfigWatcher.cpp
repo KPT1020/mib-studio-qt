@@ -9,6 +9,7 @@
 #include <QJsonArray>
 #include <QSettings>
 #include <QTextStream>
+#include <QTimer>
 
 #include <spdlog/spdlog.h>
 #ifdef _WIN32
@@ -60,6 +61,12 @@ namespace frontend
 		: QObject(parent), backend_(backend), playbackPanel_(playbackPanel)
 	{
 		connect(&watcher_, &QFileSystemWatcher::fileChanged, this, &AppConfigWatcher::onFileChanged);
+		
+		// Timer to periodically check if pending ROI can be restored
+		pendingRoiTimer_ = new QTimer(this);
+		pendingRoiTimer_->setInterval(500);  // Check every 500ms
+		pendingRoiTimer_->setSingleShot(false);
+		connect(pendingRoiTimer_, &QTimer::timeout, this, &AppConfigWatcher::tryRestorePendingRoi);
 	}
 
 	void AppConfigWatcher::start()
@@ -106,6 +113,8 @@ namespace frontend
 			watcher_.addPath(path);
 		}
 		loadAndApplyFromPath(path);
+		// Emit signal to notify other components (e.g., ConfigTabs) that file changed
+		emit configFileChanged(path);
 	}
 
 	QString AppConfigWatcher::resolveActiveConfigPath() const
@@ -302,8 +311,14 @@ namespace frontend
 						roiY + roiH <= imgDims.height())
 					{
 						QRect roi(roiX, roiY, roiW, roiH);
-						playbackPanel_->setRoi(roi);
-						SPDLOG_INFO("AppConfigWatcher: restored ROI x={}, y={}, w={}, h={}", roiX, roiY, roiW, roiH);
+						// Only restore if different from current ROI to avoid unnecessary operations
+						QRect currentRoi = playbackPanel_->getRoi();
+						if (roi != currentRoi)
+						{
+							// Restore without saving to config to prevent infinite loop
+							playbackPanel_->setRoi(roi, false);
+							SPDLOG_INFO("AppConfigWatcher: restored ROI x={}, y={}, w={}, h={}", roiX, roiY, roiW, roiH);
+						}
 					}
 					else
 					{
@@ -313,8 +328,76 @@ namespace frontend
 				else
 				{
 					// Image dimensions not available yet, store ROI for later application
-					// This will be handled when image becomes available
-					SPDLOG_DEBUG("AppConfigWatcher: ROI found but image dimensions not available yet");
+					pendingRoi_ = QRect(roiX, roiY, roiW, roiH);
+					hasPendingRoi_ = true;
+					// Start timer to periodically check if image dimensions become available
+					if (pendingRoiTimer_ && !pendingRoiTimer_->isActive())
+					{
+						pendingRoiTimer_->start();
+						SPDLOG_INFO("AppConfigWatcher: started timer to check for pending ROI restoration");
+					}
+					SPDLOG_INFO("AppConfigWatcher: ROI found but image dimensions not available yet, storing for later: x={}, y={}, w={}, h={}", roiX, roiY, roiW, roiH);
+				}
+			}
+		}
+		
+		// Try to restore pending ROI if image dimensions are now available
+		tryRestorePendingRoi();
+	}
+	
+	void AppConfigWatcher::tryRestorePendingRoi()
+	{
+		if (!hasPendingRoi_ || !playbackPanel_)
+		{
+			// Stop timer if no pending ROI
+			if (pendingRoiTimer_ && pendingRoiTimer_->isActive())
+			{
+				pendingRoiTimer_->stop();
+			}
+			return;
+		}
+			
+		QSize imgDims = playbackPanel_->getImageDimensions();
+		SPDLOG_DEBUG("AppConfigWatcher: checking pending ROI restoration, image dimensions: {}x{}", imgDims.width(), imgDims.height());
+		if (imgDims.width() > 0 && imgDims.height() > 0)
+		{
+			const int roiX = pendingRoi_.x();
+			const int roiY = pendingRoi_.y();
+			const int roiW = pendingRoi_.width();
+			const int roiH = pendingRoi_.height();
+			
+			// Check if ROI is valid and within image bounds
+			if (roiW > 0 && roiH > 0 && 
+				roiX >= 0 && roiY >= 0 &&
+				roiX + roiW <= imgDims.width() &&
+				roiY + roiH <= imgDims.height())
+			{
+				QRect currentRoi = playbackPanel_->getRoi();
+				if (pendingRoi_ != currentRoi)
+				{
+					// Restore without saving to config to prevent infinite loop
+					playbackPanel_->setRoi(pendingRoi_, false);
+					SPDLOG_INFO("AppConfigWatcher: restored pending ROI x={}, y={}, w={}, h={}", roiX, roiY, roiW, roiH);
+				}
+				else
+				{
+					SPDLOG_DEBUG("AppConfigWatcher: pending ROI already matches current ROI, clearing pending flag");
+				}
+				hasPendingRoi_ = false;  // Clear pending ROI after successful restoration or if already matches
+				// Stop timer after successful restoration
+				if (pendingRoiTimer_ && pendingRoiTimer_->isActive())
+				{
+					pendingRoiTimer_->stop();
+				}
+			}
+			else
+			{
+				SPDLOG_WARN("AppConfigWatcher: pending ROI is invalid or out of bounds, clearing: x={}, y={}, w={}, h={}", roiX, roiY, roiW, roiH);
+				hasPendingRoi_ = false;  // Clear invalid pending ROI
+				// Stop timer after clearing invalid ROI
+				if (pendingRoiTimer_ && pendingRoiTimer_->isActive())
+				{
+					pendingRoiTimer_->stop();
 				}
 			}
 		}
