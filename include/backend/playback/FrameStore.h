@@ -95,6 +95,10 @@ namespace backend::playback
         // Returns false if no frames available
         bool getAvailableTimestampRange(TimestampRange& out) const;
 
+        // Estimate memory in bytes needed for a given capacity
+        // Uses average frame size from existing frames if available, otherwise uses conservative default
+        size_t estimateMemoryBytesForCapacity(size_t capacity) const;
+
     private:
         size_t capacity_;
         mutable std::mutex mutex_;

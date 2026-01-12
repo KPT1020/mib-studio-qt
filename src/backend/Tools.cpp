@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <psapi.h>
 #pragma comment(lib, "Psapi.lib")
+#pragma comment(lib, "Kernel32.lib")
 #else
 #include <time.h>
 #endif
@@ -66,6 +67,19 @@ double Tools::getPeakProcessMemoryMB() {
     return 0.0;
 #else
     return 0.0;
+#endif
+}
+
+uint64_t Tools::getAvailableSystemRAMBytes() {
+#ifdef _WIN32
+    MEMORYSTATUSEX memStatus{};
+    memStatus.dwLength = sizeof(MEMORYSTATUSEX);
+    if (GlobalMemoryStatusEx(&memStatus)) {
+        return static_cast<uint64_t>(memStatus.ullAvailPhys);
+    }
+    return 0;
+#else
+    return 0;
 #endif
 }
 

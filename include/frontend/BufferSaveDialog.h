@@ -32,6 +32,8 @@ private:
     void updateUIState();
     bool validateInputs();
     QString formatTimestamp(uint64_t timestampNs) const;
+    void updateMemoryDisplay();
+    QString formatMemoryBytes(uint64_t bytes) const;
 
     backend::AppBackend& backend_;
 
@@ -56,6 +58,7 @@ private:
     QGroupBox* bufferSizeGroup_ = nullptr;
     QLabel* currentCapacityLabel_ = nullptr;
     QSpinBox* newCapacitySpin_ = nullptr;
+    QLabel* estimatedMemoryLabel_ = nullptr;
     QPushButton* applyResizeBtn_ = nullptr;
 
     // Filter options

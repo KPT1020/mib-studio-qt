@@ -27,6 +27,7 @@
 #include "backend/services/PlaybackService.h"
 #include "backend/services/ProcessingService.h"
 #include "backend/playback/FrameStore.h"
+#include "backend/Tools.h"
 
 namespace frontend {
 
@@ -123,11 +124,14 @@ BufferSaveDialog::BufferSaveDialog(backend::AppBackend& backend, QWidget* parent
     newCapacitySpin_->setRange(1, 100000);
     newCapacitySpin_->setValue(512);
     bufferLayout->addRow(tr("New capacity:"), newCapacitySpin_);
+    estimatedMemoryLabel_ = new QLabel(tr("Estimated memory: N/A"), this);
+    bufferLayout->addRow(tr(""), estimatedMemoryLabel_);
     applyResizeBtn_ = new QPushButton(tr("Apply Resize"), this);
     bufferLayout->addRow(tr(""), applyResizeBtn_);
     rootLayout->addWidget(bufferSizeGroup_);
 
     connect(applyResizeBtn_, &QPushButton::clicked, this, &BufferSaveDialog::onApplyResize);
+    connect(newCapacitySpin_, QOverload<int>::of(&QSpinBox::valueChanged), this, &BufferSaveDialog::updateMemoryDisplay);
 
     // Filter options section
     auto* filterGroup = new QGroupBox(tr("Filter Options"), this);
@@ -198,10 +202,71 @@ void BufferSaveDialog::onApplyResize() {
         return;
     }
 
+    // Get memory information for validation
+    const double currentProcessMemoryMB = backend::Tools::getProcessMemoryMB();
+    const uint64_t availableSystemRAMBytes = backend::Tools::getAvailableSystemRAMBytes();
+    const double availableSystemRAMMB = static_cast<double>(availableSystemRAMBytes) / (1024.0 * 1024.0);
+    
+    // Get FrameStore to estimate memory
+    auto& playback = backend_.playback();
+    const size_t estimatedBufferMemoryBytes = playback.estimateMemoryBytesForCapacity(newCapacity);
+    const double estimatedBufferMemoryMB = static_cast<double>(estimatedBufferMemoryBytes) / (1024.0 * 1024.0);
+    const double totalMemoryAfterResizeMB = currentProcessMemoryMB + estimatedBufferMemoryMB;
+    const double thresholdMB = availableSystemRAMMB * 0.75;
+
+    // Log validation check
+    SPDLOG_DEBUG("BufferSaveDialog: Validation check - requested capacity: {}, current process memory: {:.2f} MB, estimated buffer memory: {:.2f} MB, total after resize: {:.2f} MB, available system RAM: {:.2f} MB, threshold (75%): {:.2f} MB",
+                 newCapacity, currentProcessMemoryMB, estimatedBufferMemoryMB, totalMemoryAfterResizeMB, availableSystemRAMMB, thresholdMB);
+
+    // Validate against available RAM (75% threshold)
+    if (totalMemoryAfterResizeMB > thresholdMB) {
+        // Calculate maximum recommended capacity
+        const double availableForBufferMB = thresholdMB - currentProcessMemoryMB;
+        size_t maxRecommendedCapacity = 0;
+        if (availableForBufferMB > 0 && newCapacity > 0) {
+            const double memoryPerFrameMB = estimatedBufferMemoryMB / static_cast<double>(newCapacity);
+            if (memoryPerFrameMB > 0) {
+                maxRecommendedCapacity = static_cast<size_t>(availableForBufferMB / memoryPerFrameMB);
+            }
+        }
+
+        const QString message = tr(
+            "Warning: The requested buffer size may exceed available system memory.\n\n"
+            "Requested buffer capacity: %1 frames\n"
+            "Current process memory: %2\n"
+            "Estimated buffer memory: %3\n"
+            "Total memory after resize: %4\n"
+            "Available system RAM: %5\n"
+            "Threshold (75%%): %6\n\n"
+            "Maximum recommended buffer capacity: %7 frames\n\n"
+            "Do you want to proceed anyway? This may cause system instability or allocation failures."
+        )
+        .arg(newCapacity)
+        .arg(formatMemoryBytes(static_cast<uint64_t>(currentProcessMemoryMB * 1024 * 1024)))
+        .arg(formatMemoryBytes(estimatedBufferMemoryBytes))
+        .arg(formatMemoryBytes(static_cast<uint64_t>(totalMemoryAfterResizeMB * 1024 * 1024)))
+        .arg(formatMemoryBytes(availableSystemRAMBytes))
+        .arg(formatMemoryBytes(static_cast<uint64_t>(thresholdMB * 1024 * 1024)))
+        .arg(maxRecommendedCapacity);
+
+        SPDLOG_WARN("BufferSaveDialog: RAM validation failed - total memory ({:.2f} MB) would exceed threshold ({:.2f} MB)", totalMemoryAfterResizeMB, thresholdMB);
+
+        const int reply = QMessageBox::warning(this,
+                                               tr("Resize Buffer - Memory Warning"),
+                                               message,
+                                               QMessageBox::Yes | QMessageBox::No,
+                                               QMessageBox::No);
+        if (reply != QMessageBox::Yes) {
+            return;
+        }
+    } else {
+        SPDLOG_INFO("BufferSaveDialog: RAM validation passed - total memory ({:.2f} MB) is within threshold ({:.2f} MB)", totalMemoryAfterResizeMB, thresholdMB);
+    }
+
     // Warn if resize will clear frames
     uint64_t earliest = 0, latest = 0;
     size_t count = 0;
-    bool hasFrames = backend_.playback().queryRange(earliest, latest, count);
+    bool hasFrames = playback.queryRange(earliest, latest, count);
     if (hasFrames && newCapacity < count) {
         const int reply = QMessageBox::warning(this,
                                                tr("Resize Buffer"),
@@ -214,11 +279,22 @@ void BufferSaveDialog::onApplyResize() {
         }
     }
 
-    if (backend_.playback().resize(newCapacity)) {
+    if (playback.resize(newCapacity)) {
+        // Log successful resize
+        const double finalProcessMemoryMB = backend::Tools::getProcessMemoryMB();
+        const uint64_t finalAvailableRAMBytes = backend::Tools::getAvailableSystemRAMBytes();
+        const double finalAvailableRAMMB = static_cast<double>(finalAvailableRAMBytes) / (1024.0 * 1024.0);
+        const size_t finalEstimatedBufferMemoryBytes = playback.estimateMemoryBytesForCapacity(newCapacity);
+        const double finalEstimatedBufferMemoryMB = static_cast<double>(finalEstimatedBufferMemoryBytes) / (1024.0 * 1024.0);
+
+        SPDLOG_INFO("BufferSaveDialog: Buffer resized successfully - new capacity: {}, estimated buffer memory: {:.2f} MB, current process memory: {:.2f} MB, available system RAM: {:.2f} MB",
+                    newCapacity, finalEstimatedBufferMemoryMB, finalProcessMemoryMB, finalAvailableRAMMB);
+
         QMessageBox::information(this, tr("Resize Buffer"), tr("Buffer resized successfully."));
         updateAvailableRanges();
         updateUIState();
     } else {
+        SPDLOG_WARN("BufferSaveDialog: Failed to resize buffer to capacity {}", newCapacity);
         QMessageBox::warning(this, tr("Resize Buffer"), tr("Failed to resize buffer."));
     }
 }
@@ -287,6 +363,16 @@ void BufferSaveDialog::updateAvailableRanges() {
     currentCapacityLabel_->setText(QString::number(capacity));
     newCapacitySpin_->setValue(static_cast<int>(capacity));
 
+    // Log RAM usage when dialog opens
+    const double currentProcessMemoryMB = backend::Tools::getProcessMemoryMB();
+    const uint64_t availableSystemRAMBytes = backend::Tools::getAvailableSystemRAMBytes();
+    const double availableSystemRAMMB = static_cast<double>(availableSystemRAMBytes) / (1024.0 * 1024.0);
+    const size_t estimatedBufferMemoryBytes = playback.estimateMemoryBytesForCapacity(capacity);
+    const double estimatedBufferMemoryMB = static_cast<double>(estimatedBufferMemoryBytes) / (1024.0 * 1024.0);
+
+    SPDLOG_INFO("BufferSaveDialog: Dialog opened - current buffer capacity: {}, estimated buffer memory: {:.2f} MB, current process memory: {:.2f} MB, available system RAM: {:.2f} MB",
+                capacity, estimatedBufferMemoryMB, currentProcessMemoryMB, availableSystemRAMMB);
+
     // Update index range
     uint64_t earliest = 0, latest = 0;
     size_t count = 0;
@@ -328,6 +414,9 @@ void BufferSaveDialog::updateAvailableRanges() {
         startTimestampSpin_->setRange(0, 0);
         endTimestampSpin_->setRange(0, 0);
     }
+
+    // Update memory display
+    updateMemoryDisplay();
 }
 
 void BufferSaveDialog::updateUIState() {
@@ -367,6 +456,24 @@ QString BufferSaveDialog::formatTimestamp(uint64_t timestampNs) const {
         return QString::number(timestampNs / 1000);
     }
     return QString::number(timestampNs);
+}
+
+QString BufferSaveDialog::formatMemoryBytes(uint64_t bytes) const {
+    const double bytesDouble = static_cast<double>(bytes);
+    if (bytesDouble >= 1024.0 * 1024.0 * 1024.0) {
+        // GB
+        return QString::number(bytesDouble / (1024.0 * 1024.0 * 1024.0), 'f', 2) + " GB";
+    } else {
+        // MB
+        return QString::number(bytesDouble / (1024.0 * 1024.0), 'f', 2) + " MB";
+    }
+}
+
+void BufferSaveDialog::updateMemoryDisplay() {
+    const size_t newCapacity = static_cast<size_t>(newCapacitySpin_->value());
+    auto& playback = backend_.playback();
+    const size_t estimatedMemoryBytes = playback.estimateMemoryBytesForCapacity(newCapacity);
+    estimatedMemoryLabel_->setText(tr("Estimated memory: %1").arg(formatMemoryBytes(estimatedMemoryBytes)));
 }
 
 } // namespace frontend
