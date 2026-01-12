@@ -17,6 +17,7 @@ private slots:
 
 private:
     void applySettings();
+    void saveConversionFactorToConfig(double factor);
 
     backend::AppBackend& backend_;
     QDoubleSpinBox* conversionFactorSpin_{nullptr};

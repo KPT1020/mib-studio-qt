@@ -922,19 +922,27 @@ void HdfReviewTab::exportMetricsToCsv(const QString& filePath) {
 
     QTextStream out(&file);
     
+    // Get conversion factor from backend (pixels to microns)
+    const double conversionFactor = backend_.processing().getPixelToMicronFactor();
+    // Area conversion: pixels² to microns² = pixels² * (microns/pixel)²
+    const double areaConversionFactor = conversionFactor * conversionFactor;
+    
     // CSV header
-    out << "Frame Type,Index,Timestamp,Deformability,Area,Area Ratio,Ring Ratio,"
+    out << "Frame Type,Index,Timestamp,Deformability,Area,Area (um²),Area Ratio,Ring Ratio,"
         << "Valid,Touches Border,Single Inner,In Range,Inner Count,"
         << "Bright Q1,Bright Q2,Bright Q3,Bright Q4\n";
 
     // Export valid frames
     for (const auto& frame : validFrames_) {
         const auto& val = frame.validation;
+        // Convert area from pixels² to microns²
+        double areaMicrons = val.area * areaConversionFactor;
         out << "Valid,";
         out << frame.index << ",";
         out << frame.timestampNs << ",";
         out << QString::number(val.deformability, 'f', 3) << ",";
         out << QString::number(val.area, 'f', 2) << ",";
+        out << QString::number(areaMicrons, 'f', 2) << ",";
         out << QString::number(val.areaRatio, 'f', 3) << ",";
         out << QString::number(val.ringRatio, 'f', 3) << ",";
         out << (val.isValid ? "Yes" : "No") << ",";
@@ -951,11 +959,14 @@ void HdfReviewTab::exportMetricsToCsv(const QString& filePath) {
     // Export invalid frames
     for (const auto& frame : invalidFrames_) {
         const auto& val = frame.validation;
+        // Convert area from pixels² to microns²
+        double areaMicrons = val.area * areaConversionFactor;
         out << "Invalid,";
         out << frame.index << ",";
         out << frame.timestampNs << ",";
         out << QString::number(val.deformability, 'f', 3) << ",";
         out << QString::number(val.area, 'f', 2) << ",";
+        out << QString::number(areaMicrons, 'f', 2) << ",";
         out << QString::number(val.areaRatio, 'f', 3) << ",";
         out << QString::number(val.ringRatio, 'f', 3) << ",";
         out << (val.isValid ? "Yes" : "No") << ",";
