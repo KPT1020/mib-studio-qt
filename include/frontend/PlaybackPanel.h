@@ -24,6 +24,7 @@ public:
     ~PlaybackPanel() override;
 
     enum class OverlayMode { Off, Mask, Contours, Both };
+    enum class FitMode { FitToWindow, Zoom100 };
 
     // ROI management
     void setRoi(const QRect& roi, bool saveToConfig = true);
@@ -45,6 +46,7 @@ private slots:
     void onToggleCapture();
     void onSaveBuffer();
     void onLogMetrics();
+    void onToggleFit();
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -68,6 +70,7 @@ private:
     QToolButton* setBgBtn_ = nullptr;
     QToolButton* clearRoiBtn_ = nullptr;
     QToolButton* saveBufferBtn_ = nullptr;
+    QToolButton* fitBtn_ = nullptr;
     bool scrubbing_ = false;
     bool followLive_ = true;           // auto-follow latest when true
     bool prevCaptureRunning_ = false;  // detect start transitions
@@ -75,6 +78,7 @@ private:
     QImage frameImage_;
     // Overlay/ROI state
     OverlayMode overlayMode_ { OverlayMode::Off };
+    FitMode fitMode_ { FitMode::FitToWindow };
     QRect imageRoi_;
     bool roiActive_ = false;
     bool hasBackground_ = false;

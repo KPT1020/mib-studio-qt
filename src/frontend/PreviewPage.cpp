@@ -5,6 +5,8 @@
 #include <QFile>
 #include <QHBoxLayout>
 #include <QStackedLayout>
+#include <QSplitter>
+#include <QSplitterHandle>
 #include <QTextStream>
 #include <QTimer>
 #include <QToolButton>
@@ -27,11 +29,18 @@ namespace frontend
     {
         auto *root = new QVBoxLayout(this);
         root->setContentsMargins(0, 0, 0, 0);
-        root->setSpacing(6);
+        root->setSpacing(0);
+
+        // Create vertical splitter for resizable top/bottom sections
+        QSplitter *splitter = new QSplitter(Qt::Vertical, this);
+        splitter->setChildrenCollapsible(false);
+        splitter->setHandleWidth(10);
+        splitter->setOpaqueResize(true);
 
         // Top: Playback panel with centered Play/Stop overlay
         QWidget *overlayContainer = new QWidget(this);
         overlayContainer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        overlayContainer->setMinimumHeight(100);
 
         auto *stacked = new QStackedLayout(overlayContainer);
         stacked->setStackingMode(QStackedLayout::StackAll);
@@ -72,9 +81,19 @@ namespace frontend
 
         // Bottom: configuration tabs
         configTabs_ = new ConfigTabs(backend_, this);
+        // Allow the splitter to shrink this area aggressively (Qt layouts otherwise enforce a large minimum)
+        configTabs_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
+        configTabs_->setMinimumHeight(0);
 
-        root->addWidget(overlayContainer, 3);
-        root->addWidget(configTabs_, 2);
+        // Add widgets to splitter
+        splitter->addWidget(overlayContainer);
+        splitter->addWidget(configTabs_);
+        
+        // Set initial proportions (3:2 ratio)
+        splitter->setStretchFactor(0, 3);
+        splitter->setStretchFactor(1, 2);
+
+        root->addWidget(splitter);
 
         // Live config watcher: watch current path and apply changes to services and playback
         configWatcher_ = new AppConfigWatcher(backend_, playback_, this);

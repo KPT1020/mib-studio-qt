@@ -74,12 +74,14 @@ namespace
                              QImage *overlay,
                              QRect *imageRoi,
                              QList<QPolygon> *contours,
+                             PlaybackPanel::FitMode *fitMode,
                              QWidget *parent = nullptr)
             : QWidget(parent),
               image_(image),
               overlay_(overlay),
               imageRoi_(imageRoi),
-              contours_(contours) {}
+              contours_(contours),
+              fitMode_(fitMode) {}
 
         std::function<void(const QRect &)> onRoiSelected;
         std::function<void()> onRequestBackground;
@@ -94,9 +96,25 @@ namespace
 
             const int imgW = image_->width();
             const int imgH = image_->height();
-            const double scale = std::min(double(width()) / imgW, double(height()) / imgH);
-            const QSizeF drawSize(imgW * scale, imgH * scale);
-            const QPointF topLeft((width() - drawSize.width()) / 2.0, (height() - drawSize.height()) / 2.0);
+            
+            double scale;
+            QSizeF drawSize;
+            QPointF topLeft;
+            
+            if (fitMode_ && *fitMode_ == PlaybackPanel::FitMode::Zoom100)
+            {
+                // 100% zoom: 1:1 pixel ratio
+                scale = 1.0;
+                drawSize = QSizeF(imgW, imgH);
+                topLeft = QPointF((width() - drawSize.width()) / 2.0, (height() - drawSize.height()) / 2.0);
+            }
+            else
+            {
+                // Fit to window: scale to fit maintaining aspect ratio
+                scale = std::min(double(width()) / imgW, double(height()) / imgH);
+                drawSize = QSizeF(imgW * scale, imgH * scale);
+                topLeft = QPointF((width() - drawSize.width()) / 2.0, (height() - drawSize.height()) / 2.0);
+            }
 
             // Base image
             QImage scaled = image_->scaled(drawSize.toSize(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
@@ -195,9 +213,23 @@ namespace
                 }
                 const int imgW = image_->width();
                 const int imgH = image_->height();
-                const double scale = std::min(double(width()) / imgW, double(height()) / imgH);
-                const QSizeF drawSize(imgW * scale, imgH * scale);
-                const QPointF topLeft((width() - drawSize.width()) / 2.0, (height() - drawSize.height()) / 2.0);
+                
+                double scale;
+                QSizeF drawSize;
+                QPointF topLeft;
+                
+                if (fitMode_ && *fitMode_ == PlaybackPanel::FitMode::Zoom100)
+                {
+                    scale = 1.0;
+                    drawSize = QSizeF(imgW, imgH);
+                    topLeft = QPointF((width() - drawSize.width()) / 2.0, (height() - drawSize.height()) / 2.0);
+                }
+                else
+                {
+                    scale = std::min(double(width()) / imgW, double(height()) / imgH);
+                    drawSize = QSizeF(imgW * scale, imgH * scale);
+                    topLeft = QPointF((width() - drawSize.width()) / 2.0, (height() - drawSize.height()) / 2.0);
+                }
 
                 auto toImage = [&](const QPoint &wp) -> QPoint
                 {
@@ -246,6 +278,7 @@ namespace
         QImage *overlay_ = nullptr;
         QRect *imageRoi_ = nullptr;
         QList<QPolygon> *contours_ = nullptr;
+        PlaybackPanel::FitMode *fitMode_ = nullptr;
         bool dragging_ = false;
         QPoint dragStartWidgetPos_;
         QPoint dragCurrentWidgetPos_;
@@ -261,7 +294,7 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    canvas_ = new ImageCanvas(&frameImage_, &overlayImage_, &imageRoi_, &overlayContours_, this);
+    canvas_ = new ImageCanvas(&frameImage_, &overlayImage_, &imageRoi_, &overlayContours_, &fitMode_, this);
     slider_ = new QSlider(Qt::Horizontal, this);
     slider_->setRange(0, 0);
     slider_->setSingleStep(1);
@@ -289,10 +322,14 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     saveBufferBtn_ = new QToolButton(controls);
     saveBufferBtn_->setText("Save Buffer");
     saveBufferBtn_->setToolTip("Save buffer frames to disk and manage buffer size");
+    fitBtn_ = new QToolButton(controls);
+    fitBtn_->setText("Fit: Window");
+    fitBtn_->setToolTip("Toggle between fit-to-window and 100% zoom");
     controlsLayout->addWidget(overlayBtn_);
     controlsLayout->addWidget(setBgBtn_);
     controlsLayout->addWidget(clearRoiBtn_);
     controlsLayout->addWidget(saveBufferBtn_);
+    controlsLayout->addWidget(fitBtn_);
     controlsLayout->addStretch(1);
     layout->addWidget(controls);
 
@@ -305,6 +342,7 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     connect(setBgBtn_, &QToolButton::clicked, this, &PlaybackPanel::onSetBackground);
     connect(clearRoiBtn_, &QToolButton::clicked, this, &PlaybackPanel::onClearRoi);
     connect(saveBufferBtn_, &QToolButton::clicked, this, &PlaybackPanel::onSaveBuffer);
+    connect(fitBtn_, &QToolButton::clicked, this, &PlaybackPanel::onToggleFit);
 
     // Space shortcut to start/stop capture
     {
@@ -716,6 +754,30 @@ void PlaybackPanel::onSaveBuffer()
 {
     frontend::BufferSaveDialog dialog(backend_, this);
     dialog.exec();
+}
+
+void PlaybackPanel::onToggleFit()
+{
+    if (fitMode_ == FitMode::FitToWindow)
+    {
+        fitMode_ = FitMode::Zoom100;
+        if (fitBtn_)
+        {
+            fitBtn_->setText("Fit: 100%");
+            fitBtn_->setToolTip("Toggle between fit-to-window and 100% zoom");
+        }
+    }
+    else
+    {
+        fitMode_ = FitMode::FitToWindow;
+        if (fitBtn_)
+        {
+            fitBtn_->setText("Fit: Window");
+            fitBtn_->setToolTip("Toggle between fit-to-window and 100% zoom");
+        }
+    }
+    if (canvas_)
+        canvas_->update();
 }
 
 void PlaybackPanel::onToggleCapture()

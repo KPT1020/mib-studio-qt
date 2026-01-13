@@ -31,6 +31,7 @@
 #include <QRegularExpression>
 #include <QScrollArea>
 #include <QGridLayout>
+#include <QGroupBox>
 
 #include <spdlog/spdlog.h>
 #ifdef _WIN32
@@ -113,6 +114,9 @@ static void setObjectValueByPath(QJsonObject& obj, const QString& path, const QJ
 ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
     : QWidget(parent), backend_(backend) {
     auto* layout = new QVBoxLayout(this);
+    // Important: let parent QSplitter shrink this widget.
+    // Default layout constraints can impose a large minimum size, making splitter dragging feel “stuck”.
+    layout->setSizeConstraint(QLayout::SetNoConstraint);
     tabs_ = new QTabWidget(this);
 
     // App JSON config tab
@@ -627,14 +631,18 @@ void ConfigTabs::refreshJsonTableModel() {
             QTableView* table = jsonSectionTables_.take(sectionName);
             JsonTableModel* model = jsonSectionModels_.take(sectionName);
             if (table && jsonGridLayout_) {
-                // Find and remove label
-                QLabel* label = jsonGridContainer_->findChild<QLabel*>(QString("label_%1").arg(sectionName));
-                if (label) {
-                    jsonGridLayout_->removeWidget(label);
-                    label->deleteLater();
+                // Find and remove group box (contains title + table)
+                QString safe = sectionName;
+                safe.replace(QRegularExpression(QString("[^A-Za-z0-9_]")), QString("_"));
+                const QString groupName = QString("group_%1").arg(safe);
+                if (auto* group = jsonGridContainer_->findChild<QGroupBox*>(groupName)) {
+                    jsonGridLayout_->removeWidget(group);
+                    group->deleteLater();
+                } else {
+                    // Fallback: ensure the table is removed if it was previously added directly
+                    jsonGridLayout_->removeWidget(table);
+                    table->deleteLater();
                 }
-                jsonGridLayout_->removeWidget(table);
-                table->deleteLater();
             }
             if (model) {
                 model->deleteLater();
@@ -666,11 +674,24 @@ void ConfigTabs::refreshJsonTableModel() {
         
         QTableView* table = jsonSectionTables_.value(sectionName, nullptr);
         JsonTableModel* model = jsonSectionModels_.value(sectionName, nullptr);
+
+        // Stable object name for reusing widgets between refreshes
+        QString safe = sectionName;
+        safe.replace(QRegularExpression(QString("[^A-Za-z0-9_]")), QString("_"));
+        const QString groupName = QString("group_%1").arg(safe);
+        QGroupBox* group = jsonGridContainer_->findChild<QGroupBox*>(groupName);
         
-        if (!table) {
-            // Create new table and model
+        if (!group) {
+            group = new QGroupBox(sectionName, jsonGridContainer_);
+            group->setObjectName(groupName);
+            group->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+            auto* gv = new QVBoxLayout(group);
+            gv->setContentsMargins(6, 6, 6, 6);
+            gv->setSpacing(4);
+
+            // Create new table + model
             model = new JsonTableModel(this);
-            table = new QTableView(jsonGridContainer_);
+            table = new QTableView(group);
             table->setModel(model);
             table->setSelectionBehavior(QAbstractItemView::SelectRows);
             table->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -680,34 +701,35 @@ void ConfigTabs::refreshJsonTableModel() {
             table->setTextElideMode(Qt::ElideNone);
             table->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
             table->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
-            table->setMinimumHeight(150);
-            table->setMaximumHeight(400);
-            
+            table->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+            table->setMinimumHeight(140);
+
+            gv->addWidget(table, 1);
+
             // Connect dataChanged signal
             connect(model, &QAbstractItemModel::dataChanged, this,
                     [this](const QModelIndex&, const QModelIndex&, const QVector<int>&) { rebuildJsonFromTable(); });
-            
+
             jsonSectionTables_[sectionName] = table;
             jsonSectionModels_[sectionName] = model;
+        } else if (!table) {
+            // Group exists from a previous refresh; recover the table/model pointers
+            table = group->findChild<QTableView*>();
+            model = table ? qobject_cast<JsonTableModel*>(table->model()) : nullptr;
+            if (table) jsonSectionTables_[sectionName] = table;
+            if (model) jsonSectionModels_[sectionName] = model;
         }
         
         // Update model data
         if (model) {
             model->setFromFlatten(sectionTable.columns, sectionTable.rows);
         }
-        
-        // Create or get section label
-        QLabel* label = jsonGridContainer_->findChild<QLabel*>(QString("label_%1").arg(sectionName));
-        if (!label) {
-            label = new QLabel(QString("<b>%1</b>").arg(sectionName), jsonGridContainer_);
-            label->setObjectName(QString("label_%1").arg(sectionName));
-        }
-        label->show();
-        table->show();
-        
-        // Add to grid: label in row gridRow*2, table in row gridRow*2+1
-        jsonGridLayout_->addWidget(label, gridRow * 2, gridCol, 1, 1);
-        jsonGridLayout_->addWidget(table, gridRow * 2 + 1, gridCol, 1, 1);
+
+        if (group) group->show();
+        if (table) table->show();
+
+        // Add grouped widget to grid (keeps header + body together)
+        jsonGridLayout_->addWidget(group, gridRow, gridCol, 1, 1, Qt::AlignTop);
         
         // Resize columns
         if (table) {
@@ -721,6 +743,11 @@ void ConfigTabs::refreshJsonTableModel() {
             gridCol = 0;
             gridRow++;
         }
+    }
+
+    // Make rows expand from the top to use available space nicely
+    for (int r = 0; r <= gridRow; ++r) {
+        jsonGridLayout_->setRowStretch(r, 1);
     }
     
     // Also update legacy single table for backward compatibility
