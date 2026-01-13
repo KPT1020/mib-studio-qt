@@ -14,7 +14,19 @@ struct DiscoveredCamera {
     std::string interfaceID;
     std::string deviceID;
     std::string modelName;
-    std::string label; // interfaceID/deviceID (model)
+    std::string firmwareVersion; // "Unknown" if not available
+    std::string label; // interfaceID/deviceID (model) [Firmware: version]
+};
+
+struct DiscoveredFramegrabber {
+    int interfaceIndex = -1;
+    int deviceIndex = -1;
+    int streamIndex = -1;
+    std::string interfaceID;
+    std::string deviceID;
+    std::string streamID;
+    std::string modelName;
+    std::string label; // interfaceID/deviceID/streamID (model)
 };
 
 /**
@@ -30,6 +42,7 @@ public:
     ~CameraControlService() = default;
 
     std::vector<DiscoveredCamera> discoverCameras();
+    std::vector<DiscoveredFramegrabber> discoverFramegrabbers();
 
     bool applyScriptToDevice(int interfaceIndex,
                              int deviceIndex,

@@ -9,6 +9,8 @@
 #include <QVariant>
 #include <QApplication>
 #include <QIcon>
+#include <QTabWidget>
+#include <QWidget>
 
 #include <spdlog/spdlog.h>
 
@@ -53,8 +55,26 @@ ConnectTab::ConnectTab(backend::AppBackend& backend, QWidget* parent)
     : QWidget(parent), backend_(backend) {
     auto* root = new QVBoxLayout(this);
 
-    deviceList_ = new QListWidget(this);
-    deviceList_->setSelectionMode(QAbstractItemView::SingleSelection);
+    // Create tab widget with two tabs
+    tabWidget_ = new QTabWidget(this);
+    
+    // Framegrabbers tab
+    auto* framegrabberWidget = new QWidget(this);
+    auto* framegrabberLayout = new QVBoxLayout(framegrabberWidget);
+    framegrabberList_ = new QListWidget(framegrabberWidget);
+    framegrabberList_->setSelectionMode(QAbstractItemView::SingleSelection);
+    framegrabberLayout->addWidget(framegrabberList_);
+    framegrabberLayout->setContentsMargins(0, 0, 0, 0);
+    tabWidget_->addTab(framegrabberWidget, tr("Framegrabbers"));
+    
+    // Cameras tab
+    auto* cameraWidget = new QWidget(this);
+    auto* cameraLayout = new QVBoxLayout(cameraWidget);
+    cameraList_ = new QListWidget(cameraWidget);
+    cameraList_->setSelectionMode(QAbstractItemView::SingleSelection);
+    cameraLayout->addWidget(cameraList_);
+    cameraLayout->setContentsMargins(0, 0, 0, 0);
+    tabWidget_->addTab(cameraWidget, tr("Cameras"));
 
     auto* buttonsRow = new QHBoxLayout();
     refreshBtn_ = new QPushButton(tr("Refresh"), this);
@@ -65,10 +85,10 @@ ConnectTab::ConnectTab(backend::AppBackend& backend, QWidget* parent)
     buttonsRow->addStretch(1);
     buttonsRow->addWidget(mockBtn_);
 
-    statusLabel_ = new QLabel(tr("Select a camera and click Connect."), this);
+    statusLabel_ = new QLabel(tr("Select a device and click Connect."), this);
 
-    root->addWidget(new QLabel(tr("Available cameras:"), this));
-    root->addWidget(deviceList_, 1);
+    root->addWidget(new QLabel(tr("Available devices:"), this));
+    root->addWidget(tabWidget_, 1);
     root->addLayout(buttonsRow);
     root->addWidget(statusLabel_);
 
@@ -84,39 +104,74 @@ void ConnectTab::onRefresh() {
 }
 
 void ConnectTab::populateDevices() {
-    deviceList_->clear();
+    framegrabberList_->clear();
+    cameraList_->clear();
 
     auto& cc = backend_.cameraControl();
-    const auto devices = cc.discoverCameras();
-    for (const auto& d : devices) {
-        auto* item = new QListWidgetItem(QString::fromStdString(d.label));
-        item->setData(Qt::UserRole, toVariant(DeviceIdx{d.interfaceIndex, d.deviceIndex}));
-        deviceList_->addItem(item);
+    
+    // Populate framegrabbers tab
+    const auto framegrabbers = cc.discoverFramegrabbers();
+    for (const auto& fg : framegrabbers) {
+        auto* item = new QListWidgetItem(QString::fromStdString(fg.label));
+        item->setData(Qt::UserRole, toVariant(DeviceIdx{fg.interfaceIndex, fg.deviceIndex}));
+        framegrabberList_->addItem(item);
+    }
+    
+    if (framegrabberList_->count() > 0) {
+        framegrabberList_->setCurrentRow(0);
+    }
+    
+    // Populate cameras tab
+    const auto cameras = cc.discoverCameras();
+    for (const auto& cam : cameras) {
+        auto* item = new QListWidgetItem(QString::fromStdString(cam.label));
+        item->setData(Qt::UserRole, toVariant(DeviceIdx{cam.interfaceIndex, cam.deviceIndex}));
+        cameraList_->addItem(item);
+    }
+    
+    if (cameraList_->count() > 0) {
+        cameraList_->setCurrentRow(0);
     }
 
-    if (deviceList_->count() > 0) {
-        deviceList_->setCurrentRow(0);
-    }
-
-    statusLabel_->setText(QString("Found %1 device(s)").arg(deviceList_->count()));
-    SPDLOG_INFO("ConnectTab: refreshed, {} device(s) listed", deviceList_->count());
+    statusLabel_->setText(QString("Found %1 framegrabber(s), %2 camera(s)")
+                         .arg(framegrabberList_->count())
+                         .arg(cameraList_->count()));
+    SPDLOG_INFO("ConnectTab: refreshed, {} framegrabber(s), {} camera(s) listed", 
+                framegrabberList_->count(), cameraList_->count());
 }
 
 void ConnectTab::onConnect() {
-    const auto* item = deviceList_->currentItem();
+    // Get the current tab and its list widget
+    QListWidget* currentList = nullptr;
+    QString deviceType;
+    
+    int currentTab = tabWidget_->currentIndex();
+    if (currentTab == 0) {
+        currentList = framegrabberList_;
+        deviceType = tr("framegrabber");
+    } else if (currentTab == 1) {
+        currentList = cameraList_;
+        deviceType = tr("camera");
+    } else {
+        QMessageBox::information(this, tr("Connect Device"), tr("Please select a device from the list."));
+        return;
+    }
+    
+    const auto* item = currentList->currentItem();
     if (!item) {
-        QMessageBox::information(this, tr("Connect Camera"), tr("Please select a camera from the list."));
+        QMessageBox::information(this, tr("Connect Device"), 
+                                 tr("Please select a %1 from the list.").arg(deviceType));
         return;
     }
 
     DeviceIdx idx{};
     if (!fromVariant(item->data(Qt::UserRole), idx)) {
-        QMessageBox::warning(this, tr("Connect Camera"), tr("Internal error: invalid selection."));
+        QMessageBox::warning(this, tr("Connect Device"), tr("Internal error: invalid selection."));
         return;
     }
 
     const QString label = item->text();
-    SPDLOG_INFO("ConnectTab: selecting hardware camera {} ({}:{})",
+    SPDLOG_INFO("ConnectTab: selecting hardware device {} ({}:{})",
                 label.toStdString(), idx.ifIndex, idx.devIndex);
 
     backend_.setHardwareCameraSelection(idx.ifIndex, idx.devIndex, label.toStdString());

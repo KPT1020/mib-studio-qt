@@ -8,7 +8,7 @@
         "filters": {
             "enable_area_range_check": true,
             "enable_border_check": true,
-            "enable_multiple_contours_check": false,
+            "enable_multiple_contours_check": true,
             "require_single_inner_contour": true
         },
         "gaussian_blur_size": 3,

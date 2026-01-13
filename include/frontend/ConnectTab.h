@@ -10,6 +10,7 @@ namespace backend { class AppBackend; }
 class QListWidget;
 class QPushButton;
 class QLabel;
+class QTabWidget;
 
 namespace frontend {
 
@@ -30,7 +31,9 @@ private:
     void populateDevices();
 
     backend::AppBackend& backend_;
-    QListWidget* deviceList_ = nullptr;
+    QTabWidget* tabWidget_ = nullptr;
+    QListWidget* framegrabberList_ = nullptr;
+    QListWidget* cameraList_ = nullptr;
     QPushButton* refreshBtn_ = nullptr;
     QPushButton* connectBtn_ = nullptr;
     QPushButton* mockBtn_ = nullptr;

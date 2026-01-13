@@ -12,50 +12,129 @@ std::vector<DiscoveredCamera> CameraControlService::discoverCameras() {
     std::vector<DiscoveredCamera> results;
     try {
         EGenTL genTL;
-        gc::TL_HANDLE tl = genTL.tlOpen();
-        const uint32_t numInterfaces = genTL.tlGetNumInterfaces(tl);
-        for (uint32_t ifIdx = 0; ifIdx < numInterfaces; ++ifIdx) {
-            std::string interfaceID = genTL.tlGetInterfaceID(tl, ifIdx);
-            gc::IF_HANDLE ifHandle = genTL.tlOpenInterface(tl, interfaceID);
-            const uint32_t numDevices = genTL.ifGetNumDevices(ifHandle);
-            for (uint32_t devIdx = 0; devIdx < numDevices; ++devIdx) {
-                std::string deviceID = genTL.ifGetDeviceID(ifHandle, devIdx);
+        EGrabberDiscovery discovery(genTL);
+        discovery.discover(); // Discover cameras (default behavior)
 
-                // Try to query model name by temporarily opening an EGrabber
-                std::string modelName = "Unknown";
-                try {
-                    EGrabber<CallbackOnDemand> probe(genTL, static_cast<int>(ifIdx), static_cast<int>(devIdx));
-                    try {
-                        modelName = probe.getString<DeviceModule>("DeviceModelName");
-                    } catch (const gentl_error&) {
-                        // ignore if not available
-                    }
-                } catch (const std::exception& ex) {
-                    SPDLOG_WARN("CameraControlService: probe open failed for {}/{}: {}", interfaceID, deviceID, ex.what());
-                }
-
-                DiscoveredCamera dc{};
-                dc.interfaceIndex = static_cast<int>(ifIdx);
-                dc.deviceIndex = static_cast<int>(devIdx);
-                dc.interfaceID = interfaceID;
-                dc.deviceID = deviceID;
-                dc.modelName = modelName;
-                {
-                    std::ostringstream oss;
-                    oss << interfaceID << "/" << deviceID;
-                    if (!modelName.empty() && modelName != "Unknown") {
-                        oss << " (" << modelName << ")";
-                    }
-                    dc.label = oss.str();
-                }
-                results.push_back(std::move(dc));
+        for (int i = 0; i < discovery.cameraCount(); ++i) {
+            EGrabberCameraInfo cameraInfo = discovery.cameras(i);
+            
+            // Use the first grabber from the camera (master device for multi-bank cameras)
+            if (cameraInfo.grabbers.empty()) {
+                continue;
             }
-            genTL.ifClose(ifHandle);
+            
+            const EGrabberInfo& grabberInfo = cameraInfo.grabbers[0];
+            
+            // EGrabberInfo provides indices directly
+            int interfaceIndex = grabberInfo.interfaceIndex;
+            int deviceIndex = grabberInfo.deviceIndex;
+
+            // Try to query model name and firmware version by temporarily opening an EGrabber
+            std::string modelName = grabberInfo.isRemoteAvailable ? grabberInfo.deviceModelName : "Unknown";
+            std::string firmwareVersion = "Unknown";
+            
+            try {
+                EGrabber<CallbackOnDemand> probe(genTL, interfaceIndex, deviceIndex);
+                try {
+                    if (modelName == "Unknown" || modelName.empty()) {
+                        modelName = probe.getString<DeviceModule>("DeviceModelName");
+                    }
+                } catch (const gentl_error&) {
+                    // ignore if not available
+                }
+                try {
+                    firmwareVersion = probe.getString<DeviceModule>("DeviceVersion");
+                } catch (const gentl_error&) {
+                    // ignore if not available
+                }
+            } catch (const std::exception& ex) {
+                SPDLOG_WARN("CameraControlService: probe open failed for camera {}/{}: {}", 
+                           grabberInfo.interfaceID, grabberInfo.deviceID, ex.what());
+            }
+
+            DiscoveredCamera dc{};
+            dc.interfaceIndex = interfaceIndex;
+            dc.deviceIndex = deviceIndex;
+            dc.interfaceID = grabberInfo.interfaceID;
+            dc.deviceID = grabberInfo.deviceID;
+            dc.modelName = modelName;
+            dc.firmwareVersion = firmwareVersion;
+            {
+                std::ostringstream oss;
+                oss << grabberInfo.interfaceID << "/" << grabberInfo.deviceID;
+                if (!modelName.empty() && modelName != "Unknown") {
+                    oss << " (" << modelName << ")";
+                }
+                if (!firmwareVersion.empty() && firmwareVersion != "Unknown") {
+                    oss << " [Firmware: " << firmwareVersion << "]";
+                }
+                dc.label = oss.str();
+            }
+            results.push_back(std::move(dc));
         }
-        genTL.tlClose(tl);
-        SPDLOG_INFO("Discovery found {} device(s)", results.size());
+        
+        SPDLOG_INFO("Discovery found {} camera(s)", results.size());
     } catch (const std::exception& ex) {
         SPDLOG_ERROR("CameraControlService::discoverCameras failed: {}", ex.what());
+        results.clear();
+    }
+    return results;
+}
+
+std::vector<DiscoveredFramegrabber> CameraControlService::discoverFramegrabbers() {
+    std::vector<DiscoveredFramegrabber> results;
+    try {
+        EGenTL genTL;
+        EGrabberDiscovery discovery(genTL);
+        discovery.discover(); // Discover both eGrabbers and cameras
+
+        for (int i = 0; i < discovery.egrabberCount(); ++i) {
+            EGrabberInfo grabberInfo = discovery.egrabbers(i);
+            
+            // EGrabberInfo provides indices directly
+            int interfaceIndex = grabberInfo.interfaceIndex;
+            int deviceIndex = grabberInfo.deviceIndex;
+            int streamIndex = grabberInfo.streamIndex;
+
+            // Try to query model name by temporarily opening an EGrabber
+            std::string modelName = grabberInfo.isRemoteAvailable ? grabberInfo.deviceModelName : "Unknown";
+            
+            try {
+                EGrabber<CallbackOnDemand> probe(genTL, interfaceIndex, deviceIndex);
+                try {
+                    if (modelName == "Unknown" || modelName.empty()) {
+                        modelName = probe.getString<DeviceModule>("DeviceModelName");
+                    }
+                } catch (const gentl_error&) {
+                    // ignore if not available
+                }
+            } catch (const std::exception& ex) {
+                SPDLOG_WARN("CameraControlService: probe open failed for framegrabber {}/{}/{}: {}", 
+                           grabberInfo.interfaceID, grabberInfo.deviceID, grabberInfo.streamID, ex.what());
+            }
+
+            DiscoveredFramegrabber df{};
+            df.interfaceIndex = interfaceIndex;
+            df.deviceIndex = deviceIndex;
+            df.streamIndex = streamIndex;
+            df.interfaceID = grabberInfo.interfaceID;
+            df.deviceID = grabberInfo.deviceID;
+            df.streamID = grabberInfo.streamID;
+            df.modelName = modelName;
+            {
+                std::ostringstream oss;
+                oss << grabberInfo.interfaceID << "/" << grabberInfo.deviceID << "/" << grabberInfo.streamID;
+                if (!modelName.empty() && modelName != "Unknown") {
+                    oss << " (" << modelName << ")";
+                }
+                df.label = oss.str();
+            }
+            results.push_back(std::move(df));
+        }
+        
+        SPDLOG_INFO("Discovery found {} framegrabber(s)", results.size());
+    } catch (const std::exception& ex) {
+        SPDLOG_ERROR("CameraControlService::discoverFramegrabbers failed: {}", ex.what());
         results.clear();
     }
     return results;
