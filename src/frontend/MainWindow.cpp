@@ -26,6 +26,7 @@
 #include "frontend/HdfReviewTab.h"
 #include "frontend/ExperimentMonitoringTab.h"
 #include "frontend/MonitoringSettingsDialog.h"
+#include "frontend/OverviewTab.h"
 #include <spdlog/spdlog.h>
 #include <opencv2/core.hpp>
 #include <chrono>
@@ -140,9 +141,10 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
             SPDLOG_INFO("Auto-flushed {} frames to HDF5", flushed);
         } });
 
-    // Tabs: Connect + Experiment (Preview + Monitoring) + Review
+    // Tabs: Connect + Overview + Experiment (Preview + Monitoring) + Review
     tabs_ = new QTabWidget(this);
     auto *connectTab = new frontend::ConnectTab(backend_, tabs_);
+    auto *overviewTab = new frontend::OverviewTab(backend_, tabs_);
     
     // Create Experiment tab with nested Preview and Monitoring tabs
     experimentTabs_ = new QTabWidget(this);
@@ -177,6 +179,7 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     
     auto *hdfReviewTab = new frontend::HdfReviewTab(backend_, tabs_);
     tabs_->addTab(connectTab, tr("Connect"));
+    tabs_->addTab(overviewTab, tr("Overview"));
     tabs_->addTab(experimentTabs_, tr("Experiment"));
     tabs_->addTab(hdfReviewTab, tr("Review"));
     setCentralWidget(tabs_);

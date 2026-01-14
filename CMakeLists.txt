@@ -134,6 +134,8 @@ set(FRONTEND_COMMON_SOURCES
     resources/defaults.qrc
     src/frontend/ConnectTab.cpp
     include/frontend/ConnectTab.h
+    src/frontend/OverviewTab.cpp
+    include/frontend/OverviewTab.h
     src/frontend/PreviewPage.cpp
     include/frontend/PreviewPage.h
     src/frontend/ConfigTabs.cpp
