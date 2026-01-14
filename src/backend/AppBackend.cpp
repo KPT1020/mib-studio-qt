@@ -26,24 +26,29 @@
 
 namespace backend
 {
-    namespace {
+    namespace
+    {
         // Get a user-writable log path, falling back to dataDir if needed
-        std::string getLogPath(const std::string& dataDir) {
+        std::string getLogPath(const std::string &dataDir)
+        {
             std::filesystem::path dataPath(dataDir);
             std::string logPath;
-            
+
 #ifdef _WIN32
             // Check if dataDir is in Program Files (requires admin to write)
             std::string dataDirLower = dataDir;
-            std::transform(dataDirLower.begin(), dataDirLower.end(), dataDirLower.begin(), 
-                          [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            
+            std::transform(dataDirLower.begin(), dataDirLower.end(), dataDirLower.begin(),
+                           [](unsigned char c)
+                           { return static_cast<char>(std::tolower(c)); });
+
             // Check if path contains "program files" (common install location)
-            if (dataDirLower.find("program files") != std::string::npos || 
-                dataDirLower.find("program files (x86)") != std::string::npos) {
+            if (dataDirLower.find("program files") != std::string::npos ||
+                dataDirLower.find("program files (x86)") != std::string::npos)
+            {
                 // Use user-writable location instead
                 char appDataPath[MAX_PATH];
-                if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, appDataPath))) {
+                if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, appDataPath)))
+                {
                     std::filesystem::path userLogDir = std::filesystem::path(appDataPath) / "MIB_Studio_Qt" / "logs";
                     std::filesystem::create_directories(userLogDir);
                     logPath = (userLogDir / "app.log").string();
@@ -85,11 +90,11 @@ namespace backend
         processingService_->startRealtime(frameStore_);
 
         // Wire autofocus service to receive ring ratios from processing service
-        processingService_->setRingRatioCallback([this](double ringRatio, int64_t timestampNs) {
+        processingService_->setRingRatioCallback([this](double ringRatio, int64_t timestampNs)
+                                                 {
             if (autofocusService_) {
                 autofocusService_->onRingRatio(ringRatio, timestampNs);
-            }
-        });
+            } });
 
         // Wire capture -> frame store for playback/display
         captureService_->setFrameStore(frameStore_);
@@ -174,55 +179,65 @@ namespace backend
     services::CameraControlService &AppBackend::cameraControl() { return *cameraControlService_; }
     services::AutofocusService &AppBackend::autofocus() { return *autofocusService_; }
 
-void AppBackend::configureMockCamera(const camera::mock::MockCameraOptions& options) {
-    if (!captureService_) return;
-    captureService_->setCameraFactory([options]() mutable {
-        return std::make_unique<camera::mock::MockCamera>(options);
-    });
-    selectedIfIndex_ = -1;
-    selectedDevIndex_ = -1;
-    selectedLabel_.clear();
-}
-
-void AppBackend::setHardwareCameraSelection(int interfaceIndex, int deviceIndex, const std::string& label) {
-    if (!captureService_) return;
-    selectedIfIndex_ = interfaceIndex;
-    selectedDevIndex_ = deviceIndex;
-    selectedLabel_ = label;
-
-    captureService_->setCameraFactory([interfaceIndex, deviceIndex]() {
-        return std::make_unique<camera::common::EGrabberCamera>(interfaceIndex, deviceIndex);
-    });
-    SPDLOG_INFO("Hardware camera selected: {} (if={}, dev={})",
-                label, interfaceIndex, deviceIndex);
-}
-
-bool AppBackend::applyCameraScriptFromFile(const std::string& path, std::string* errorOut) {
-    if (selectedIfIndex_ < 0 || selectedDevIndex_ < 0) {
-        if (errorOut) *errorOut = "No hardware camera selected";
-        return false;
+    void AppBackend::configureMockCamera(const camera::mock::MockCameraOptions &options)
+    {
+        if (!captureService_)
+            return;
+        captureService_->setCameraFactory([options]() mutable
+                                          { return std::make_unique<camera::mock::MockCamera>(options); });
+        selectedIfIndex_ = -1;
+        selectedDevIndex_ = -1;
+        selectedLabel_.clear();
     }
-    // Ensure capture thread is stopped
-    if (captureService_ && captureService_->isRunning()) {
-        SPDLOG_INFO("Stopping capture before applying camera script");
-        captureService_->stop();
-    }
-    SPDLOG_INFO("Applying camera script to {} from {}", selectedLabel_, path);
-    return cameraControlService_->applyScriptToDevice(selectedIfIndex_, selectedDevIndex_, path, errorOut);
-}
 
-bool AppBackend::resetSelectedHardwareCamera(std::string* errorOut) {
-    if (selectedIfIndex_ < 0 || selectedDevIndex_ < 0) {
-        if (errorOut) *errorOut = "No hardware camera selected";
-        return false;
+    void AppBackend::setHardwareCameraSelection(int interfaceIndex, int deviceIndex, const std::string &label)
+    {
+        if (!captureService_)
+            return;
+        selectedIfIndex_ = interfaceIndex;
+        selectedDevIndex_ = deviceIndex;
+        selectedLabel_ = label;
+
+        captureService_->setCameraFactory([interfaceIndex, deviceIndex]()
+                                          { return std::make_unique<camera::common::EGrabberCamera>(interfaceIndex, deviceIndex); });
+        SPDLOG_INFO("Hardware camera selected: {} (if={}, dev={})",
+                    label, interfaceIndex, deviceIndex);
     }
-    // Ensure capture thread is stopped
-    if (captureService_ && captureService_->isRunning()) {
-        SPDLOG_INFO("Stopping capture before camera reset");
-        captureService_->stop();
+
+    bool AppBackend::applyCameraScriptFromFile(const std::string &path, std::string *errorOut)
+    {
+        if (selectedIfIndex_ < 0 || selectedDevIndex_ < 0)
+        {
+            if (errorOut)
+                *errorOut = "No hardware camera selected";
+            return false;
+        }
+        // Ensure capture thread is stopped
+        if (captureService_ && captureService_->isRunning())
+        {
+            SPDLOG_INFO("Stopping capture before applying camera script");
+            captureService_->stop();
+        }
+        SPDLOG_INFO("Applying camera script to {} from {}", selectedLabel_, path);
+        return cameraControlService_->applyScriptToDevice(selectedIfIndex_, selectedDevIndex_, path, errorOut);
     }
-    SPDLOG_INFO("Resetting camera {}", selectedLabel_);
-    return cameraControlService_->deviceReset(selectedIfIndex_, selectedDevIndex_, errorOut);
-}
+
+    bool AppBackend::resetSelectedHardwareCamera(std::string *errorOut)
+    {
+        if (selectedIfIndex_ < 0 || selectedDevIndex_ < 0)
+        {
+            if (errorOut)
+                *errorOut = "No hardware camera selected";
+            return false;
+        }
+        // Ensure capture thread is stopped
+        if (captureService_ && captureService_->isRunning())
+        {
+            SPDLOG_INFO("Stopping capture before camera reset");
+            captureService_->stop();
+        }
+        SPDLOG_INFO("Resetting camera {}", selectedLabel_);
+        return cameraControlService_->deviceReset(selectedIfIndex_, selectedDevIndex_, errorOut);
+    }
 
 } // namespace backend
