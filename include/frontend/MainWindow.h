@@ -12,6 +12,7 @@ class QPushButton;
 template<typename T> class QFutureWatcher;
 
 namespace backend { class AppBackend; }
+namespace frontend { class OverviewTab; }
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -24,6 +25,7 @@ private slots:
     void onStartExperiment();
     void onStopExperiment();
     void onUpdateStats();
+    void onTabChanged(int index);
 
 private:
     void updateExperimentButtonStates();
@@ -33,6 +35,7 @@ private:
     PlaybackPanel* playbackPanel_ = nullptr;
     QTabWidget* tabs_ = nullptr;
     QTabWidget* experimentTabs_ = nullptr;
+    frontend::OverviewTab* overviewTab_ = nullptr;
     uint64_t experimentStartTimeNs_{0};
     bool experimentActive_{false};
     bool flushInProgress_{false};

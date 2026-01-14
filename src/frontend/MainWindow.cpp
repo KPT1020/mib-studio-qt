@@ -7,6 +7,7 @@
 #include <QToolBar>
 #include <QTabWidget>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QMessageBox>
 #include <QSizePolicy>
 #include <QWidget>
@@ -27,6 +28,7 @@
 #include "frontend/ExperimentMonitoringTab.h"
 #include "frontend/MonitoringSettingsDialog.h"
 #include "frontend/OverviewTab.h"
+#include "frontend/ConfigTabs.h"
 #include <spdlog/spdlog.h>
 #include <opencv2/core.hpp>
 #include <chrono>
@@ -144,7 +146,7 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     // Tabs: Connect + Overview + Experiment (Preview + Monitoring) + Review
     tabs_ = new QTabWidget(this);
     auto *connectTab = new frontend::ConnectTab(backend_, tabs_);
-    auto *overviewTab = new frontend::OverviewTab(backend_, tabs_);
+    overviewTab_ = new frontend::OverviewTab(backend_, tabs_);
     
     // Create Experiment tab with nested Preview and Monitoring tabs
     experimentTabs_ = new QTabWidget(this);
@@ -179,7 +181,7 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     
     auto *hdfReviewTab = new frontend::HdfReviewTab(backend_, tabs_);
     tabs_->addTab(connectTab, tr("Connect"));
-    tabs_->addTab(overviewTab, tr("Overview"));
+    tabs_->addTab(overviewTab_, tr("Overview"));
     tabs_->addTab(experimentTabs_, tr("Experiment"));
     tabs_->addTab(hdfReviewTab, tr("Review"));
     setCentralWidget(tabs_);
@@ -192,6 +194,9 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
                 experimentTabs_->setCurrentIndex(0); // Switch to Preview sub-tab
             }
         } });
+
+    // Connect tab change signal for auto-applying camera scripts
+    connect(tabs_, &QTabWidget::currentChanged, this, &MainWindow::onTabChanged);
 
     // Initialize button states (start enabled, stop disabled)
     updateExperimentButtonStates();
@@ -540,4 +545,79 @@ void MainWindow::onUpdateStats()
     }
 
     statusLabel_->setText(status);
+}
+
+void MainWindow::onTabChanged(int index)
+{
+    // Only handle switches between Overview (index 1) and Experiment (index 2)
+    if (index != 1 && index != 2) {
+        return;
+    }
+
+    // Check if camera is currently running
+    bool wasRunning = backend_.capture().isRunning();
+
+    QString scriptPath;
+    
+    if (index == 1) {
+        // Overview tab
+        if (!overviewTab_) {
+            SPDLOG_WARN("MainWindow::onTabChanged: overviewTab_ is null");
+            return;
+        }
+        scriptPath = overviewTab_->currentJsPath();
+    } else if (index == 2) {
+        // Experiment tab
+        if (!experimentTabs_) {
+            SPDLOG_WARN("MainWindow::onTabChanged: experimentTabs_ is null");
+            return;
+        }
+        // Get PreviewPage from Experiment tab (index 0)
+        auto* previewPage = qobject_cast<frontend::PreviewPage*>(experimentTabs_->widget(0));
+        if (!previewPage) {
+            SPDLOG_WARN("MainWindow::onTabChanged: PreviewPage is null");
+            return;
+        }
+        auto* configTabs = previewPage->getConfigTabs();
+        if (!configTabs) {
+            SPDLOG_WARN("MainWindow::onTabChanged: ConfigTabs is null");
+            return;
+        }
+        scriptPath = configTabs->currentJsPath();
+    }
+
+    // Verify the script file exists
+    if (scriptPath.isEmpty()) {
+        SPDLOG_WARN("MainWindow::onTabChanged: Script path is empty");
+        return;
+    }
+
+    QFileInfo fileInfo(scriptPath);
+    if (!fileInfo.exists()) {
+        SPDLOG_WARN("MainWindow::onTabChanged: Script file does not exist: {}", scriptPath.toStdString());
+        return;
+    }
+
+    // Apply the script
+    SPDLOG_INFO("MainWindow::onTabChanged: Auto-applying camera script from {}", scriptPath.toStdString());
+    std::string backendErr;
+    if (!backend_.applyCameraScriptFromFile(scriptPath.toStdString(), &backendErr)) {
+        SPDLOG_ERROR("MainWindow::onTabChanged: Failed to apply script: {}", backendErr);
+        return;
+    }
+
+    // If camera was running, restart it
+    if (wasRunning) {
+        SPDLOG_INFO("MainWindow::onTabChanged: Restarting camera after script application");
+        if (!backend_.capture().start()) {
+            SPDLOG_ERROR("MainWindow::onTabChanged: Failed to restart camera after script application");
+            statusLabel_->setText("Camera script applied, but restart failed");
+        } else {
+            SPDLOG_INFO("MainWindow::onTabChanged: Camera restarted successfully");
+            statsTimer_->start();
+            statusLabel_->setText("Camera running");
+        }
+    } else {
+        SPDLOG_INFO("MainWindow::onTabChanged: Camera script applied (camera was not running)");
+    }
 }

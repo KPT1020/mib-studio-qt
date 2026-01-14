@@ -21,6 +21,8 @@ public:
 
     enum class FitMode { FitToWindow, Zoom100 };
 
+    QString currentJsPath() const;
+
 private slots:
     void onTick();
     void onReloadJs();
@@ -33,7 +35,6 @@ private slots:
 private:
     QString appDirIncludePath(const QString& fileName) const;
     QString defaultJsPath() const { return appDirIncludePath("overviewConfig.js"); }
-    QString currentJsPath() const;
     bool loadFileToEditor(const QString& path, QPlainTextEdit* editor, QString* err);
     bool saveEditorToFile(QPlainTextEdit* editor, const QString& path, QString* err);
 

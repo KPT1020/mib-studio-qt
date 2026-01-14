@@ -31,6 +31,9 @@ public:
 signals:
 	void appConfigPathChanged(const QString& path);
 
+public:
+    QString currentJsPath() const;
+
 public slots:
     // Called when config file changes externally (e.g., when ROI is saved)
     void onExternalConfigFileChanged(const QString& path);
@@ -61,7 +64,6 @@ private:
     QString defaultJsonPath() const { return appDirIncludePath("config.json"); }
     QString defaultJsPath() const { return appDirIncludePath("egrabberConfig.js"); }
     QString currentJsonPath() const;
-    QString currentJsPath() const;
     bool loadFileToEditor(const QString& path, QPlainTextEdit* editor, QString* err);
     bool saveEditorToFile(QPlainTextEdit* editor, const QString& path, QString* err);
     void refreshJsonTableModel();
