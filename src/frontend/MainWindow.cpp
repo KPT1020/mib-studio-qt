@@ -10,6 +10,9 @@
 #include <QMessageBox>
 #include <QSizePolicy>
 #include <QWidget>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QPushButton>
 
 #include "backend/AppBackend.h"
 #include "backend/services/CaptureService.h"
@@ -58,10 +61,10 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         SPDLOG_INFO("Opening Processing Settings dialog");
         // Find PlaybackPanel from PreviewPage tab
         PlaybackPanel* playbackPanel = nullptr;
-        if (tabs_) {
-            // Preview tab is at index 1
-            if (tabs_->count() > 1) {
-                auto* previewPage = qobject_cast<frontend::PreviewPage*>(tabs_->widget(1));
+        if (experimentTabs_) {
+            // Preview tab is at index 0 within Experiment tab
+            if (experimentTabs_->count() > 0) {
+                auto* previewPage = qobject_cast<frontend::PreviewPage*>(experimentTabs_->widget(0));
                 if (previewPage) {
                     playbackPanel = previewPage->getPlaybackPanel();
                 }
@@ -76,10 +79,10 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         SPDLOG_INFO("Opening Monitoring Settings dialog");
         // Find ExperimentMonitoringTab
         frontend::ExperimentMonitoringTab* monitoringTab = nullptr;
-        if (tabs_) {
-            // Monitoring tab is at index 2 (0=Connect, 1=Preview, 2=Monitoring, 3=Review)
-            if (tabs_->count() > 2) {
-                monitoringTab = qobject_cast<frontend::ExperimentMonitoringTab*>(tabs_->widget(2));
+        if (experimentTabs_) {
+            // Monitoring tab is at index 1 within Experiment tab (0=Preview, 1=Monitoring)
+            if (experimentTabs_->count() > 1) {
+                monitoringTab = qobject_cast<frontend::ExperimentMonitoringTab*>(experimentTabs_->widget(1));
             }
         }
         if (monitoringTab) {
@@ -107,24 +110,9 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     toolbar->addAction(startCaptureAct);
     toolbar->addAction(stopCaptureAct);
     
-    // Add spacer to push experiment buttons to the right
-    auto *spacer = new QWidget(this);
-    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    toolbar->addWidget(spacer);
-    
-    toolbar->addSeparator();
-    
-    // Create experiment indicator widget (colored rectangle) - add to toolbar before experiment buttons
-    experimentIndicator_ = new QLabel(this);
-    experimentIndicator_->setFixedSize(20, 20);
-    experimentIndicator_->setStyleSheet("background-color: gray; border: 1px solid black;");
-    experimentIndicator_->setToolTip(tr("Experiment status indicator"));
-    toolbar->addWidget(experimentIndicator_);
-    
+    // Experiment buttons and indicator will be added to Experiment tab, not toolbar
     startExperimentAct_ = new QAction("Start Experiment", this);
     stopExperimentAct_ = new QAction("Stop Experiment", this);
-    toolbar->addAction(startExperimentAct_);
-    toolbar->addAction(stopExperimentAct_);
 
     // Initialize defaults for this session
     backend_.processing().setInvalidFrameSamplingRate(200);
@@ -152,21 +140,55 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
             SPDLOG_INFO("Auto-flushed {} frames to HDF5", flushed);
         } });
 
-    // Tabs: Connect + Preview + Monitoring + Review
+    // Tabs: Connect + Experiment (Preview + Monitoring) + Review
     tabs_ = new QTabWidget(this);
     auto *connectTab = new frontend::ConnectTab(backend_, tabs_);
-    auto *previewPage = new frontend::PreviewPage(backend_, tabs_);
-    auto *monitoringTab = new frontend::ExperimentMonitoringTab(backend_, tabs_);
+    
+    // Create Experiment tab with nested Preview and Monitoring tabs
+    experimentTabs_ = new QTabWidget(this);
+    auto *previewPage = new frontend::PreviewPage(backend_, experimentTabs_);
+    auto *monitoringTab = new frontend::ExperimentMonitoringTab(backend_, experimentTabs_);
+    experimentTabs_->addTab(previewPage, tr("Preview"));
+    experimentTabs_->addTab(monitoringTab, tr("Monitoring"));
+    
+    // Create corner widget for experiment controls (on same row as tabs)
+    auto *experimentControlsWidget = new QWidget(this);
+    auto *experimentControlsLayout = new QHBoxLayout(experimentControlsWidget);
+    experimentControlsLayout->setContentsMargins(5, 0, 5, 0);
+    experimentControlsLayout->setSpacing(5);
+    
+    // Create experiment indicator widget (colored rectangle)
+    experimentIndicator_ = new QLabel(experimentControlsWidget);
+    experimentIndicator_->setFixedSize(20, 20);
+    experimentIndicator_->setStyleSheet("background-color: gray; border: 1px solid black;");
+    experimentIndicator_->setToolTip(tr("Experiment status indicator"));
+    experimentControlsLayout->addWidget(experimentIndicator_);
+    
+    // Create push buttons and connect them to actions
+    startExperimentBtn_ = new QPushButton(startExperimentAct_->text(), experimentControlsWidget);
+    stopExperimentBtn_ = new QPushButton(stopExperimentAct_->text(), experimentControlsWidget);
+    connect(startExperimentBtn_, &QPushButton::clicked, startExperimentAct_, &QAction::trigger);
+    connect(stopExperimentBtn_, &QPushButton::clicked, stopExperimentAct_, &QAction::trigger);
+    experimentControlsLayout->addWidget(startExperimentBtn_);
+    experimentControlsLayout->addWidget(stopExperimentBtn_);
+    
+    // Add controls widget to the corner of the tab bar (same row as tabs)
+    experimentTabs_->setCornerWidget(experimentControlsWidget, Qt::TopRightCorner);
+    
     auto *hdfReviewTab = new frontend::HdfReviewTab(backend_, tabs_);
     tabs_->addTab(connectTab, tr("Connect"));
-    tabs_->addTab(previewPage, tr("Preview"));
-    tabs_->addTab(monitoringTab, tr("Monitoring"));
+    tabs_->addTab(experimentTabs_, tr("Experiment"));
     tabs_->addTab(hdfReviewTab, tr("Review"));
     setCentralWidget(tabs_);
 
     connect(connectTab, &frontend::ConnectTab::connected, this, [this]()
             {
-        if (tabs_) tabs_->setCurrentIndex(1); });
+        if (tabs_) {
+            tabs_->setCurrentIndex(1); // Switch to Experiment tab
+            if (experimentTabs_) {
+                experimentTabs_->setCurrentIndex(0); // Switch to Preview sub-tab
+            }
+        } });
 
     // Initialize button states (start enabled, stop disabled)
     updateExperimentButtonStates();
@@ -180,6 +202,16 @@ void MainWindow::updateExperimentButtonStates()
         startExperimentAct_->setEnabled(!experimentActive_);
         // Disable stop when experiment is inactive, enable when active
         stopExperimentAct_->setEnabled(experimentActive_);
+    }
+    
+    // Update button enabled states to match actions
+    if (startExperimentBtn_)
+    {
+        startExperimentBtn_->setEnabled(startExperimentAct_ ? startExperimentAct_->isEnabled() : false);
+    }
+    if (stopExperimentBtn_)
+    {
+        stopExperimentBtn_->setEnabled(stopExperimentAct_ ? stopExperimentAct_->isEnabled() : false);
     }
 
     // Update visual indicator
@@ -407,8 +439,8 @@ void MainWindow::onUpdateStats()
     QString status;
     // Display / algo / classification rates and totals
     double displayFps = 0.0;
-    if (tabs_ && tabs_->count() > 1) {
-        auto* previewPage = qobject_cast<frontend::PreviewPage*>(tabs_->widget(1));
+    if (experimentTabs_ && experimentTabs_->count() > 0) {
+        auto* previewPage = qobject_cast<frontend::PreviewPage*>(experimentTabs_->widget(0));
         if (previewPage) {
             auto* playbackPanel = previewPage->getPlaybackPanel();
             if (playbackPanel) {
