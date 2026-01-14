@@ -7,6 +7,7 @@ namespace backend { class AppBackend; }
 
 class QPlainTextEdit;
 class QPushButton;
+class QToolButton;
 class QLabel;
 class QTimer;
 class QWidget;
@@ -18,6 +19,8 @@ class OverviewTab : public QWidget {
 public:
     explicit OverviewTab(backend::AppBackend& backend, QWidget* parent = nullptr);
 
+    enum class FitMode { FitToWindow, Zoom100 };
+
 private slots:
     void onTick();
     void onReloadJs();
@@ -25,6 +28,7 @@ private slots:
     void onApplyJs();
     void onBrowseJs();
     void onClearJs();
+    void onToggleFit();
 
 private:
     QString appDirIncludePath(const QString& fileName) const;
@@ -39,6 +43,8 @@ private:
     QWidget* canvas_ = nullptr;
     QTimer* timer_ = nullptr;
     QImage frameImage_;
+    FitMode fitMode_ { FitMode::FitToWindow };
+    QToolButton* fitBtn_ = nullptr;
     
     // Camera script configuration
     QPlainTextEdit* jsEdit_ = nullptr;

@@ -14,6 +14,7 @@
 #include <QSplitter>
 #include <QTextStream>
 #include <QTimer>
+#include <QToolButton>
 #include <QVBoxLayout>
 #include <QSettings>
 #include <QTextOption>
@@ -61,8 +62,8 @@ static QString getUserConfigDir() {
 class SimpleImageCanvas : public QWidget
 {
 public:
-    explicit SimpleImageCanvas(QImage* image, QWidget* parent = nullptr)
-        : QWidget(parent), image_(image) {}
+    explicit SimpleImageCanvas(QImage* image, OverviewTab::FitMode* fitMode, QWidget* parent = nullptr)
+        : QWidget(parent), image_(image), fitMode_(fitMode) {}
 
 protected:
     void paintEvent(QPaintEvent*) override
@@ -75,10 +76,24 @@ protected:
         const int imgW = image_->width();
         const int imgH = image_->height();
         
-        // Fit to window: scale to fit maintaining aspect ratio
-        const double scale = std::min(double(width()) / imgW, double(height()) / imgH);
-        const QSizeF drawSize(imgW * scale, imgH * scale);
-        const QPointF topLeft((width() - drawSize.width()) / 2.0, (height() - drawSize.height()) / 2.0);
+        double scale;
+        QSizeF drawSize;
+        QPointF topLeft;
+        
+        if (fitMode_ && *fitMode_ == OverviewTab::FitMode::Zoom100)
+        {
+            // 100% zoom: 1:1 pixel ratio
+            scale = 1.0;
+            drawSize = QSizeF(imgW, imgH);
+            topLeft = QPointF((width() - drawSize.width()) / 2.0, (height() - drawSize.height()) / 2.0);
+        }
+        else
+        {
+            // Fit to window: scale to fit maintaining aspect ratio
+            scale = std::min(double(width()) / imgW, double(height()) / imgH);
+            drawSize = QSizeF(imgW * scale, imgH * scale);
+            topLeft = QPointF((width() - drawSize.width()) / 2.0, (height() - drawSize.height()) / 2.0);
+        }
 
         // Base image
         QImage scaled = image_->scaled(drawSize.toSize(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
@@ -87,6 +102,7 @@ protected:
 
 private:
     QImage* image_ = nullptr;
+    OverviewTab::FitMode* fitMode_ = nullptr;
 };
 
 static bool ensureDefaultsFile(const QString& targetPath, const QString& resourceName, QString* err) {
@@ -134,11 +150,31 @@ OverviewTab::OverviewTab(backend::AppBackend& backend, QWidget* parent)
     splitter->setHandleWidth(10);
     splitter->setOpaqueResize(true);
 
-    // Top: Frame display
-    canvas_ = new SimpleImageCanvas(&frameImage_, this);
+    // Top: Frame display with controls
+    QWidget* canvasContainer = new QWidget(this);
+    canvasContainer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    canvasContainer->setMinimumHeight(100);
+    auto* canvasLayout = new QVBoxLayout(canvasContainer);
+    canvasLayout->setContentsMargins(0, 0, 0, 0);
+    canvasLayout->setSpacing(0);
+
+    // Controls bar
+    QWidget* controls = new QWidget(canvasContainer);
+    auto* controlsLayout = new QHBoxLayout(controls);
+    controlsLayout->setContentsMargins(6, 4, 6, 4);
+    controlsLayout->setSpacing(6);
+    fitBtn_ = new QToolButton(controls);
+    fitBtn_->setText(tr("Fit: Window"));
+    fitBtn_->setToolTip(tr("Toggle between fit-to-window and 100% zoom"));
+    controlsLayout->addWidget(fitBtn_);
+    controlsLayout->addStretch(1);
+    canvasLayout->addWidget(controls);
+
+    canvas_ = new SimpleImageCanvas(&frameImage_, &fitMode_, canvasContainer);
     canvas_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    canvas_->setMinimumHeight(100);
-    splitter->addWidget(canvas_);
+    canvasLayout->addWidget(canvas_, 1);
+
+    splitter->addWidget(canvasContainer);
 
     // Bottom: Camera script configuration
     QWidget* configWidget = new QWidget(this);
@@ -198,6 +234,7 @@ OverviewTab::OverviewTab(backend::AppBackend& backend, QWidget* parent)
     connect(jsApplyBtn_, &QPushButton::clicked, this, &OverviewTab::onApplyJs);
     connect(jsBrowseBtn_, &QPushButton::clicked, this, &OverviewTab::onBrowseJs);
     connect(jsClearBtn_, &QPushButton::clicked, this, &OverviewTab::onClearJs);
+    connect(fitBtn_, &QToolButton::clicked, this, &OverviewTab::onToggleFit);
     connect(jsEdit_, &QPlainTextEdit::textChanged, this, [this]() {
         if (jsUnsavedLabel_) jsUnsavedLabel_->setVisible(true);
     });
@@ -368,6 +405,30 @@ void OverviewTab::onClearJs()
     if (ret == QMessageBox::Yes) {
         onReloadJs();
     }
+}
+
+void OverviewTab::onToggleFit()
+{
+    if (fitMode_ == FitMode::FitToWindow)
+    {
+        fitMode_ = FitMode::Zoom100;
+        if (fitBtn_)
+        {
+            fitBtn_->setText(tr("Fit: 100%"));
+            fitBtn_->setToolTip(tr("Toggle between fit-to-window and 100% zoom"));
+        }
+    }
+    else
+    {
+        fitMode_ = FitMode::FitToWindow;
+        if (fitBtn_)
+        {
+            fitBtn_->setText(tr("Fit: Window"));
+            fitBtn_->setToolTip(tr("Toggle between fit-to-window and 100% zoom"));
+        }
+    }
+    if (canvas_)
+        canvas_->update();
 }
 
 } // namespace frontend
