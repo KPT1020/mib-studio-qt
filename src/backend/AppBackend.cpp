@@ -87,7 +87,7 @@ namespace backend
         hdf5Service_->initialize(dataDir);
 
         processingService_->start();
-        processingService_->startRealtime(frameStore_);
+        // Note: startRealtime() is now called when Experiment tab becomes active, not during initialization
 
         // Wire autofocus service to receive ring ratios from processing service
         processingService_->setRingRatioCallback([this](double ringRatio, int64_t timestampNs)

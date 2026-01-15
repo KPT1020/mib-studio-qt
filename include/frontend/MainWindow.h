@@ -9,6 +9,7 @@ class QTabWidget;
 class QSpinBox;
 class QAction;
 class QPushButton;
+class QCloseEvent;
 template<typename T> class QFutureWatcher;
 
 namespace backend { class AppBackend; }
@@ -18,6 +19,9 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
     explicit MainWindow(backend::AppBackend& backend, QWidget* parent = nullptr);
+
+protected:
+    void closeEvent(QCloseEvent* event) override;
 
 private slots:
     void onStartCapture();
@@ -29,6 +33,8 @@ private slots:
 
 private:
     void updateExperimentButtonStates();
+    void startExperimentServices();
+    void stopExperimentServices();
     backend::AppBackend& backend_;
     QLabel* statusLabel_ = nullptr;
     QTimer* statsTimer_ = nullptr;
@@ -38,6 +44,7 @@ private:
     frontend::OverviewTab* overviewTab_ = nullptr;
     uint64_t experimentStartTimeNs_{0};
     bool experimentActive_{false};
+    bool experimentServicesActive_{false};
     bool flushInProgress_{false};
     QFutureWatcher<size_t>* flushWatcher_{nullptr};
     QAction* startExperimentAct_ = nullptr;

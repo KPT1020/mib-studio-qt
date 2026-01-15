@@ -43,6 +43,7 @@
 #include "frontend/ProcessingSettingsDialog.h"
 #include "frontend/ConversionFactorDialog.h"
 #include "backend/Tools.h"
+#include <QCloseEvent>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -547,9 +548,50 @@ void MainWindow::onUpdateStats()
     statusLabel_->setText(status);
 }
 
+void MainWindow::startExperimentServices()
+{
+    if (experimentServicesActive_) {
+        return; // Already active
+    }
+
+    auto frameStore = backend_.getFrameStore();
+    if (!frameStore) {
+        SPDLOG_ERROR("MainWindow::startExperimentServices: FrameStore is null");
+        return;
+    }
+
+    backend_.processing().startRealtime(frameStore);
+    backend_.playback().play();
+    experimentServicesActive_ = true;
+    SPDLOG_INFO("MainWindow: Experiment services started");
+}
+
+void MainWindow::stopExperimentServices()
+{
+    if (!experimentServicesActive_) {
+        return; // Already stopped
+    }
+
+    backend_.processing().stopRealtime();
+    backend_.playback().pause();
+    experimentServicesActive_ = false;
+    SPDLOG_INFO("MainWindow: Experiment services stopped");
+}
+
 void MainWindow::onTabChanged(int index)
 {
-    // Only handle switches between Overview (index 1) and Experiment (index 2)
+    // Handle service lifecycle for Experiment tab (index 2)
+    const int EXPERIMENT_TAB_INDEX = 2;
+    
+    if (index == EXPERIMENT_TAB_INDEX) {
+        // Switching TO Experiment tab: start services
+        startExperimentServices();
+    } else if (experimentServicesActive_) {
+        // Switching FROM Experiment tab: stop services
+        stopExperimentServices();
+    }
+
+    // Only handle script application for switches between Overview (index 1) and Experiment (index 2)
     if (index != 1 && index != 2) {
         return;
     }
@@ -620,4 +662,13 @@ void MainWindow::onTabChanged(int index)
     } else {
         SPDLOG_INFO("MainWindow::onTabChanged: Camera script applied (camera was not running)");
     }
+}
+
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    // Ensure experiment services are stopped before closing
+    if (experimentServicesActive_) {
+        stopExperimentServices();
+    }
+    QMainWindow::closeEvent(event);
 }

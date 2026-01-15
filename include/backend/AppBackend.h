@@ -44,6 +44,9 @@ namespace backend
         services::PlaybackService &playback();
         services::CameraControlService &cameraControl();
         services::AutofocusService &autofocus();
+        
+        // Get frame store for service lifecycle management
+        std::shared_ptr<playback::FrameStore> getFrameStore() const { return frameStore_; }
 
         void configureMockCamera(const camera::mock::MockCameraOptions &options);
 
