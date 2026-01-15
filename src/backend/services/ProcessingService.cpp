@@ -96,6 +96,10 @@ void ProcessingService::setRealtimeEnabled(bool on) {
     rtEnabled_.store(on);
 }
 
+void ProcessingService::setRealtimeDropFrames(bool on) {
+    rtDropFrames_.store(on, std::memory_order_relaxed);
+}
+
 void ProcessingService::setRealtimeRoi(const Roi& roi) {
     std::scoped_lock lk(rtMutex_);
     rtRoi_ = roi;
@@ -573,7 +577,15 @@ void ProcessingService::realtimeLoop() {
             continue;
         }
 
-        for (uint64_t idx = last + 1; idx <= latest && rtRunning_.load(); ++idx) {
+        // If enabled, prefer processing only the most recent frame to minimize latency (drop intermediate frames).
+        // We intentionally ignore this mode during experiments to avoid dropping frames that might be saved.
+        const bool dropFrames = rtDropFrames_.load(std::memory_order_relaxed) && !experimentActive_.load();
+        if (dropFrames) {
+            const uint64_t nextIdx = latest;
+            if (last + 1 < nextIdx) {
+                framesSkippedSinceSummary += (nextIdx - (last + 1));
+            }
+            const uint64_t idx = nextIdx;
             const auto frameStart = clock::now();
             if (!rtEnabled_.load()) { rtLastProcessed_.store(idx); continue; }
             backend::playback::Frame f{};
@@ -830,6 +842,266 @@ void ProcessingService::realtimeLoop() {
                 algoMsSinceSummary = 0.0;
                 validSinceSummary = 0;
                 invalidSinceSummary = 0;
+            }
+        } else {
+            for (uint64_t idx = last + 1; idx <= latest && rtRunning_.load(); ++idx) {
+                const auto frameStart = clock::now();
+                if (!rtEnabled_.load()) { rtLastProcessed_.store(idx); continue; }
+                backend::playback::Frame f{};
+                if (!rtStore_->getByWriteIndex(idx, f)) {
+                    continue;
+                }
+                if (f.width == 0 || f.height == 0 || f.data.empty()) {
+                    continue;
+                }
+                cv::Mat gray = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
+
+                // Grab ROI and background under lock
+                Roi roi{};
+                cv::Mat bg;
+                {
+                    std::scoped_lock lk(rtMutex_);
+                    roi = rtRoi_;
+                    if (!rtBgGray_.empty()) bg = rtBgGray_;
+                }
+
+                // Clamp ROI
+                if (roi.w <= 0 || roi.h <= 0) {
+                    roi.x = 0; roi.y = 0; roi.w = gray.cols; roi.h = gray.rows;
+                }
+                roi.x = std::max(0, std::min(roi.x, gray.cols - 1));
+                roi.y = std::max(0, std::min(roi.y, gray.rows - 1));
+                roi.w = std::max(1, std::min(roi.w, gray.cols - roi.x));
+                roi.h = std::max(1, std::min(roi.h, gray.rows - roi.y));
+
+                cv::Rect cvRoi(roi.x, roi.y, roi.w, roi.h);
+
+                // Get config early for empty frame check
+                ProcessingConfig config;
+                {
+                    std::scoped_lock cfgLk(configMutex_);
+                    config = processingConfig_;
+                }
+
+                // Build full-size mask
+                cv::Mat mask(gray.rows, gray.cols, CV_8UC1, cv::Scalar(0));
+                cv::Mat roiCurr = gray(cvRoi);
+                cv::Mat roiDst = mask(cvRoi);
+                cv::Mat blurredCurr, blurredBg, diff, thresh;
+                const auto algoStart = clock::now();
+                auto toOdd = [](int v) -> int { if (v < 1) v = 1; if ((v % 2) == 0) v += 1; return v; };
+                const int blurK = toOdd(config.gaussian_blur_size);
+                const int morphK = toOdd(config.morph_kernel_size);
+                const int morphIter = std::max(1, config.morph_iterations);
+                const int threshVal = std::max(0, config.bg_subtract_threshold);
+
+                cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(blurK, blurK), 0);
+                if (!bg.empty() && bg.size() == gray.size() && bg.type() == CV_8UC1) {
+                    cv::GaussianBlur(bg(cvRoi), blurredBg, cv::Size(blurK, blurK), 0);
+                    cv::subtract(blurredCurr, blurredBg, diff);
+                } else {
+                    diff = blurredCurr;
+                }
+                cv::threshold(diff, thresh, threshVal, 255, cv::THRESH_BINARY);
+
+                // Check for empty frame: count non-zero pixels after binary threshold
+                int pixelCount = cv::countNonZero(thresh);
+                if (pixelCount < config.empty_frame_pixel_threshold) {
+                    SPDLOG_DEBUG("Empty frame detected (idx={}, pixel_count={}, threshold={}), skipping further processing",
+                                idx, pixelCount, config.empty_frame_pixel_threshold);
+                    rtLastProcessed_.store(idx);
+                    continue; // Skip morphology, contours, validation, and frame accumulation
+                }
+
+                cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+                cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
+                cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
+
+                // Contours
+                std::vector<std::vector<cv::Point>> contours;
+                std::vector<cv::Vec4i> hierarchy;
+                cv::findContours(mask, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+                // Always run validation for monitoring (even without experiment)
+
+                FilterResult validation = filterProcessedImage(mask, cvRoi, config, gray);
+                const auto algoEnd = clock::now();
+                const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
+                algoMsSinceSummary += algoMs;
+                if (validation.isValid) {
+                    ++validSinceSummary;
+                } else {
+                    ++invalidSinceSummary;
+                }
+
+                // Always accumulate frames for monitoring (with size limit)
+                {
+                    ProcessedFrame monitoringFrame;
+                    monitoringFrame.index = idx;
+                    monitoringFrame.timestampNs = f.timestamp;
+                    monitoringFrame.validation = validation;
+                    // Store ROI-only images to reduce memory usage
+                    cv::Mat roiOriginal = gray(cvRoi).clone();
+                    cv::Mat roiMask = mask(cvRoi).clone();
+                    monitoringFrame.originalImage = std::move(roiOriginal);
+                    monitoringFrame.processedImage = std::move(roiMask);
+
+                    std::scoped_lock monitoringLk(monitoringFramesMutex_);
+                    if (validation.isValid) {
+                        monitoringValidFrames_.push_back(std::move(monitoringFrame));
+
+                        // Notify autofocus service of ring ratio from validated frames
+                        if (validation.ringRatio > 0.0) {
+                            std::scoped_lock callbackLk(ringRatioCallbackMutex_);
+                            if (ringRatioCallback_) {
+                                ringRatioCallback_(validation.ringRatio, f.timestamp);
+                            }
+                        }
+                    } else {
+                        monitoringInvalidFrames_.push_back(std::move(monitoringFrame));
+                    }
+
+                    // Throttled DEBUG: accumulation sizes and process memory
+                    if ((idx % 500ULL) == 0ULL) {
+                        size_t vSz = 0;
+                        size_t iSz = 0;
+                        {
+                            std::scoped_lock fLk(framesMutex_);
+                            vSz = validFrames_.size();
+                            iSz = invalidFrames_.size();
+                        }
+                        SPDLOG_DEBUG("Accumulated frames (idx={}): valid={}, invalid={}, flush_interval={}, since_last_flush={}, mem_mb={:.1f}",
+                                    idx, vSz, iSz, flushInterval_.load(), framesSinceLastFlush_.load(), backend::Tools::getProcessMemoryMB());
+                    }
+                }
+
+                // Throttled DEBUG: monitoring buffer sizes and process memory
+                if ((idx % 500ULL) == 0ULL) {
+                    size_t monValidSz = 0;
+                    size_t monInvalidSz = 0;
+                    {
+                        std::scoped_lock mLk(monitoringFramesMutex_);
+                        monValidSz = monitoringValidFrames_.size();
+                        monInvalidSz = monitoringInvalidFrames_.size();
+                    }
+                    SPDLOG_DEBUG("Realtime monitoring sizes (idx={}): mon_valid={}, mon_invalid={}, mem_mb={:.1f}",
+                                idx, monValidSz, monInvalidSz, backend::Tools::getProcessMemoryMB());
+                }
+
+                // Also accumulate frames for experiment if active
+                if (experimentActive_.load()) {
+                    // Determine if we should save this frame
+                    // Always save valid frames, but sample invalid frames to reduce file size and improve performance
+                    bool shouldSave = false;
+                    if (validation.isValid) {
+                        shouldSave = true; // Always save valid frames
+                    } else {
+                        // Sample invalid frames: save every Nth invalid frame
+                        size_t counter = invalidFrameCounter_.fetch_add(1, std::memory_order_relaxed);
+                        size_t rate = invalidFrameSamplingRate_.load(std::memory_order_relaxed);
+                        if (rate > 0 && (counter % rate) == 0) {
+                            shouldSave = true;
+                        }
+                    }
+
+                    if (shouldSave) {
+                        // Prepare frame data (clone images before mutex lock to minimize lock time)
+                        ProcessedFrame frame;
+                        frame.index = idx;
+                        frame.timestampNs = f.timestamp;
+                        frame.validation = validation;
+                        // Clone images - expensive but necessary to preserve data
+                        frame.originalImage = gray.clone();
+                        frame.processedImage = mask.clone();
+
+                        {
+                            std::scoped_lock framesLk(framesMutex_);
+                            // Use emplace_back with move to avoid extra copy
+                            if (validation.isValid) {
+                                validFrames_.emplace_back(std::move(frame));
+                            } else {
+                                invalidFrames_.emplace_back(std::move(frame));
+                            }
+
+                            // Check if we should flush to disk (round-robin buffer)
+                            size_t totalFrames = validFrames_.size() + invalidFrames_.size();
+                            size_t interval = flushInterval_.load(std::memory_order_relaxed);
+                            if (interval > 0 && totalFrames >= interval) {
+                                // Signal that flush is needed (will be handled by MainWindow timer)
+                                framesSinceLastFlush_.store(totalFrames, std::memory_order_relaxed);
+                            }
+                        }
+                    }
+                }
+
+                // Publish snapshot
+                {
+                    std::scoped_lock lk(snapshotMutex_);
+                    latestSnapshot_.index = idx;
+                    latestSnapshot_.mask = mask; // shallow copy ok; mask will be destroyed after leaving scope, so clone
+                    latestSnapshot_.mask = latestSnapshot_.mask.clone();
+                    latestSnapshot_.contours = std::move(contours);
+                }
+
+                rtLastProcessed_.store(idx);
+
+                // Per-frame timing
+                const auto frameEnd = clock::now();
+                const double ms = std::chrono::duration<double, std::milli>(frameEnd - frameStart).count();
+                SPDLOG_DEBUG("Realtime processing: idx={} time_ms={:.3f} roi={}x{}", idx, ms, roi.w, roi.h);
+
+                // Periodic summary
+                framesSinceSummary += 1;
+                msSinceSummary += ms;
+                const auto now = frameEnd;
+                const double windowMs = std::chrono::duration<double, std::milli>(now - lastSummaryTs).count();
+                if (windowMs >= 1000.0) {
+                    const double avgMs = framesSinceSummary > 0 ? (msSinceSummary / static_cast<double>(framesSinceSummary)) : 0.0;
+                    const double algoAvgMs = framesSinceSummary > 0 ? (algoMsSinceSummary / static_cast<double>(framesSinceSummary)) : 0.0;
+                    const double fps = windowMs > 0.0 ? (static_cast<double>(framesSinceSummary) * 1000.0 / windowMs) : 0.0;
+                    const double vfps = windowMs > 0.0 ? (static_cast<double>(validSinceSummary) * 1000.0 / windowMs) : 0.0;
+                    const double ifps = windowMs > 0.0 ? (static_cast<double>(invalidSinceSummary) * 1000.0 / windowMs) : 0.0;
+                    algoFps1s_.store(fps, std::memory_order_relaxed);
+                    validFps1s_.store(vfps, std::memory_order_relaxed);
+                    invalidFps1s_.store(ifps, std::memory_order_relaxed);
+                    const double algoAvgUs = algoAvgMs * 1000.0;
+                    algoAvgUs1s_.store(algoAvgUs, std::memory_order_relaxed);
+                    SPDLOG_INFO("Realtime processing summary: processed={} skipped={} window_ms={:.0f} avg_ms={:.3f} algo_avg_ms={:.3f} ~fps={:.1f}",
+                                framesSinceSummary, framesSkippedSinceSummary, windowMs, avgMs, algoAvgMs, fps);
+
+                    // Extended summary: buffers, ROI, background, and process memory
+                    size_t vSz = 0, iSz = 0, monValidSz = 0, monInvalidSz = 0;
+                    {
+                        std::scoped_lock fLk(framesMutex_);
+                        vSz = validFrames_.size();
+                        iSz = invalidFrames_.size();
+                    }
+                    {
+                        std::scoped_lock mLk(monitoringFramesMutex_);
+                        monValidSz = monitoringValidFrames_.size();
+                        monInvalidSz = monitoringInvalidFrames_.size();
+                    }
+                    Roi roi{};
+                    bool hasBg = false;
+                    {
+                        std::scoped_lock rtLk(rtMutex_);
+                        roi = rtRoi_;
+                        hasBg = !rtBgGray_.empty();
+                    }
+                    const size_t flushInt = flushInterval_.load();
+                    const size_t sinceFlush = framesSinceLastFlush_.load();
+                    const double memMB = backend::Tools::getProcessMemoryMB();
+                    const double peakMB = backend::Tools::getPeakProcessMemoryMB();
+                    SPDLOG_INFO("Realtime buffers: acc_valid={} acc_invalid={} mon_valid={} mon_invalid={} flush_interval={} since_last_flush={} roi={}x{} bg={} mem_mb={:.1f} peak_mb={:.1f}",
+                                vSz, iSz, monValidSz, monInvalidSz, flushInt, sinceFlush, roi.w, roi.h, hasBg ? 1 : 0, memMB, peakMB);
+                    lastSummaryTs = now;
+                    framesSinceSummary = 0;
+                    framesSkippedSinceSummary = 0;
+                    msSinceSummary = 0.0;
+                    algoMsSinceSummary = 0.0;
+                    validSinceSummary = 0;
+                    invalidSinceSummary = 0;
+                }
             }
         }
     }

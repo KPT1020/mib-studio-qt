@@ -5,6 +5,7 @@
 #include <QDialogButtonBox>
 #include <QPushButton>
 #include <QLabel>
+#include <QCheckBox>
 
 #include <spdlog/spdlog.h>
 
@@ -63,6 +64,11 @@ ProcessingSettingsDialog::ProcessingSettingsDialog(backend::AppBackend& backend,
     layout->addRow(tr("ROI Y"), roiYSpin_);
     layout->addRow(tr("ROI Width"), roiWidthSpin_);
     layout->addRow(tr("ROI Height"), roiHeightSpin_);
+
+    dropFramesCheck_ = new QCheckBox(tr("Process latest only (drop intermediate frames)"), this);
+    dropFramesCheck_->setToolTip(tr("When enabled, realtime processing skips queued frames and processes only the most recent frame to reduce latency. (Ignored while an experiment is running.)"));
+    dropFramesCheck_->setChecked(backend_.processing().getRealtimeDropFrames());
+    layout->addRow(tr("Realtime"), dropFramesCheck_);
 
     // Update ROI limits and load current values
     updateRoiLimits();
@@ -143,6 +149,9 @@ void ProcessingSettingsDialog::applySettings() {
 
     proc.setInvalidFrameSamplingRate(static_cast<size_t>(invalidNth));
     proc.setFlushInterval(static_cast<size_t>(flushEvery));
+    if (dropFramesCheck_) {
+        proc.setRealtimeDropFrames(dropFramesCheck_->isChecked());
+    }
     SPDLOG_INFO("Processing settings applied: invalidNth={}, flushEvery={}", invalidNth, flushEvery);
 
     // Apply ROI settings

@@ -4,6 +4,7 @@
 
 class QSpinBox;
 class QDialogButtonBox;
+class QCheckBox;
 class PlaybackPanel;
 
 namespace backend { class AppBackend; }
@@ -28,6 +29,7 @@ private:
     QSpinBox* roiYSpin_{nullptr};
     QSpinBox* roiWidthSpin_{nullptr};
     QSpinBox* roiHeightSpin_{nullptr};
+    QCheckBox* dropFramesCheck_{nullptr};
     QDialogButtonBox* buttons_{nullptr};
 };
 

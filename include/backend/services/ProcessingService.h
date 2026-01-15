@@ -91,6 +91,10 @@ public:
     void startRealtime(std::shared_ptr<backend::playback::FrameStore> store);
     void stopRealtime();
     void setRealtimeEnabled(bool on);
+    // When enabled, realtime processing will skip intermediate frames and process only the most recent frame.
+    // Note: experiments still process every frame (this mode is ignored while experimentActive_ is true).
+    void setRealtimeDropFrames(bool on);
+    bool getRealtimeDropFrames() const { return rtDropFrames_.load(std::memory_order_relaxed); }
     void setRealtimeRoi(const Roi& roi);
     Roi getRealtimeRoi() const;
     void setRealtimeBackgroundGray(const cv::Mat& bg);
@@ -180,6 +184,7 @@ private:
     std::thread realtimeThread_;
     std::atomic<bool> rtRunning_{false};
     std::atomic<bool> rtEnabled_{true};
+    std::atomic<bool> rtDropFrames_{false};
     std::shared_ptr<backend::playback::FrameStore> rtStore_;
     mutable std::mutex rtMutex_;
     Roi rtRoi_{};
