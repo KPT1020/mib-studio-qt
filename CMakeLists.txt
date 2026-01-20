@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.21)
 project(MIB_Studio_Qt VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -102,9 +102,14 @@ elseif(TARGET hdf5::hdf5-cpp)
 elseif(TARGET HDF5::HDF5)
     target_link_libraries(mib_backend PUBLIC HDF5::HDF5)
 else()
-    # Fallback: manually link HDF5 libraries from vcpkg
-    find_library(HDF5_LIB hdf5 PATHS "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/lib" NO_DEFAULT_PATH)
-    find_library(HDF5_HL_LIB hdf5_hl PATHS "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/lib" NO_DEFAULT_PATH)
+    # Fallback: manually link HDF5 libraries from Conan
+    # Check common Conan install locations
+    set(CONAN_LIB_PATHS
+        "${CMAKE_BINARY_DIR}/conan"
+        "${CMAKE_PREFIX_PATH}"
+    )
+    find_library(HDF5_LIB hdf5 PATHS ${CONAN_LIB_PATHS} PATH_SUFFIXES lib NO_DEFAULT_PATH)
+    find_library(HDF5_HL_LIB hdf5_hl PATHS ${CONAN_LIB_PATHS} PATH_SUFFIXES lib NO_DEFAULT_PATH)
     if(HDF5_LIB AND HDF5_HL_LIB)
         target_link_libraries(mib_backend PUBLIC ${HDF5_LIB} ${HDF5_HL_LIB})
         message(STATUS "Linked HDF5 libraries manually: ${HDF5_LIB} ${HDF5_HL_LIB}")
@@ -191,42 +196,138 @@ elseif(DEFINED OpenCV_LIBS)
     target_link_libraries(mib_studio_qt PRIVATE ${OpenCV_LIBS})
 endif()
 
-# Qt deployment via windeployqt (vcpkg)
-if(WIN32)
-    set(VCPKG_BIN_DIR ${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/bin)
-    set(VCPKG_DEBUG_BIN_DIR ${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/debug/bin)
-    set(WINDEPLOYQT_RELEASE ${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/tools/Qt6/bin/windeployqt.exe)
-    set(WINDEPLOYQT_DEBUG ${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/tools/Qt6/bin/windeployqt.debug.bat)
+add_executable(mock_studio_qt
+    src/frontend/mock_main.cpp
+    ${FRONTEND_COMMON_SOURCES}
+)
 
+target_include_directories(mock_studio_qt PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    "C:/Program Files/Euresys/eGrabber/include"
+)
+
+target_link_libraries(mock_studio_qt PRIVATE
+    Qt6::Widgets
+    Qt6::Charts
+    mib_backend
+    spdlog::spdlog
+)
+
+# OpenCV linking (prefer imported targets; fallback to variables)
+if(TARGET opencv_world)
+    target_link_libraries(mock_studio_qt PRIVATE opencv_world)
+elseif(TARGET opencv_core)
+    target_link_libraries(mock_studio_qt PRIVATE opencv_core opencv_imgproc opencv_imgcodecs)
+elseif(DEFINED OpenCV_LIBS)
+    target_include_directories(mock_studio_qt PRIVATE ${OpenCV_INCLUDE_DIRS})
+    target_link_libraries(mock_studio_qt PRIVATE ${OpenCV_LIBS})
+endif()
+
+# Qt deployment via windeployqt (Conan)
+if(WIN32)
+    # Find Qt6 installation path from Conan
+    # Qt6_DIR is set by Conan's CMakeDeps generator
+    if(DEFINED Qt6_DIR)
+        get_filename_component(QT6_ROOT "${Qt6_DIR}/../.." ABSOLUTE)
+    elseif(TARGET Qt6::qmake)
+        get_target_property(QT6_QMAKE_EXECUTABLE Qt6::qmake IMPORTED_LOCATION)
+        if(QT6_QMAKE_EXECUTABLE)
+            get_filename_component(QT6_ROOT "${QT6_QMAKE_EXECUTABLE}/../.." ABSOLUTE)
+        endif()
+    endif()
+    
+    # Fallback to CMAKE_PREFIX_PATH if Qt6_DIR not found
+    if(NOT DEFINED QT6_ROOT)
+        set(QT6_ROOT "${CMAKE_PREFIX_PATH}")
+    endif()
+    
+    # Set Qt bin directories (Conan typically installs in CMAKE_PREFIX_PATH)
+    # For multi-config builds, use imported targets first (they handle Debug/Release automatically)
+    set(CONAN_QT_BIN_DIR "")
+    
+    # Try to get path from Qt6::Core imported target (handles multi-config properly)
+    if(TARGET Qt6::Core)
+        # Try Release location first (more common for deployment)
+        get_target_property(_QT_CORE_LOCATION Qt6::Core IMPORTED_LOCATION_RELEASE)
+        if(_QT_CORE_LOCATION)
+            get_filename_component(CONAN_QT_BIN_DIR "${_QT_CORE_LOCATION}" DIRECTORY)
+            get_filename_component(QT6_ROOT "${CONAN_QT_BIN_DIR}" DIRECTORY)
+        else()
+            # Try Debug location as fallback
+            get_target_property(_QT_CORE_LOCATION Qt6::Core IMPORTED_LOCATION_DEBUG)
+            if(_QT_CORE_LOCATION)
+                get_filename_component(CONAN_QT_BIN_DIR "${_QT_CORE_LOCATION}" DIRECTORY)
+                get_filename_component(QT6_ROOT "${CONAN_QT_BIN_DIR}" DIRECTORY)
+            endif()
+        endif()
+    endif()
+    
+    # Fallback: search CMAKE_PREFIX_PATH (may only have paths from last conan install)
+    if(NOT CONAN_QT_BIN_DIR)
+        foreach(_path IN LISTS CMAKE_PREFIX_PATH)
+            if(EXISTS "${_path}/Qt6Core.dll" OR EXISTS "${_path}/Qt6Cored.dll")
+                set(CONAN_QT_BIN_DIR "${_path}")
+                get_filename_component(QT6_ROOT "${_path}" DIRECTORY)
+                break()
+            endif()
+        endforeach()
+    endif()
+    
+    # Final fallback: use computed path if not found
+    if(NOT CONAN_QT_BIN_DIR)
+        if(DEFINED QT6_ROOT)
+            set(CONAN_QT_BIN_DIR "${QT6_ROOT}/bin")
+        else()
+            message(WARNING "Could not determine Qt bin directory - Qt deployment may fail")
+        endif()
+    endif()
+    
+    set(CONAN_QT_DEBUG_BIN_DIR "${CONAN_QT_BIN_DIR}")  # Debug and Release DLLs in same directory
+    set(CONAN_QT_TOOLS_DIR "${QT6_ROOT}/tools/qt6/bin")
+    
+    # Find windeployqt
+    find_program(WINDEPLOYQT_RELEASE windeployqt.exe
+        PATHS "${CONAN_QT_TOOLS_DIR}" "${CONAN_QT_BIN_DIR}"
+        NO_DEFAULT_PATH
+    )
+    find_program(WINDEPLOYQT_DEBUG windeployqt.debug.bat
+        PATHS "${CONAN_QT_TOOLS_DIR}" "${CONAN_QT_BIN_DIR}"
+        NO_DEFAULT_PATH
+    )
+    
+    # If not found in tools, try bin directory
+    if(NOT WINDEPLOYQT_RELEASE)
+        find_program(WINDEPLOYQT_RELEASE windeployqt.exe
+            PATHS "${CONAN_QT_BIN_DIR}" "${CMAKE_PREFIX_PATH}/bin"
+        )
+    endif()
+    
     # Discover extra third-party codec runtimes used by Qt imageformats plugins (copy after windeployqt)
-    # This helps ensure qjpeg/qtiff/qwebp/qjp2 load on machines without vcpkg in PATH.
+    # This helps ensure qjpeg/qtiff/qwebp/qjp2 load on machines without Conan packages in PATH.
+    set(CONAN_SEARCH_PATHS
+        "${CONAN_QT_BIN_DIR}"
+        "${CMAKE_PREFIX_PATH}/bin"
+        "${CMAKE_BINARY_DIR}/conan/bin"
+    )
     set(_EXTRA_CODEC_PATTERNS
         # Release + Debug bins, so Debug runs work too
-        "${VCPKG_BIN_DIR}/jpeg*.dll"
-        "${VCPKG_DEBUG_BIN_DIR}/jpeg*.dll"
-        "${VCPKG_BIN_DIR}/libjpeg*.dll"
-        "${VCPKG_DEBUG_BIN_DIR}/libjpeg*.dll"
-        "${VCPKG_BIN_DIR}/tiff*.dll"
-        "${VCPKG_DEBUG_BIN_DIR}/tiff*.dll"
-        "${VCPKG_BIN_DIR}/libtiff*.dll"
-        "${VCPKG_DEBUG_BIN_DIR}/libtiff*.dll"
-        "${VCPKG_BIN_DIR}/liblzma*.dll"
-        "${VCPKG_DEBUG_BIN_DIR}/liblzma*.dll"
-        "${VCPKG_BIN_DIR}/libwebp*.dll"
-        "${VCPKG_DEBUG_BIN_DIR}/libwebp*.dll"
-        "${VCPKG_BIN_DIR}/libwebpdemux*.dll"
-        "${VCPKG_DEBUG_BIN_DIR}/libwebpdemux*.dll"
-        "${VCPKG_BIN_DIR}/libwebpmux*.dll"
-        "${VCPKG_DEBUG_BIN_DIR}/libwebpmux*.dll"
-        "${VCPKG_BIN_DIR}/libsharpyuv*.dll"
-        "${VCPKG_DEBUG_BIN_DIR}/libsharpyuv*.dll"
-        "${VCPKG_BIN_DIR}/openjp*.dll"      # openjp2 for qjp2
-        "${VCPKG_DEBUG_BIN_DIR}/openjp*.dll"
-        "${VCPKG_BIN_DIR}/zstd*.dll"
-        "${VCPKG_DEBUG_BIN_DIR}/zstd*.dll"
-        "${VCPKG_BIN_DIR}/libdeflate*.dll"
-        "${VCPKG_DEBUG_BIN_DIR}/libdeflate*.dll"
     )
+    foreach(_search_path IN LISTS CONAN_SEARCH_PATHS)
+        list(APPEND _EXTRA_CODEC_PATTERNS
+            "${_search_path}/jpeg*.dll"
+            "${_search_path}/libjpeg*.dll"
+            "${_search_path}/tiff*.dll"
+            "${_search_path}/libtiff*.dll"
+            "${_search_path}/liblzma*.dll"
+            "${_search_path}/libwebp*.dll"
+            "${_search_path}/libwebpdemux*.dll"
+            "${_search_path}/libwebpmux*.dll"
+            "${_search_path}/libsharpyuv*.dll"
+            "${_search_path}/openjp*.dll"      # openjp2 for qjp2
+            "${_search_path}/zstd*.dll"
+            "${_search_path}/libdeflate*.dll"
+        )
+    endforeach()
     set(_EXTRA_CODEC_DLLS "")
     foreach(_pat IN LISTS _EXTRA_CODEC_PATTERNS)
         file(GLOB _found "${_pat}")
@@ -234,16 +335,160 @@ if(WIN32)
     endforeach()
     list(REMOVE_DUPLICATES _EXTRA_CODEC_DLLS)
 
-    foreach(app_target IN ITEMS mib_studio_qt)
+    foreach(app_target IN ITEMS mib_studio_qt mock_studio_qt)
         # Use different windeployqt for Debug vs Release
-        add_custom_command(TARGET ${app_target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E env "PATH=$<IF:$<STREQUAL:$<CONFIG>,Debug>,${VCPKG_DEBUG_BIN_DIR},${VCPKG_BIN_DIR}>;$ENV{PATH}"
-                    "$<IF:$<STREQUAL:$<CONFIG>,Debug>,${WINDEPLOYQT_DEBUG},${WINDEPLOYQT_RELEASE}>"
-                    $<IF:$<STREQUAL:$<CONFIG>,Debug>,--debug,--release>
-                    --compiler-runtime
-                    "$<TARGET_FILE:${app_target}>"
-            COMMENT "windeployqt ($<CONFIG>): ${app_target}"
-        )
+        if(WINDEPLOYQT_RELEASE)
+            # Check if Debug and Release Qt DLLs exist
+            # For multi-config, Debug and Release packages may be in different Conan directories
+            set(_QT_DEBUG_DLL_FOUND FALSE)
+            set(_QT_RELEASE_DLL_FOUND FALSE)
+            set(_QT_DEBUG_BIN_DIR "")
+            set(_QT_RELEASE_BIN_DIR "")
+            
+            # Check Debug package location using imported target
+            if(TARGET Qt6::Core)
+                get_target_property(_QT_CORE_LOCATION_DEBUG Qt6::Core IMPORTED_LOCATION_DEBUG)
+                if(_QT_CORE_LOCATION_DEBUG)
+                    get_filename_component(_QT_DEBUG_BIN_DIR "${_QT_CORE_LOCATION_DEBUG}" DIRECTORY)
+                    if(EXISTS "${_QT_DEBUG_BIN_DIR}/Qt6Cored.dll")
+                        set(_QT_DEBUG_DLL_FOUND TRUE)
+                    endif()
+                else()
+                    # Fallback: derive bin dir from debug import library
+                    get_target_property(_QT_CORE_IMPLIB_DEBUG Qt6::Core IMPORTED_IMPLIB_DEBUG)
+                    if(_QT_CORE_IMPLIB_DEBUG)
+                        get_filename_component(_QT_DEBUG_LIB_DIR "${_QT_CORE_IMPLIB_DEBUG}" DIRECTORY)
+                        get_filename_component(_QT_DEBUG_PREFIX "${_QT_DEBUG_LIB_DIR}" DIRECTORY)
+                        set(_QT_DEBUG_BIN_DIR "${_QT_DEBUG_PREFIX}/bin")
+                        if(EXISTS "${_QT_DEBUG_BIN_DIR}/Qt6Cored.dll")
+                            set(_QT_DEBUG_DLL_FOUND TRUE)
+                        endif()
+                    endif()
+                endif()
+                
+                # Check Release package location using imported target
+                get_target_property(_QT_CORE_LOCATION_RELEASE Qt6::Core IMPORTED_LOCATION_RELEASE)
+                if(_QT_CORE_LOCATION_RELEASE)
+                    get_filename_component(_QT_RELEASE_BIN_DIR "${_QT_CORE_LOCATION_RELEASE}" DIRECTORY)
+                    if(EXISTS "${_QT_RELEASE_BIN_DIR}/Qt6Core.dll")
+                        set(_QT_RELEASE_DLL_FOUND TRUE)
+                    endif()
+                else()
+                    # Fallback: derive bin dir from release import library
+                    get_target_property(_QT_CORE_IMPLIB_RELEASE Qt6::Core IMPORTED_IMPLIB_RELEASE)
+                    if(_QT_CORE_IMPLIB_RELEASE)
+                        get_filename_component(_QT_RELEASE_LIB_DIR "${_QT_CORE_IMPLIB_RELEASE}" DIRECTORY)
+                        get_filename_component(_QT_RELEASE_PREFIX "${_QT_RELEASE_LIB_DIR}" DIRECTORY)
+                        set(_QT_RELEASE_BIN_DIR "${_QT_RELEASE_PREFIX}/bin")
+                        if(EXISTS "${_QT_RELEASE_BIN_DIR}/Qt6Core.dll")
+                            set(_QT_RELEASE_DLL_FOUND TRUE)
+                        endif()
+                    endif()
+                endif()
+            endif()
+            
+            # Fallback: check CONAN_QT_BIN_DIR (may only have one build_type)
+            if(CONAN_QT_BIN_DIR)
+                if(NOT _QT_DEBUG_DLL_FOUND AND EXISTS "${CONAN_QT_BIN_DIR}/Qt6Cored.dll")
+                    set(_QT_DEBUG_DLL_FOUND TRUE)
+                    set(_QT_DEBUG_BIN_DIR "${CONAN_QT_BIN_DIR}")
+                endif()
+                if(NOT _QT_RELEASE_DLL_FOUND AND EXISTS "${CONAN_QT_BIN_DIR}/Qt6Core.dll")
+                    set(_QT_RELEASE_DLL_FOUND TRUE)
+                    set(_QT_RELEASE_BIN_DIR "${CONAN_QT_BIN_DIR}")
+                endif()
+            endif()
+
+            # Last resort: search Conan cache for Qt6 debug/release DLLs
+            if(NOT _QT_DEBUG_BIN_DIR OR NOT _QT_RELEASE_BIN_DIR)
+                set(_CONAN_CACHE_ROOT "$ENV{USERPROFILE}/.conan2")
+                if(EXISTS "${_CONAN_CACHE_ROOT}")
+                    if(NOT _QT_DEBUG_BIN_DIR)
+                        file(GLOB _qt_debug_dll_candidates "${_CONAN_CACHE_ROOT}/p/b/*/p/bin/Qt6Cored.dll")
+                        list(LENGTH _qt_debug_dll_candidates _qt_debug_count)
+                        if(_qt_debug_count GREATER 0)
+                            list(GET _qt_debug_dll_candidates 0 _qt_debug_dll)
+                            get_filename_component(_QT_DEBUG_BIN_DIR "${_qt_debug_dll}" DIRECTORY)
+                            set(_QT_DEBUG_DLL_FOUND TRUE)
+                        endif()
+                    endif()
+                    if(NOT _QT_RELEASE_BIN_DIR)
+                        file(GLOB _qt_release_dll_candidates "${_CONAN_CACHE_ROOT}/p/b/*/p/bin/Qt6Core.dll")
+                        list(LENGTH _qt_release_dll_candidates _qt_release_count)
+                        if(_qt_release_count GREATER 0)
+                            list(GET _qt_release_dll_candidates 0 _qt_release_dll)
+                            get_filename_component(_QT_RELEASE_BIN_DIR "${_qt_release_dll}" DIRECTORY)
+                            set(_QT_RELEASE_DLL_FOUND TRUE)
+                        endif()
+                    endif()
+                endif()
+            endif()
+            
+            # Warn if required DLLs are missing (for multi-config, both should be available)
+            if(NOT _QT_DEBUG_DLL_FOUND)
+                if(_QT_DEBUG_BIN_DIR)
+                    message(WARNING "Qt Debug DLLs not found in ${_QT_DEBUG_BIN_DIR}")
+                else()
+                    message(WARNING "Qt Debug DLLs not found (Debug package location not determined)")
+                endif()
+                message(WARNING "  Debug builds may fail. Install Debug packages:")
+                message(WARNING "  conan install . --output-folder=build --build=missing -s build_type=Debug")
+            endif()
+            if(NOT _QT_RELEASE_DLL_FOUND)
+                if(_QT_RELEASE_BIN_DIR)
+                    message(WARNING "Qt Release DLLs not found in ${_QT_RELEASE_BIN_DIR}")
+                else()
+                    message(WARNING "Qt Release DLLs not found (Release package location not determined)")
+                endif()
+                message(WARNING "  Release builds may fail. Install Release packages:")
+                message(WARNING "  conan install . --output-folder=build --build=missing -s build_type=Release")
+            endif()
+            
+            # Use config-specific deployment flags and paths
+            set(_WINDEPLOYQT_DEBUG_EXE "")
+            if(_QT_DEBUG_BIN_DIR)
+                if(EXISTS "${_QT_DEBUG_BIN_DIR}/windeployqt.debug.bat")
+                    set(_WINDEPLOYQT_DEBUG_EXE "${_QT_DEBUG_BIN_DIR}/windeployqt.debug.bat")
+                elseif(EXISTS "${_QT_DEBUG_BIN_DIR}/windeployqt.exe")
+                    set(_WINDEPLOYQT_DEBUG_EXE "${_QT_DEBUG_BIN_DIR}/windeployqt.exe")
+                endif()
+            endif()
+
+            if(_WINDEPLOYQT_DEBUG_EXE)
+                set(_WINDEPLOYQT_EXE "$<IF:$<STREQUAL:$<CONFIG>,Debug>,${_WINDEPLOYQT_DEBUG_EXE},${WINDEPLOYQT_RELEASE}>")
+            elseif(WINDEPLOYQT_DEBUG)
+                set(_WINDEPLOYQT_EXE "$<IF:$<STREQUAL:$<CONFIG>,Debug>,${WINDEPLOYQT_DEBUG},${WINDEPLOYQT_RELEASE}>")
+            else()
+                # Use windeployqt.exe with --debug/--release flag if windeployqt.debug.bat doesn't exist
+                set(_WINDEPLOYQT_EXE "${WINDEPLOYQT_RELEASE}")
+            endif()
+            set(_WINDEPLOYQT_FLAG "$<IF:$<STREQUAL:$<CONFIG>,Debug>,--debug,--release>")
+
+            # Use appropriate bin directory for PATH based on configuration
+            # For Debug builds, prefer Debug bin dir; for Release, prefer Release bin dir
+            set(_WINDEPLOYQT_PATH "")
+            if(_QT_DEBUG_BIN_DIR AND _QT_RELEASE_BIN_DIR)
+                # Both found - use generator expression to select based on config
+                set(_WINDEPLOYQT_PATH "$<IF:$<STREQUAL:$<CONFIG>,Debug>,${_QT_DEBUG_BIN_DIR},${_QT_RELEASE_BIN_DIR}>")
+            elseif(_QT_RELEASE_BIN_DIR)
+                set(_WINDEPLOYQT_PATH "${_QT_RELEASE_BIN_DIR}")
+            elseif(_QT_DEBUG_BIN_DIR)
+                set(_WINDEPLOYQT_PATH "${_QT_DEBUG_BIN_DIR}")
+            elseif(CONAN_QT_BIN_DIR)
+                set(_WINDEPLOYQT_PATH "${CONAN_QT_BIN_DIR}")
+            endif()
+            
+            add_custom_command(TARGET ${app_target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E env "PATH=${_WINDEPLOYQT_PATH};$ENV{PATH}"
+                        "${_WINDEPLOYQT_EXE}"
+                        "${_WINDEPLOYQT_FLAG}"
+                        --compiler-runtime
+                        "$<TARGET_FILE:${app_target}>"
+                COMMENT "windeployqt ($<CONFIG>): ${app_target}"
+            )
+        else()
+            message(WARNING "windeployqt not found - Qt deployment will be skipped")
+        endif()
         # Copy extra codec/runtime DLLs if present
         foreach(_dll IN LISTS _EXTRA_CODEC_DLLS)
             add_custom_command(TARGET ${app_target} POST_BUILD
@@ -258,11 +503,20 @@ if(WIN32)
                     "$<TARGET_FILE_DIR:${app_target}>/"
             COMMENT "Copy Coremor DLL: ${app_target}"
         )
+        # Copy Conan package DLLs (OpenCV, HDF5, SQLite3, etc.)
+        add_custom_command(TARGET ${app_target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_RUNTIME_DLLS:${app_target}>
+                    $<TARGET_FILE_DIR:${app_target}>
+            COMMAND_EXPAND_LISTS
+            COMMENT "Copying Conan package DLLs for ${app_target}"
+        )
     endforeach()
 endif()
 
 if(TARGET nlohmann_json::nlohmann_json)
     target_link_libraries(mib_studio_qt PRIVATE nlohmann_json::nlohmann_json)
+    target_link_libraries(mock_studio_qt PRIVATE nlohmann_json::nlohmann_json)
 endif()
 
 # Windows installer packaging (InnoSetup)
@@ -297,7 +551,7 @@ if(WIN32)
             COMMAND "${ISCC_EXE}" "${INNOSETUP_SCRIPT}"
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             COMMENT "Building Windows installer with InnoSetup"
-            DEPENDS mib_studio_qt
+            DEPENDS mib_studio_qt mock_studio_qt
         )
         
         message(STATUS "InnoSetup found: ${ISCC_EXE}")

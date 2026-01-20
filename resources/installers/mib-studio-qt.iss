@@ -11,6 +11,8 @@
 #define SourceDir "..\..\"
 #define EgrabberInstaller "egrabber-win-x86_64-25.10.0.57.exe"
 #define VCRedistInstaller "vc_redist.x64.exe"
+#define EgrabberPath AddBackslash(SourceDir) + "resources\\installers\\" + EgrabberInstaller
+#define VCRedistPath AddBackslash(SourceDir) + "resources\\installers\\" + VCRedistInstaller
 
 [Setup]
 ; App identification
@@ -38,8 +40,12 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+#if FileExists(VCRedistPath)
 Name: "installvcredist"; Description: "Install Visual C++ Redistributable (required for application to run)"; GroupDescription: "Additional components"
+#endif
+#if FileExists(EgrabberPath)
 Name: "installegrabber"; Description: "Install eGrabber SDK (required for camera functionality)"; GroupDescription: "Additional components"
+#endif
 
 [Files]
 ; Main executables
@@ -68,10 +74,14 @@ Source: "{#SourceDir}{#BuildDir}\tls\*"; DestDir: "{app}\tls"; Flags: ignorevers
 Source: "{#SourceDir}{#BuildDir}\data\*"; DestDir: "{app}\data"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Visual C++ Redistributable installer (bundled but only run if user selects the task and runtime is not already installed)
-Source: "{#SourceDir}resources\installers\{#VCRedistInstaller}"; DestDir: "{tmp}"; Flags: deleteafterinstall; Tasks: installvcredist
+#if FileExists(VCRedistPath)
+Source: "{#VCRedistPath}"; DestDir: "{tmp}"; Flags: deleteafterinstall; Tasks: installvcredist
+#endif
 
 ; eGrabber installer (bundled but only run if user selects the task)
-Source: "{#SourceDir}resources\installers\{#EgrabberInstaller}"; DestDir: "{tmp}"; Flags: deleteafterinstall; Tasks: installegrabber
+#if FileExists(EgrabberPath)
+Source: "{#EgrabberPath}"; DestDir: "{tmp}"; Flags: deleteafterinstall; Tasks: installegrabber
+#endif
 
 [Dirs]
 ; Ensure data directory structure exists even if source data directory is empty
@@ -87,10 +97,14 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: deskto
 
 [Run]
 ; Run VC++ Redistributable installer if selected and runtime not already installed
+#if FileExists(VCRedistPath)
 Filename: "{tmp}\{#VCRedistInstaller}"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing Visual C++ Redistributable..."; Tasks: installvcredist; Flags: runhidden waituntilterminated; Check: VCRuntimeNotInstalled
+#endif
 
 ; Run eGrabber installer if selected (silent mode)
+#if FileExists(EgrabberPath)
 Filename: "{tmp}\{#EgrabberInstaller}"; Parameters: "/S"; StatusMsg: "Installing eGrabber SDK..."; Tasks: installegrabber; Flags: runhidden waituntilterminated
+#endif
 
 [Code]
 
