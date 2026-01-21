@@ -14,6 +14,7 @@ template<typename T> class QFutureWatcher;
 
 namespace backend { class AppBackend; }
 namespace frontend { class OverviewTab; }
+namespace frontend { class AutoUpdater; }
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -43,6 +44,7 @@ private:
     QTabWidget* tabs_ = nullptr;
     QTabWidget* experimentTabs_ = nullptr;
     frontend::OverviewTab* overviewTab_ = nullptr;
+    frontend::AutoUpdater* updater_ = nullptr;
     uint64_t experimentStartTimeNs_{0};
     bool experimentActive_{false};
     bool experimentServicesActive_{false};

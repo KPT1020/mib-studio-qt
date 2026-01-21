@@ -121,7 +121,7 @@ During installation, users can choose to install the bundled eGrabber SDK:
 ## Distribution Notes
 
 - **File Size**: The installer includes all Qt runtime files, so it will be large (typically 100-200 MB)
-- **Version Number**: Update the version in `CMakeLists.txt` and the installer script will use it
+- **Version Number**: Update the version in `CMakeLists.txt`. The CMake `package_installer` target passes `/DAppVersion=<PROJECT_VERSION>` to Inno Setup so the output filename matches the app version.
 - **Digital Signing**: Consider code signing the installer for distribution (requires a code signing certificate)
 - **Antivirus**: Some antivirus software may flag installers - test with common AV products
 - **Windows Version**: The installer requires Windows 7 or later (64-bit)
@@ -169,4 +169,10 @@ The installer script is located at `resources/installers/mib-studio-qt.iss`. Key
 - `[Code]`: Custom Pascal script for installation logic
 
 To update the version number, modify the `AppVersion` define at the top of the script, or update `CMakeLists.txt` and regenerate the script if using CMake variables.
+
+If you compile via CMake (`package_installer` target), the version is injected automatically via:
+
+```
+ISCC.exe /DAppVersion=<PROJECT_VERSION> mib-studio-qt.iss
+```
 

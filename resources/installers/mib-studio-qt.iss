@@ -2,7 +2,11 @@
 ; This script packages the application with all dependencies and optionally installs egrabber
 
 #define AppName "MIB Studio Qt"
-#define AppVersion "0.1.0"
+; AppVersion can be overridden from the command line:
+;   ISCC.exe /DAppVersion=0.2.0 mib-studio-qt.iss
+#ifndef AppVersion
+  #define AppVersion "0.1.0"
+#endif
 #define AppPublisher "MIB Studio"
 #define AppURL "https://github.com/your-org/mib-studio-qt"
 #define AppExeName "mib_studio_qt.exe"
@@ -33,6 +37,9 @@ SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
 ArchitecturesInstallIn64BitMode=x64compatible
+; Help upgrades when the app is running
+CloseApplications=yes
+CloseApplicationsFilter={#AppExeName}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

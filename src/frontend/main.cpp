@@ -68,6 +68,10 @@ int main(int argc, char* argv[]) {
 #endif
         // Initialize QApplication first
         QApplication app(argc, argv);
+
+        // Application identity/version (used by the updater and About dialogs)
+        QCoreApplication::setApplicationName(QStringLiteral("MIB Studio Qt"));
+        QCoreApplication::setApplicationVersion(QStringLiteral(MIB_STUDIO_QT_VERSION));
         
         // Get executable directory and resolve data path
         QString exeDir = QCoreApplication::applicationDirPath();

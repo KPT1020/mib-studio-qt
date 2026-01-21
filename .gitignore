@@ -4,3 +4,10 @@ data/logs/app.log
 # Exclude .exe files in installers directory
 resources/installers/*.exe
 resources/installers/build/**/*.exe
+credentials.json
+
+# Test files
+test_installer.exe
+test_*.exe
+test_*.txt
+test_*.json

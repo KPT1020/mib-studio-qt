@@ -1,6 +1,7 @@
 #include "frontend/MainWindow.h"
 
 #include <QAction>
+#include <QCoreApplication>
 #include <QLabel>
 #include <QStatusBar>
 #include <QTimer>
@@ -28,6 +29,7 @@
 #include "frontend/MonitoringSettingsDialog.h"
 #include "frontend/OverviewTab.h"
 #include "frontend/ConfigTabs.h"
+#include "frontend/AutoUpdater.h"
 #include <spdlog/spdlog.h>
 #include <opencv2/core.hpp>
 #include <chrono>
@@ -103,9 +105,19 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     auto *helpMenu = menuBar()->addMenu(tr("Help"));
     auto *aboutAct = helpMenu->addAction(tr("About"));
     connect(aboutAct, &QAction::triggered, this, [this]()
-            { QMessageBox::about(this,
-                                 tr("About MIB Studio Qt Scaffold"),
-                                 tr("MIB Studio Qt Scaffold\n\nProvides camera capture, processing, and HDF5 logging.")); });
+            {
+        const QString v = QCoreApplication::applicationVersion();
+        QMessageBox::about(this,
+                           tr("About MIB Studio Qt"),
+                           tr("MIB Studio Qt\nVersion: %1\n\nProvides camera capture, processing, and HDF5 logging.")
+                               .arg(v.isEmpty() ? tr("(unknown)") : v));
+    });
+
+    updater_ = new frontend::AutoUpdater(this, this);
+    auto* checkUpdatesAct = helpMenu->addAction(tr("Check for Updates..."));
+    connect(checkUpdatesAct, &QAction::triggered, this, [this]() {
+        if (updater_) updater_->checkForUpdates(true);
+    });
 
     // Camera buttons will be added to main tab bar corner widget, not toolbar
     auto *startCaptureAct = new QAction("Start Camera", this);
@@ -219,6 +231,11 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     
     // Initialize tab states (all tabs enabled initially since no experiment is active)
     updateTabStates();
+
+    // Quiet update check on startup (only prompts if an update is available)
+    QTimer::singleShot(1500, this, [this]() {
+        if (updater_) updater_->checkForUpdates(false);
+    });
 }
 
 void MainWindow::updateExperimentButtonStates()

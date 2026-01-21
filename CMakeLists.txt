@@ -1,5 +1,52 @@
 cmake_minimum_required(VERSION 3.21)
-project(MIB_Studio_Qt VERSION 0.1.0 LANGUAGES CXX)
+
+# Default version (fallback if git is not available or no tags exist)
+set(DEFAULT_VERSION "0.2.1")
+
+# Try to get version from git tags
+set(GIT_VERSION "")
+if(EXISTS "${CMAKE_SOURCE_DIR}/.git")
+    find_package(Git QUIET)
+    if(GIT_FOUND)
+        # Get the latest tag matching version pattern (vX.Y.Z or X.Y.Z)
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} describe --tags --abbrev=0 --match "v[0-9]*" --match "[0-9]*"
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            OUTPUT_VARIABLE GIT_TAG
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+            RESULT_VARIABLE GIT_TAG_RESULT
+        )
+        
+        if(GIT_TAG_RESULT EQUAL 0 AND GIT_TAG)
+            # Extract version from tag (strip optional 'v' prefix)
+            string(REGEX REPLACE "^v?([0-9]+\\.[0-9]+\\.[0-9]+).*" "\\1" GIT_VERSION "${GIT_TAG}")
+            # Verify it's a valid semantic version
+            if(GIT_VERSION AND GIT_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+                message(STATUS "Found git tag version: ${GIT_VERSION} (from tag: ${GIT_TAG})")
+            else()
+                set(GIT_VERSION "")
+            endif()
+        endif()
+    endif()
+endif()
+
+# Use git version if available and newer than default, otherwise use default
+if(GIT_VERSION)
+    # Compare versions: if git version is newer, use it; otherwise use default
+    if(GIT_VERSION VERSION_GREATER DEFAULT_VERSION OR GIT_VERSION VERSION_EQUAL DEFAULT_VERSION)
+        set(PROJECT_VERSION "${GIT_VERSION}")
+        message(STATUS "Using version from git tag: ${PROJECT_VERSION}")
+    else()
+        set(PROJECT_VERSION "${DEFAULT_VERSION}")
+        message(STATUS "Using default version (git tag ${GIT_VERSION} is older): ${PROJECT_VERSION}")
+    endif()
+else()
+    set(PROJECT_VERSION "${DEFAULT_VERSION}")
+    message(STATUS "Using default version (git tag not available): ${PROJECT_VERSION}")
+endif()
+
+project(MIB_Studio_Qt VERSION ${PROJECT_VERSION} LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,7 +60,7 @@ if(MSVC)
     add_compile_options(/wd4828)
 endif()
 
-find_package(Qt6 COMPONENTS Widgets Gui Charts REQUIRED)
+find_package(Qt6 COMPONENTS Core Widgets Gui Charts Network REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG QUIET)
 find_package(OpenCV CONFIG REQUIRED)
@@ -167,6 +214,8 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/JsonFlatten.h
     src/frontend/AppConfigWatcher.cpp
     include/frontend/AppConfigWatcher.h
+    src/frontend/AutoUpdater.cpp
+    include/frontend/AutoUpdater.h
 )
 
 add_executable(mib_studio_qt WIN32
@@ -183,8 +232,14 @@ target_include_directories(mib_studio_qt PRIVATE
 target_link_libraries(mib_studio_qt PRIVATE
     Qt6::Widgets
     Qt6::Charts
+    Qt6::Network
     mib_backend
     spdlog::spdlog
+)
+
+# App version exported from CMake (used for update checks, About dialogs, etc.)
+target_compile_definitions(mib_studio_qt PRIVATE
+    MIB_STUDIO_QT_VERSION="${PROJECT_VERSION}"
 )
 
 # OpenCV linking (prefer imported targets; fallback to variables)
@@ -509,10 +564,11 @@ if(WIN32)
         set(INSTALLER_OUTPUT_DIR "${CMAKE_BINARY_DIR}/dist")
         file(MAKE_DIRECTORY "${INSTALLER_OUTPUT_DIR}")
         
-        # InnoSetup script path
+        # InnoSetup script paths
         set(INNOSETUP_SCRIPT "${CMAKE_SOURCE_DIR}/resources/installers/mib-studio-qt.iss")
+        set(INNOSETUP_UPDATE_SCRIPT "${CMAKE_SOURCE_DIR}/resources/installers/mib-studio-qt-update.iss")
         
-        # Custom target to build installer
+        # Custom target to build full installer
         add_custom_target(package_installer
             COMMAND ${CMAKE_COMMAND} -E echo "Building Windows installer..."
             COMMAND ${CMAKE_COMMAND} -E echo "Verifying Release build files..."
@@ -521,15 +577,32 @@ if(WIN32)
             COMMAND ${CMAKE_COMMAND} -E echo "Checking for ${CMAKE_BINARY_DIR}/Release/mib_studio_qt.exe..."
             # Build installer
             COMMAND ${CMAKE_COMMAND} -E echo "Compiling InnoSetup script..."
-            COMMAND "${ISCC_EXE}" "${INNOSETUP_SCRIPT}"
+            COMMAND "${ISCC_EXE}" "/DAppVersion=${PROJECT_VERSION}" "${INNOSETUP_SCRIPT}"
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             COMMENT "Building Windows installer with InnoSetup"
             DEPENDS mib_studio_qt
         )
         
+        # Custom target to build update package (app files only, no eGrabber/VC++)
+        add_custom_target(package_installer_update
+            COMMAND ${CMAKE_COMMAND} -E echo "Building Windows update package..."
+            COMMAND ${CMAKE_COMMAND} -E echo "Verifying Release build files..."
+            COMMAND ${CMAKE_COMMAND} -E echo "Release directory: ${CMAKE_BINARY_DIR}/Release"
+            # Verify main executables exist
+            COMMAND ${CMAKE_COMMAND} -E echo "Checking for ${CMAKE_BINARY_DIR}/Release/mib_studio_qt.exe..."
+            # Build update package
+            COMMAND ${CMAKE_COMMAND} -E echo "Compiling InnoSetup update script..."
+            COMMAND "${ISCC_EXE}" "/DAppVersion=${PROJECT_VERSION}" "${INNOSETUP_UPDATE_SCRIPT}"
+            WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+            COMMENT "Building Windows update package with InnoSetup"
+            DEPENDS mib_studio_qt
+        )
+        
         message(STATUS "InnoSetup found: ${ISCC_EXE}")
-        message(STATUS "Installer target 'package_installer' available")
-        message(STATUS "Run 'cmake --build build --target package_installer' to create installer")
+        message(STATUS "Installer target 'package_installer' available (full installer)")
+        message(STATUS "Installer target 'package_installer_update' available (update package)")
+        message(STATUS "Run 'cmake --build build --target package_installer' to create full installer")
+        message(STATUS "Run 'cmake --build build --target package_installer_update' to create update package")
     else()
         message(STATUS "InnoSetup not found - installer target will not be available")
         message(STATUS "Install InnoSetup from https://jrsoftware.org/isdl.php to enable installer generation")
