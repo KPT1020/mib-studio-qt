@@ -196,33 +196,6 @@ elseif(DEFINED OpenCV_LIBS)
     target_link_libraries(mib_studio_qt PRIVATE ${OpenCV_LIBS})
 endif()
 
-add_executable(mock_studio_qt WIN32
-    src/frontend/mock_main.cpp
-    ${FRONTEND_COMMON_SOURCES}
-)
-
-target_include_directories(mock_studio_qt PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    "C:/Program Files/Euresys/eGrabber/include"
-)
-
-target_link_libraries(mock_studio_qt PRIVATE
-    Qt6::Widgets
-    Qt6::Charts
-    mib_backend
-    spdlog::spdlog
-)
-
-# OpenCV linking (prefer imported targets; fallback to variables)
-if(TARGET opencv_world)
-    target_link_libraries(mock_studio_qt PRIVATE opencv_world)
-elseif(TARGET opencv_core)
-    target_link_libraries(mock_studio_qt PRIVATE opencv_core opencv_imgproc opencv_imgcodecs)
-elseif(DEFINED OpenCV_LIBS)
-    target_include_directories(mock_studio_qt PRIVATE ${OpenCV_INCLUDE_DIRS})
-    target_link_libraries(mock_studio_qt PRIVATE ${OpenCV_LIBS})
-endif()
-
 # Qt deployment via windeployqt (Conan)
 if(WIN32)
     # Find Qt6 installation path from Conan
@@ -335,7 +308,7 @@ if(WIN32)
     endforeach()
     list(REMOVE_DUPLICATES _EXTRA_CODEC_DLLS)
 
-    foreach(app_target IN ITEMS mib_studio_qt mock_studio_qt)
+    foreach(app_target IN ITEMS mib_studio_qt)
         # Use different windeployqt for Debug vs Release
         if(WINDEPLOYQT_RELEASE)
             # Check if Debug and Release Qt DLLs exist
@@ -516,7 +489,6 @@ endif()
 
 if(TARGET nlohmann_json::nlohmann_json)
     target_link_libraries(mib_studio_qt PRIVATE nlohmann_json::nlohmann_json)
-    target_link_libraries(mock_studio_qt PRIVATE nlohmann_json::nlohmann_json)
 endif()
 
 # Windows installer packaging (InnoSetup)
@@ -551,7 +523,7 @@ if(WIN32)
             COMMAND "${ISCC_EXE}" "${INNOSETUP_SCRIPT}"
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             COMMENT "Building Windows installer with InnoSetup"
-            DEPENDS mib_studio_qt mock_studio_qt
+            DEPENDS mib_studio_qt
         )
         
         message(STATUS "InnoSetup found: ${ISCC_EXE}")

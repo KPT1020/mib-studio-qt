@@ -43,7 +43,7 @@ cmake --preset windows-default
 2) Build Release (windeployqt runs post-build for each app target):
 
 ```powershell
-cmake --build build --config Release --target mib_studio_qt mock_studio_qt
+cmake --build build --config Release --target mib_studio_qt
 ```
 
 3) Find deployed apps next to the built executables (e.g., `build\bin\Release\mib_studio_qt.exe`). All required Qt DLLs and plugins will be copied alongside by windeployqt.

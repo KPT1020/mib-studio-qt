@@ -5,7 +5,7 @@
 - Impact: Crash during `updateImageGrid`/`loadThumbnailsBatch` on first load, especially with many frames.
 
 ### Reproduction
-1. Launch `mock_studio_qt.exe`.
+1. Launch `mib_studio_qt.exe` (with or without mock camera mode).
 2. Open a large HDF5 file in Review.
 3. Observe logs show “Mem before batch …” and application crashes shortly after.
 

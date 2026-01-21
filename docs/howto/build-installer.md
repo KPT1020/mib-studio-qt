@@ -19,7 +19,7 @@ This guide explains how to build a Windows installer for MIB Studio Qt using Inn
 First, build the application in Release mode:
 
 ```powershell
-cmake --build build --config Release --target mib_studio_qt mock_studio_qt
+cmake --build build --config Release --target mib_studio_qt
 ```
 
 This will:
@@ -32,9 +32,8 @@ This will:
 Before building the installer, verify that the Release build is complete:
 
 ```powershell
-# Check that executables exist
+# Check that executable exists
 Test-Path build\Release\mib_studio_qt.exe
-Test-Path build\Release\mock_studio_qt.exe
 
 # Check that Qt plugins are deployed
 Test-Path build\Release\platforms\qwindows.dll
@@ -73,11 +72,11 @@ If you prefer to build the installer manually using InnoSetup IDE:
 
 The installer includes:
 
-- **Application Files**: Both `mib_studio_qt.exe` and `mock_studio_qt.exe`
+- **Application Files**: `mib_studio_qt.exe`
 - **Qt Runtime**: All Qt DLLs, plugins, and dependencies deployed by windeployqt
 - **Third-party Libraries**: OpenCV, HDF5, spdlog, and other dependencies
 - **eGrabber Installer**: Bundled eGrabber SDK installer (optional installation)
-- **Start Menu Shortcuts**: Shortcuts for both applications
+- **Start Menu Shortcuts**: Shortcut for the application
 - **Desktop Shortcut**: Optional desktop icon
 - **Uninstaller**: Complete uninstallation support
 
@@ -105,8 +104,8 @@ During installation, users can choose to install the bundled eGrabber SDK:
 1. **Test Installation**:
    - Run the installer on a clean system (or VM)
    - Verify all files are installed correctly
-   - Test both application executables
-   - Verify Start Menu shortcuts work
+   - Test the application executable
+   - Verify Start Menu shortcut works
 
 2. **Test Uninstallation**:
    - Uninstall via Control Panel or Start Menu

@@ -6,7 +6,6 @@
 #define AppPublisher "MIB Studio"
 #define AppURL "https://github.com/your-org/mib-studio-qt"
 #define AppExeName "mib_studio_qt.exe"
-#define MockExeName "mock_studio_qt.exe"
 #define BuildDir "build\Release"
 #define SourceDir "..\..\"
 #define EgrabberInstaller "egrabber-win-x86_64-25.10.0.57.exe"
@@ -50,7 +49,6 @@ Name: "installegrabber"; Description: "Install eGrabber SDK (required for camera
 [Files]
 ; Main executables
 Source: "{#SourceDir}{#BuildDir}\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourceDir}{#BuildDir}\{#MockExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Qt DLLs (deployed by windeployqt)
 ; Expected: Qt6Core.dll, Qt6Gui.dll, Qt6Widgets.dll, Qt6Charts.dll, Qt6OpenGL.dll, Qt6OpenGLWidgets.dll
@@ -90,7 +88,6 @@ Name: "{app}\data\logs"; Flags: uninsneveruninstall
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{#SourceDir}resources\favicon\favicon.ico"
-Name: "{group}\{#AppName} (Mock Mode)"; Filename: "{app}\{#MockExeName}"; IconFilename: "{#SourceDir}resources\favicon\favicon.ico"
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{#SourceDir}resources\favicon\favicon.ico"; Tasks: desktopicon
 
