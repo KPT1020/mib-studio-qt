@@ -169,7 +169,7 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/AppConfigWatcher.h
 )
 
-add_executable(mib_studio_qt
+add_executable(mib_studio_qt WIN32
     src/frontend/main.cpp
     ${FRONTEND_COMMON_SOURCES}
 )
@@ -196,7 +196,7 @@ elseif(DEFINED OpenCV_LIBS)
     target_link_libraries(mib_studio_qt PRIVATE ${OpenCV_LIBS})
 endif()
 
-add_executable(mock_studio_qt
+add_executable(mock_studio_qt WIN32
     src/frontend/mock_main.cpp
     ${FRONTEND_COMMON_SOURCES}
 )

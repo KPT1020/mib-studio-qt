@@ -39,7 +39,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 #if FileExists(VCRedistPath)
 Name: "installvcredist"; Description: "Install Visual C++ Redistributable (required for application to run)"; GroupDescription: "Additional components"
 #endif
@@ -69,9 +69,8 @@ Source: "{#SourceDir}{#BuildDir}\networkinformation\*"; DestDir: "{app}\networki
 Source: "{#SourceDir}{#BuildDir}\styles\*"; DestDir: "{app}\styles"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourceDir}{#BuildDir}\tls\*"; DestDir: "{app}\tls"; Flags: ignoreversion recursesubdirs createallsubdirs
 
-; Data directory (logs, etc.)
-; Note: This copies existing data files if present in build directory
-Source: "{#SourceDir}{#BuildDir}\data\*"; DestDir: "{app}\data"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Isoelastic curve data files
+Source: "{#SourceDir}resources\isoelastic_curve\*"; DestDir: "{app}\resources\isoelastic_curve"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; Visual C++ Redistributable installer (bundled but only run if user selects the task and runtime is not already installed)
 #if FileExists(VCRedistPath)
@@ -90,10 +89,10 @@ Name: "{app}\data"; Flags: uninsneveruninstall
 Name: "{app}\data\logs"; Flags: uninsneveruninstall
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
-Name: "{group}\{#AppName} (Mock Mode)"; Filename: "{app}\{#MockExeName}"
+Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{#SourceDir}resources\favicon\favicon.ico"
+Name: "{group}\{#AppName} (Mock Mode)"; Filename: "{app}\{#MockExeName}"; IconFilename: "{#SourceDir}resources\favicon\favicon.ico"
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{#SourceDir}resources\favicon\favicon.ico"; Tasks: desktopicon
 
 [Run]
 ; Run VC++ Redistributable installer if selected and runtime not already installed
