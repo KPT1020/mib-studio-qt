@@ -61,6 +61,9 @@ namespace backend
         // If capture is running, it will be stopped first. Capture remains stopped.
         bool resetSelectedHardwareCamera(std::string *errorOut = nullptr);
 
+        // Check if a camera is configured (either hardware or mock)
+        bool isCameraConfigured() const;
+
     private:
         std::unique_ptr<services::SqliteService> sqliteService_;
         std::unique_ptr<services::Hdf5Service> hdf5Service_;
@@ -75,6 +78,7 @@ namespace backend
         int selectedIfIndex_{-1};
         int selectedDevIndex_{-1};
         std::string selectedLabel_;
+        bool mockCameraConfigured_{false};
     };
 
 } // namespace backend

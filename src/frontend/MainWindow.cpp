@@ -4,7 +4,6 @@
 #include <QLabel>
 #include <QStatusBar>
 #include <QTimer>
-#include <QToolBar>
 #include <QTabWidget>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -108,11 +107,9 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
                                  tr("About MIB Studio Qt Scaffold"),
                                  tr("MIB Studio Qt Scaffold\n\nProvides camera capture, processing, and HDF5 logging.")); });
 
-    auto *toolbar = addToolBar("Capture");
+    // Camera buttons will be added to main tab bar corner widget, not toolbar
     auto *startCaptureAct = new QAction("Start Camera", this);
     auto *stopCaptureAct = new QAction("Stop Camera", this);
-    toolbar->addAction(startCaptureAct);
-    toolbar->addAction(stopCaptureAct);
     
     // Experiment buttons and indicator will be added to Experiment tab, not toolbar
     startExperimentAct_ = new QAction("Start Experiment", this);
@@ -185,6 +182,24 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     tabs_->addTab(overviewTab_, tr("Overview"));
     tabs_->addTab(experimentTabs_, tr("Experiment"));
     tabs_->addTab(hdfReviewTab, tr("Review"));
+    
+    // Create corner widget for camera controls (on same row as main tabs)
+    auto *cameraControlsWidget = new QWidget(this);
+    auto *cameraControlsLayout = new QHBoxLayout(cameraControlsWidget);
+    cameraControlsLayout->setContentsMargins(5, 0, 5, 0);
+    cameraControlsLayout->setSpacing(5);
+    
+    // Create push buttons and connect them to actions
+    startCameraBtn_ = new QPushButton(startCaptureAct->text(), cameraControlsWidget);
+    stopCameraBtn_ = new QPushButton(stopCaptureAct->text(), cameraControlsWidget);
+    connect(startCameraBtn_, &QPushButton::clicked, startCaptureAct, &QAction::trigger);
+    connect(stopCameraBtn_, &QPushButton::clicked, stopCaptureAct, &QAction::trigger);
+    cameraControlsLayout->addWidget(startCameraBtn_);
+    cameraControlsLayout->addWidget(stopCameraBtn_);
+    
+    // Add controls widget to the corner of the main tab bar (same row as tabs)
+    tabs_->setCornerWidget(cameraControlsWidget, Qt::TopRightCorner);
+    
     setCentralWidget(tabs_);
 
     connect(connectTab, &frontend::ConnectTab::connected, this, [this]()
@@ -201,6 +216,9 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
 
     // Initialize button states (start enabled, stop disabled)
     updateExperimentButtonStates();
+    
+    // Initialize tab states (all tabs enabled initially since no experiment is active)
+    updateTabStates();
 }
 
 void MainWindow::updateExperimentButtonStates()
@@ -239,6 +257,19 @@ void MainWindow::updateExperimentButtonStates()
             experimentIndicator_->setToolTip(tr("No experiment running"));
         }
     }
+
+    // Update tab states
+    updateTabStates();
+}
+
+void MainWindow::updateTabStates()
+{
+    if (!tabs_)
+        return;
+
+    // Disable Overview tab (index 1) and Review tab (index 3) during experiment
+    tabs_->setTabEnabled(1, !experimentActive_); // Overview
+    tabs_->setTabEnabled(3, !experimentActive_); // Review
 }
 
 void MainWindow::onStartCapture()
@@ -248,6 +279,15 @@ void MainWindow::onStartCapture()
     {
         QMessageBox::information(this, tr("Start Camera"),
                                  tr("Camera is already running."));
+        return;
+    }
+
+    // Guard: Cannot start camera unless a camera has been connected (hardware or mock)
+    if (!backend_.isCameraConfigured())
+    {
+        QMessageBox::warning(this, tr("Start Camera"),
+                             tr("No camera is configured. Please connect to a camera or configure a mock camera first."));
+        statusLabel_->setText("Camera not configured");
         return;
     }
 
@@ -275,19 +315,20 @@ void MainWindow::onStopCapture()
         return;
     }
 
+    // Guard: During experiment cannot stop camera before stopping experiment
+    if (experimentActive_)
+    {
+        QMessageBox::warning(this, tr("Stop Camera"),
+                             tr("Cannot stop camera while experiment is active. Please stop the experiment first."));
+        statusLabel_->setText("Cannot stop camera during experiment");
+        return;
+    }
+
     // Stop capture only (don't end experiment)
     cap.stop();
     statsTimer_->stop();
     backend_.processing().resetRealtimeMetrics();
-
-    if (experimentActive_)
-    {
-        statusLabel_->setText("Camera stopped (experiment still active)");
-    }
-    else
-    {
-        statusLabel_->setText("Camera stopped");
-    }
+    statusLabel_->setText("Camera stopped");
 }
 
 void MainWindow::onStartExperiment()
@@ -296,6 +337,15 @@ void MainWindow::onStartExperiment()
     {
         QMessageBox::information(this, tr("Experiment"),
                                  tr("Experiment is already running"));
+        return;
+    }
+
+    // Guard: Experiment cannot start without first starting camera
+    if (!backend_.capture().isRunning())
+    {
+        QMessageBox::warning(this, tr("Start Experiment"),
+                             tr("Camera must be running before starting an experiment. Please start the camera first."));
+        statusLabel_->setText("Camera not running");
         return;
     }
 
@@ -350,7 +400,7 @@ void MainWindow::onStartExperiment()
 
     experimentActive_ = true;
     statusLabel_->setText("Experiment started");
-    updateExperimentButtonStates();
+    updateExperimentButtonStates(); // This will also call updateTabStates() to disable Overview and Review tabs
 }
 
 void MainWindow::onStopExperiment()
@@ -431,7 +481,7 @@ void MainWindow::onStopExperiment()
     }
 
     experimentActive_ = false;
-    updateExperimentButtonStates();
+    updateExperimentButtonStates(); // This will also call updateTabStates() to enable Overview and Review tabs
 }
 
 void MainWindow::onUpdateStats()
@@ -580,6 +630,28 @@ void MainWindow::stopExperimentServices()
 
 void MainWindow::onTabChanged(int index)
 {
+    // Guard: Once experiment started, overview is disabled until end of experiment
+    if (index == 1 && experimentActive_) {
+        QMessageBox::warning(this, tr("Overview Tab"),
+                             tr("Overview tab is disabled while an experiment is active. Please stop the experiment first."));
+        // Switch back to previous tab (or Experiment tab)
+        if (tabs_) {
+            tabs_->setCurrentIndex(2); // Switch to Experiment tab
+        }
+        return;
+    }
+
+    // Guard: Cannot review when there is an experiment going on
+    if (index == 3 && experimentActive_) {
+        QMessageBox::warning(this, tr("Review Tab"),
+                             tr("Review tab is disabled while an experiment is active. Please stop the experiment first."));
+        // Switch back to previous tab (or Experiment tab)
+        if (tabs_) {
+            tabs_->setCurrentIndex(2); // Switch to Experiment tab
+        }
+        return;
+    }
+
     // Handle service lifecycle for Experiment tab (index 2)
     const int EXPERIMENT_TAB_INDEX = 2;
     
@@ -591,8 +663,15 @@ void MainWindow::onTabChanged(int index)
         stopExperimentServices();
     }
 
+    // Guard: Camera script application - skip during experiment
     // Only handle script application for switches between Overview (index 1) and Experiment (index 2)
     if (index != 1 && index != 2) {
+        return;
+    }
+
+    // Skip script application if experiment is active
+    if (experimentActive_) {
+        SPDLOG_WARN("MainWindow::onTabChanged: Skipping script application during active experiment");
         return;
     }
 
@@ -666,6 +745,21 @@ void MainWindow::onTabChanged(int index)
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
+    // Guard: Warn if closing during active experiment
+    if (experimentActive_) {
+        QMessageBox::StandardButton reply = QMessageBox::question(
+            this,
+            tr("Close Application"),
+            tr("An experiment is currently active. Closing the application may result in data loss.\n\nDo you want to close anyway?"),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No
+        );
+        if (reply != QMessageBox::Yes) {
+            event->ignore();
+            return;
+        }
+    }
+
     // Ensure experiment services are stopped before closing
     if (experimentServicesActive_) {
         stopExperimentServices();

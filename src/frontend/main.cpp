@@ -51,6 +51,21 @@ namespace {
 
 int main(int argc, char* argv[]) {
     try {
+#ifdef _WIN32
+#ifdef _DEBUG
+        // Allocate console window for Debug builds
+        if (AllocConsole()) {
+            // Redirect stdout and stderr to the console
+            FILE* pCout;
+            FILE* pCerr;
+            freopen_s(&pCout, "CONOUT$", "w", stdout);
+            freopen_s(&pCerr, "CONOUT$", "w", stderr);
+            std::cout.clear();
+            std::cerr.clear();
+            std::clog.clear();
+        }
+#endif
+#endif
         // Initialize QApplication first
         QApplication app(argc, argv);
         

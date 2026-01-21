@@ -155,12 +155,14 @@ namespace backend
 
             captureService_->setCameraFactory([options]() mutable
                                               { return std::make_unique<camera::mock::MockCamera>(options); });
+            mockCameraConfigured_ = true;
         }
         else
         {
             SPDLOG_INFO("AppBackend: configuring hardware EGrabber camera");
             captureService_->setCameraFactory([]()
                                               { return std::make_unique<camera::common::EGrabberCamera>(); });
+            mockCameraConfigured_ = false;
         }
         playbackService_->setFrameStore(frameStore_);
 
@@ -188,6 +190,7 @@ namespace backend
         selectedIfIndex_ = -1;
         selectedDevIndex_ = -1;
         selectedLabel_.clear();
+        mockCameraConfigured_ = true;
     }
 
     void AppBackend::setHardwareCameraSelection(int interfaceIndex, int deviceIndex, const std::string &label)
@@ -197,6 +200,7 @@ namespace backend
         selectedIfIndex_ = interfaceIndex;
         selectedDevIndex_ = deviceIndex;
         selectedLabel_ = label;
+        mockCameraConfigured_ = false;
 
         captureService_->setCameraFactory([interfaceIndex, deviceIndex]()
                                           { return std::make_unique<camera::common::EGrabberCamera>(interfaceIndex, deviceIndex); });
@@ -238,6 +242,12 @@ namespace backend
         }
         SPDLOG_INFO("Resetting camera {}", selectedLabel_);
         return cameraControlService_->deviceReset(selectedIfIndex_, selectedDevIndex_, errorOut);
+    }
+
+    bool AppBackend::isCameraConfigured() const
+    {
+        // Camera is configured if hardware camera is selected OR mock camera is configured
+        return (selectedIfIndex_ >= 0 && selectedDevIndex_ >= 0) || mockCameraConfigured_;
     }
 
 } // namespace backend

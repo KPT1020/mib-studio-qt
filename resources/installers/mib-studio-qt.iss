@@ -50,6 +50,9 @@ Name: "installegrabber"; Description: "Install eGrabber SDK (required for camera
 ; Main executables
 Source: "{#SourceDir}{#BuildDir}\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
+; Application icon (used for shortcuts)
+Source: "{#SourceDir}resources\favicon\favicon.ico"; DestDir: "{app}"; Flags: ignoreversion
+
 ; Qt DLLs (deployed by windeployqt)
 ; Expected: Qt6Core.dll, Qt6Gui.dll, Qt6Widgets.dll, Qt6Charts.dll, Qt6OpenGL.dll, Qt6OpenGLWidgets.dll
 Source: "{#SourceDir}{#BuildDir}\Qt6*.dll"; DestDir: "{app}"; Flags: ignoreversion
@@ -87,9 +90,9 @@ Name: "{app}\data"; Flags: uninsneveruninstall
 Name: "{app}\data\logs"; Flags: uninsneveruninstall
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{#SourceDir}resources\favicon\favicon.ico"
+Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\favicon.ico"
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{#SourceDir}resources\favicon\favicon.ico"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\favicon.ico"; Tasks: desktopicon
 
 [Run]
 ; Run VC++ Redistributable installer if selected and runtime not already installed

@@ -16,6 +16,7 @@
 
 #include "backend/AppBackend.h"
 #include "backend/services/CameraControlService.h"
+#include "backend/services/CaptureService.h"
 #include "frontend/MockConfigDialog.h"
 #include "camera/mock/MockCamera.h"
 
@@ -141,6 +142,13 @@ void ConnectTab::populateDevices() {
 }
 
 void ConnectTab::onConnect() {
+    // Guard: Cannot change camera connection while camera is running
+    if (backend_.capture().isRunning()) {
+        QMessageBox::warning(this, tr("Connect Device"),
+                             tr("Cannot change camera connection while camera is running. Please stop the camera first."));
+        return;
+    }
+
     // Get the current tab and its list widget
     QListWidget* currentList = nullptr;
     QString deviceType;
@@ -180,6 +188,13 @@ void ConnectTab::onConnect() {
 }
 
 void ConnectTab::onConfigureMock() {
+    // Guard: Cannot change camera connection while camera is running
+    if (backend_.capture().isRunning()) {
+        QMessageBox::warning(this, tr("Configure Mock Camera"),
+                             tr("Cannot change camera connection while camera is running. Please stop the camera first."));
+        return;
+    }
+
     frontend::MockConfigDialog dlg(this);
     if (dlg.exec() != QDialog::Accepted) {
         return;

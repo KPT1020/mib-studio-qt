@@ -33,6 +33,7 @@ private slots:
 
 private:
     void updateExperimentButtonStates();
+    void updateTabStates();
     void startExperimentServices();
     void stopExperimentServices();
     backend::AppBackend& backend_;
@@ -52,4 +53,6 @@ private:
     QPushButton* startExperimentBtn_ = nullptr;
     QPushButton* stopExperimentBtn_ = nullptr;
     QLabel* experimentIndicator_ = nullptr;
+    QPushButton* startCameraBtn_ = nullptr;
+    QPushButton* stopCameraBtn_ = nullptr;
 };

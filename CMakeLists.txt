@@ -172,6 +172,7 @@ set(FRONTEND_COMMON_SOURCES
 add_executable(mib_studio_qt WIN32
     src/frontend/main.cpp
     ${FRONTEND_COMMON_SOURCES}
+    resources/app_icon.rc
 )
 
 target_include_directories(mib_studio_qt PRIVATE
