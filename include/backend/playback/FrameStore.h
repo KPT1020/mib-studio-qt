@@ -50,6 +50,11 @@ namespace backend::playback
         // Retrieve a copy by absolute write index; returns false if out-of-range
         bool getByWriteIndex(uint64_t writeIndex, Frame &out) const;
 
+        // Retrieve ROI region from frame by absolute write index without full frame copy
+        // Returns false if out-of-range or invalid ROI
+        // The ROI is extracted directly from the frame data, avoiding full frame copy
+        bool getByWriteIndexROI(uint64_t writeIndex, int roiX, int roiY, int roiW, int roiH, Frame &out) const;
+
         // Absolute index helpers (monotonic sequence since start)
         // Earliest absolute index currently retained in the ring
         uint64_t earliestAvailableIndex() const;

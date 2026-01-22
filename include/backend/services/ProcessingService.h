@@ -188,7 +188,7 @@ private:
     std::shared_ptr<backend::playback::FrameStore> rtStore_;
     mutable std::mutex rtMutex_;
     Roi rtRoi_{};
-    cv::Mat rtBgGray_; // protected by rtMutex_
+    std::shared_ptr<cv::Mat> rtBgGray_; // shared_ptr to avoid cloning on access
     std::atomic<uint64_t> rtLastProcessed_{0};
 
     std::mutex snapshotMutex_;

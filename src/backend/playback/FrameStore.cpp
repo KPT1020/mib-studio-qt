@@ -61,6 +61,45 @@ bool FrameStore::getByWriteIndex(uint64_t writeIndex, Frame& out) const {
     return !out.data.empty();
 }
 
+bool FrameStore::getByWriteIndexROI(uint64_t writeIndex, int roiX, int roiY, int roiW, int roiH, Frame& out) const {
+    const uint64_t w = totalWritten_.load();
+    if (writeIndex >= w || capacity_ == 0) return false;
+    const size_t idx = static_cast<size_t>(writeIndex % capacity_);
+    
+    std::scoped_lock lk(mutex_);
+    const Frame& src = ring_[idx];
+    if (src.data.empty() || src.width == 0 || src.height == 0) return false;
+    
+    // Clamp ROI to frame bounds
+    const int frameW = static_cast<int>(src.width);
+    const int frameH = static_cast<int>(src.height);
+    const int clampedX = std::max(0, std::min(roiX, frameW - 1));
+    const int clampedY = std::max(0, std::min(roiY, frameH - 1));
+    const int clampedW = std::max(1, std::min(roiW, frameW - clampedX));
+    const int clampedH = std::max(1, std::min(roiH, frameH - clampedY));
+    
+    // Copy frame metadata
+    out.width = static_cast<uint64_t>(clampedW);
+    out.height = static_cast<uint64_t>(clampedH);
+    out.pixelFormat = src.pixelFormat;
+    out.timestamp = src.timestamp;
+    out.linePitch = 0; // ROI will be contiguous
+    
+    // Extract ROI region
+    const size_t srcPitch = (src.linePitch == 0 ? static_cast<size_t>(src.width) : src.linePitch);
+    const size_t roiSize = static_cast<size_t>(clampedW * clampedH);
+    out.data.resize(roiSize);
+    
+    const uint8_t* srcPtr = src.data.data() + (clampedY * srcPitch) + clampedX;
+    uint8_t* dstPtr = out.data.data();
+    
+    for (int y = 0; y < clampedH; ++y) {
+        std::memcpy(dstPtr + y * clampedW, srcPtr + y * srcPitch, static_cast<size_t>(clampedW));
+    }
+    
+    return true;
+}
+
 uint64_t FrameStore::earliestAvailableIndex() const {
     const uint64_t w = totalWritten_.load();
     if (capacity_ == 0 || w == 0) return 0;

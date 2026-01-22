@@ -113,20 +113,20 @@ ProcessingService::Roi ProcessingService::getRealtimeRoi() const {
 void ProcessingService::setRealtimeBackgroundGray(const cv::Mat& bg) {
     std::scoped_lock lk(rtMutex_);
     if (!bg.empty() && bg.type() == CV_8UC1) {
-        rtBgGray_ = bg.clone();
+        rtBgGray_ = std::make_shared<cv::Mat>(bg.clone());
     } else if (!bg.empty()) {
         cv::Mat tmp;
         bg.convertTo(tmp, CV_8UC1);
-        rtBgGray_ = tmp.clone();
+        rtBgGray_ = std::make_shared<cv::Mat>(std::move(tmp));
     } else {
-        rtBgGray_.release();
+        rtBgGray_.reset();
     }
 }
 
 cv::Mat ProcessingService::getRealtimeBackgroundGray() const {
     std::scoped_lock lk(rtMutex_);
-    if (!rtBgGray_.empty()) {
-        return rtBgGray_.clone();
+    if (rtBgGray_ && !rtBgGray_->empty()) {
+        return rtBgGray_->clone();
     }
     return cv::Mat();
 }
@@ -219,6 +219,31 @@ static inline cv::Mat makeGrayCopy(uint64_t width, uint64_t height, size_t lineP
     const size_t step = (linePitch == 0 ? static_cast<size_t>(width) : linePitch);
     cv::Mat view(h, w, CV_8UC1, const_cast<uint8_t*>(data), step);
     return view.clone();
+}
+
+// Extract ROI directly from frame data without full frame copy
+static inline cv::Mat makeGrayROI(const backend::playback::Frame& frame, int roiX, int roiY, int roiW, int roiH) {
+    if (frame.data.empty() || frame.width == 0 || frame.height == 0) {
+        return cv::Mat();
+    }
+    
+    const int frameW = static_cast<int>(frame.width);
+    const int frameH = static_cast<int>(frame.height);
+    
+    // Clamp ROI to frame bounds
+    const int clampedX = std::max(0, std::min(roiX, frameW - 1));
+    const int clampedY = std::max(0, std::min(roiY, frameH - 1));
+    const int clampedW = std::max(1, std::min(roiW, frameW - clampedX));
+    const int clampedH = std::max(1, std::min(roiH, frameH - clampedY));
+    
+    const size_t srcPitch = (frame.linePitch == 0 ? static_cast<size_t>(frame.width) : frame.linePitch);
+    const uint8_t* srcPtr = frame.data.data() + (clampedY * srcPitch) + clampedX;
+    
+    // Create ROI Mat view
+    cv::Mat roiView(clampedH, clampedW, CV_8UC1, const_cast<uint8_t*>(srcPtr), srcPitch);
+    
+    // Clone to ensure contiguous memory and ownership
+    return roiView.clone();
 }
 
 bool ProcessingService::isFrameEmpty(const backend::playback::Frame& frame,
@@ -588,104 +613,120 @@ void ProcessingService::realtimeLoop() {
             const uint64_t idx = nextIdx;
             const auto frameStart = clock::now();
             if (!rtEnabled_.load()) { rtLastProcessed_.store(idx); continue; }
-            backend::playback::Frame f{};
-            if (!rtStore_->getByWriteIndex(idx, f)) {
-                continue;
-            }
-            if (f.width == 0 || f.height == 0 || f.data.empty()) {
-                continue;
-            }
-            cv::Mat gray = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
-
-            // Grab ROI and background under lock
+            
+            // Get ROI and config first (outside frame access to minimize lock time)
             Roi roi{};
-            cv::Mat bg;
+            std::shared_ptr<cv::Mat> bgShared;
+            ProcessingConfig config;
             {
                 std::scoped_lock lk(rtMutex_);
                 roi = rtRoi_;
-                if (!rtBgGray_.empty()) bg = rtBgGray_;
+                bgShared = rtBgGray_; // shared_ptr copy is cheap, no cloning
             }
-
-            // Clamp ROI
-            if (roi.w <= 0 || roi.h <= 0) {
-                roi.x = 0; roi.y = 0; roi.w = gray.cols; roi.h = gray.rows;
-            }
-            roi.x = std::max(0, std::min(roi.x, gray.cols - 1));
-            roi.y = std::max(0, std::min(roi.y, gray.rows - 1));
-            roi.w = std::max(1, std::min(roi.w, gray.cols - roi.x));
-            roi.h = std::max(1, std::min(roi.h, gray.rows - roi.y));
-
-            cv::Rect cvRoi(roi.x, roi.y, roi.w, roi.h);
-
-            // Get config early for empty frame check
-            ProcessingConfig config;
             {
                 std::scoped_lock cfgLk(configMutex_);
                 config = processingConfig_;
             }
-
-            // Build full-size mask
-            cv::Mat mask(gray.rows, gray.cols, CV_8UC1, cv::Scalar(0));
-            cv::Mat roiCurr = gray(cvRoi);
-            cv::Mat roiDst = mask(cvRoi);
-            cv::Mat blurredCurr, blurredBg, diff, thresh;
-            const auto algoStart = clock::now();
-            auto toOdd = [](int v) -> int { if (v < 1) v = 1; if ((v % 2) == 0) v += 1; return v; };
-            const int blurK = toOdd(config.gaussian_blur_size);
-            const int morphK = toOdd(config.morph_kernel_size);
-            const int morphIter = std::max(1, config.morph_iterations);
-            const int threshVal = std::max(0, config.bg_subtract_threshold);
-
-            cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(blurK, blurK), 0);
-            if (!bg.empty() && bg.size() == gray.size() && bg.type() == CV_8UC1) {
-                cv::GaussianBlur(bg(cvRoi), blurredBg, cv::Size(blurK, blurK), 0);
-                cv::subtract(blurredCurr, blurredBg, diff);
-            } else {
-                diff = blurredCurr;
-            }
-            cv::threshold(diff, thresh, threshVal, 255, cv::THRESH_BINARY);
             
-            // Check for empty frame: count non-zero pixels after binary threshold
-            int pixelCount = cv::countNonZero(thresh);
-            if (pixelCount < config.empty_frame_pixel_threshold) {
-                SPDLOG_DEBUG("Empty frame detected (idx={}, pixel_count={}, threshold={}), skipping further processing", 
-                            idx, pixelCount, config.empty_frame_pixel_threshold);
-                rtLastProcessed_.store(idx);
-                continue; // Skip morphology, contours, validation, and frame accumulation
-            }
-            
-            cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
-            cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
-            cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
+            // Get frame - use ROI access if ROI is specified, otherwise full frame
+            backend::playback::Frame f{};
+            bool useROI = (roi.w > 0 && roi.h > 0);
+            if (useROI) {
+                // Clamp ROI to reasonable bounds first
+                if (!rtStore_->getByWriteIndex(idx, f)) {
+                    continue;
+                }
+                if (f.width == 0 || f.height == 0 || f.data.empty()) {
+                    continue;
+                }
+                const int frameW = static_cast<int>(f.width);
+                const int frameH = static_cast<int>(f.height);
+                roi.x = std::max(0, std::min(roi.x, frameW - 1));
+                roi.y = std::max(0, std::min(roi.y, frameH - 1));
+                roi.w = std::max(1, std::min(roi.w, frameW - roi.x));
+                roi.h = std::max(1, std::min(roi.h, frameH - roi.y));
+                
+                // Extract ROI directly from frame
+                cv::Mat grayROI = makeGrayROI(f, roi.x, roi.y, roi.w, roi.h);
+                if (grayROI.empty()) {
+                    continue;
+                }
+                
+                // Create ROI-sized mask (much smaller than full frame)
+                cv::Mat mask(roi.h, roi.w, CV_8UC1, cv::Scalar(0));
+                cv::Mat blurredCurr, blurredBg, diff, thresh;
+                const auto algoStart = clock::now();
+                auto toOdd = [](int v) -> int { if (v < 1) v = 1; if ((v % 2) == 0) v += 1; return v; };
+                const int blurK = toOdd(config.gaussian_blur_size);
+                const int morphK = toOdd(config.morph_kernel_size);
+                const int morphIter = std::max(1, config.morph_iterations);
+                const int threshVal = std::max(0, config.bg_subtract_threshold);
 
-            // Contours
-            std::vector<std::vector<cv::Point>> contours;
-            std::vector<cv::Vec4i> hierarchy;
-            cv::findContours(mask, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+                cv::GaussianBlur(grayROI, blurredCurr, cv::Size(blurK, blurK), 0);
+                if (bgShared && !bgShared->empty() && bgShared->size() == cv::Size(static_cast<int>(f.width), static_cast<int>(f.height)) && bgShared->type() == CV_8UC1) {
+                    cv::Rect bgRoi(roi.x, roi.y, roi.w, roi.h);
+                    cv::Mat bgROI = (*bgShared)(bgRoi);
+                    cv::GaussianBlur(bgROI, blurredBg, cv::Size(blurK, blurK), 0);
+                    cv::subtract(blurredCurr, blurredBg, diff);
+                } else {
+                    diff = blurredCurr;
+                }
+                cv::threshold(diff, thresh, threshVal, 255, cv::THRESH_BINARY);
+                
+                // Check for empty frame: count non-zero pixels after binary threshold
+                int pixelCount = cv::countNonZero(thresh);
+                if (pixelCount < config.empty_frame_pixel_threshold) {
+                    SPDLOG_DEBUG("Empty frame detected (idx={}, pixel_count={}, threshold={}), skipping further processing", 
+                                idx, pixelCount, config.empty_frame_pixel_threshold);
+                    rtLastProcessed_.store(idx);
+                    continue; // Skip morphology, contours, validation, and frame accumulation
+                }
+                
+                cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+                cv::morphologyEx(thresh, mask, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
+                cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
-            // Always run validation for monitoring (even without experiment)
-            
-            FilterResult validation = filterProcessedImage(mask, cvRoi, config, gray);
-            const auto algoEnd = clock::now();
-            const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
-            algoMsSinceSummary += algoMs;
-            if (validation.isValid) {
-                ++validSinceSummary;
-            } else {
-                ++invalidSinceSummary;
-            }
-            
-            // Always accumulate frames for monitoring (with size limit)
-            {
-                ProcessedFrame monitoringFrame;
-                monitoringFrame.index = idx;
-                monitoringFrame.timestampNs = f.timestamp;
-                monitoringFrame.validation = validation;
-                // Store ROI-only images to reduce memory usage
-                cv::Mat roiOriginal = gray(cvRoi).clone();
-                cv::Mat roiMask = mask(cvRoi).clone();
-                monitoringFrame.originalImage = std::move(roiOriginal);
-                monitoringFrame.processedImage = std::move(roiMask);
+                // Contours - now working on ROI-sized mask
+                std::vector<std::vector<cv::Point>> contours;
+                std::vector<cv::Vec4i> hierarchy;
+                cv::findContours(mask, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+                // Adjust contour coordinates to be relative to full frame (for validation)
+                // Validation expects contours in full frame coordinates
+                for (auto& contour : contours) {
+                    for (auto& pt : contour) {
+                        pt.x += roi.x;
+                        pt.y += roi.y;
+                    }
+                }
+
+                // Always run validation for monitoring (even without experiment)
+                // cvRoi is now relative to full frame, mask is ROI-sized
+                cv::Rect cvRoi(roi.x, roi.y, roi.w, roi.h);
+                // For validation, we need full frame gray - get it only when needed
+                cv::Mat grayFull;
+                if (experimentActive_.load()) {
+                    grayFull = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
+                }
+                FilterResult validation = filterProcessedImage(mask, cvRoi, config, grayFull.empty() ? grayROI : grayFull);
+                const auto algoEnd = clock::now();
+                const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
+                algoMsSinceSummary += algoMs;
+                if (validation.isValid) {
+                    ++validSinceSummary;
+                } else {
+                    ++invalidSinceSummary;
+                }
+                
+                // Always accumulate frames for monitoring (with size limit)
+                {
+                    ProcessedFrame monitoringFrame;
+                    monitoringFrame.index = idx;
+                    monitoringFrame.timestampNs = f.timestamp;
+                    monitoringFrame.validation = validation;
+                    // Store ROI-only images (already ROI-sized, just clone)
+                    monitoringFrame.originalImage = grayROI.clone();
+                    monitoringFrame.processedImage = mask.clone();
                 
                 std::scoped_lock monitoringLk(monitoringFramesMutex_);
                 if (validation.isValid) {
@@ -751,9 +792,17 @@ void ProcessingService::realtimeLoop() {
                     frame.index = idx;
                     frame.timestampNs = f.timestamp;
                     frame.validation = validation;
-                    // Clone images - expensive but necessary to preserve data
-                    frame.originalImage = gray.clone();
-                    frame.processedImage = mask.clone();
+                    // For experiment, we need full frames - get full frame if not already loaded
+                    if (grayFull.empty()) {
+                        grayFull = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
+                    }
+                    // Create full-size mask for experiment frames
+                    cv::Mat fullMask(grayFull.rows, grayFull.cols, CV_8UC1, cv::Scalar(0));
+                    cv::Rect fullCvRoi(roi.x, roi.y, roi.w, roi.h);
+                    mask.copyTo(fullMask(fullCvRoi));
+                    // Clone images - expensive but necessary to preserve data for experiment
+                    frame.originalImage = grayFull.clone();
+                    frame.processedImage = fullMask.clone();
                     
                     {
                         std::scoped_lock framesLk(framesMutex_);
@@ -775,16 +824,205 @@ void ProcessingService::realtimeLoop() {
                 }
             }
 
-            // Publish snapshot
-            {
-                std::scoped_lock lk(snapshotMutex_);
-                latestSnapshot_.index = idx;
-                latestSnapshot_.mask = mask; // shallow copy ok; mask will be destroyed after leaving scope, so clone
-                latestSnapshot_.mask = latestSnapshot_.mask.clone();
-                latestSnapshot_.contours = std::move(contours);
-            }
+                // Publish snapshot
+                {
+                    std::scoped_lock lk(snapshotMutex_);
+                    latestSnapshot_.index = idx;
+                    // Create full-size mask for snapshot display
+                    cv::Mat fullMaskSnapshot;
+                    if (useROI) {
+                        // Get full frame for snapshot
+                        backend::playback::Frame fFull{};
+                        if (rtStore_->getByWriteIndex(idx, fFull)) {
+                            cv::Mat grayFullSnap = makeGrayCopy(fFull.width, fFull.height, fFull.linePitch, fFull.data.data());
+                            fullMaskSnapshot = cv::Mat(grayFullSnap.rows, grayFullSnap.cols, CV_8UC1, cv::Scalar(0));
+                            cv::Rect fullCvRoiSnap(roi.x, roi.y, roi.w, roi.h);
+                            mask.copyTo(fullMaskSnapshot(fullCvRoiSnap));
+                        } else {
+                            fullMaskSnapshot = mask.clone();
+                        }
+                    } else {
+                        fullMaskSnapshot = mask.clone();
+                    }
+                    latestSnapshot_.mask = fullMaskSnapshot;
+                    latestSnapshot_.contours = std::move(contours);
+                }
 
-            rtLastProcessed_.store(idx);
+                rtLastProcessed_.store(idx);
+            } else {
+                // No ROI specified - process full frame (fallback to original behavior)
+                backend::playback::Frame f{};
+                if (!rtStore_->getByWriteIndex(idx, f)) {
+                    continue;
+                }
+                if (f.width == 0 || f.height == 0 || f.data.empty()) {
+                    continue;
+                }
+                cv::Mat gray = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
+
+                // Clamp ROI (will be full frame if not set)
+                if (roi.w <= 0 || roi.h <= 0) {
+                    roi.x = 0; roi.y = 0; roi.w = gray.cols; roi.h = gray.rows;
+                }
+                roi.x = std::max(0, std::min(roi.x, gray.cols - 1));
+                roi.y = std::max(0, std::min(roi.y, gray.rows - 1));
+                roi.w = std::max(1, std::min(roi.w, gray.cols - roi.x));
+                roi.h = std::max(1, std::min(roi.h, gray.rows - roi.y));
+
+                cv::Rect cvRoi(roi.x, roi.y, roi.w, roi.h);
+
+                // Build full-size mask
+                cv::Mat mask(gray.rows, gray.cols, CV_8UC1, cv::Scalar(0));
+                cv::Mat roiCurr = gray(cvRoi);
+                cv::Mat roiDst = mask(cvRoi);
+                cv::Mat blurredCurr, blurredBg, diff, thresh;
+                const auto algoStart = clock::now();
+                auto toOdd = [](int v) -> int { if (v < 1) v = 1; if ((v % 2) == 0) v += 1; return v; };
+                const int blurK = toOdd(config.gaussian_blur_size);
+                const int morphK = toOdd(config.morph_kernel_size);
+                const int morphIter = std::max(1, config.morph_iterations);
+                const int threshVal = std::max(0, config.bg_subtract_threshold);
+
+                cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(blurK, blurK), 0);
+                if (bgShared && !bgShared->empty() && bgShared->size() == gray.size() && bgShared->type() == CV_8UC1) {
+                    cv::GaussianBlur((*bgShared)(cvRoi), blurredBg, cv::Size(blurK, blurK), 0);
+                    cv::subtract(blurredCurr, blurredBg, diff);
+                } else {
+                    diff = blurredCurr;
+                }
+                cv::threshold(diff, thresh, threshVal, 255, cv::THRESH_BINARY);
+                
+                // Check for empty frame: count non-zero pixels after binary threshold
+                int pixelCount = cv::countNonZero(thresh);
+                if (pixelCount < config.empty_frame_pixel_threshold) {
+                    SPDLOG_DEBUG("Empty frame detected (idx={}, pixel_count={}, threshold={}), skipping further processing", 
+                                idx, pixelCount, config.empty_frame_pixel_threshold);
+                    rtLastProcessed_.store(idx);
+                    continue;
+                }
+                
+                cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+                cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
+                cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
+
+                // Contours
+                std::vector<std::vector<cv::Point>> contours;
+                std::vector<cv::Vec4i> hierarchy;
+                cv::findContours(mask, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+                FilterResult validation = filterProcessedImage(mask, cvRoi, config, gray);
+                const auto algoEnd = clock::now();
+                const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
+                algoMsSinceSummary += algoMs;
+                if (validation.isValid) {
+                    ++validSinceSummary;
+                } else {
+                    ++invalidSinceSummary;
+                }
+                
+                // Always accumulate frames for monitoring (with size limit)
+                {
+                    ProcessedFrame monitoringFrame;
+                    monitoringFrame.index = idx;
+                    monitoringFrame.timestampNs = f.timestamp;
+                    monitoringFrame.validation = validation;
+                    // Store ROI-only images to reduce memory usage
+                    cv::Mat roiOriginal = gray(cvRoi).clone();
+                    cv::Mat roiMask = mask(cvRoi).clone();
+                    monitoringFrame.originalImage = std::move(roiOriginal);
+                    monitoringFrame.processedImage = std::move(roiMask);
+                    
+                    std::scoped_lock monitoringLk(monitoringFramesMutex_);
+                    if (validation.isValid) {
+                        monitoringValidFrames_.push_back(std::move(monitoringFrame));
+                        
+                        // Notify autofocus service of ring ratio from validated frames
+                        if (validation.ringRatio > 0.0) {
+                            std::scoped_lock callbackLk(ringRatioCallbackMutex_);
+                            if (ringRatioCallback_) {
+                                ringRatioCallback_(validation.ringRatio, f.timestamp);
+                            }
+                        }
+                    } else {
+                        monitoringInvalidFrames_.push_back(std::move(monitoringFrame));
+                    }
+
+                    // Throttled DEBUG: accumulation sizes and process memory
+                    if ((idx % 500ULL) == 0ULL) {
+                        size_t vSz = 0;
+                        size_t iSz = 0;
+                        {
+                            std::scoped_lock fLk(framesMutex_);
+                            vSz = validFrames_.size();
+                            iSz = invalidFrames_.size();
+                        }
+                        SPDLOG_DEBUG("Accumulated frames (idx={}): valid={}, invalid={}, flush_interval={}, since_last_flush={}, mem_mb={:.1f}",
+                                     idx, vSz, iSz, flushInterval_.load(), framesSinceLastFlush_.load(), backend::Tools::getProcessMemoryMB());
+                    }
+                }
+
+                // Throttled DEBUG: monitoring buffer sizes and process memory
+                if ((idx % 500ULL) == 0ULL) {
+                    size_t monValidSz = 0;
+                    size_t monInvalidSz = 0;
+                    {
+                        std::scoped_lock mLk(monitoringFramesMutex_);
+                        monValidSz = monitoringValidFrames_.size();
+                        monInvalidSz = monitoringInvalidFrames_.size();
+                    }
+                    SPDLOG_DEBUG("Realtime monitoring sizes (idx={}): mon_valid={}, mon_invalid={}, mem_mb={:.1f}",
+                                 idx, monValidSz, monInvalidSz, backend::Tools::getProcessMemoryMB());
+                }
+                
+                // Also accumulate frames for experiment if active
+                if (experimentActive_.load()) {
+                    // Determine if we should save this frame
+                    bool shouldSave = false;
+                    if (validation.isValid) {
+                        shouldSave = true;
+                    } else {
+                        size_t counter = invalidFrameCounter_.fetch_add(1, std::memory_order_relaxed);
+                        size_t rate = invalidFrameSamplingRate_.load(std::memory_order_relaxed);
+                        if (rate > 0 && (counter % rate) == 0) {
+                            shouldSave = true;
+                        }
+                    }
+                    
+                    if (shouldSave) {
+                        ProcessedFrame frame;
+                        frame.index = idx;
+                        frame.timestampNs = f.timestamp;
+                        frame.validation = validation;
+                        frame.originalImage = gray.clone();
+                        frame.processedImage = mask.clone();
+                        
+                        {
+                            std::scoped_lock framesLk(framesMutex_);
+                            if (validation.isValid) {
+                                validFrames_.emplace_back(std::move(frame));
+                            } else {
+                                invalidFrames_.emplace_back(std::move(frame));
+                            }
+                            
+                            size_t totalFrames = validFrames_.size() + invalidFrames_.size();
+                            size_t interval = flushInterval_.load(std::memory_order_relaxed);
+                            if (interval > 0 && totalFrames >= interval) {
+                                framesSinceLastFlush_.store(totalFrames, std::memory_order_relaxed);
+                            }
+                        }
+                    }
+                }
+
+                // Publish snapshot
+                {
+                    std::scoped_lock lk(snapshotMutex_);
+                    latestSnapshot_.index = idx;
+                    latestSnapshot_.mask = mask.clone();
+                    latestSnapshot_.contours = std::move(contours);
+                }
+
+                rtLastProcessed_.store(idx);
+            }
 
             // Per-frame timing
             const auto frameEnd = clock::now();
@@ -827,7 +1065,7 @@ void ProcessingService::realtimeLoop() {
                 {
                     std::scoped_lock rtLk(rtMutex_);
                     roi = rtRoi_;
-                    hasBg = !rtBgGray_.empty();
+                    hasBg = (rtBgGray_ != nullptr && !rtBgGray_->empty());
                 }
                 const size_t flushInt = flushInterval_.load();
                 const size_t sinceFlush = framesSinceLastFlush_.load();
@@ -856,13 +1094,18 @@ void ProcessingService::realtimeLoop() {
                 }
                 cv::Mat gray = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
 
-                // Grab ROI and background under lock
+                // Grab ROI, background, and config first (outside frame processing to minimize lock time)
                 Roi roi{};
-                cv::Mat bg;
+                std::shared_ptr<cv::Mat> bgShared;
+                ProcessingConfig config;
                 {
                     std::scoped_lock lk(rtMutex_);
                     roi = rtRoi_;
-                    if (!rtBgGray_.empty()) bg = rtBgGray_;
+                    bgShared = rtBgGray_; // shared_ptr copy is cheap, no cloning
+                }
+                {
+                    std::scoped_lock cfgLk(configMutex_);
+                    config = processingConfig_;
                 }
 
                 // Clamp ROI
@@ -875,13 +1118,6 @@ void ProcessingService::realtimeLoop() {
                 roi.h = std::max(1, std::min(roi.h, gray.rows - roi.y));
 
                 cv::Rect cvRoi(roi.x, roi.y, roi.w, roi.h);
-
-                // Get config early for empty frame check
-                ProcessingConfig config;
-                {
-                    std::scoped_lock cfgLk(configMutex_);
-                    config = processingConfig_;
-                }
 
                 // Build full-size mask
                 cv::Mat mask(gray.rows, gray.cols, CV_8UC1, cv::Scalar(0));
@@ -896,8 +1132,8 @@ void ProcessingService::realtimeLoop() {
                 const int threshVal = std::max(0, config.bg_subtract_threshold);
 
                 cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(blurK, blurK), 0);
-                if (!bg.empty() && bg.size() == gray.size() && bg.type() == CV_8UC1) {
-                    cv::GaussianBlur(bg(cvRoi), blurredBg, cv::Size(blurK, blurK), 0);
+                if (bgShared && !bgShared->empty() && bgShared->size() == gray.size() && bgShared->type() == CV_8UC1) {
+                    cv::GaussianBlur((*bgShared)(cvRoi), blurredBg, cv::Size(blurK, blurK), 0);
                     cv::subtract(blurredCurr, blurredBg, diff);
                 } else {
                     diff = blurredCurr;
@@ -1086,7 +1322,7 @@ void ProcessingService::realtimeLoop() {
                     {
                         std::scoped_lock rtLk(rtMutex_);
                         roi = rtRoi_;
-                        hasBg = !rtBgGray_.empty();
+                        hasBg = (rtBgGray_ != nullptr && !rtBgGray_->empty());
                     }
                     const size_t flushInt = flushInterval_.load();
                     const size_t sinceFlush = framesSinceLastFlush_.load();
