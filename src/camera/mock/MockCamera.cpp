@@ -4,6 +4,9 @@
 #include <QImageReader>
 #include <QString>
 
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
+
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -223,28 +226,92 @@ namespace camera::mock
 
     bool MockCamera::loadFrameFromPath(const std::filesystem::path &path, camera::common::Frame &frame)
     {
+        // Try QImageReader first (works for most formats)
         QImageReader reader(toQString(path));
         reader.setAutoTransform(true);
 
         QImage image = reader.read();
-        if (image.isNull())
+        if (!image.isNull())
         {
+            // QImageReader succeeded
+            QImage mono = image.convertToFormat(QImage::Format_Grayscale8);
+            frame.width = static_cast<uint64_t>(mono.width());
+            frame.height = static_cast<uint64_t>(mono.height());
+            frame.linePitch = static_cast<size_t>(mono.bytesPerLine());
+            frame.pixelFormat = kPfncMono8;
+            frame.data.resize(static_cast<size_t>(mono.sizeInBytes()));
+            if (!frame.data.empty())
+            {
+                std::memcpy(frame.data.data(), mono.constBits(), frame.data.size());
+            }
+            SPDLOG_DEBUG("MockCamera: loaded {} using QImageReader", path.string());
+            return true;
+        }
+
+        // QImageReader failed - check if this is a TIFF file and try OpenCV fallback
+        std::string ext = path.extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c)
+                       { return static_cast<char>(std::tolower(c)); });
+        
+        bool isTiff = (ext == ".tif" || ext == ".tiff");
+        
+        if (isTiff)
+        {
+            // Try OpenCV as fallback for TIFF files
+            std::string pathStr = path.string();
+            cv::Mat img = cv::imread(pathStr, cv::IMREAD_GRAYSCALE);
+            
+            if (!img.empty() && img.data != nullptr)
+            {
+                // OpenCV succeeded - convert cv::Mat to Frame format
+                frame.width = static_cast<uint64_t>(img.cols);
+                frame.height = static_cast<uint64_t>(img.rows);
+                frame.pixelFormat = kPfncMono8;
+                
+                // Calculate data size and line pitch
+                // For Frame format, linePitch should match the actual data stride we're storing
+                const size_t width = static_cast<size_t>(img.cols);
+                const size_t height = static_cast<size_t>(img.rows);
+                
+                if (img.isContinuous())
+                {
+                    // Data is contiguous - linePitch equals width
+                    frame.linePitch = width;
+                    size_t dataSize = width * height;
+                    frame.data.resize(dataSize);
+                    std::memcpy(frame.data.data(), img.data, dataSize);
+                }
+                else
+                {
+                    // Data has padding - copy row by row, linePitch equals width (no padding in Frame)
+                    frame.linePitch = width;
+                    size_t dataSize = width * height;
+                    frame.data.resize(dataSize);
+                    
+                    uint8_t* dst = frame.data.data();
+                    const uint8_t* src = img.data;
+                    for (int y = 0; y < img.rows; ++y)
+                    {
+                        std::memcpy(dst + y * width, src + y * img.step[0], width);
+                    }
+                }
+                
+                SPDLOG_DEBUG("MockCamera: loaded {} using OpenCV (QImageReader fallback)", path.string());
+                return true;
+            }
+            else
+            {
+                SPDLOG_WARN("MockCamera: both QImageReader and OpenCV failed for {} (QImageReader: {})", 
+                           path.string(), reader.errorString().toStdString());
+                return false;
+            }
+        }
+        else
+        {
+            // Not a TIFF file, QImageReader failure is final
             SPDLOG_WARN("MockCamera: QImageReader failed for {} ({})", path.string(), reader.errorString().toStdString());
             return false;
         }
-
-        QImage mono = image.convertToFormat(QImage::Format_Grayscale8);
-        frame.width = static_cast<uint64_t>(mono.width());
-        frame.height = static_cast<uint64_t>(mono.height());
-        frame.linePitch = static_cast<size_t>(mono.bytesPerLine());
-        frame.pixelFormat = kPfncMono8;
-        frame.data.resize(static_cast<size_t>(mono.sizeInBytes()));
-        if (!frame.data.empty())
-        {
-            std::memcpy(frame.data.data(), mono.constBits(), frame.data.size());
-        }
-
-        return true;
     }
 
     bool MockCamera::preloadFrames()
