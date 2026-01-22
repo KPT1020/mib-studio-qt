@@ -49,6 +49,8 @@ namespace frontend
     class HdfMetricsModel;
 }
 
+namespace Ui { class HdfReviewTab; }
+
 namespace frontend
 {
 
@@ -72,6 +74,7 @@ namespace frontend
         void onViewFrameDetails(int frameIndex);
 
     private:
+        void setupCharts();
         void loadHdfFile(const QString &filePath);
         void populateFrames(const std::vector<backend::services::ProcessedFrame> &frames, bool isValid);
         void clearDisplay();
@@ -100,42 +103,11 @@ namespace frontend
         void loadIsoelasticCurves();
         QPixmap chartToPixmap(QChartView* chartView) const;
 
+        Ui::HdfReviewTab* ui;
         backend::AppBackend &backend_;
         std::unique_ptr<backend::services::Hdf5Service> hdfReader_;
 
-        // UI components
-        QPushButton *selectFileBtn_ = nullptr;
-        QPushButton *exportMetricsBtn_ = nullptr;
-        QPushButton *exportAllBtn_ = nullptr;
-        QPushButton *exportChartsBtn_ = nullptr;
-        QCheckBox *roiOverlayCheck_ = nullptr;
-        QLabel *filePathLabel_ = nullptr;
-        QLabel *statusLabel_ = nullptr;
-        QTabWidget *frameTypeTabs_ = nullptr;
-
-        // Valid frames tab
-        QWidget *validFramesWidget_ = nullptr;
-        QScrollArea *validImageScroll_ = nullptr;
-        QWidget *validImageGridWidget_ = nullptr;
-        QGridLayout *validImageGrid_ = nullptr;
-        QTableView *validMetricsTable_ = nullptr;
-        HdfMetricsModel *validMetricsModel_ = nullptr;
-        QSpacerItem *validBottomSpacer_ = nullptr;
-        QSpacerItem *validTopSpacer_ = nullptr;
-
-        // Invalid frames tab
-        QWidget *invalidFramesWidget_ = nullptr;
-        QScrollArea *invalidImageScroll_ = nullptr;
-        QWidget *invalidImageGridWidget_ = nullptr;
-        QGridLayout *invalidImageGrid_ = nullptr;
-        QTableView *invalidMetricsTable_ = nullptr;
-        HdfMetricsModel *invalidMetricsModel_ = nullptr;
-        QSpacerItem *invalidBottomSpacer_ = nullptr;
-        QSpacerItem *invalidTopSpacer_ = nullptr;
-
-        // Charts tab
-        QWidget *chartsWidget_ = nullptr;
-        QHBoxLayout *chartsLayout_ = nullptr;
+        // Charts (created in C++)
         QChartView *scatterPlotView_ = nullptr;
         QChart *scatterPlotChart_ = nullptr;
         QScatterSeries *scatterSeries_ = nullptr;
@@ -152,6 +124,16 @@ namespace frontend
 #endif
         QValueAxis *histogramXAxis_ = nullptr;
         QValueAxis *histogramYAxis_ = nullptr;
+
+        // Models
+        HdfMetricsModel *validMetricsModel_ = nullptr;
+        HdfMetricsModel *invalidMetricsModel_ = nullptr;
+
+        // Spacers for grid layout
+        QSpacerItem *validBottomSpacer_ = nullptr;
+        QSpacerItem *validTopSpacer_ = nullptr;
+        QSpacerItem *invalidBottomSpacer_ = nullptr;
+        QSpacerItem *invalidTopSpacer_ = nullptr;
 
         // Data
         std::vector<backend::services::ProcessedFrame> validFrames_;

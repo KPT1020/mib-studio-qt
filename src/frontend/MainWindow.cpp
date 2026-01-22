@@ -1,4 +1,5 @@
 #include "frontend/MainWindow.h"
+#include "ui_MainWindow.h"
 
 #include <QAction>
 #include <QCoreApplication>
@@ -50,18 +51,13 @@
 #endif
 
 MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
-    : QMainWindow(parent), backend_(backend)
+    : QMainWindow(parent), ui(new Ui::MainWindow), backend_(backend)
 {
-    setWindowTitle("MIB Studio Qt Scaffold");
+    ui->setupUi(this);
 
-    // Menu bar
-    auto *fileMenu = menuBar()->addMenu(tr("File"));
-    auto *exitAct = fileMenu->addAction(tr("Exit"));
-    connect(exitAct, &QAction::triggered, this, &QWidget::close);
-
-    auto *settingsMenu = menuBar()->addMenu(tr("Settings"));
-    auto *processingSettingsAct = settingsMenu->addAction(tr("Processing Settings..."));
-    connect(processingSettingsAct, &QAction::triggered, this, [this]()
+    // Connect menu actions
+    connect(ui->exitAct, &QAction::triggered, this, &QWidget::close);
+    connect(ui->processingSettingsAct, &QAction::triggered, this, [this]()
             {
         SPDLOG_INFO("Opening Processing Settings dialog");
         // Find PlaybackPanel from PreviewPage tab
@@ -77,9 +73,7 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         }
         ProcessingSettingsDialog dlg(backend_, playbackPanel, this);
         dlg.exec(); });
-    
-    auto *monitoringSettingsAct = settingsMenu->addAction(tr("Monitoring Settings..."));
-    connect(monitoringSettingsAct, &QAction::triggered, this, [this]()
+    connect(ui->monitoringSettingsAct, &QAction::triggered, this, [this]()
             {
         SPDLOG_INFO("Opening Monitoring Settings dialog");
         // Find ExperimentMonitoringTab
@@ -94,17 +88,12 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
             MonitoringSettingsDialog dlg(monitoringTab, this);
             dlg.exec();
         } });
-    
-    auto *conversionFactorAct = settingsMenu->addAction(tr("Pixel to Micron Conversion..."));
-    connect(conversionFactorAct, &QAction::triggered, this, [this]()
+    connect(ui->conversionFactorAct, &QAction::triggered, this, [this]()
             {
         SPDLOG_INFO("Opening Pixel to Micron Conversion dialog");
         ConversionFactorDialog dlg(backend_, this);
         dlg.exec(); });
-
-    auto *helpMenu = menuBar()->addMenu(tr("Help"));
-    auto *aboutAct = helpMenu->addAction(tr("About"));
-    connect(aboutAct, &QAction::triggered, this, [this]()
+    connect(ui->aboutAct, &QAction::triggered, this, [this]()
             {
         const QString v = QCoreApplication::applicationVersion();
         QMessageBox::about(this,
@@ -114,8 +103,7 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     });
 
     updater_ = new frontend::AutoUpdater(this, this);
-    auto* checkUpdatesAct = helpMenu->addAction(tr("Check for Updates..."));
-    connect(checkUpdatesAct, &QAction::triggered, this, [this]() {
+    connect(ui->checkUpdatesAct, &QAction::triggered, this, [this]() {
         if (updater_) updater_->checkForUpdates(true);
     });
 
@@ -137,7 +125,7 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     connect(stopExperimentAct_, &QAction::triggered, this, &MainWindow::onStopExperiment);
 
     statusLabel_ = new QLabel("Idle");
-    statusBar()->addPermanentWidget(statusLabel_);
+    ui->statusbar->addPermanentWidget(statusLabel_);
 
     statsTimer_ = new QTimer(this);
     statsTimer_->setInterval(500);
@@ -154,9 +142,8 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         } });
 
     // Tabs: Connect + Overview + Experiment (Preview + Monitoring) + Review
-    tabs_ = new QTabWidget(this);
-    auto *connectTab = new frontend::ConnectTab(backend_, tabs_);
-    overviewTab_ = new frontend::OverviewTab(backend_, tabs_);
+    auto *connectTab = new frontend::ConnectTab(backend_, ui->tabs);
+    overviewTab_ = new frontend::OverviewTab(backend_, ui->tabs);
     
     // Create Experiment tab with nested Preview and Monitoring tabs
     experimentTabs_ = new QTabWidget(this);
@@ -165,6 +152,43 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     experimentTabs_->addTab(previewPage, tr("Preview"));
     experimentTabs_->addTab(monitoringTab, tr("Monitoring"));
     
+    setupCornerWidgets();
+    
+    auto *hdfReviewTab = new frontend::HdfReviewTab(backend_, ui->tabs);
+    ui->tabs->addTab(connectTab, tr("Connect"));
+    ui->tabs->addTab(overviewTab_, tr("Overview"));
+    ui->tabs->addTab(experimentTabs_, tr("Experiment"));
+    ui->tabs->addTab(hdfReviewTab, tr("Review"));
+
+    connect(connectTab, &frontend::ConnectTab::connected, this, [this]()
+            {
+        if (ui->tabs) {
+            ui->tabs->setCurrentIndex(1); // Switch to Experiment tab
+            if (experimentTabs_) {
+                experimentTabs_->setCurrentIndex(0); // Switch to Preview sub-tab
+            }
+        } });
+
+    // Connect tab change signal for auto-applying camera scripts
+    connect(ui->tabs, &QTabWidget::currentChanged, this, &MainWindow::onTabChanged);
+
+    // Initialize button states (start enabled, stop disabled)
+    updateExperimentButtonStates();
+    
+    // Initialize tab states (all tabs enabled initially since no experiment is active)
+    updateTabStates();
+
+    // Quiet update check on startup (only prompts if an update is available)
+    QTimer::singleShot(1500, this, [this]() {
+        if (updater_) updater_->checkForUpdates(false);
+    });
+}
+
+MainWindow::~MainWindow() {
+    delete ui;
+}
+
+void MainWindow::setupCornerWidgets() {
     // Create corner widget for experiment controls (on same row as tabs)
     auto *experimentControlsWidget = new QWidget(this);
     auto *experimentControlsLayout = new QHBoxLayout(experimentControlsWidget);
@@ -189,12 +213,6 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     // Add controls widget to the corner of the tab bar (same row as tabs)
     experimentTabs_->setCornerWidget(experimentControlsWidget, Qt::TopRightCorner);
     
-    auto *hdfReviewTab = new frontend::HdfReviewTab(backend_, tabs_);
-    tabs_->addTab(connectTab, tr("Connect"));
-    tabs_->addTab(overviewTab_, tr("Overview"));
-    tabs_->addTab(experimentTabs_, tr("Experiment"));
-    tabs_->addTab(hdfReviewTab, tr("Review"));
-    
     // Create corner widget for camera controls (on same row as main tabs)
     auto *cameraControlsWidget = new QWidget(this);
     auto *cameraControlsLayout = new QHBoxLayout(cameraControlsWidget);
@@ -202,40 +220,15 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     cameraControlsLayout->setSpacing(5);
     
     // Create push buttons and connect them to actions
-    startCameraBtn_ = new QPushButton(startCaptureAct->text(), cameraControlsWidget);
-    stopCameraBtn_ = new QPushButton(stopCaptureAct->text(), cameraControlsWidget);
-    connect(startCameraBtn_, &QPushButton::clicked, startCaptureAct, &QAction::trigger);
-    connect(stopCameraBtn_, &QPushButton::clicked, stopCaptureAct, &QAction::trigger);
+    startCameraBtn_ = new QPushButton("Start Camera", cameraControlsWidget);
+    stopCameraBtn_ = new QPushButton("Stop Camera", cameraControlsWidget);
+    connect(startCameraBtn_, &QPushButton::clicked, this, &MainWindow::onStartCapture);
+    connect(stopCameraBtn_, &QPushButton::clicked, this, &MainWindow::onStopCapture);
     cameraControlsLayout->addWidget(startCameraBtn_);
     cameraControlsLayout->addWidget(stopCameraBtn_);
     
     // Add controls widget to the corner of the main tab bar (same row as tabs)
-    tabs_->setCornerWidget(cameraControlsWidget, Qt::TopRightCorner);
-    
-    setCentralWidget(tabs_);
-
-    connect(connectTab, &frontend::ConnectTab::connected, this, [this]()
-            {
-        if (tabs_) {
-            tabs_->setCurrentIndex(1); // Switch to Experiment tab
-            if (experimentTabs_) {
-                experimentTabs_->setCurrentIndex(0); // Switch to Preview sub-tab
-            }
-        } });
-
-    // Connect tab change signal for auto-applying camera scripts
-    connect(tabs_, &QTabWidget::currentChanged, this, &MainWindow::onTabChanged);
-
-    // Initialize button states (start enabled, stop disabled)
-    updateExperimentButtonStates();
-    
-    // Initialize tab states (all tabs enabled initially since no experiment is active)
-    updateTabStates();
-
-    // Quiet update check on startup (only prompts if an update is available)
-    QTimer::singleShot(1500, this, [this]() {
-        if (updater_) updater_->checkForUpdates(false);
-    });
+    ui->tabs->setCornerWidget(cameraControlsWidget, Qt::TopRightCorner);
 }
 
 void MainWindow::updateExperimentButtonStates()
@@ -281,12 +274,12 @@ void MainWindow::updateExperimentButtonStates()
 
 void MainWindow::updateTabStates()
 {
-    if (!tabs_)
+    if (!ui->tabs)
         return;
 
     // Disable Overview tab (index 1) and Review tab (index 3) during experiment
-    tabs_->setTabEnabled(1, !experimentActive_); // Overview
-    tabs_->setTabEnabled(3, !experimentActive_); // Review
+    ui->tabs->setTabEnabled(1, !experimentActive_); // Overview
+    ui->tabs->setTabEnabled(3, !experimentActive_); // Review
 }
 
 void MainWindow::onStartCapture()
@@ -652,8 +645,8 @@ void MainWindow::onTabChanged(int index)
         QMessageBox::warning(this, tr("Overview Tab"),
                              tr("Overview tab is disabled while an experiment is active. Please stop the experiment first."));
         // Switch back to previous tab (or Experiment tab)
-        if (tabs_) {
-            tabs_->setCurrentIndex(2); // Switch to Experiment tab
+        if (ui->tabs) {
+            ui->tabs->setCurrentIndex(2); // Switch to Experiment tab
         }
         return;
     }
@@ -663,8 +656,8 @@ void MainWindow::onTabChanged(int index)
         QMessageBox::warning(this, tr("Review Tab"),
                              tr("Review tab is disabled while an experiment is active. Please stop the experiment first."));
         // Switch back to previous tab (or Experiment tab)
-        if (tabs_) {
-            tabs_->setCurrentIndex(2); // Switch to Experiment tab
+        if (ui->tabs) {
+            ui->tabs->setCurrentIndex(2); // Switch to Experiment tab
         }
         return;
     }

@@ -18,6 +18,8 @@ class QVBoxLayout;
 class QHBoxLayout;
 class QGridLayout;
 
+namespace Ui { class FrameViewerDialog; }
+
 namespace frontend {
 
 class FrameViewerDialog : public QDialog {
@@ -27,6 +29,7 @@ public:
                               const backend::services::ProcessingService::Roi& roi,
                               bool showOverlays,
                               QWidget* parent = nullptr);
+    ~FrameViewerDialog();
     
     void setFrame(const backend::services::ProcessedFrame& frame);
     void setRoi(const backend::services::ProcessingService::Roi& roi);
@@ -64,19 +67,7 @@ private:
     QImage displayImage_;
     double zoomFactor_;
     
-    // UI components
-    QLabel* frameInfoLabel_;
-    QScrollArea* imageScrollArea_;
-    QLabel* imageLabel_;
-    QPushButton* prevButton_;
-    QPushButton* nextButton_;
-    QCheckBox* processingOverlayCheck_;
-    QCheckBox* roiOverlayCheck_;
-    QPushButton* zoomInButton_;
-    QPushButton* zoomOutButton_;
-    QPushButton* fitToWindowButton_;
-    QPushButton* exportButton_;
-    QPushButton* closeButton_;
+    Ui::FrameViewerDialog* ui;
 };
 
 } // namespace frontend

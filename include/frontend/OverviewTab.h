@@ -15,6 +15,8 @@ class QLabel;
 class QTimer;
 class QWidget;
 
+namespace Ui { class OverviewTab; }
+
 namespace frontend
 {
 
@@ -23,6 +25,7 @@ namespace frontend
         Q_OBJECT
     public:
         explicit OverviewTab(backend::AppBackend &backend, QWidget *parent = nullptr);
+        ~OverviewTab();
 
         enum class FitMode
         {
@@ -49,6 +52,7 @@ namespace frontend
         bool loadFileToEditor(const QString &path, QPlainTextEdit *editor, QString *err);
         bool saveEditorToFile(QPlainTextEdit *editor, const QString &path, QString *err);
 
+        Ui::OverviewTab* ui;
         backend::AppBackend &backend_;
 
         // Frame display
@@ -56,8 +60,6 @@ namespace frontend
         QTimer *timer_ = nullptr;
         QImage frameImage_;
         FitMode fitMode_{FitMode::FitToWindow};
-        QToolButton *fitBtn_ = nullptr;
-        QToolButton *roiOverlayBtn_ = nullptr;
 
         // ROI overlay state
         bool roiOverlayVisible_ = false;
@@ -69,16 +71,6 @@ namespace frontend
         QString egrabberConfigPath() const;
         void updateEgrabberConfigFromRect(QPointF imagePos);
         void initializeRoiFromConfig();
-
-        // Camera script configuration
-        QPlainTextEdit *jsEdit_ = nullptr;
-        QPushButton *jsReloadBtn_ = nullptr;
-        QPushButton *jsSaveBtn_ = nullptr;
-        QPushButton *jsApplyBtn_ = nullptr;
-        QPushButton *jsBrowseBtn_ = nullptr;
-        QPushButton *jsClearBtn_ = nullptr;
-        QLabel *jsPathLabel_ = nullptr;
-        QLabel *jsUnsavedLabel_ = nullptr;
     };
 
 } // namespace frontend

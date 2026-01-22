@@ -1,21 +1,15 @@
 #include "frontend/OverviewTab.h"
+#include "ui_OverviewTab.h"
 
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QHBoxLayout>
-#include <QLabel>
 #include <QMessageBox>
 #include <QPainter>
-#include <QPlainTextEdit>
-#include <QPushButton>
-#include <QSplitter>
 #include <QTextStream>
 #include <QTimer>
-#include <QToolButton>
-#include <QVBoxLayout>
 #include <QSettings>
 #include <QTextOption>
 #include <QMouseEvent>
@@ -304,115 +298,35 @@ namespace frontend
     } // namespace
 
     OverviewTab::OverviewTab(backend::AppBackend &backend, QWidget *parent)
-        : QWidget(parent), backend_(backend)
+        : QWidget(parent), ui(new Ui::OverviewTab), backend_(backend)
     {
-        auto *root = new QVBoxLayout(this);
-        root->setContentsMargins(0, 0, 0, 0);
-        root->setSpacing(0);
+        ui->setupUi(this);
 
-        // Create vertical splitter for resizable top/bottom sections
-        QSplitter *splitter = new QSplitter(Qt::Vertical, this);
-        splitter->setChildrenCollapsible(false);
-        splitter->setHandleWidth(10);
-        splitter->setOpaqueResize(true);
-
-        // Top: Frame display with controls
-        QWidget *canvasContainer = new QWidget(this);
-        canvasContainer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-        canvasContainer->setMinimumHeight(100);
-        auto *canvasLayout = new QVBoxLayout(canvasContainer);
-        canvasLayout->setContentsMargins(0, 0, 0, 0);
-        canvasLayout->setSpacing(0);
-
-        // Controls bar
-        QWidget *controls = new QWidget(canvasContainer);
-        auto *controlsLayout = new QHBoxLayout(controls);
-        controlsLayout->setContentsMargins(6, 4, 6, 4);
-        controlsLayout->setSpacing(6);
-        fitBtn_ = new QToolButton(controls);
-        fitBtn_->setText(tr("Fit: Window"));
-        fitBtn_->setToolTip(tr("Toggle between fit-to-window and 100% zoom"));
-        controlsLayout->addWidget(fitBtn_);
-
-        roiOverlayBtn_ = new QToolButton(controls);
-        roiOverlayBtn_->setText(tr("ROI Overlay: Off"));
-        roiOverlayBtn_->setToolTip(tr("Toggle ROI overlay (512x96 rectangle)"));
-        controlsLayout->addWidget(roiOverlayBtn_);
-
-        controlsLayout->addStretch(1);
-        canvasLayout->addWidget(controls);
-
-        canvas_ = new SimpleImageCanvas(&frameImage_, &fitMode_, &roiOverlayVisible_, &roiPosition_, canvasContainer);
+        // Create custom SimpleImageCanvas widget and add it to the placeholder
+        canvas_ = new SimpleImageCanvas(&frameImage_, &fitMode_, &roiOverlayVisible_, &roiPosition_, ui->canvasContainer);
         canvas_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-        canvasLayout->addWidget(canvas_, 1);
-
-        splitter->addWidget(canvasContainer);
-
-        // Bottom: Camera script configuration
-        QWidget *configWidget = new QWidget(this);
-        configWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
-        configWidget->setMinimumHeight(0);
-        auto *configLayout = new QVBoxLayout(configWidget);
-        configLayout->setContentsMargins(6, 6, 6, 6);
-        configLayout->setSpacing(6);
-
-        // Camera script editor
-        jsEdit_ = new QPlainTextEdit(configWidget);
-        jsEdit_->setWordWrapMode(QTextOption::NoWrap);
-
-        // Buttons row
-        auto *buttonRow = new QHBoxLayout();
-        jsReloadBtn_ = new QPushButton(tr("Reset"), configWidget);
-        jsSaveBtn_ = new QPushButton(tr("Save"), configWidget);
-        jsApplyBtn_ = new QPushButton(tr("Apply to Camera"), configWidget);
-        jsBrowseBtn_ = new QPushButton(tr("Browse..."), configWidget);
-        jsClearBtn_ = new QPushButton(tr("Clear"), configWidget);
-        jsPathLabel_ = new QLabel(configWidget);
-        jsPathLabel_->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
-        jsPathLabel_->setTextFormat(Qt::PlainText);
-        jsPathLabel_->setWordWrap(false);
-        jsPathLabel_->setMinimumWidth(0);
-        jsPathLabel_->setMaximumWidth(400);
-        jsUnsavedLabel_ = new QLabel(configWidget);
-        jsUnsavedLabel_->setText(tr("Unsaved changes – click Save to apply."));
-        jsUnsavedLabel_->setVisible(false);
-        jsUnsavedLabel_->setStyleSheet("color: #d17a00;");
-        jsUnsavedLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
-
-        buttonRow->addWidget(jsReloadBtn_);
-        buttonRow->addWidget(jsSaveBtn_);
-        buttonRow->addWidget(jsApplyBtn_);
-        buttonRow->addWidget(jsBrowseBtn_);
-        buttonRow->addWidget(jsClearBtn_);
-        buttonRow->addStretch(1);
-        buttonRow->addWidget(jsPathLabel_);
-        buttonRow->addSpacing(8);
-        buttonRow->addWidget(jsUnsavedLabel_);
-
-        configLayout->addLayout(buttonRow);
-        configLayout->addWidget(jsEdit_, 1);
-
-        splitter->addWidget(configWidget);
+        // Replace the placeholder with the actual canvas
+        ui->canvasLayout->removeWidget(ui->canvasPlaceholder);
+        delete ui->canvasPlaceholder;
+        ui->canvasLayout->addWidget(canvas_, 1);
 
         // Set initial proportions (3:2 ratio)
-        splitter->setStretchFactor(0, 3);
-        splitter->setStretchFactor(1, 2);
-
-        root->addWidget(splitter);
+        ui->splitter->setStretchFactor(0, 3);
+        ui->splitter->setStretchFactor(1, 2);
 
         // Connect button signals
-        connect(jsReloadBtn_, &QPushButton::clicked, this, &OverviewTab::onReloadJs);
-        connect(jsSaveBtn_, &QPushButton::clicked, this, &OverviewTab::onSaveJs);
-        connect(jsApplyBtn_, &QPushButton::clicked, this, &OverviewTab::onApplyJs);
-        connect(jsBrowseBtn_, &QPushButton::clicked, this, &OverviewTab::onBrowseJs);
-        connect(jsClearBtn_, &QPushButton::clicked, this, &OverviewTab::onClearJs);
-        connect(fitBtn_, &QToolButton::clicked, this, &OverviewTab::onToggleFit);
-        connect(roiOverlayBtn_, &QToolButton::clicked, this, &OverviewTab::onToggleRoiOverlay);
+        connect(ui->jsReloadBtn, &QPushButton::clicked, this, &OverviewTab::onReloadJs);
+        connect(ui->jsSaveBtn, &QPushButton::clicked, this, &OverviewTab::onSaveJs);
+        connect(ui->jsApplyBtn, &QPushButton::clicked, this, &OverviewTab::onApplyJs);
+        connect(ui->jsBrowseBtn, &QPushButton::clicked, this, &OverviewTab::onBrowseJs);
+        connect(ui->jsClearBtn, &QPushButton::clicked, this, &OverviewTab::onClearJs);
+        connect(ui->fitBtn, &QToolButton::clicked, this, &OverviewTab::onToggleFit);
+        connect(ui->roiOverlayBtn, &QToolButton::clicked, this, &OverviewTab::onToggleRoiOverlay);
         connect(static_cast<SimpleImageCanvas *>(canvas_), &SimpleImageCanvas::roiPositionChanged,
                 this, &OverviewTab::onRoiPositionChanged);
-        connect(jsEdit_, &QPlainTextEdit::textChanged, this, [this]()
+        connect(ui->jsEdit, &QPlainTextEdit::textChanged, this, [this]()
                 {
-        if (jsUnsavedLabel_) jsUnsavedLabel_->setVisible(true); });
+        if (ui->jsUnsavedLabel) ui->jsUnsavedLabel->setVisible(true); });
 
         // Timer for frame display at 50 fps (20ms interval)
         timer_ = new QTimer(this);
@@ -427,6 +341,10 @@ namespace frontend
 
         // Initialize ROI position from egrabberConfig.js
         initializeRoiFromConfig();
+    }
+
+    OverviewTab::~OverviewTab() {
+        delete ui;
     }
 
     QString OverviewTab::appDirIncludePath(const QString &fileName) const
@@ -456,8 +374,8 @@ namespace frontend
         const bool blocked = editor->blockSignals(true);
         editor->setPlainText(in.readAll());
         editor->blockSignals(blocked);
-        if (editor == jsEdit_ && jsUnsavedLabel_)
-            jsUnsavedLabel_->setVisible(false);
+        if (editor == ui->jsEdit && ui->jsUnsavedLabel)
+            ui->jsUnsavedLabel->setVisible(false);
         return true;
     }
 
@@ -513,30 +431,30 @@ namespace frontend
             }
         }
         QString err;
-        if (!loadFileToEditor(path, jsEdit_, &err))
+        if (!loadFileToEditor(path, ui->jsEdit, &err))
         {
             SPDLOG_WARN("Failed to load overviewConfig.js from {}: {}", path.toStdString(), err.toStdString());
             QMessageBox::warning(this, tr("Reset overviewConfig.js"), tr("Failed to load: %1").arg(err));
             return;
         }
-        jsPathLabel_->setText(path);
-        if (jsUnsavedLabel_)
-            jsUnsavedLabel_->setVisible(false);
+        ui->jsPathLabel->setText(path);
+        if (ui->jsUnsavedLabel)
+            ui->jsUnsavedLabel->setVisible(false);
     }
 
     void OverviewTab::onSaveJs()
     {
         const QString path = currentJsPath();
         QString err;
-        if (!saveEditorToFile(jsEdit_, path, &err))
+        if (!saveEditorToFile(ui->jsEdit, path, &err))
         {
             SPDLOG_ERROR("Failed to save overviewConfig.js to {}: {}", path.toStdString(), err.toStdString());
             QMessageBox::warning(this, tr("Save overviewConfig.js"), tr("Failed to save: %1").arg(err));
             return;
         }
         QMessageBox::information(this, tr("Save overviewConfig.js"), tr("Saved."));
-        if (jsUnsavedLabel_)
-            jsUnsavedLabel_->setVisible(false);
+        if (ui->jsUnsavedLabel)
+            ui->jsUnsavedLabel->setVisible(false);
     }
 
     void OverviewTab::onApplyJs()
@@ -546,7 +464,7 @@ namespace frontend
         // Always save first to ensure the latest content is applied
         {
             QString saveErr;
-            if (!saveEditorToFile(jsEdit_, path, &saveErr))
+            if (!saveEditorToFile(ui->jsEdit, path, &saveErr))
             {
                 QMessageBox::warning(this, tr("Apply Camera Script"), tr("Failed to save script: %1").arg(saveErr));
                 return;
@@ -580,15 +498,15 @@ namespace frontend
         }
         SPDLOG_INFO("External Overview script set to {}", selected.toStdString());
         QString err;
-        if (!loadFileToEditor(selected, jsEdit_, &err))
+        if (!loadFileToEditor(selected, ui->jsEdit, &err))
         {
             SPDLOG_WARN("Failed to load external overviewConfig.js from {}: {}", selected.toStdString(), err.toStdString());
             QMessageBox::warning(this, tr("Reset overviewConfig.js"), tr("Failed to load: %1").arg(err));
             return;
         }
-        jsPathLabel_->setText(selected);
-        if (jsUnsavedLabel_)
-            jsUnsavedLabel_->setVisible(false);
+        ui->jsPathLabel->setText(selected);
+        if (ui->jsUnsavedLabel)
+            ui->jsUnsavedLabel->setVisible(false);
     }
 
     void OverviewTab::onClearJs()
@@ -612,19 +530,19 @@ namespace frontend
         if (fitMode_ == FitMode::FitToWindow)
         {
             fitMode_ = FitMode::Zoom100;
-            if (fitBtn_)
+            if (ui->fitBtn)
             {
-                fitBtn_->setText(tr("Fit: 100%"));
-                fitBtn_->setToolTip(tr("Toggle between fit-to-window and 100% zoom"));
+                ui->fitBtn->setText(tr("Fit: 100%"));
+                ui->fitBtn->setToolTip(tr("Toggle between fit-to-window and 100% zoom"));
             }
         }
         else
         {
             fitMode_ = FitMode::FitToWindow;
-            if (fitBtn_)
+            if (ui->fitBtn)
             {
-                fitBtn_->setText(tr("Fit: Window"));
-                fitBtn_->setToolTip(tr("Toggle between fit-to-window and 100% zoom"));
+                ui->fitBtn->setText(tr("Fit: Window"));
+                ui->fitBtn->setToolTip(tr("Toggle between fit-to-window and 100% zoom"));
             }
         }
         if (canvas_)
@@ -634,15 +552,15 @@ namespace frontend
     void OverviewTab::onToggleRoiOverlay()
     {
         roiOverlayVisible_ = !roiOverlayVisible_;
-        if (roiOverlayBtn_)
+        if (ui->roiOverlayBtn)
         {
             if (roiOverlayVisible_)
             {
-                roiOverlayBtn_->setText(tr("ROI Overlay: On"));
+                ui->roiOverlayBtn->setText(tr("ROI Overlay: On"));
             }
             else
             {
-                roiOverlayBtn_->setText(tr("ROI Overlay: Off"));
+                ui->roiOverlayBtn->setText(tr("ROI Overlay: Off"));
             }
         }
         if (canvas_)

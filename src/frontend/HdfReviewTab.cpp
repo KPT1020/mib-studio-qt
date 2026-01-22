@@ -1,31 +1,24 @@
 #include "frontend/HdfReviewTab.h"
+#include "ui_HdfReviewTab.h"
 
 #include <QPushButton>
-#include <QLabel>
-#include <QTabWidget>
 #include <QTableWidget>
-#include <QTableView>
-#include <QGridLayout>
-#include <QScrollArea>
-#include <QScrollBar>
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QFileDialog>
-#include <QMessageBox>
-#include <QHeaderView>
 #include <QTableWidgetItem>
+#include <QHeaderView>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QFrame>
 #include <QSpacerItem>
 #include <QFile>
 #include <QTextStream>
-#include <QCheckBox>
+#include <QFileDialog>
+#include <QMessageBox>
+#include <QScrollBar>
+#include <QEventLoop>
 #include <QChartView>
 #include <QLineSeries>
 #include <QCoreApplication>
 #include <QDir>
-#include <QEventLoop>
 #include <map>
 #include <QScatterSeries>
 #include <QChart>
@@ -114,120 +107,44 @@ private:
 };
 
 HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
-    : QWidget(parent), backend_(backend) {
-    auto* rootLayout = new QVBoxLayout(this);
-    rootLayout->setContentsMargins(6, 6, 6, 6);
-    rootLayout->setSpacing(6);
+    : QWidget(parent), ui(new Ui::HdfReviewTab), backend_(backend) {
+    ui->setupUi(this);
 
     // Configure thumbnail cache (store up to ~2048 thumbnails)
     thumbnailCache_.setMaxCost(2048);
     SPDLOG_INFO("HdfReviewTab: thumbnail cache size set to {}", 2048);
 
-    // File selection row
-    auto* fileRow = new QHBoxLayout();
-    selectFileBtn_ = new QPushButton(tr("Select HDF File..."), this);
-    exportMetricsBtn_ = new QPushButton(tr("Export Metrics to CSV..."), this);
-    exportMetricsBtn_->setEnabled(false);
-    exportAllBtn_ = new QPushButton(tr("Export All..."), this);
-    exportAllBtn_->setEnabled(false);
-    exportChartsBtn_ = new QPushButton(tr("Export Charts as TIFF..."), this);
-    exportChartsBtn_->setEnabled(false);
-    roiOverlayCheck_ = new QCheckBox(tr("Show Overlays"), this);
-    roiOverlayCheck_->setEnabled(false);
-    filePathLabel_ = new QLabel(tr("No file selected"), this);
-    statusLabel_ = new QLabel(tr("Ready"), this);
-    fileRow->addWidget(selectFileBtn_);
-    fileRow->addWidget(exportMetricsBtn_);
-    fileRow->addWidget(exportAllBtn_);
-    fileRow->addWidget(exportChartsBtn_);
-    fileRow->addWidget(roiOverlayCheck_);
-    fileRow->addWidget(filePathLabel_, 1);
-    fileRow->addWidget(statusLabel_);
-    rootLayout->addLayout(fileRow);
+    // Connect button signals
+    connect(ui->selectFileBtn, &QPushButton::clicked, this, &HdfReviewTab::onSelectFile);
+    connect(ui->exportMetricsBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportMetrics);
+    connect(ui->exportAllBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportAll);
+    connect(ui->exportChartsBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportCharts);
+    connect(ui->roiOverlayCheck, &QCheckBox::toggled, this, &HdfReviewTab::onToggleRoiOverlay);
 
-    connect(selectFileBtn_, &QPushButton::clicked, this, &HdfReviewTab::onSelectFile);
-    connect(exportMetricsBtn_, &QPushButton::clicked, this, &HdfReviewTab::onExportMetrics);
-    connect(exportAllBtn_, &QPushButton::clicked, this, &HdfReviewTab::onExportAll);
-    connect(exportChartsBtn_, &QPushButton::clicked, this, &HdfReviewTab::onExportCharts);
-    connect(roiOverlayCheck_, &QCheckBox::toggled, this, &HdfReviewTab::onToggleRoiOverlay);
-
-    // Tab widget for valid/invalid frames
-    frameTypeTabs_ = new QTabWidget(this);
-    
-    // Valid frames tab
-    validFramesWidget_ = new QWidget(this);
-    auto* validLayout = new QHBoxLayout(validFramesWidget_);
-    validLayout->setContentsMargins(0, 0, 0, 0);
-    
-    validImageScroll_ = new QScrollArea(validFramesWidget_);
-    validImageGridWidget_ = new QWidget(validImageScroll_);
-    validImageGrid_ = new QGridLayout(validImageGridWidget_);
-    validImageGrid_->setSpacing(4);
-    validImageScroll_->setWidget(validImageGridWidget_);
-    validImageScroll_->setWidgetResizable(true);
-    validImageScroll_->setMinimumWidth(400);
-    validImageScroll_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    validBottomSpacer_ = new QSpacerItem(0, 0, QSizePolicy::Minimum, QSizePolicy::Fixed);
-    validImageGrid_->addItem(validBottomSpacer_, 0, 0, 1, GRID_COLUMNS);
-    connect(validImageScroll_->verticalScrollBar(), &QScrollBar::valueChanged,
+    // Setup valid frames tab widgets
+    connect(ui->validImageScroll->verticalScrollBar(), &QScrollBar::valueChanged,
             this, &HdfReviewTab::onScrollValueChanged);
-    
-    validMetricsTable_ = new QTableView(validFramesWidget_);
-    validMetricsTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
-    validMetricsTable_->setSelectionMode(QAbstractItemView::SingleSelection);
-    validMetricsTable_->horizontalHeader()->setStretchLastSection(true);
-    validMetricsModel_ = new HdfMetricsModel(validMetricsTable_);
+    ui->validMetricsTable->horizontalHeader()->setStretchLastSection(true);
+    validMetricsModel_ = new HdfMetricsModel(ui->validMetricsTable);
     validMetricsModel_->setSource(&validFrames_);
-    validMetricsTable_->setModel(validMetricsModel_);
+    ui->validMetricsTable->setModel(validMetricsModel_);
     
-    validLayout->addWidget(validImageScroll_, 1);
-    validLayout->addWidget(validMetricsTable_, 1);
-    
-    frameTypeTabs_->addTab(validFramesWidget_, tr("Valid Frames"));
-
-    // Invalid frames tab
-    invalidFramesWidget_ = new QWidget(this);
-    auto* invalidLayout = new QHBoxLayout(invalidFramesWidget_);
-    invalidLayout->setContentsMargins(0, 0, 0, 0);
-    
-    invalidImageScroll_ = new QScrollArea(invalidFramesWidget_);
-    invalidImageGridWidget_ = new QWidget(invalidImageScroll_);
-    invalidImageGrid_ = new QGridLayout(invalidImageGridWidget_);
-    invalidImageGrid_->setSpacing(4);
-    invalidImageScroll_->setWidget(invalidImageGridWidget_);
-    invalidImageScroll_->setWidgetResizable(true);
-    invalidImageScroll_->setMinimumWidth(400);
-    invalidImageScroll_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    invalidBottomSpacer_ = new QSpacerItem(0, 0, QSizePolicy::Minimum, QSizePolicy::Fixed);
-    invalidImageGrid_->addItem(invalidBottomSpacer_, 0, 0, 1, GRID_COLUMNS);
-    connect(invalidImageScroll_->verticalScrollBar(), &QScrollBar::valueChanged,
+    // Setup invalid frames tab widgets
+    connect(ui->invalidImageScroll->verticalScrollBar(), &QScrollBar::valueChanged,
             this, &HdfReviewTab::onScrollValueChanged);
-    
-    invalidMetricsTable_ = new QTableView(invalidFramesWidget_);
-    invalidMetricsTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
-    invalidMetricsTable_->setSelectionMode(QAbstractItemView::SingleSelection);
-    invalidMetricsTable_->horizontalHeader()->setStretchLastSection(true);
-    invalidMetricsModel_ = new HdfMetricsModel(invalidMetricsTable_);
+    ui->invalidMetricsTable->horizontalHeader()->setStretchLastSection(true);
+    invalidMetricsModel_ = new HdfMetricsModel(ui->invalidMetricsTable);
     invalidMetricsModel_->setSource(&invalidFrames_);
-    invalidMetricsTable_->setModel(invalidMetricsModel_);
-    
-    invalidLayout->addWidget(invalidImageScroll_, 1);
-    invalidLayout->addWidget(invalidMetricsTable_, 1);
-    
-    frameTypeTabs_->addTab(invalidFramesWidget_, tr("Invalid Frames"));
+    ui->invalidMetricsTable->setModel(invalidMetricsModel_);
 
-    // Charts tab
-    chartsWidget_ = new QWidget(this);
-    chartsLayout_ = new QHBoxLayout(chartsWidget_);
-    chartsLayout_->setContentsMargins(6, 6, 6, 6);
-    chartsLayout_->setSpacing(6);
-    
+    // Add bottom spacers to grids
+    validBottomSpacer_ = new QSpacerItem(0, 0, QSizePolicy::Minimum, QSizePolicy::Fixed);
+    ui->validImageGrid->addItem(validBottomSpacer_, 0, 0, 1, GRID_COLUMNS);
+    invalidBottomSpacer_ = new QSpacerItem(0, 0, QSizePolicy::Minimum, QSizePolicy::Fixed);
+    ui->invalidImageGrid->addItem(invalidBottomSpacer_, 0, 0, 1, GRID_COLUMNS);
+
+    // Charts tab - replace placeholders with actual chart views
     // Left side: Scatter plot chart
-    auto* scatterContainer = new QWidget(chartsWidget_);
-    auto* scatterContainerLayout = new QVBoxLayout(scatterContainer);
-    scatterContainerLayout->setContentsMargins(0, 0, 0, 0);
-    scatterContainerLayout->setSpacing(4);
-    
     scatterPlotChart_ = new QChart();
     scatterSeries_ = new QScatterSeries();
     scatterSeries_->setMarkerSize(6.0);
@@ -248,19 +165,16 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
     // Load isoelastic curves overlay
     loadIsoelasticCurves();
     
-    scatterPlotView_ = new QChartView(scatterPlotChart_, scatterContainer);
+    scatterPlotView_ = new QChartView(scatterPlotChart_, ui->chartsTab);
     scatterPlotView_->setRenderHint(QPainter::Antialiasing);
     scatterPlotView_->setMinimumHeight(300);
-    scatterContainerLayout->addWidget(new QLabel(tr("Scatter Plot"), scatterContainer));
-    scatterContainerLayout->addWidget(scatterPlotView_, 1);
-    chartsLayout_->addWidget(scatterContainer, 1);
+    // Replace placeholder with actual chart view
+    int scatterIndex = ui->chartsLayout->indexOf(ui->scatterPlotViewPlaceholder);
+    ui->chartsLayout->removeWidget(ui->scatterPlotViewPlaceholder);
+    ui->scatterPlotViewPlaceholder->deleteLater();
+    ui->chartsLayout->insertWidget(scatterIndex, scatterPlotView_, 1);
     
     // Right side: Histogram chart
-    auto* histogramContainer = new QWidget(chartsWidget_);
-    auto* histogramContainerLayout = new QVBoxLayout(histogramContainer);
-    histogramContainerLayout->setContentsMargins(0, 0, 0, 0);
-    histogramContainerLayout->setSpacing(4);
-    
     histogramChart_ = new QChart();
     histogramChart_->setTitle("Ring Width Distribution");
     histogramChart_->legend()->setVisible(false);
@@ -290,28 +204,27 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
     histogramXAxis_ = nullptr;
 #endif
     
-    histogramView_ = new QChartView(histogramChart_, histogramContainer);
+    histogramView_ = new QChartView(histogramChart_, ui->chartsTab);
     histogramView_->setRenderHint(QPainter::Antialiasing);
     histogramView_->setMinimumHeight(300);
-    histogramContainerLayout->addWidget(new QLabel(tr("Histogram"), histogramContainer));
-    histogramContainerLayout->addWidget(histogramView_, 1);
-    chartsLayout_->addWidget(histogramContainer, 1);
-    
-    frameTypeTabs_->addTab(chartsWidget_, tr("Charts"));
+    // Replace placeholder with actual chart view
+    int histogramIndex = ui->chartsLayout->indexOf(ui->histogramViewPlaceholder);
+    ui->chartsLayout->removeWidget(ui->histogramViewPlaceholder);
+    ui->histogramViewPlaceholder->deleteLater();
+    ui->chartsLayout->insertWidget(histogramIndex, histogramView_, 1);
 
-    rootLayout->addWidget(frameTypeTabs_, 1);
-
-    connect(frameTypeTabs_, QOverload<int>::of(&QTabWidget::currentChanged), 
+    // Connect tab and table signals
+    connect(ui->frameTypeTabs, QOverload<int>::of(&QTabWidget::currentChanged), 
             this, &HdfReviewTab::onTabChanged);
-    connect(validMetricsTable_->selectionModel(), &QItemSelectionModel::selectionChanged,
+    connect(ui->validMetricsTable->selectionModel(), &QItemSelectionModel::selectionChanged,
             this, &HdfReviewTab::onTableSelectionChanged);
-    connect(invalidMetricsTable_->selectionModel(), &QItemSelectionModel::selectionChanged,
+    connect(ui->invalidMetricsTable->selectionModel(), &QItemSelectionModel::selectionChanged,
             this, &HdfReviewTab::onTableSelectionChanged);
-    connect(validMetricsTable_, &QTableView::doubleClicked,
+    connect(ui->validMetricsTable, &QTableView::doubleClicked,
             this, [this](const QModelIndex& idx) {
                 if (idx.isValid()) onViewFrameDetails(idx.row());
             });
-    connect(invalidMetricsTable_, &QTableView::doubleClicked,
+    connect(ui->invalidMetricsTable, &QTableView::doubleClicked,
             this, [this](const QModelIndex& idx) {
                 if (idx.isValid()) onViewFrameDetails(idx.row());
             });
@@ -326,6 +239,7 @@ HdfReviewTab::~HdfReviewTab() {
         }
     }
     isoelasticCurves_.clear();
+    delete ui;
 }
 
 void HdfReviewTab::onSelectFile() {
@@ -342,8 +256,8 @@ void HdfReviewTab::onSelectFile() {
 }
 
 void HdfReviewTab::loadHdfFile(const QString& filePath) {
-    statusLabel_->setText(tr("Loading..."));
-    filePathLabel_->setText(filePath);
+    ui->statusLabel->setText(tr("Loading..."));
+    ui->filePathLabel->setText(filePath);
     clearDisplay();
 
     SPDLOG_INFO("HdfReviewTab: opening file '{}'", filePath.toStdString());
@@ -353,7 +267,7 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
     if (!hdfReader_->loadFile(filePath.toStdString())) {
         QMessageBox::critical(this, tr("Error"), 
                              tr("Failed to open HDF file:\n%1").arg(filePath));
-        statusLabel_->setText(tr("Error loading file"));
+        ui->statusLabel->setText(tr("Error loading file"));
         return;
     }
 
@@ -362,17 +276,17 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
     size_t totalValid = 0, totalInvalid = 0;
     backend::services::ProcessingService::Roi loadedRoi{0, 0, 0, 0};
     if (hdfReader_->readExperimentInfo(startTimeNs, endTimeNs, totalValid, totalInvalid, &loadedRoi)) {
-        statusLabel_->setText(QString("Valid: %1, Invalid: %2")
+        ui->statusLabel->setText(QString("Valid: %1, Invalid: %2")
                              .arg(totalValid).arg(totalInvalid));
         roi_ = loadedRoi;
         SPDLOG_INFO("Loaded ROI from HDF5: x={}, y={}, w={}, h={}", roi_.x, roi_.y, roi_.w, roi_.h);
         // Enable overlay checkbox if we have frames (for processing overlay) or valid ROI
-        roiOverlayCheck_->setEnabled(true);
+        ui->roiOverlayCheck->setEnabled(true);
     } else {
         roi_ = {0, 0, 0, 0};
         SPDLOG_WARN("Failed to read experiment info or ROI not found in HDF5 file");
         // Still enable overlay checkbox if we have frames (for processing overlay)
-        roiOverlayCheck_->setEnabled(false);
+        ui->roiOverlayCheck->setEnabled(false);
     }
 
     // Log datasets info for debugging
@@ -415,13 +329,13 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
 
     // Enable export buttons if we have any data
     bool hasData = !validFrames_.empty() || !invalidFrames_.empty();
-    exportMetricsBtn_->setEnabled(hasData);
-    exportAllBtn_->setEnabled(hasData);
-    exportChartsBtn_->setEnabled(hasData);
+    ui->exportMetricsBtn->setEnabled(hasData);
+    ui->exportAllBtn->setEnabled(hasData);
+    ui->exportChartsBtn->setEnabled(hasData);
     
     // Enable overlay checkbox if we have frames (for processing overlay)
     if (hasData) {
-        roiOverlayCheck_->setEnabled(true);
+        ui->roiOverlayCheck->setEnabled(true);
     }
 
     // Update charts tab with snapshots from HDF5
@@ -433,7 +347,7 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
                                  : (validImagesCount > 0 ? validImagesCount : totalValid);
         const size_t shownInvalid = !invalidFrames_.empty() ? invalidFrames_.size()
                                    : (invalidImagesCount > 0 ? invalidImagesCount : totalInvalid);
-        statusLabel_->setText(QString("Valid: %1, Invalid: %2")
+        ui->statusLabel->setText(QString("Valid: %1, Invalid: %2")
                               .arg(static_cast<qulonglong>(shownValid))
                               .arg(static_cast<qulonglong>(shownInvalid)));
     }
@@ -469,15 +383,15 @@ void HdfReviewTab::clearDisplay() {
     invalidScrollValue_ = 0;
     
     // Disable export buttons and ROI overlay when no data
-    exportMetricsBtn_->setEnabled(false);
-    exportAllBtn_->setEnabled(false);
-    exportChartsBtn_->setEnabled(false);
-    roiOverlayCheck_->setEnabled(false);
-    roiOverlayCheck_->setChecked(false);
+    ui->exportMetricsBtn->setEnabled(false);
+    ui->exportAllBtn->setEnabled(false);
+    ui->exportChartsBtn->setEnabled(false);
+    ui->roiOverlayCheck->setEnabled(false);
+    ui->roiOverlayCheck->setChecked(false);
 
     // Clear valid frames grid
     QLayoutItem* item;
-    while ((item = validImageGrid_->takeAt(0)) != nullptr) {
+    while ((item = ui->validImageGrid->takeAt(0)) != nullptr) {
         delete item->widget();
         delete item;
     }
@@ -486,7 +400,7 @@ void HdfReviewTab::clearDisplay() {
     validTopSpacer_ = nullptr;
 
     // Clear invalid frames grid
-    while ((item = invalidImageGrid_->takeAt(0)) != nullptr) {
+    while ((item = ui->invalidImageGrid->takeAt(0)) != nullptr) {
         delete item->widget();
         delete item;
     }
@@ -531,7 +445,7 @@ void HdfReviewTab::clearDisplay() {
 void HdfReviewTab::updateImageGrid(const std::vector<backend::services::ProcessedFrame>& frames) {
     // Determine which grid to use based on which frames vector we're updating
     bool isValid = (&frames == &validFrames_);
-    QGridLayout* grid = isValid ? validImageGrid_ : invalidImageGrid_;
+    QGridLayout* grid = isValid ? ui->validImageGrid : ui->invalidImageGrid;
     SPDLOG_DEBUG("HdfReviewTab: updateImageGrid {} frames={}",
                  isValid ? "valid" : "invalid", frames.size());
     
@@ -574,24 +488,24 @@ void HdfReviewTab::updateImageGrid(const std::vector<backend::services::Processe
     const int spacerH = remainingRows * cellH;
     if (isValid) {
         if (validBottomSpacer_) {
-            validImageGrid_->removeItem(validBottomSpacer_);
+            ui->validImageGrid->removeItem(validBottomSpacer_);
             delete validBottomSpacer_;
         }
         validBottomSpacer_ = new QSpacerItem(0, spacerH, QSizePolicy::Minimum, QSizePolicy::Fixed);
-        validImageGrid_->addItem(validBottomSpacer_, static_cast<int>(loadedRows), 0, 1, GRID_COLUMNS);
+        ui->validImageGrid->addItem(validBottomSpacer_, static_cast<int>(loadedRows), 0, 1, GRID_COLUMNS);
     } else {
         if (invalidBottomSpacer_) {
-            invalidImageGrid_->removeItem(invalidBottomSpacer_);
+            ui->invalidImageGrid->removeItem(invalidBottomSpacer_);
             delete invalidBottomSpacer_;
         }
         invalidBottomSpacer_ = new QSpacerItem(0, spacerH, QSizePolicy::Minimum, QSizePolicy::Fixed);
-        invalidImageGrid_->addItem(invalidBottomSpacer_, static_cast<int>(loadedRows), 0, 1, GRID_COLUMNS);
+        ui->invalidImageGrid->addItem(invalidBottomSpacer_, static_cast<int>(loadedRows), 0, 1, GRID_COLUMNS);
     }
 }
 
 void HdfReviewTab::loadThumbnailsBatch(const std::vector<backend::services::ProcessedFrame>& frames,
                                         size_t startIndex, size_t count, bool isValid) {
-    QGridLayout* grid = isValid ? validImageGrid_ : invalidImageGrid_;
+    QGridLayout* grid = isValid ? ui->validImageGrid : ui->invalidImageGrid;
     size_t endIndex = std::min(startIndex + count, frames.size());
     SPDLOG_DEBUG("HdfReviewTab: loadThumbnailsBatch {} start={} count={} end={}",
                  isValid ? "valid" : "invalid", startIndex, count, endIndex);
@@ -698,18 +612,18 @@ void HdfReviewTab::loadThumbnailsBatch(const std::vector<backend::services::Proc
     const int spacerH = remainingRows * cellH;
     if (isValid) {
         if (validBottomSpacer_) {
-            validImageGrid_->removeItem(validBottomSpacer_);
+            ui->validImageGrid->removeItem(validBottomSpacer_);
             delete validBottomSpacer_;
         }
         validBottomSpacer_ = new QSpacerItem(0, spacerH, QSizePolicy::Minimum, QSizePolicy::Fixed);
-        validImageGrid_->addItem(validBottomSpacer_, static_cast<int>(loadedRows), 0, 1, GRID_COLUMNS);
+        ui->validImageGrid->addItem(validBottomSpacer_, static_cast<int>(loadedRows), 0, 1, GRID_COLUMNS);
     } else {
         if (invalidBottomSpacer_) {
-            invalidImageGrid_->removeItem(invalidBottomSpacer_);
+            ui->invalidImageGrid->removeItem(invalidBottomSpacer_);
             delete invalidBottomSpacer_;
         }
         invalidBottomSpacer_ = new QSpacerItem(0, spacerH, QSizePolicy::Minimum, QSizePolicy::Fixed);
-        invalidImageGrid_->addItem(invalidBottomSpacer_, static_cast<int>(loadedRows), 0, 1, GRID_COLUMNS);
+        ui->invalidImageGrid->addItem(invalidBottomSpacer_, static_cast<int>(loadedRows), 0, 1, GRID_COLUMNS);
     }
 #ifdef _WIN32
     {
@@ -726,7 +640,7 @@ void HdfReviewTab::loadThumbnailsBatch(const std::vector<backend::services::Proc
 }
 
 void HdfReviewTab::onScrollValueChanged(int value) {
-    QScrollArea* scrollArea = isShowingValid_ ? validImageScroll_ : invalidImageScroll_;
+    QScrollArea* scrollArea = isShowingValid_ ? ui->validImageScroll : ui->invalidImageScroll;
     const auto& frames = isShowingValid_ ? validFrames_ : invalidFrames_;
     size_t& loadedCount = isShowingValid_ ? validThumbnailsLoaded_ : invalidThumbnailsLoaded_;
     
@@ -763,12 +677,12 @@ void HdfReviewTab::updateMetricsTable(const std::vector<backend::services::Proce
     if (isValid) {
         if (validMetricsModel_) {
             validMetricsModel_->setSource(&validFrames_);
-            validMetricsTable_->resizeColumnsToContents();
+            ui->validMetricsTable->resizeColumnsToContents();
         }
     } else {
         if (invalidMetricsModel_) {
             invalidMetricsModel_->setSource(&invalidFrames_);
-            invalidMetricsTable_->resizeColumnsToContents();
+            ui->invalidMetricsTable->resizeColumnsToContents();
         }
     }
 }
@@ -806,7 +720,7 @@ QImage HdfReviewTab::matToQImage(const cv::Mat& mat) const {
 void HdfReviewTab::onTabChanged(int index) {
     // Save previous tab's scroll position
     {
-        QScrollArea* prevScroll = isShowingValid_ ? validImageScroll_ : invalidImageScroll_;
+        QScrollArea* prevScroll = isShowingValid_ ? ui->validImageScroll : ui->invalidImageScroll;
         if (prevScroll && prevScroll->verticalScrollBar()) {
             int prevVal = prevScroll->verticalScrollBar()->value();
             if (isShowingValid_) {
@@ -828,7 +742,7 @@ void HdfReviewTab::onTabChanged(int index) {
 
     // Restore saved scroll position for the new tab
     {
-        QScrollArea* currScroll = isShowingValid_ ? validImageScroll_ : invalidImageScroll_;
+        QScrollArea* currScroll = isShowingValid_ ? ui->validImageScroll : ui->invalidImageScroll;
         if (currScroll && currScroll->verticalScrollBar()) {
             int targetVal = isShowingValid_ ? validScrollValue_ : invalidScrollValue_;
             currScroll->verticalScrollBar()->setValue(targetVal);
@@ -849,7 +763,7 @@ void HdfReviewTab::onViewFrameDetails(int frameIndex) {
 }
 
 void HdfReviewTab::onTableSelectionChanged() {
-    QTableView* table = isShowingValid_ ? validMetricsTable_ : invalidMetricsTable_;
+    QTableView* table = isShowingValid_ ? ui->validMetricsTable : ui->invalidMetricsTable;
     if (!table || !table->selectionModel()) return;
     const QModelIndexList rows = table->selectionModel()->selectedRows();
     if (!rows.isEmpty()) {
@@ -871,7 +785,7 @@ void HdfReviewTab::setSelectedFrame(int frameIndex) {
     selectedFrameIndex_ = frameIndex;
 
     // Update thumbnail selection
-    QGridLayout* grid = isShowingValid_ ? validImageGrid_ : invalidImageGrid_;
+    QGridLayout* grid = isShowingValid_ ? ui->validImageGrid : ui->invalidImageGrid;
     for (int i = 0; i < grid->count(); ++i) {
         QLayoutItem* item = grid->itemAt(i);
         if (item && item->widget()) {
@@ -883,7 +797,7 @@ void HdfReviewTab::setSelectedFrame(int frameIndex) {
     }
 
     // Update table selection
-    QTableView* table = isShowingValid_ ? validMetricsTable_ : invalidMetricsTable_;
+    QTableView* table = isShowingValid_ ? ui->validMetricsTable : ui->invalidMetricsTable;
     if (table && table->model()) {
         QModelIndex idx = table->model()->index(frameIndex, 0);
         if (idx.isValid() && table->selectionModel()) {
@@ -1001,11 +915,11 @@ void HdfReviewTab::onToggleRoiOverlay(bool enabled) {
     thumbnailCache_.clear();
 
     // Preserve current scroll positions
-    if (validImageScroll_ && validImageScroll_->verticalScrollBar()) {
-        validScrollValue_ = validImageScroll_->verticalScrollBar()->value();
+    if (ui->validImageScroll && ui->validImageScroll->verticalScrollBar()) {
+        validScrollValue_ = ui->validImageScroll->verticalScrollBar()->value();
     }
-    if (invalidImageScroll_ && invalidImageScroll_->verticalScrollBar()) {
-        invalidScrollValue_ = invalidImageScroll_->verticalScrollBar()->value();
+    if (ui->invalidImageScroll && ui->invalidImageScroll->verticalScrollBar()) {
+        invalidScrollValue_ = ui->invalidImageScroll->verticalScrollBar()->value();
     }
 
     // Refresh only what is visible in each tab (carousel-like behavior)
@@ -1015,11 +929,11 @@ void HdfReviewTab::onToggleRoiOverlay(bool enabled) {
     pruneOffscreenThumbnails(false);
 
     // Restore scroll positions
-    if (validImageScroll_ && validImageScroll_->verticalScrollBar()) {
-        validImageScroll_->verticalScrollBar()->setValue(validScrollValue_);
+    if (ui->validImageScroll && ui->validImageScroll->verticalScrollBar()) {
+        ui->validImageScroll->verticalScrollBar()->setValue(validScrollValue_);
     }
-    if (invalidImageScroll_ && invalidImageScroll_->verticalScrollBar()) {
-        invalidImageScroll_->verticalScrollBar()->setValue(invalidScrollValue_);
+    if (ui->invalidImageScroll && ui->invalidImageScroll->verticalScrollBar()) {
+        ui->invalidImageScroll->verticalScrollBar()->setValue(invalidScrollValue_);
     }
 }
 
@@ -1097,7 +1011,7 @@ void HdfReviewTab::computeVisibleRange(bool isValid, size_t &outStartIndex, size
     outEndIndex = 0;
     if (frames.empty()) return;
 
-    const QScrollArea* scrollArea = isValid ? validImageScroll_ : invalidImageScroll_;
+    const QScrollArea* scrollArea = isValid ? ui->validImageScroll : ui->invalidImageScroll;
     if (!scrollArea || !scrollArea->verticalScrollBar()) return;
 
     const int cellH = THUMBNAIL_SIZE + 8;
@@ -1167,7 +1081,7 @@ void HdfReviewTab::refreshVisibleThumbnails(bool isValid) {
     computeVisibleRange(isValid, startIndex, endIndex);
     if (endIndex <= startIndex) return;
 
-    QGridLayout* grid = isValid ? validImageGrid_ : invalidImageGrid_;
+    QGridLayout* grid = isValid ? ui->validImageGrid : ui->invalidImageGrid;
 
     // Remove existing thumbnail labels
     QVector<QWidget*> toRemove;
@@ -1192,18 +1106,18 @@ void HdfReviewTab::refreshVisibleThumbnails(bool isValid) {
 
     if (isValid) {
         if (validTopSpacer_) {
-            validImageGrid_->removeItem(validTopSpacer_);
+            ui->validImageGrid->removeItem(validTopSpacer_);
             delete validTopSpacer_;
         }
         validTopSpacer_ = new QSpacerItem(0, static_cast<int>(startRow) * cellH, QSizePolicy::Minimum, QSizePolicy::Fixed);
-        validImageGrid_->addItem(validTopSpacer_, 0, 0, 1, GRID_COLUMNS);
+        ui->validImageGrid->addItem(validTopSpacer_, 0, 0, 1, GRID_COLUMNS);
     } else {
         if (invalidTopSpacer_) {
-            invalidImageGrid_->removeItem(invalidTopSpacer_);
+            ui->invalidImageGrid->removeItem(invalidTopSpacer_);
             delete invalidTopSpacer_;
         }
         invalidTopSpacer_ = new QSpacerItem(0, static_cast<int>(startRow) * cellH, QSizePolicy::Minimum, QSizePolicy::Fixed);
-        invalidImageGrid_->addItem(invalidTopSpacer_, 0, 0, 1, GRID_COLUMNS);
+        ui->invalidImageGrid->addItem(invalidTopSpacer_, 0, 0, 1, GRID_COLUMNS);
     }
 
     // Add visible thumbnails as a contiguous block after the top spacer
@@ -1226,18 +1140,18 @@ void HdfReviewTab::refreshVisibleThumbnails(bool isValid) {
     const int bottomH = static_cast<int>(remainingRows) * cellH;
     if (isValid) {
         if (validBottomSpacer_) {
-            validImageGrid_->removeItem(validBottomSpacer_);
+            ui->validImageGrid->removeItem(validBottomSpacer_);
             delete validBottomSpacer_;
         }
         validBottomSpacer_ = new QSpacerItem(0, bottomH, QSizePolicy::Minimum, QSizePolicy::Fixed);
-        validImageGrid_->addItem(validBottomSpacer_, localRowBase + static_cast<int>(visibleRows), 0, 1, GRID_COLUMNS);
+        ui->validImageGrid->addItem(validBottomSpacer_, localRowBase + static_cast<int>(visibleRows), 0, 1, GRID_COLUMNS);
     } else {
         if (invalidBottomSpacer_) {
-            invalidImageGrid_->removeItem(invalidBottomSpacer_);
+            ui->invalidImageGrid->removeItem(invalidBottomSpacer_);
             delete invalidBottomSpacer_;
         }
         invalidBottomSpacer_ = new QSpacerItem(0, bottomH, QSizePolicy::Minimum, QSizePolicy::Fixed);
-        invalidImageGrid_->addItem(invalidBottomSpacer_, localRowBase + static_cast<int>(visibleRows), 0, 1, GRID_COLUMNS);
+        ui->invalidImageGrid->addItem(invalidBottomSpacer_, localRowBase + static_cast<int>(visibleRows), 0, 1, GRID_COLUMNS);
     }
 }
 
@@ -1249,7 +1163,7 @@ void HdfReviewTab::pruneOffscreenThumbnails(bool isValid) {
     computeVisibleRange(isValid, keepStart, keepEnd);
     if (keepEnd <= keepStart) return;
 
-    QGridLayout* grid = isValid ? validImageGrid_ : invalidImageGrid_;
+    QGridLayout* grid = isValid ? ui->validImageGrid : ui->invalidImageGrid;
 
     // Collect labels to remove (outside keep range)
     QVector<QWidget*> toRemove;
@@ -1290,18 +1204,18 @@ void HdfReviewTab::pruneOffscreenThumbnails(bool isValid) {
     const int spacerH = remainingRows * cellH;
     if (isValid) {
         if (validBottomSpacer_) {
-            validImageGrid_->removeItem(validBottomSpacer_);
+            ui->validImageGrid->removeItem(validBottomSpacer_);
             delete validBottomSpacer_;
         }
         validBottomSpacer_ = new QSpacerItem(0, spacerH, QSizePolicy::Minimum, QSizePolicy::Fixed);
-        validImageGrid_->addItem(validBottomSpacer_, static_cast<int>(loadedRows), 0, 1, GRID_COLUMNS);
+        ui->validImageGrid->addItem(validBottomSpacer_, static_cast<int>(loadedRows), 0, 1, GRID_COLUMNS);
     } else {
         if (invalidBottomSpacer_) {
-            invalidImageGrid_->removeItem(invalidBottomSpacer_);
+            ui->invalidImageGrid->removeItem(invalidBottomSpacer_);
             delete invalidBottomSpacer_;
         }
         invalidBottomSpacer_ = new QSpacerItem(0, spacerH, QSizePolicy::Minimum, QSizePolicy::Fixed);
-        invalidImageGrid_->addItem(invalidBottomSpacer_, static_cast<int>(loadedRows), 0, 1, GRID_COLUMNS);
+        ui->invalidImageGrid->addItem(invalidBottomSpacer_, static_cast<int>(loadedRows), 0, 1, GRID_COLUMNS);
     }
 }
 

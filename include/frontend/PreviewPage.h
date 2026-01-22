@@ -13,6 +13,7 @@ class QCheckBox;
 class QLabel;
 class QTimer;
 namespace frontend { class AppConfigWatcher; }
+namespace Ui { class PreviewPage; }
 
 namespace frontend {
 
@@ -22,6 +23,7 @@ class PreviewPage : public QWidget {
     Q_OBJECT
 public:
     explicit PreviewPage(backend::AppBackend& backend, QWidget* parent = nullptr);
+    ~PreviewPage();
     PlaybackPanel* getPlaybackPanel() const { return playback_; }
     ConfigTabs* getConfigTabs() const { return configTabs_; }
 
@@ -31,8 +33,9 @@ private slots:
     void onUpdateOverlay();
 
 private:
+    void setupOverlayWidget();
 
-
+    Ui::PreviewPage* ui;
     backend::AppBackend& backend_;
     PlaybackPanel* playback_ = nullptr;
     ConfigTabs* configTabs_ = nullptr;

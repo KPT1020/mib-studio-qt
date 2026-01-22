@@ -177,37 +177,50 @@ endif()
 set(FRONTEND_COMMON_SOURCES
     src/frontend/MainWindow.cpp
     include/frontend/MainWindow.h
+    resources/ui/MainWindow.ui
     src/frontend/HdfReviewTab.cpp
     include/frontend/HdfReviewTab.h
+    resources/ui/HdfReviewTab.ui
     src/frontend/PlaybackPanel.cpp
     include/frontend/PlaybackPanel.h
     src/frontend/BufferSaveDialog.cpp
     include/frontend/BufferSaveDialog.h
+    resources/ui/BufferSaveDialog.ui
     resources/defaults.qrc
     src/frontend/ConnectTab.cpp
     include/frontend/ConnectTab.h
+    resources/ui/ConnectTab.ui
     src/frontend/OverviewTab.cpp
     include/frontend/OverviewTab.h
+    resources/ui/OverviewTab.ui
     src/frontend/PreviewPage.cpp
     include/frontend/PreviewPage.h
+    resources/ui/PreviewPage.ui
     src/frontend/ConfigTabs.cpp
     include/frontend/ConfigTabs.h
     src/frontend/NanopositionerTab.cpp
     include/frontend/NanopositionerTab.h
+    resources/ui/NanopositionerTab.ui
     src/frontend/ProcessingSettingsDialog.cpp
     include/frontend/ProcessingSettingsDialog.h
+    resources/ui/ProcessingSettingsDialog.ui
     src/frontend/FrameViewerDialog.cpp
     include/frontend/FrameViewerDialog.h
+    resources/ui/FrameViewerDialog.ui
     src/frontend/MockConfigDialog.cpp
     include/frontend/MockConfigDialog.h
+    resources/ui/MockConfigDialog.ui
     src/frontend/ExperimentMonitoringTab.cpp
     include/frontend/ExperimentMonitoringTab.h
+    resources/ui/ExperimentMonitoringTab.ui
     src/frontend/HdfMetricsModel.cpp
     include/frontend/HdfMetricsModel.h
     src/frontend/MonitoringSettingsDialog.cpp
     include/frontend/MonitoringSettingsDialog.h
+    resources/ui/MonitoringSettingsDialog.ui
     src/frontend/ConversionFactorDialog.cpp
     include/frontend/ConversionFactorDialog.h
+    resources/ui/ConversionFactorDialog.ui
     src/frontend/JsonTableModel.cpp
     include/frontend/JsonTableModel.h
     src/frontend/JsonFlatten.cpp
@@ -222,6 +235,10 @@ add_executable(mib_studio_qt WIN32
     src/frontend/main.cpp
     ${FRONTEND_COMMON_SOURCES}
     resources/app_icon.rc
+)
+
+set_target_properties(mib_studio_qt PROPERTIES
+    AUTOUIC_SEARCH_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/resources/ui"
 )
 
 target_include_directories(mib_studio_qt PRIVATE

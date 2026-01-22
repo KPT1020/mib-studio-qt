@@ -8,11 +8,13 @@ class QCheckBox;
 class PlaybackPanel;
 
 namespace backend { class AppBackend; }
+namespace Ui { class ProcessingSettingsDialog; }
 
 class ProcessingSettingsDialog : public QDialog {
     Q_OBJECT
 public:
     explicit ProcessingSettingsDialog(backend::AppBackend& backend, PlaybackPanel* playbackPanel = nullptr, QWidget* parent = nullptr);
+    ~ProcessingSettingsDialog();
 
 private slots:
     void onApply();
@@ -21,16 +23,9 @@ private:
     void applySettings();
     void updateRoiLimits();
 
+    Ui::ProcessingSettingsDialog* ui;
     backend::AppBackend& backend_;
     PlaybackPanel* playbackPanel_{nullptr};
-    QSpinBox* invalidSamplingSpin_{nullptr};
-    QSpinBox* flushIntervalSpin_{nullptr};
-    QSpinBox* roiXSpin_{nullptr};
-    QSpinBox* roiYSpin_{nullptr};
-    QSpinBox* roiWidthSpin_{nullptr};
-    QSpinBox* roiHeightSpin_{nullptr};
-    QCheckBox* dropFramesCheck_{nullptr};
-    QDialogButtonBox* buttons_{nullptr};
 };
 
 

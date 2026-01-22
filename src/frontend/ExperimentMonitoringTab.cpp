@@ -1,8 +1,7 @@
 #include "frontend/ExperimentMonitoringTab.h"
+#include "ui_ExperimentMonitoringTab.h"
 
 #include <QTimer>
-#include <QGridLayout>
-#include <QScrollArea>
 #include <QLabel>
 #include <QPixmap>
 #include <QPainter>
@@ -26,10 +25,6 @@
 #include <QBarCategoryAxis>
 #endif
 #include <QFrame>
-#include <QCheckBox>
-#include <QPushButton>
-#include <QHBoxLayout>
-#include <QVBoxLayout>
 #include <QMessageBox>
 #include <QShowEvent>
 #include <QHideEvent>
@@ -58,12 +53,43 @@ namespace frontend
 {
 
     ExperimentMonitoringTab::ExperimentMonitoringTab(backend::AppBackend &backend, QWidget *parent)
-        : QWidget(parent), backend_(backend)
+        : QWidget(parent), ui(new Ui::ExperimentMonitoringTab), backend_(backend)
     {
-        auto *rootLayout = new QGridLayout(this);
-        rootLayout->setContentsMargins(6, 6, 6, 6);
-        rootLayout->setSpacing(6);
+        ui->setupUi(this);
 
+        setupCharts();
+
+        // Connect signals
+        connect(ui->clearBufferBtn, &QPushButton::clicked, this, &ExperimentMonitoringTab::onClearBuffer);
+        connect(ui->validOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
+        connect(ui->invalidOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
+
+        // Set column stretch to make panels equal size
+        ui->gridLayout->setColumnStretch(0, 1);
+        ui->gridLayout->setColumnStretch(1, 1);
+        ui->gridLayout->setRowStretch(1, 1); // Charts row
+        ui->gridLayout->setRowStretch(2, 1); // Frame grids row
+
+        // Setup update timer
+        updateTimer_ = new QTimer(this);
+        updateTimer_->setInterval(UPDATE_INTERVAL_MS);
+        connect(updateTimer_, &QTimer::timeout, this, &ExperimentMonitoringTab::onUpdate);
+    }
+
+    ExperimentMonitoringTab::~ExperimentMonitoringTab() {
+        // Cleanup isoelastic curve line series
+        for (QLineSeries* series : isoelasticCurves_)
+        {
+            if (series)
+            {
+                delete series;
+            }
+        }
+        isoelasticCurves_.clear();
+        delete ui;
+    }
+
+    void ExperimentMonitoringTab::setupCharts() {
         // Panel 1: Scatterplot (top-left)
         scatterplotChart_ = new QChart();
         scatterSeries_ = new QScatterSeries();
@@ -84,7 +110,10 @@ namespace frontend
 
         scatterplotView_ = new QChartView(scatterplotChart_);
         scatterplotView_->setRenderHint(QPainter::Antialiasing);
-        rootLayout->addWidget(scatterplotView_, 1, 0);
+        // Replace placeholder with actual chart view
+        ui->gridLayout->removeWidget(ui->scatterplotViewPlaceholder);
+        delete ui->scatterplotViewPlaceholder;
+        ui->gridLayout->addWidget(scatterplotView_, 1, 0);
 
         // Load isoelastic curves overlay
         loadIsoelasticCurves();
@@ -129,74 +158,10 @@ namespace frontend
 
         histogramView_ = new QChartView(histogramChart_);
         histogramView_->setRenderHint(QPainter::Antialiasing);
-        rootLayout->addWidget(histogramView_, 1, 1);
-
-        // Panel 3: Valid frames grid (bottom-left)
-        validFramesContainer_ = new QWidget(this);
-        validFramesLayout_ = new QVBoxLayout(validFramesContainer_);
-        validFramesLayout_->setContentsMargins(0, 0, 0, 0);
-        validFramesLayout_->setSpacing(4);
-
-        validFramesControls_ = new QHBoxLayout();
-        validOverlayCheck_ = new QCheckBox(tr("Show Overlay"), validFramesContainer_);
-        validOverlayCheck_->setChecked(false);
-        connect(validOverlayCheck_, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
-        validFramesControls_->addWidget(validOverlayCheck_);
-        validFramesControls_->addStretch();
-        validFramesLayout_->addLayout(validFramesControls_);
-
-        validFramesScroll_ = new QScrollArea(validFramesContainer_);
-        validFramesWidget_ = new QWidget();
-        validFramesGrid_ = new QGridLayout(validFramesWidget_);
-        validFramesGrid_->setSpacing(4);
-        validFramesScroll_->setWidget(validFramesWidget_);
-        validFramesScroll_->setWidgetResizable(true);
-        validFramesScroll_->setMinimumHeight(200);
-        validFramesLayout_->addWidget(validFramesScroll_);
-        rootLayout->addWidget(validFramesContainer_, 2, 0);
-
-        // Panel 4: Invalid frames grid (bottom-right)
-        invalidFramesContainer_ = new QWidget(this);
-        invalidFramesLayout_ = new QVBoxLayout(invalidFramesContainer_);
-        invalidFramesLayout_->setContentsMargins(0, 0, 0, 0);
-        invalidFramesLayout_->setSpacing(4);
-
-        invalidFramesControls_ = new QHBoxLayout();
-        invalidOverlayCheck_ = new QCheckBox(tr("Show Overlay"), invalidFramesContainer_);
-        invalidOverlayCheck_->setChecked(false);
-        connect(invalidOverlayCheck_, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
-        invalidFramesControls_->addWidget(invalidOverlayCheck_);
-        invalidFramesControls_->addStretch();
-        invalidFramesLayout_->addLayout(invalidFramesControls_);
-
-        invalidFramesScroll_ = new QScrollArea(invalidFramesContainer_);
-        invalidFramesWidget_ = new QWidget();
-        invalidFramesGrid_ = new QGridLayout(invalidFramesWidget_);
-        invalidFramesGrid_->setSpacing(4);
-        invalidFramesScroll_->setWidget(invalidFramesWidget_);
-        invalidFramesScroll_->setWidgetResizable(true);
-        invalidFramesScroll_->setMinimumHeight(200);
-        invalidFramesLayout_->addWidget(invalidFramesScroll_);
-        rootLayout->addWidget(invalidFramesContainer_, 2, 1);
-
-        // Add clear buffer button in a separate row above charts
-        auto *topRow = new QHBoxLayout();
-        clearBufferBtn_ = new QPushButton(tr("Clear Buffer"), this);
-        connect(clearBufferBtn_, &QPushButton::clicked, this, &ExperimentMonitoringTab::onClearBuffer);
-        topRow->addWidget(clearBufferBtn_);
-        topRow->addStretch();
-        rootLayout->addLayout(topRow, 0, 0, 1, 2);
-
-        // Set column stretch to make panels equal size
-        rootLayout->setColumnStretch(0, 1);
-        rootLayout->setColumnStretch(1, 1);
-        rootLayout->setRowStretch(1, 1); // Charts row
-        rootLayout->setRowStretch(2, 1); // Frame grids row
-
-        // Setup update timer
-        updateTimer_ = new QTimer(this);
-        updateTimer_->setInterval(UPDATE_INTERVAL_MS);
-        connect(updateTimer_, &QTimer::timeout, this, &ExperimentMonitoringTab::onUpdate);
+        // Replace placeholder with actual chart view
+        ui->gridLayout->removeWidget(ui->histogramViewPlaceholder);
+        delete ui->histogramViewPlaceholder;
+        ui->gridLayout->addWidget(histogramView_, 1, 1);
     }
 
     void ExperimentMonitoringTab::onUpdate()
@@ -279,18 +244,6 @@ namespace frontend
         }
     }
 
-    ExperimentMonitoringTab::~ExperimentMonitoringTab()
-    {
-        // Cleanup isoelastic curve line series
-        for (QLineSeries* series : isoelasticCurves_)
-        {
-            if (series)
-            {
-                delete series;
-            }
-        }
-        isoelasticCurves_.clear();
-    }
 
     void ExperimentMonitoringTab::updateScatterplot(const std::vector<backend::services::ProcessedFrame> &validFrames)
     {
@@ -511,7 +464,7 @@ namespace frontend
 
     void ExperimentMonitoringTab::updateValidFramesGrid(const std::vector<backend::services::ProcessedFrame> &validFrames)
     {
-        clearGrid(validFramesGrid_);
+        clearGrid(ui->validFramesGrid);
 
         // Get ROI
         auto roi = backend_.processing().getRealtimeRoi();
@@ -559,7 +512,7 @@ namespace frontend
                     THUMBNAIL_SIZE, THUMBNAIL_SIZE,
                     Qt::KeepAspectRatio, Qt::SmoothTransformation));
 
-                QLabel *label = new QLabel(validFramesWidget_);
+                QLabel *label = new QLabel(ui->validFramesWidget);
                 label->setPixmap(pixmap);
                 label->setAlignment(Qt::AlignCenter);
                 label->setFrameStyle(QFrame::Box);
@@ -569,7 +522,7 @@ namespace frontend
                 label->setMaximumSize(THUMBNAIL_SIZE, THUMBNAIL_SIZE);
                 label->setScaledContents(false);
 
-                validFramesGrid_->addWidget(label, row, col);
+                ui->validFramesGrid->addWidget(label, row, col);
 
                 col++;
                 if (col >= GRID_COLUMNS)
@@ -583,7 +536,7 @@ namespace frontend
 
     void ExperimentMonitoringTab::updateInvalidFramesGrid(const std::vector<backend::services::ProcessedFrame> &invalidFrames)
     {
-        clearGrid(invalidFramesGrid_);
+        clearGrid(ui->invalidFramesGrid);
 
         // Get ROI
         auto roi = backend_.processing().getRealtimeRoi();
@@ -629,7 +582,7 @@ namespace frontend
                     THUMBNAIL_SIZE, THUMBNAIL_SIZE,
                     Qt::KeepAspectRatio, Qt::SmoothTransformation));
 
-                QLabel *label = new QLabel(invalidFramesWidget_);
+                QLabel *label = new QLabel(ui->invalidFramesWidget);
                 label->setPixmap(pixmap);
                 label->setAlignment(Qt::AlignCenter);
                 label->setFrameStyle(QFrame::Box);
@@ -639,7 +592,7 @@ namespace frontend
                 label->setMaximumSize(THUMBNAIL_SIZE, THUMBNAIL_SIZE);
                 label->setScaledContents(false);
 
-                invalidFramesGrid_->addWidget(label, row, col);
+                ui->invalidFramesGrid->addWidget(label, row, col);
 
                 col++;
                 if (col >= GRID_COLUMNS)
@@ -731,13 +684,13 @@ namespace frontend
     void ExperimentMonitoringTab::onToggleOverlay(bool enabled)
     {
         QCheckBox *sender = qobject_cast<QCheckBox *>(this->sender());
-        if (sender == validOverlayCheck_)
+        if (sender == ui->validOverlayCheck)
         {
             showValidOverlay_ = enabled;
             // Trigger update to refresh grid with overlay
             updateValidFramesGrid(recentValidFrames_);
         }
-        else if (sender == invalidOverlayCheck_)
+        else if (sender == ui->invalidOverlayCheck)
         {
             showInvalidOverlay_ = enabled;
             // Trigger update to refresh grid with overlay

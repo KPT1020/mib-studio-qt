@@ -1,0 +1,302 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>BufferSaveDialog</class>
+ <widget class="QDialog" name="BufferSaveDialog">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>500</width>
+    <height>400</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Save Buffer &amp; Manage Size</string>
+  </property>
+  <property name="modal">
+   <bool>true</bool>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <property name="spacing">
+    <number>8</number>
+   </property>
+   <item>
+    <widget class="QGroupBox" name="dirGroup">
+     <property name="title">
+      <string>Output Directory</string>
+     </property>
+     <layout class="QVBoxLayout" name="dirLayout">
+      <item>
+       <layout class="QHBoxLayout" name="dirRowLayout">
+        <item>
+         <widget class="QLineEdit" name="outputDirEdit">
+          <property name="placeholderText">
+           <string>Select output directory for saved frames</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="browseBtn">
+          <property name="text">
+           <string>Browse...</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="rangeGroup">
+     <property name="title">
+      <string>Frame Range</string>
+     </property>
+     <layout class="QVBoxLayout" name="rangeLayout">
+      <item>
+       <widget class="QRadioButton" name="allFramesRadio">
+        <property name="text">
+         <string>All available frames</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QRadioButton" name="indexRangeRadio">
+        <property name="text">
+         <string>Index range</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="indexRangeLayout">
+        <item>
+         <widget class="QLabel" name="startIndexLabel">
+          <property name="text">
+           <string>Start:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QSpinBox" name="startIndexSpin">
+          <property name="maximum">
+           <number>2147483647</number>
+          </property>
+          <property name="value">
+           <number>0</number>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="endIndexLabel">
+          <property name="text">
+           <string>End:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QSpinBox" name="endIndexSpin">
+          <property name="maximum">
+           <number>2147483647</number>
+          </property>
+          <property name="value">
+           <number>0</number>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="horizontalSpacer">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QRadioButton" name="timestampRangeRadio">
+        <property name="text">
+         <string>Timestamp range</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="timestampRangeLayout">
+        <item>
+         <widget class="QLabel" name="startTimestampLabel">
+          <property name="text">
+           <string>Start:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QSpinBox" name="startTimestampSpin">
+          <property name="maximum">
+           <number>2147483647</number>
+          </property>
+          <property name="value">
+           <number>0</number>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="endTimestampLabel">
+          <property name="text">
+           <string>End:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QSpinBox" name="endTimestampSpin">
+          <property name="maximum">
+           <number>2147483647</number>
+          </property>
+          <property name="value">
+           <number>0</number>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="horizontalSpacer_2">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QLabel" name="availableRangeLabel">
+        <property name="text">
+         <string>Available: N/A</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="availableTimestampLabel">
+        <property name="text">
+         <string>Available: N/A</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="refreshRangesBtn">
+        <property name="text">
+         <string>Refresh Ranges</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="bufferSizeGroup">
+     <property name="title">
+      <string>Buffer Size</string>
+     </property>
+     <layout class="QFormLayout" name="bufferLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="currentCapacityLabel">
+        <property name="text">
+         <string>Current capacity:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QLabel" name="currentCapacityValueLabel">
+        <property name="text">
+         <string>N/A</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="newCapacityLabel">
+        <property name="text">
+         <string>New capacity:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QSpinBox" name="newCapacitySpin">
+        <property name="minimum">
+         <number>1</number>
+        </property>
+        <property name="maximum">
+         <number>100000</number>
+        </property>
+        <property name="value">
+         <number>512</number>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0" colspan="2">
+       <widget class="QLabel" name="estimatedMemoryLabel">
+        <property name="text">
+         <string>Estimated memory: N/A</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0" colspan="2">
+       <widget class="QPushButton" name="applyResizeBtn">
+        <property name="text">
+         <string>Apply Resize</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="filterGroup">
+     <property name="title">
+      <string>Filter Options</string>
+     </property>
+     <layout class="QVBoxLayout" name="filterLayout">
+      <item>
+       <widget class="QCheckBox" name="filterEmptyFramesCheck">
+        <property name="text">
+         <string>Remove empty frames</string>
+        </property>
+        <property name="toolTip">
+         <string>Skip frames with pixel count below threshold after binary threshold</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="statusLabel">
+     <property name="text">
+      <string>Ready</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QDialogButtonBox" name="buttons">
+     <property name="standardButtons">
+      <set>QDialogButtonBox::Cancel|QDialogButtonBox::Save</set>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+</ui>

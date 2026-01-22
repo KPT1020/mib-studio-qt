@@ -1,10 +1,7 @@
 #include "frontend/ConversionFactorDialog.h"
+#include "ui_ConversionFactorDialog.h"
 
-#include <QFormLayout>
-#include <QDoubleSpinBox>
-#include <QDialogButtonBox>
 #include <QPushButton>
-#include <QLabel>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -57,33 +54,22 @@ namespace
 }
 
 ConversionFactorDialog::ConversionFactorDialog(backend::AppBackend& backend, QWidget* parent)
-    : QDialog(parent), backend_(backend) {
-    setWindowTitle(tr("Pixel to Micron Conversion"));
-    setModal(true);
-
-    auto* layout = new QFormLayout(this);
-
-    conversionFactorSpin_ = new QDoubleSpinBox(this);
-    conversionFactorSpin_->setMinimum(0.0001);
-    conversionFactorSpin_->setMaximum(1000.0);
-    conversionFactorSpin_->setDecimals(4);
-    conversionFactorSpin_->setSuffix(tr(" μm/pixel"));
-    conversionFactorSpin_->setToolTip(tr("Conversion factor: 1 pixel = X micron"));
-
-    layout->addRow(tr("Pixel to Micron Factor"), conversionFactorSpin_);
+    : QDialog(parent), ui(new Ui::ConversionFactorDialog), backend_(backend) {
+    ui->setupUi(this);
 
     // Load current value from backend
-    conversionFactorSpin_->setValue(backend_.processing().getPixelToMicronFactor());
+    ui->conversionFactorSpin->setValue(backend_.processing().getPixelToMicronFactor());
 
-    buttons_ = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Apply, this);
-    layout->addRow(buttons_);
-
-    connect(buttons_, &QDialogButtonBox::accepted, this, [this]() {
+    connect(ui->buttons, &QDialogButtonBox::accepted, this, [this]() {
         applySettings();
         accept();
     });
-    connect(buttons_, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    connect(buttons_->button(QDialogButtonBox::Apply), &QPushButton::clicked, this, [this](bool) { onApply(); });
+    connect(ui->buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(ui->buttons->button(QDialogButtonBox::Apply), &QPushButton::clicked, this, [this](bool) { onApply(); });
+}
+
+ConversionFactorDialog::~ConversionFactorDialog() {
+    delete ui;
 }
 
 void ConversionFactorDialog::onApply() {
@@ -92,7 +78,7 @@ void ConversionFactorDialog::onApply() {
 
 void ConversionFactorDialog::applySettings() {
     auto& proc = backend_.processing();
-    const double factor = conversionFactorSpin_->value();
+    const double factor = ui->conversionFactorSpin->value();
 
     proc.setPixelToMicronFactor(factor);
     SPDLOG_INFO("Pixel to micron conversion factor applied: {}", factor);

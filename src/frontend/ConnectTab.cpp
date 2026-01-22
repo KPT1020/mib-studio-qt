@@ -1,16 +1,8 @@
 #include "frontend/ConnectTab.h"
+#include "ui_ConnectTab.h"
 
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QListWidget>
-#include <QPushButton>
 #include <QMessageBox>
-#include <QLabel>
 #include <QVariant>
-#include <QApplication>
-#include <QIcon>
-#include <QTabWidget>
-#include <QWidget>
 
 #include <spdlog/spdlog.h>
 
@@ -53,51 +45,18 @@ bool fromVariant(const QVariant& v, DeviceIdx& out) {
 namespace frontend {
 
 ConnectTab::ConnectTab(backend::AppBackend& backend, QWidget* parent)
-    : QWidget(parent), backend_(backend) {
-    auto* root = new QVBoxLayout(this);
+    : QWidget(parent), ui(new Ui::ConnectTab), backend_(backend) {
+    ui->setupUi(this);
 
-    // Create tab widget with two tabs
-    tabWidget_ = new QTabWidget(this);
-    
-    // Framegrabbers tab
-    auto* framegrabberWidget = new QWidget(this);
-    auto* framegrabberLayout = new QVBoxLayout(framegrabberWidget);
-    framegrabberList_ = new QListWidget(framegrabberWidget);
-    framegrabberList_->setSelectionMode(QAbstractItemView::SingleSelection);
-    framegrabberLayout->addWidget(framegrabberList_);
-    framegrabberLayout->setContentsMargins(0, 0, 0, 0);
-    tabWidget_->addTab(framegrabberWidget, tr("Framegrabbers"));
-    
-    // Cameras tab
-    auto* cameraWidget = new QWidget(this);
-    auto* cameraLayout = new QVBoxLayout(cameraWidget);
-    cameraList_ = new QListWidget(cameraWidget);
-    cameraList_->setSelectionMode(QAbstractItemView::SingleSelection);
-    cameraLayout->addWidget(cameraList_);
-    cameraLayout->setContentsMargins(0, 0, 0, 0);
-    tabWidget_->addTab(cameraWidget, tr("Cameras"));
-
-    auto* buttonsRow = new QHBoxLayout();
-    refreshBtn_ = new QPushButton(tr("Refresh"), this);
-    connectBtn_ = new QPushButton(tr("Connect"), this);
-    mockBtn_ = new QPushButton(tr("Configure Mock…"), this);
-    buttonsRow->addWidget(refreshBtn_);
-    buttonsRow->addWidget(connectBtn_);
-    buttonsRow->addStretch(1);
-    buttonsRow->addWidget(mockBtn_);
-
-    statusLabel_ = new QLabel(tr("Select a device and click Connect."), this);
-
-    root->addWidget(new QLabel(tr("Available devices:"), this));
-    root->addWidget(tabWidget_, 1);
-    root->addLayout(buttonsRow);
-    root->addWidget(statusLabel_);
-
-    connect(refreshBtn_, &QPushButton::clicked, this, &ConnectTab::onRefresh);
-    connect(connectBtn_, &QPushButton::clicked, this, &ConnectTab::onConnect);
-    connect(mockBtn_, &QPushButton::clicked, this, &ConnectTab::onConfigureMock);
+    connect(ui->refreshBtn, &QPushButton::clicked, this, &ConnectTab::onRefresh);
+    connect(ui->connectBtn, &QPushButton::clicked, this, &ConnectTab::onConnect);
+    connect(ui->mockBtn, &QPushButton::clicked, this, &ConnectTab::onConfigureMock);
 
     onRefresh();
+}
+
+ConnectTab::~ConnectTab() {
+    delete ui;
 }
 
 void ConnectTab::onRefresh() {
@@ -105,8 +64,8 @@ void ConnectTab::onRefresh() {
 }
 
 void ConnectTab::populateDevices() {
-    framegrabberList_->clear();
-    cameraList_->clear();
+    ui->framegrabberList->clear();
+    ui->cameraList->clear();
 
     auto& cc = backend_.cameraControl();
     
@@ -115,11 +74,11 @@ void ConnectTab::populateDevices() {
     for (const auto& fg : framegrabbers) {
         auto* item = new QListWidgetItem(QString::fromStdString(fg.label));
         item->setData(Qt::UserRole, toVariant(DeviceIdx{fg.interfaceIndex, fg.deviceIndex}));
-        framegrabberList_->addItem(item);
+        ui->framegrabberList->addItem(item);
     }
     
-    if (framegrabberList_->count() > 0) {
-        framegrabberList_->setCurrentRow(0);
+    if (ui->framegrabberList->count() > 0) {
+        ui->framegrabberList->setCurrentRow(0);
     }
     
     // Populate cameras tab
@@ -127,18 +86,18 @@ void ConnectTab::populateDevices() {
     for (const auto& cam : cameras) {
         auto* item = new QListWidgetItem(QString::fromStdString(cam.label));
         item->setData(Qt::UserRole, toVariant(DeviceIdx{cam.interfaceIndex, cam.deviceIndex}));
-        cameraList_->addItem(item);
+        ui->cameraList->addItem(item);
     }
     
-    if (cameraList_->count() > 0) {
-        cameraList_->setCurrentRow(0);
+    if (ui->cameraList->count() > 0) {
+        ui->cameraList->setCurrentRow(0);
     }
 
-    statusLabel_->setText(QString("Found %1 framegrabber(s), %2 camera(s)")
-                         .arg(framegrabberList_->count())
-                         .arg(cameraList_->count()));
+    ui->statusLabel->setText(QString("Found %1 framegrabber(s), %2 camera(s)")
+                         .arg(ui->framegrabberList->count())
+                         .arg(ui->cameraList->count()));
     SPDLOG_INFO("ConnectTab: refreshed, {} framegrabber(s), {} camera(s) listed", 
-                framegrabberList_->count(), cameraList_->count());
+                ui->framegrabberList->count(), ui->cameraList->count());
 }
 
 void ConnectTab::onConnect() {
@@ -153,12 +112,12 @@ void ConnectTab::onConnect() {
     QListWidget* currentList = nullptr;
     QString deviceType;
     
-    int currentTab = tabWidget_->currentIndex();
+    int currentTab = ui->tabWidget->currentIndex();
     if (currentTab == 0) {
-        currentList = framegrabberList_;
+        currentList = ui->framegrabberList;
         deviceType = tr("framegrabber");
     } else if (currentTab == 1) {
-        currentList = cameraList_;
+        currentList = ui->cameraList;
         deviceType = tr("camera");
     } else {
         QMessageBox::information(this, tr("Connect Device"), tr("Please select a device from the list."));
@@ -183,7 +142,7 @@ void ConnectTab::onConnect() {
                 label.toStdString(), idx.ifIndex, idx.devIndex);
 
     backend_.setHardwareCameraSelection(idx.ifIndex, idx.devIndex, label.toStdString());
-    statusLabel_->setText(tr("Connected to %1 (not capturing)").arg(label));
+    ui->statusLabel->setText(tr("Connected to %1 (not capturing)").arg(label));
     emit connected();
 }
 
@@ -214,7 +173,7 @@ void ConnectTab::onConfigureMock() {
     options.loopFiles = true;
 
     backend_.configureMockCamera(options);
-    statusLabel_->setText(tr("Mock camera configured (not capturing)"));
+    ui->statusLabel->setText(tr("Mock camera configured (not capturing)"));
     SPDLOG_INFO("ConnectTab: mock camera configured ({}, ~{} fps)",
                 options.folder.string(),
                 options.frameInterval.count() > 0 ? 1'000'000.0 / options.frameInterval.count() : 0.0);

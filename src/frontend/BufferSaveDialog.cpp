@@ -1,21 +1,12 @@
 #include "frontend/BufferSaveDialog.h"
+#include "ui_BufferSaveDialog.h"
 
 #include <QCoreApplication>
-#include <QDialogButtonBox>
 #include <QFileDialog>
-#include <QFormLayout>
-#include <QGroupBox>
-#include <QHBoxLayout>
-#include <QLabel>
-#include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QRadioButton>
-#include <QSpinBox>
-#include <QVBoxLayout>
 #include <QStandardPaths>
 #include <QDir>
-#include <QCheckBox>
 
 #include <climits>
 #include <algorithm>
@@ -32,130 +23,30 @@
 namespace frontend {
 
 BufferSaveDialog::BufferSaveDialog(backend::AppBackend& backend, QWidget* parent)
-    : QDialog(parent), backend_(backend) {
-    setWindowTitle(tr("Save Buffer & Manage Size"));
-    setModal(true);
-    resize(500, 400);
+    : QDialog(parent), ui(new Ui::BufferSaveDialog), backend_(backend) {
+    ui->setupUi(this);
 
-    auto* rootLayout = new QVBoxLayout(this);
-    rootLayout->setSpacing(8);
+    // Enable/disable spin boxes based on radio selection
+    ui->startIndexSpin->setEnabled(false);
+    ui->endIndexSpin->setEnabled(false);
+    ui->startTimestampSpin->setEnabled(false);
+    ui->endTimestampSpin->setEnabled(false);
 
-    // Output directory section
-    auto* dirGroup = new QGroupBox(tr("Output Directory"), this);
-    auto* dirLayout = new QVBoxLayout(dirGroup);
-    auto* dirRowLayout = new QHBoxLayout();
-    outputDirEdit_ = new QLineEdit(this);
-    outputDirEdit_->setPlaceholderText(tr("Select output directory for saved frames"));
-    browseBtn_ = new QPushButton(tr("Browse..."), this);
-    dirRowLayout->addWidget(outputDirEdit_);
-    dirRowLayout->addWidget(browseBtn_);
-    dirLayout->addLayout(dirRowLayout);
-    rootLayout->addWidget(dirGroup);
-
-    connect(browseBtn_, &QPushButton::clicked, this, &BufferSaveDialog::onBrowseDirectory);
-
-    // Range selection section
-    rangeGroup_ = new QGroupBox(tr("Frame Range"), this);
-    auto* rangeLayout = new QVBoxLayout(rangeGroup_);
-
-    allFramesRadio_ = new QRadioButton(tr("All available frames"), this);
-    indexRangeRadio_ = new QRadioButton(tr("Index range"), this);
-    timestampRangeRadio_ = new QRadioButton(tr("Timestamp range"), this);
-    allFramesRadio_->setChecked(true);
-
-    rangeLayout->addWidget(allFramesRadio_);
-    rangeLayout->addWidget(indexRangeRadio_);
-
-    auto* indexRangeLayout = new QHBoxLayout();
-    startIndexSpin_ = new QSpinBox(this);
-    startIndexSpin_->setRange(0, INT_MAX);
-    startIndexSpin_->setValue(0);
-    startIndexSpin_->setEnabled(false);
-    endIndexSpin_ = new QSpinBox(this);
-    endIndexSpin_->setRange(0, INT_MAX);
-    endIndexSpin_->setValue(0);
-    endIndexSpin_->setEnabled(false);
-    indexRangeLayout->addWidget(new QLabel(tr("Start:"), this));
-    indexRangeLayout->addWidget(startIndexSpin_);
-    indexRangeLayout->addWidget(new QLabel(tr("End:"), this));
-    indexRangeLayout->addWidget(endIndexSpin_);
-    indexRangeLayout->addStretch();
-    rangeLayout->addLayout(indexRangeLayout);
-
-    rangeLayout->addWidget(timestampRangeRadio_);
-
-    auto* timestampRangeLayout = new QHBoxLayout();
-    startTimestampSpin_ = new QSpinBox(this);
-    startTimestampSpin_->setRange(0, INT_MAX);
-    startTimestampSpin_->setValue(0);
-    startTimestampSpin_->setEnabled(false);
-    endTimestampSpin_ = new QSpinBox(this);
-    endTimestampSpin_->setRange(0, INT_MAX);
-    endTimestampSpin_->setValue(0);
-    endTimestampSpin_->setEnabled(false);
-    timestampRangeLayout->addWidget(new QLabel(tr("Start:"), this));
-    timestampRangeLayout->addWidget(startTimestampSpin_);
-    timestampRangeLayout->addWidget(new QLabel(tr("End:"), this));
-    timestampRangeLayout->addWidget(endTimestampSpin_);
-    timestampRangeLayout->addStretch();
-    rangeLayout->addLayout(timestampRangeLayout);
-
-    availableRangeLabel_ = new QLabel(tr("Available: N/A"), this);
-    availableTimestampLabel_ = new QLabel(tr("Available: N/A"), this);
-    rangeLayout->addWidget(availableRangeLabel_);
-    rangeLayout->addWidget(availableTimestampLabel_);
-
-    refreshRangesBtn_ = new QPushButton(tr("Refresh Ranges"), this);
-    rangeLayout->addWidget(refreshRangesBtn_);
-
-    rootLayout->addWidget(rangeGroup_);
-
-    connect(allFramesRadio_, &QRadioButton::toggled, this, &BufferSaveDialog::onRangeModeChanged);
-    connect(indexRangeRadio_, &QRadioButton::toggled, this, &BufferSaveDialog::onRangeModeChanged);
-    connect(timestampRangeRadio_, &QRadioButton::toggled, this, &BufferSaveDialog::onRangeModeChanged);
-    connect(refreshRangesBtn_, &QPushButton::clicked, this, &BufferSaveDialog::onRefreshRanges);
-
-    // Buffer size section
-    bufferSizeGroup_ = new QGroupBox(tr("Buffer Size"), this);
-    auto* bufferLayout = new QFormLayout(bufferSizeGroup_);
-    currentCapacityLabel_ = new QLabel(tr("N/A"), this);
-    bufferLayout->addRow(tr("Current capacity:"), currentCapacityLabel_);
-    newCapacitySpin_ = new QSpinBox(this);
-    newCapacitySpin_->setRange(1, 100000);
-    newCapacitySpin_->setValue(512);
-    bufferLayout->addRow(tr("New capacity:"), newCapacitySpin_);
-    estimatedMemoryLabel_ = new QLabel(tr("Estimated memory: N/A"), this);
-    bufferLayout->addRow(tr(""), estimatedMemoryLabel_);
-    applyResizeBtn_ = new QPushButton(tr("Apply Resize"), this);
-    bufferLayout->addRow(tr(""), applyResizeBtn_);
-    rootLayout->addWidget(bufferSizeGroup_);
-
-    connect(applyResizeBtn_, &QPushButton::clicked, this, &BufferSaveDialog::onApplyResize);
-    connect(newCapacitySpin_, QOverload<int>::of(&QSpinBox::valueChanged), this, &BufferSaveDialog::updateMemoryDisplay);
-
-    // Filter options section
-    auto* filterGroup = new QGroupBox(tr("Filter Options"), this);
-    auto* filterLayout = new QVBoxLayout(filterGroup);
-    filterEmptyFramesCheck_ = new QCheckBox(tr("Remove empty frames"), this);
-    filterEmptyFramesCheck_->setToolTip(tr("Skip frames with pixel count below threshold after binary threshold"));
-    filterEmptyFramesCheck_->setChecked(false);
-    filterLayout->addWidget(filterEmptyFramesCheck_);
-    rootLayout->addWidget(filterGroup);
-
-    // Status label
-    statusLabel_ = new QLabel(tr("Ready"), this);
-    statusLabel_->setWordWrap(true);
-    rootLayout->addWidget(statusLabel_);
-
-    // Dialog buttons
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
-    saveBtn_ = buttons->button(QDialogButtonBox::Save);
-    if (saveBtn_) {
-        saveBtn_->setText(tr("Save Frames"));
+    // Connect signals
+    connect(ui->browseBtn, &QPushButton::clicked, this, &BufferSaveDialog::onBrowseDirectory);
+    connect(ui->allFramesRadio, &QRadioButton::toggled, this, &BufferSaveDialog::onRangeModeChanged);
+    connect(ui->indexRangeRadio, &QRadioButton::toggled, this, &BufferSaveDialog::onRangeModeChanged);
+    connect(ui->timestampRangeRadio, &QRadioButton::toggled, this, &BufferSaveDialog::onRangeModeChanged);
+    connect(ui->refreshRangesBtn, &QPushButton::clicked, this, &BufferSaveDialog::onRefreshRanges);
+    connect(ui->applyResizeBtn, &QPushButton::clicked, this, &BufferSaveDialog::onApplyResize);
+    connect(ui->newCapacitySpin, QOverload<int>::of(&QSpinBox::valueChanged), this, &BufferSaveDialog::updateMemoryDisplay);
+    
+    QPushButton* saveBtn = ui->buttons->button(QDialogButtonBox::Save);
+    if (saveBtn) {
+        saveBtn->setText(tr("Save Frames"));
     }
-    connect(buttons, &QDialogButtonBox::accepted, this, &BufferSaveDialog::onSaveFrames);
-    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    rootLayout->addWidget(buttons);
+    connect(ui->buttons, &QDialogButtonBox::accepted, this, &BufferSaveDialog::onSaveFrames);
+    connect(ui->buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
     // Set default output directory using QStandardPaths for portability
     QString defaultDir;
@@ -167,31 +58,35 @@ BufferSaveDialog::BufferSaveDialog(backend::AppBackend& backend, QWidget* parent
         const QString appDir = QCoreApplication::applicationDirPath();
         defaultDir = QDir(appDir).absoluteFilePath("saved_frames");
     }
-    outputDirEdit_->setText(QDir(defaultDir).absolutePath());
+    ui->outputDirEdit->setText(QDir(defaultDir).absolutePath());
 
     // Initial update
     updateAvailableRanges();
     updateUIState();
 }
 
+BufferSaveDialog::~BufferSaveDialog() {
+    delete ui;
+}
+
 void BufferSaveDialog::onBrowseDirectory() {
-    const QString current = outputDirEdit_->text().trimmed();
+    const QString current = ui->outputDirEdit->text().trimmed();
     QString selected = QFileDialog::getExistingDirectory(this,
                                                          tr("Select output directory"),
                                                          current.isEmpty() ? QDir::currentPath() : current);
     if (!selected.isEmpty()) {
-        outputDirEdit_->setText(QDir(selected).absolutePath());
+        ui->outputDirEdit->setText(QDir(selected).absolutePath());
     }
 }
 
 void BufferSaveDialog::onRangeModeChanged() {
-    const bool indexMode = indexRangeRadio_->isChecked();
-    const bool timestampMode = timestampRangeRadio_->isChecked();
+    const bool indexMode = ui->indexRangeRadio->isChecked();
+    const bool timestampMode = ui->timestampRangeRadio->isChecked();
 
-    startIndexSpin_->setEnabled(indexMode);
-    endIndexSpin_->setEnabled(indexMode);
-    startTimestampSpin_->setEnabled(timestampMode);
-    endTimestampSpin_->setEnabled(timestampMode);
+    ui->startIndexSpin->setEnabled(indexMode);
+    ui->endIndexSpin->setEnabled(indexMode);
+    ui->startTimestampSpin->setEnabled(timestampMode);
+    ui->endTimestampSpin->setEnabled(timestampMode);
 
     updateUIState();
 }
@@ -201,7 +96,7 @@ void BufferSaveDialog::onRefreshRanges() {
 }
 
 void BufferSaveDialog::onApplyResize() {
-    const size_t newCapacity = static_cast<size_t>(newCapacitySpin_->value());
+    const size_t newCapacity = static_cast<size_t>(ui->newCapacitySpin->value());
     const size_t currentCapacity = backend_.playback().capacity();
 
     if (newCapacity == currentCapacity) {
@@ -311,14 +206,14 @@ void BufferSaveDialog::onSaveFrames() {
         return;
     }
 
-    const QString outputDir = outputDirEdit_->text().trimmed();
+    const QString outputDir = ui->outputDirEdit->text().trimmed();
     if (outputDir.isEmpty()) {
         QMessageBox::warning(this, tr("Save Frames"), tr("Please select an output directory."));
         return;
     }
 
-    statusLabel_->setText(tr("Saving frames..."));
-    saveBtn_->setEnabled(false);
+    ui->statusLabel->setText(tr("Saving frames..."));
+    ui->buttons->button(QDialogButtonBox::Save)->setEnabled(false);
     QCoreApplication::processEvents();
 
     bool success = false;
@@ -326,7 +221,7 @@ void BufferSaveDialog::onSaveFrames() {
 
     // Create filter function if empty frame filtering is enabled
     std::function<bool(const backend::playback::Frame&)> filterFn = nullptr;
-    if (filterEmptyFramesCheck_ && filterEmptyFramesCheck_->isChecked()) {
+    if (ui->filterEmptyFramesCheck && ui->filterEmptyFramesCheck->isChecked()) {
         auto config = backend_.processing().getProcessingConfig();
         auto roi = backend_.processing().getRealtimeRoi();
         auto bg = backend_.processing().getRealtimeBackgroundGray();
@@ -335,25 +230,25 @@ void BufferSaveDialog::onSaveFrames() {
         };
     }
 
-    if (allFramesRadio_->isChecked()) {
+    if (ui->allFramesRadio->isChecked()) {
         success = backend_.playback().saveFramesToDisk(outputDirStd, filterFn);
-    } else if (indexRangeRadio_->isChecked()) {
-        const uint64_t start = static_cast<uint64_t>(startIndexSpin_->value());
-        const uint64_t end = static_cast<uint64_t>(endIndexSpin_->value());
+    } else if (ui->indexRangeRadio->isChecked()) {
+        const uint64_t start = static_cast<uint64_t>(ui->startIndexSpin->value());
+        const uint64_t end = static_cast<uint64_t>(ui->endIndexSpin->value());
         success = backend_.playback().saveFramesToDisk(outputDirStd, start, end, filterFn);
-    } else if (timestampRangeRadio_->isChecked()) {
-        const uint64_t start = static_cast<uint64_t>(startTimestampSpin_->value());
-        const uint64_t end = static_cast<uint64_t>(endTimestampSpin_->value());
+    } else if (ui->timestampRangeRadio->isChecked()) {
+        const uint64_t start = static_cast<uint64_t>(ui->startTimestampSpin->value());
+        const uint64_t end = static_cast<uint64_t>(ui->endTimestampSpin->value());
         success = backend_.playback().saveFramesToDisk(outputDirStd, start, end, true, filterFn);
     }
 
-    saveBtn_->setEnabled(true);
+    ui->buttons->button(QDialogButtonBox::Save)->setEnabled(true);
 
     if (success) {
-        statusLabel_->setText(tr("Frames saved successfully to: %1").arg(outputDir));
+        ui->statusLabel->setText(tr("Frames saved successfully to: %1").arg(outputDir));
         QMessageBox::information(this, tr("Save Frames"), tr("Frames saved successfully."));
     } else {
-        statusLabel_->setText(tr("Failed to save frames. Check logs for details."));
+        ui->statusLabel->setText(tr("Failed to save frames. Check logs for details."));
         QMessageBox::warning(this, tr("Save Frames"), tr("Failed to save frames. Check logs for details."));
     }
 }
@@ -367,8 +262,8 @@ void BufferSaveDialog::updateAvailableRanges() {
 
     // Update capacity
     const size_t capacity = playback.capacity();
-    currentCapacityLabel_->setText(QString::number(capacity));
-    newCapacitySpin_->setValue(static_cast<int>(capacity));
+    ui->currentCapacityValueLabel->setText(QString::number(capacity));
+    ui->newCapacitySpin->setValue(static_cast<int>(capacity));
 
     // Log RAM usage when dialog opens
     const double currentProcessMemoryMB = backend::Tools::getProcessMemoryMB();
@@ -384,7 +279,7 @@ void BufferSaveDialog::updateAvailableRanges() {
     uint64_t earliest = 0, latest = 0;
     size_t count = 0;
     if (playback.queryRange(earliest, latest, count)) {
-        availableRangeLabel_->setText(tr("Available indices: %1 - %2 (%3 frames)")
+        ui->availableRangeLabel->setText(tr("Available indices: %1 - %2 (%3 frames)")
                                          .arg(earliest)
                                          .arg(latest)
                                          .arg(count));
@@ -392,34 +287,34 @@ void BufferSaveDialog::updateAvailableRanges() {
         const int maxInt = INT_MAX;
         const int startVal = static_cast<int>(std::min(earliest, static_cast<uint64_t>(maxInt)));
         const int endVal = static_cast<int>(std::min(latest, static_cast<uint64_t>(maxInt)));
-        startIndexSpin_->setRange(startVal, endVal);
-        endIndexSpin_->setRange(startVal, endVal);
-        startIndexSpin_->setValue(startVal);
-        endIndexSpin_->setValue(endVal);
+        ui->startIndexSpin->setRange(startVal, endVal);
+        ui->endIndexSpin->setRange(startVal, endVal);
+        ui->startIndexSpin->setValue(startVal);
+        ui->endIndexSpin->setValue(endVal);
     } else {
-        availableRangeLabel_->setText(tr("Available indices: No frames available"));
-        startIndexSpin_->setRange(0, 0);
-        endIndexSpin_->setRange(0, 0);
+        ui->availableRangeLabel->setText(tr("Available indices: No frames available"));
+        ui->startIndexSpin->setRange(0, 0);
+        ui->endIndexSpin->setRange(0, 0);
     }
 
     // Update timestamp range
     backend::playback::TimestampRange tsRange;
     if (playback.getAvailableTimestampRange(tsRange)) {
-        availableTimestampLabel_->setText(tr("Available timestamps: %1 - %2")
+        ui->availableTimestampLabel->setText(tr("Available timestamps: %1 - %2")
                                              .arg(formatTimestamp(tsRange.start))
                                              .arg(formatTimestamp(tsRange.end)));
         // Clamp to int range for QSpinBox
         const int maxInt = INT_MAX;
         const int startVal = static_cast<int>(std::min(tsRange.start, static_cast<uint64_t>(maxInt)));
         const int endVal = static_cast<int>(std::min(tsRange.end, static_cast<uint64_t>(maxInt)));
-        startTimestampSpin_->setRange(startVal, endVal);
-        endTimestampSpin_->setRange(startVal, endVal);
-        startTimestampSpin_->setValue(startVal);
-        endTimestampSpin_->setValue(endVal);
+        ui->startTimestampSpin->setRange(startVal, endVal);
+        ui->endTimestampSpin->setRange(startVal, endVal);
+        ui->startTimestampSpin->setValue(startVal);
+        ui->endTimestampSpin->setValue(endVal);
     } else {
-        availableTimestampLabel_->setText(tr("Available timestamps: No frames available"));
-        startTimestampSpin_->setRange(0, 0);
-        endTimestampSpin_->setRange(0, 0);
+        ui->availableTimestampLabel->setText(tr("Available timestamps: No frames available"));
+        ui->startTimestampSpin->setRange(0, 0);
+        ui->endTimestampSpin->setRange(0, 0);
     }
 
     // Update memory display
@@ -428,25 +323,26 @@ void BufferSaveDialog::updateAvailableRanges() {
 
 void BufferSaveDialog::updateUIState() {
     // Enable/disable save button based on state
-    const bool hasOutputDir = !outputDirEdit_->text().trimmed().isEmpty();
+    const bool hasOutputDir = !ui->outputDirEdit->text().trimmed().isEmpty();
     const bool hasFrames = backend_.playback().capacity() > 0;
 
-    if (saveBtn_) {
-        saveBtn_->setEnabled(hasOutputDir && hasFrames);
+    QPushButton* saveBtn = ui->buttons->button(QDialogButtonBox::Save);
+    if (saveBtn) {
+        saveBtn->setEnabled(hasOutputDir && hasFrames);
     }
 }
 
 bool BufferSaveDialog::validateInputs() {
-    if (indexRangeRadio_->isChecked()) {
-        const int start = startIndexSpin_->value();
-        const int end = endIndexSpin_->value();
+    if (ui->indexRangeRadio->isChecked()) {
+        const int start = ui->startIndexSpin->value();
+        const int end = ui->endIndexSpin->value();
         if (start > end) {
             QMessageBox::warning(this, tr("Validation Error"), tr("Start index must be <= end index."));
             return false;
         }
-    } else if (timestampRangeRadio_->isChecked()) {
-        const int start = startTimestampSpin_->value();
-        const int end = endTimestampSpin_->value();
+    } else if (ui->timestampRangeRadio->isChecked()) {
+        const int start = ui->startTimestampSpin->value();
+        const int end = ui->endTimestampSpin->value();
         if (start > end) {
             QMessageBox::warning(this, tr("Validation Error"), tr("Start timestamp must be <= end timestamp."));
             return false;
@@ -477,10 +373,10 @@ QString BufferSaveDialog::formatMemoryBytes(uint64_t bytes) const {
 }
 
 void BufferSaveDialog::updateMemoryDisplay() {
-    const size_t newCapacity = static_cast<size_t>(newCapacitySpin_->value());
+    const size_t newCapacity = static_cast<size_t>(ui->newCapacitySpin->value());
     auto& playback = backend_.playback();
     const size_t estimatedMemoryBytes = playback.estimateMemoryBytesForCapacity(newCapacity);
-    estimatedMemoryLabel_->setText(tr("Estimated memory: %1").arg(formatMemoryBytes(estimatedMemoryBytes)));
+    ui->estimatedMemoryLabel->setText(tr("Estimated memory: %1").arg(formatMemoryBytes(estimatedMemoryBytes)));
 }
 
 } // namespace frontend

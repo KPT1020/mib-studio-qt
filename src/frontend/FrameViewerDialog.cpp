@@ -1,12 +1,6 @@
 #include "frontend/FrameViewerDialog.h"
+#include "ui_FrameViewerDialog.h"
 
-#include <QLabel>
-#include <QPushButton>
-#include <QCheckBox>
-#include <QScrollArea>
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QGridLayout>
 #include <QPainter>
 #include <QWheelEvent>
 #include <QKeyEvent>
@@ -27,101 +21,48 @@ FrameViewerDialog::FrameViewerDialog(const backend::services::ProcessedFrame& fr
                                      bool showOverlays,
                                      QWidget* parent)
     : QDialog(parent),
+      ui(new Ui::FrameViewerDialog),
       frame_(&frame),
       roi_(roi),
       showProcessingOverlay_(showOverlays),
       showRoiOverlay_(showOverlays),
       zoomFactor_(1.0)
 {
+    ui->setupUi(this);
     setWindowTitle(tr("Frame Viewer - Frame %1").arg(frame.index));
-    setModal(true);
-    resize(1200, 800);
     
     // Set initial zoom to fit window
     zoomFactor_ = 1.0;
 
-    auto* mainLayout = new QVBoxLayout(this);
-    mainLayout->setSpacing(6);
-    mainLayout->setContentsMargins(6, 6, 6, 6);
-
-    // Frame info panel
-    frameInfoLabel_ = new QLabel(this);
-    frameInfoLabel_->setStyleSheet("QLabel { background-color: #f0f0f0; padding: 4px; border: 1px solid #ccc; }");
-    frameInfoLabel_->setWordWrap(true);
-    mainLayout->addWidget(frameInfoLabel_);
-
-    // Image display area
-    imageScrollArea_ = new QScrollArea(this);
-    imageScrollArea_->setWidgetResizable(true);
-    imageScrollArea_->setBackgroundRole(QPalette::Dark);
-    imageScrollArea_->setAlignment(Qt::AlignCenter);
-    imageScrollArea_->installEventFilter(this);
+    // Configure scroll area
+    ui->imageScrollArea->setBackgroundRole(QPalette::Dark);
+    ui->imageScrollArea->installEventFilter(this);
     
-    imageLabel_ = new QLabel(this);
-    imageLabel_->setAlignment(Qt::AlignCenter);
-    imageLabel_->setBackgroundRole(QPalette::Base);
-    imageLabel_->setScaledContents(false);
-    imageLabel_->setMinimumSize(400, 300);
+    // Configure image label
+    ui->imageLabel->setBackgroundRole(QPalette::Base);
     
-    imageScrollArea_->setWidget(imageLabel_);
-    mainLayout->addWidget(imageScrollArea_, 1);
-
-    // Controls layout
-    auto* controlsLayout = new QHBoxLayout();
-    
-    // Navigation buttons
-    prevButton_ = new QPushButton(tr("◀ Previous"), this);
-    nextButton_ = new QPushButton(tr("Next ▶"), this);
-    controlsLayout->addWidget(prevButton_);
-    controlsLayout->addWidget(nextButton_);
-    
-    controlsLayout->addSpacing(20);
-    
-    // Overlay checkboxes
-    processingOverlayCheck_ = new QCheckBox(tr("Processing Overlay"), this);
-    processingOverlayCheck_->setChecked(showProcessingOverlay_);
-    roiOverlayCheck_ = new QCheckBox(tr("ROI Overlay"), this);
-    roiOverlayCheck_->setChecked(showRoiOverlay_);
-    controlsLayout->addWidget(processingOverlayCheck_);
-    controlsLayout->addWidget(roiOverlayCheck_);
-    
-    controlsLayout->addSpacing(20);
-    
-    // Zoom controls
-    zoomOutButton_ = new QPushButton(tr("Zoom Out"), this);
-    fitToWindowButton_ = new QPushButton(tr("Fit to Window"), this);
-    zoomInButton_ = new QPushButton(tr("Zoom In"), this);
-    controlsLayout->addWidget(zoomOutButton_);
-    controlsLayout->addWidget(fitToWindowButton_);
-    controlsLayout->addWidget(zoomInButton_);
-    
-    controlsLayout->addStretch();
-    
-    // Export button
-    exportButton_ = new QPushButton(tr("Export as TIFF..."), this);
-    controlsLayout->addWidget(exportButton_);
-    
-    // Close button
-    closeButton_ = new QPushButton(tr("Close"), this);
-    closeButton_->setDefault(true);
-    controlsLayout->addWidget(closeButton_);
-    
-    mainLayout->addLayout(controlsLayout);
+    // Set overlay checkboxes
+    ui->processingOverlayCheck->setChecked(showProcessingOverlay_);
+    ui->roiOverlayCheck->setChecked(showRoiOverlay_);
 
     // Connect signals
-    connect(prevButton_, &QPushButton::clicked, this, &FrameViewerDialog::onPreviousFrame);
-    connect(nextButton_, &QPushButton::clicked, this, &FrameViewerDialog::onNextFrame);
-    connect(processingOverlayCheck_, &QCheckBox::toggled, this, &FrameViewerDialog::onToggleProcessingOverlay);
-    connect(roiOverlayCheck_, &QCheckBox::toggled, this, &FrameViewerDialog::onToggleRoiOverlay);
-    connect(zoomInButton_, &QPushButton::clicked, this, &FrameViewerDialog::onZoomIn);
-    connect(zoomOutButton_, &QPushButton::clicked, this, &FrameViewerDialog::onZoomOut);
-    connect(fitToWindowButton_, &QPushButton::clicked, this, &FrameViewerDialog::onFitToWindow);
-    connect(exportButton_, &QPushButton::clicked, this, &FrameViewerDialog::onExportFrame);
-    connect(closeButton_, &QPushButton::clicked, this, &QDialog::accept);
+    connect(ui->prevButton, &QPushButton::clicked, this, &FrameViewerDialog::onPreviousFrame);
+    connect(ui->nextButton, &QPushButton::clicked, this, &FrameViewerDialog::onNextFrame);
+    connect(ui->processingOverlayCheck, &QCheckBox::toggled, this, &FrameViewerDialog::onToggleProcessingOverlay);
+    connect(ui->roiOverlayCheck, &QCheckBox::toggled, this, &FrameViewerDialog::onToggleRoiOverlay);
+    connect(ui->zoomInButton, &QPushButton::clicked, this, &FrameViewerDialog::onZoomIn);
+    connect(ui->zoomOutButton, &QPushButton::clicked, this, &FrameViewerDialog::onZoomOut);
+    connect(ui->fitToWindowButton, &QPushButton::clicked, this, &FrameViewerDialog::onFitToWindow);
+    connect(ui->exportButton, &QPushButton::clicked, this, &FrameViewerDialog::onExportFrame);
+    connect(ui->closeButton, &QPushButton::clicked, this, &QDialog::accept);
 
     // Update display
     updateImage();
     updateFrameInfo();
+}
+
+FrameViewerDialog::~FrameViewerDialog() {
+    delete ui;
 }
 
 void FrameViewerDialog::setFrame(const backend::services::ProcessedFrame& frame) {
@@ -139,8 +80,8 @@ void FrameViewerDialog::setRoi(const backend::services::ProcessingService::Roi& 
 void FrameViewerDialog::setShowOverlays(bool show) {
     showProcessingOverlay_ = show;
     showRoiOverlay_ = show;
-    processingOverlayCheck_->setChecked(show);
-    roiOverlayCheck_->setChecked(show);
+    ui->processingOverlayCheck->setChecked(show);
+    ui->roiOverlayCheck->setChecked(show);
     updateImage();
 }
 
@@ -179,7 +120,7 @@ void FrameViewerDialog::onFitToWindow() {
 }
 
 bool FrameViewerDialog::eventFilter(QObject* obj, QEvent* event) {
-    if (obj == imageScrollArea_ && event->type() == QEvent::Wheel) {
+    if (obj == ui->imageScrollArea && event->type() == QEvent::Wheel) {
         QWheelEvent* wheelEvent = static_cast<QWheelEvent*>(event);
         if (wheelEvent->modifiers() & Qt::ControlModifier) {
             double delta = wheelEvent->angleDelta().y() / 120.0;
@@ -211,7 +152,7 @@ void FrameViewerDialog::keyPressEvent(QKeyEvent* event) {
 void FrameViewerDialog::updateImage() {
     if (!frame_ || frame_->originalImage.empty()) {
         displayImage_ = QImage();
-        imageLabel_->setPixmap(QPixmap());
+        ui->imageLabel->setPixmap(QPixmap());
         return;
     }
 
@@ -249,12 +190,12 @@ void FrameViewerDialog::updateImage() {
 
     // Update label
     if (!displayImage_.isNull()) {
-        imageLabel_->setPixmap(QPixmap::fromImage(displayImage_));
-        imageLabel_->resize(displayImage_.size());
+        ui->imageLabel->setPixmap(QPixmap::fromImage(displayImage_));
+        ui->imageLabel->resize(displayImage_.size());
         // Ensure scroll area shows the image properly
-        imageScrollArea_->ensureWidgetVisible(imageLabel_);
+        ui->imageScrollArea->ensureWidgetVisible(ui->imageLabel);
     } else {
-        imageLabel_->setPixmap(QPixmap());
+        ui->imageLabel->setPixmap(QPixmap());
     }
 }
 
@@ -324,7 +265,7 @@ QImage FrameViewerDialog::matToQImage(const cv::Mat& mat) const {
 
 void FrameViewerDialog::updateFrameInfo() {
     if (!frame_) {
-        frameInfoLabel_->setText(tr("No frame selected"));
+        ui->frameInfoLabel->setText(tr("No frame selected"));
         return;
     }
 
@@ -348,7 +289,7 @@ void FrameViewerDialog::updateFrameInfo() {
     .arg(val.isValid ? "Yes" : "No")
     .arg(val.innerContourCount);
 
-    frameInfoLabel_->setText(info);
+    ui->frameInfoLabel->setText(info);
 }
 
 void FrameViewerDialog::onExportFrame() {

@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ProcessingSettingsDialog</class>
+ <widget class="QDialog" name="ProcessingSettingsDialog">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>400</width>
+    <height>300</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Processing Settings</string>
+  </property>
+  <property name="modal">
+   <bool>true</bool>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <layout class="QFormLayout" name="formLayout">
+     <item row="0" column="0">
+      <widget class="QLabel" name="invalidSamplingLabel">
+       <property name="text">
+        <string>Invalid frame sampling</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="QSpinBox" name="invalidSamplingSpin">
+       <property name="minimum">
+        <number>1</number>
+       </property>
+       <property name="maximum">
+        <number>10000</number>
+       </property>
+       <property name="suffix">
+        <string>th frame</string>
+       </property>
+       <property name="toolTip">
+        <string>Save every Nth invalid frame (1 = save all, higher = fewer frames)</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="0">
+      <widget class="QLabel" name="flushIntervalLabel">
+       <property name="text">
+        <string>Flush interval</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="1">
+      <widget class="QSpinBox" name="flushIntervalSpin">
+       <property name="minimum">
+        <number>1</number>
+       </property>
+       <property name="maximum">
+        <number>10000</number>
+       </property>
+       <property name="suffix">
+        <string> frames</string>
+       </property>
+       <property name="toolTip">
+        <string>Flush buffered frames to HDF5 every N frames</string>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="0" colspan="2">
+      <widget class="QLabel" name="roiLabel">
+       <property name="text">
+        <string>&lt;b&gt;Region of Interest (ROI)&lt;/b&gt;</string>
+       </property>
+      </widget>
+     </item>
+     <item row="3" column="0">
+      <widget class="QLabel" name="roiXLabel">
+       <property name="text">
+        <string>ROI X</string>
+       </property>
+      </widget>
+     </item>
+     <item row="3" column="1">
+      <widget class="QSpinBox" name="roiXSpin">
+       <property name="minimum">
+        <number>0</number>
+       </property>
+       <property name="toolTip">
+        <string>ROI X position (left edge)</string>
+       </property>
+      </widget>
+     </item>
+     <item row="4" column="0">
+      <widget class="QLabel" name="roiYLabel">
+       <property name="text">
+        <string>ROI Y</string>
+       </property>
+      </widget>
+     </item>
+     <item row="4" column="1">
+      <widget class="QSpinBox" name="roiYSpin">
+       <property name="minimum">
+        <number>0</number>
+       </property>
+       <property name="toolTip">
+        <string>ROI Y position (top edge)</string>
+       </property>
+      </widget>
+     </item>
+     <item row="5" column="0">
+      <widget class="QLabel" name="roiWidthLabel">
+       <property name="text">
+        <string>ROI Width</string>
+       </property>
+      </widget>
+     </item>
+     <item row="5" column="1">
+      <widget class="QSpinBox" name="roiWidthSpin">
+       <property name="minimum">
+        <number>1</number>
+       </property>
+       <property name="toolTip">
+        <string>ROI width</string>
+       </property>
+      </widget>
+     </item>
+     <item row="6" column="0">
+      <widget class="QLabel" name="roiHeightLabel">
+       <property name="text">
+        <string>ROI Height</string>
+       </property>
+      </widget>
+     </item>
+     <item row="6" column="1">
+      <widget class="QSpinBox" name="roiHeightSpin">
+       <property name="minimum">
+        <number>1</number>
+       </property>
+       <property name="toolTip">
+        <string>ROI height</string>
+       </property>
+      </widget>
+     </item>
+     <item row="7" column="0">
+      <widget class="QLabel" name="realtimeLabel">
+       <property name="text">
+        <string>Realtime</string>
+       </property>
+      </widget>
+     </item>
+     <item row="7" column="1">
+      <widget class="QCheckBox" name="dropFramesCheck">
+       <property name="text">
+        <string>Process latest only (drop intermediate frames)</string>
+       </property>
+       <property name="toolTip">
+        <string>When enabled, realtime processing skips queued frames and processes only the most recent frame to reduce latency. (Ignored while an experiment is running.)</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QDialogButtonBox" name="buttons">
+     <property name="standardButtons">
+      <set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok|QDialogButtonBox::Apply</set>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <spacer name="verticalSpacer">
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+     <property name="sizeHint" stdset="0">
+      <size>
+       <width>20</width>
+       <height>40</height>
+      </size>
+     </property>
+    </spacer>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+</ui>

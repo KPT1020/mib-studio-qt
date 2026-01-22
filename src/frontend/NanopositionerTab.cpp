@@ -1,21 +1,13 @@
 #include "frontend/NanopositionerTab.h"
+#include "ui_NanopositionerTab.h"
 
-#include <QCheckBox>
-#include <QComboBox>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QGridLayout>
-#include <QGroupBox>
-#include <QHBoxLayout>
-#include <QLabel>
 #include <QMessageBox>
-#include <QPushButton>
-#include <QSpinBox>
 #include <QTextStream>
 #include <QTimer>
-#include <QVBoxLayout>
 #include <QSettings>
 
 #include <spdlog/spdlog.h>
@@ -105,14 +97,24 @@ namespace frontend
 	}
 
 	NanopositionerTab::NanopositionerTab(backend::AppBackend &backend, QWidget *parent)
-		: QWidget(parent), backend_(backend)
+		: QWidget(parent), ui(new Ui::NanopositionerTab), backend_(backend)
 	{
-		auto *root = new QVBoxLayout(this);
-		root->setContentsMargins(6, 6, 6, 6);
-		root->setSpacing(6);
+		ui->setupUi(this);
 
-		setupUi();
-		root->addWidget(nanopositionerGroup_, 0);
+		// Configure baud rate combo with data values
+		ui->baudRateCombo->setItemData(0, 9600);
+		ui->baudRateCombo->setItemData(1, 19200);
+		ui->baudRateCombo->setItemData(2, 38400);
+		ui->baudRateCombo->setItemData(3, 57600);
+		ui->baudRateCombo->setItemData(4, 115200);
+		ui->baudRateCombo->setCurrentIndex(4); // Default to 115200
+
+		// Connect signals
+		connect(ui->connectBtn, &QPushButton::clicked, this, &NanopositionerTab::onConnectNanopositioner);
+		connect(ui->disconnectBtn, &QPushButton::clicked, this, &NanopositionerTab::onDisconnectNanopositioner);
+		connect(ui->autofocusEnabledCheck, &QCheckBox::stateChanged, this, &NanopositionerTab::onAutofocusEnabledChanged);
+		connect(ui->increaseVoltageBtn, &QPushButton::clicked, this, &NanopositionerTab::onIncreaseVoltage);
+		connect(ui->decreaseVoltageBtn, &QPushButton::clicked, this, &NanopositionerTab::onDecreaseVoltage);
 
 		// Load config and update UI
 		loadConfig();
@@ -127,83 +129,15 @@ namespace frontend
 		// Set status callback for autofocus service
 		backend_.autofocus().setStatusCallback([this](const std::string &message)
 											   {
-		if (statusLabel_) {
-			statusLabel_->setText(QString::fromStdString(message));
+		if (ui->statusLabel) {
+			ui->statusLabel->setText(QString::fromStdString(message));
 		} });
 	}
 
-	void NanopositionerTab::setupUi()
-	{
-		nanopositionerGroup_ = new QGroupBox(tr("Nanopositioner Autofocus"), this);
-		auto *layout = new QGridLayout(nanopositionerGroup_);
-
-		// Connection settings row
-		layout->addWidget(new QLabel(tr("COM Port:")), 0, 0);
-		comPortSpinBox_ = new QSpinBox(nanopositionerGroup_);
-		comPortSpinBox_->setRange(1, 256);
-		comPortSpinBox_->setValue(6);
-		layout->addWidget(comPortSpinBox_, 0, 1);
-
-		layout->addWidget(new QLabel(tr("Baud Rate:")), 0, 2);
-		baudRateCombo_ = new QComboBox(nanopositionerGroup_);
-		baudRateCombo_->addItem("9600", 9600);
-		baudRateCombo_->addItem("19200", 19200);
-		baudRateCombo_->addItem("38400", 38400);
-		baudRateCombo_->addItem("57600", 57600);
-		baudRateCombo_->addItem("115200", 115200);
-		baudRateCombo_->setCurrentIndex(4); // Default to 115200
-		layout->addWidget(baudRateCombo_, 0, 3);
-
-		layout->addWidget(new QLabel(tr("Device Address:")), 0, 4);
-		deviceAddressSpinBox_ = new QSpinBox(nanopositionerGroup_);
-		deviceAddressSpinBox_->setRange(0, 255);
-		deviceAddressSpinBox_->setValue(1);
-		layout->addWidget(deviceAddressSpinBox_, 0, 5);
-
-		connectBtn_ = new QPushButton(tr("Connect"), nanopositionerGroup_);
-		disconnectBtn_ = new QPushButton(tr("Disconnect"), nanopositionerGroup_);
-		disconnectBtn_->setEnabled(false);
-		layout->addWidget(connectBtn_, 0, 6);
-		layout->addWidget(disconnectBtn_, 0, 7);
-
-		connect(connectBtn_, &QPushButton::clicked, this, &NanopositionerTab::onConnectNanopositioner);
-		connect(disconnectBtn_, &QPushButton::clicked, this, &NanopositionerTab::onDisconnectNanopositioner);
-
-		// Autofocus control row
-		autofocusEnabledCheck_ = new QCheckBox(tr("Enable Autofocus"), nanopositionerGroup_);
-		autofocusEnabledCheck_->setEnabled(false);
-		layout->addWidget(autofocusEnabledCheck_, 1, 0, 1, 2);
-		connect(autofocusEnabledCheck_, &QCheckBox::stateChanged, this, &NanopositionerTab::onAutofocusEnabledChanged);
-
-		statusLabel_ = new QLabel(tr("Not connected"), nanopositionerGroup_);
-		layout->addWidget(statusLabel_, 1, 2, 1, 2);
-
-		voltageLabel_ = new QLabel(tr("Voltage: -- V"), nanopositionerGroup_);
-		layout->addWidget(voltageLabel_, 1, 4, 1, 2);
-
-		// Manual voltage control row
-		layout->addWidget(new QLabel(tr("Manual Control:")), 2, 0);
-		increaseVoltageBtn_ = new QPushButton(tr("+"), nanopositionerGroup_);
-		increaseVoltageBtn_->setEnabled(false);
-		increaseVoltageBtn_->setMaximumWidth(40);
-		layout->addWidget(increaseVoltageBtn_, 2, 1);
-
-		decreaseVoltageBtn_ = new QPushButton(tr("-"), nanopositionerGroup_);
-		decreaseVoltageBtn_->setEnabled(false);
-		decreaseVoltageBtn_->setMaximumWidth(40);
-		layout->addWidget(decreaseVoltageBtn_, 2, 2);
-
-		layout->addWidget(new QLabel(tr("Step (V):")), 2, 3);
-		voltageStepSpinBox_ = new QSpinBox(nanopositionerGroup_);
-		voltageStepSpinBox_->setRange(1, 100);
-		voltageStepSpinBox_->setValue(1);
-		voltageStepSpinBox_->setSuffix(" V");
-		voltageStepSpinBox_->setEnabled(false);
-		layout->addWidget(voltageStepSpinBox_, 2, 4);
-
-		connect(increaseVoltageBtn_, &QPushButton::clicked, this, &NanopositionerTab::onIncreaseVoltage);
-		connect(decreaseVoltageBtn_, &QPushButton::clicked, this, &NanopositionerTab::onDecreaseVoltage);
+	NanopositionerTab::~NanopositionerTab() {
+		delete ui;
 	}
+
 
 	void NanopositionerTab::updateNanopositionerUI()
 	{
@@ -211,33 +145,33 @@ namespace frontend
 		bool connected = autofocus.isConnected();
 		bool enabled = autofocus.isEnabled();
 
-		connectBtn_->setEnabled(!connected);
-		disconnectBtn_->setEnabled(connected);
-		comPortSpinBox_->setEnabled(!connected);
-		baudRateCombo_->setEnabled(!connected);
-		deviceAddressSpinBox_->setEnabled(!connected);
-		autofocusEnabledCheck_->setEnabled(connected);
-		autofocusEnabledCheck_->setCheckState(enabled ? Qt::Checked : Qt::Unchecked);
-		increaseVoltageBtn_->setEnabled(connected);
-		decreaseVoltageBtn_->setEnabled(connected);
-		voltageStepSpinBox_->setEnabled(connected);
+		ui->connectBtn->setEnabled(!connected);
+		ui->disconnectBtn->setEnabled(connected);
+		ui->comPortSpinBox->setEnabled(!connected);
+		ui->baudRateCombo->setEnabled(!connected);
+		ui->deviceAddressSpinBox->setEnabled(!connected);
+		ui->autofocusEnabledCheck->setEnabled(connected);
+		ui->autofocusEnabledCheck->setCheckState(enabled ? Qt::Checked : Qt::Unchecked);
+		ui->increaseVoltageBtn->setEnabled(connected);
+		ui->decreaseVoltageBtn->setEnabled(connected);
+		ui->voltageStepSpinBox->setEnabled(connected);
 
 		if (connected)
 		{
 			double voltage = autofocus.getCurrentVoltage();
-			voltageLabel_->setText(QString("Voltage: %1 V").arg(voltage, 0, 'f', 2));
+			ui->voltageLabel->setText(QString("Voltage: %1 V").arg(voltage, 0, 'f', 2));
 		}
 		else
 		{
-			voltageLabel_->setText("Voltage: -- V");
+			ui->voltageLabel->setText("Voltage: -- V");
 		}
 	}
 
 	void NanopositionerTab::onConnectNanopositioner()
 	{
-		int comPort = comPortSpinBox_->value();
-		int baudRate = baudRateCombo_->currentData().toInt();
-		unsigned char deviceAddress = static_cast<unsigned char>(deviceAddressSpinBox_->value());
+		int comPort = ui->comPortSpinBox->value();
+		int baudRate = ui->baudRateCombo->currentData().toInt();
+		unsigned char deviceAddress = static_cast<unsigned char>(ui->deviceAddressSpinBox->value());
 
 		// Load config and apply to autofocus service
 		loadConfig();
@@ -270,7 +204,7 @@ namespace frontend
 	{
 		// Update manual voltage step from UI
 		backend::services::AutofocusService::Config config = backend_.autofocus().getConfig();
-		config.manualVoltageStep = voltageStepSpinBox_->value();
+		config.manualVoltageStep = ui->voltageStepSpinBox->value();
 		backend_.autofocus().setConfig(config);
 		backend_.autofocus().increaseVoltage();
 	}
@@ -279,7 +213,7 @@ namespace frontend
 	{
 		// Update manual voltage step from UI
 		backend::services::AutofocusService::Config config = backend_.autofocus().getConfig();
-		config.manualVoltageStep = voltageStepSpinBox_->value();
+		config.manualVoltageStep = ui->voltageStepSpinBox->value();
 		backend_.autofocus().setConfig(config);
 		backend_.autofocus().decreaseVoltage();
 	}
@@ -320,20 +254,20 @@ namespace frontend
 			// Load autofocus settings
 			if (config.contains("autofocus_com_port"))
 			{
-				comPortSpinBox_->setValue(config["autofocus_com_port"].get<int>());
+				ui->comPortSpinBox->setValue(config["autofocus_com_port"].get<int>());
 			}
 			if (config.contains("autofocus_baud_rate"))
 			{
 				int baudRate = config["autofocus_baud_rate"].get<int>();
-				int index = baudRateCombo_->findData(baudRate);
+				int index = ui->baudRateCombo->findData(baudRate);
 				if (index >= 0)
 				{
-					baudRateCombo_->setCurrentIndex(index);
+					ui->baudRateCombo->setCurrentIndex(index);
 				}
 			}
 			if (config.contains("autofocus_device_address"))
 			{
-				deviceAddressSpinBox_->setValue(config["autofocus_device_address"].get<int>());
+				ui->deviceAddressSpinBox->setValue(config["autofocus_device_address"].get<int>());
 			}
 
 			// Load autofocus service config
@@ -369,7 +303,7 @@ namespace frontend
 			if (config.contains("autofocus_manual_voltage_step"))
 			{
 				afConfig.manualVoltageStep = config["autofocus_manual_voltage_step"].get<double>();
-				voltageStepSpinBox_->setValue(static_cast<int>(afConfig.manualVoltageStep));
+				ui->voltageStepSpinBox->setValue(static_cast<int>(afConfig.manualVoltageStep));
 			}
 			if (config.contains("ring_ratio_stale_ms"))
 			{
@@ -416,9 +350,9 @@ namespace frontend
 			json config = json::parse(data.constData(), data.constData() + data.size());
 
 			// Save autofocus settings
-			config["autofocus_com_port"] = comPortSpinBox_->value();
-			config["autofocus_baud_rate"] = baudRateCombo_->currentData().toInt();
-			config["autofocus_device_address"] = deviceAddressSpinBox_->value();
+			config["autofocus_com_port"] = ui->comPortSpinBox->value();
+			config["autofocus_baud_rate"] = ui->baudRateCombo->currentData().toInt();
+			config["autofocus_device_address"] = ui->deviceAddressSpinBox->value();
 
 			file.resize(0);
 			QTextStream out(&file);

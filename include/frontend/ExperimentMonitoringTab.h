@@ -30,6 +30,8 @@ class QVBoxLayout;
 class QShowEvent;
 class QHideEvent;
 
+namespace Ui { class ExperimentMonitoringTab; }
+
 namespace frontend {
 
 class ExperimentMonitoringTab : public QWidget {
@@ -62,6 +64,7 @@ protected:
     void hideEvent(QHideEvent* event) override;
 
 private:
+    void setupCharts();
     void loadIsoelasticCurves();
     void updateScatterplot(const std::vector<backend::services::ProcessedFrame>& validFrames);
     void updateHistogram(const std::vector<backend::services::ProcessedFrame>& validFrames);
@@ -74,6 +77,7 @@ private:
     std::vector<std::vector<double>> computeKDE(const std::vector<std::pair<double, double>>& points, 
                                                  int gridX, int gridY, double bandwidth) const;
 
+    Ui::ExperimentMonitoringTab* ui;
     backend::AppBackend& backend_;
     QTimer* updateTimer_ = nullptr;
 
@@ -103,27 +107,6 @@ private:
 #endif
     QValueAxis* histogramYAxis_ = nullptr;
     QValueAxis* histogramXAxis_ = nullptr;
-
-    // Panel 3: Valid frames grid
-    QWidget* validFramesContainer_ = nullptr;
-    QVBoxLayout* validFramesLayout_ = nullptr;
-    QHBoxLayout* validFramesControls_ = nullptr;
-    QCheckBox* validOverlayCheck_ = nullptr;
-    QScrollArea* validFramesScroll_ = nullptr;
-    QWidget* validFramesWidget_ = nullptr;
-    QGridLayout* validFramesGrid_ = nullptr;
-
-    // Panel 4: Invalid frames grid
-    QWidget* invalidFramesContainer_ = nullptr;
-    QVBoxLayout* invalidFramesLayout_ = nullptr;
-    QHBoxLayout* invalidFramesControls_ = nullptr;
-    QCheckBox* invalidOverlayCheck_ = nullptr;
-    QScrollArea* invalidFramesScroll_ = nullptr;
-    QWidget* invalidFramesWidget_ = nullptr;
-    QGridLayout* invalidFramesGrid_ = nullptr;
-    
-    // Controls
-    QPushButton* clearBufferBtn_ = nullptr;
     
     // Overlay state
     bool showValidOverlay_ = false;

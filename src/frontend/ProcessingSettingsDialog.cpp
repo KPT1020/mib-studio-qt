@@ -1,11 +1,7 @@
 #include "frontend/ProcessingSettingsDialog.h"
+#include "ui_ProcessingSettingsDialog.h"
 
-#include <QFormLayout>
-#include <QSpinBox>
-#include <QDialogButtonBox>
 #include <QPushButton>
-#include <QLabel>
-#include <QCheckBox>
 
 #include <spdlog/spdlog.h>
 
@@ -16,72 +12,27 @@
 #include "frontend/PlaybackPanel.h"
 
 ProcessingSettingsDialog::ProcessingSettingsDialog(backend::AppBackend& backend, PlaybackPanel* playbackPanel, QWidget* parent)
-    : QDialog(parent), backend_(backend), playbackPanel_(playbackPanel) {
-    setWindowTitle(tr("Processing Settings"));
-    setModal(true);
-
-    auto* layout = new QFormLayout(this);
-
-    invalidSamplingSpin_ = new QSpinBox(this);
-    invalidSamplingSpin_->setMinimum(1);
-    invalidSamplingSpin_->setMaximum(10000);
-    invalidSamplingSpin_->setSuffix(tr("th frame"));
-    invalidSamplingSpin_->setToolTip(tr("Save every Nth invalid frame (1 = save all, higher = fewer frames)"));
-
-    flushIntervalSpin_ = new QSpinBox(this);
-    flushIntervalSpin_->setMinimum(1);
-    flushIntervalSpin_->setMaximum(10000);
-    flushIntervalSpin_->setSuffix(tr(" frames"));
-    flushIntervalSpin_->setToolTip(tr("Flush buffered frames to HDF5 every N frames"));
-
-    layout->addRow(tr("Invalid frame sampling"), invalidSamplingSpin_);
-    layout->addRow(tr("Flush interval"), flushIntervalSpin_);
+    : QDialog(parent), ui(new Ui::ProcessingSettingsDialog), backend_(backend), playbackPanel_(playbackPanel) {
+    ui->setupUi(this);
 
     // Load current values from backend
-    invalidSamplingSpin_->setValue(static_cast<int>(backend_.processing().getInvalidFrameSamplingRate()));
-    flushIntervalSpin_->setValue(static_cast<int>(backend_.processing().getFlushInterval()));
-
-    // ROI controls
-    layout->addRow(new QLabel(tr("<b>Region of Interest (ROI)</b>"), this));
-
-    roiXSpin_ = new QSpinBox(this);
-    roiXSpin_->setMinimum(0);
-    roiXSpin_->setToolTip(tr("ROI X position (left edge)"));
-
-    roiYSpin_ = new QSpinBox(this);
-    roiYSpin_->setMinimum(0);
-    roiYSpin_->setToolTip(tr("ROI Y position (top edge)"));
-
-    roiWidthSpin_ = new QSpinBox(this);
-    roiWidthSpin_->setMinimum(1);
-    roiWidthSpin_->setToolTip(tr("ROI width"));
-
-    roiHeightSpin_ = new QSpinBox(this);
-    roiHeightSpin_->setMinimum(1);
-    roiHeightSpin_->setToolTip(tr("ROI height"));
-
-    layout->addRow(tr("ROI X"), roiXSpin_);
-    layout->addRow(tr("ROI Y"), roiYSpin_);
-    layout->addRow(tr("ROI Width"), roiWidthSpin_);
-    layout->addRow(tr("ROI Height"), roiHeightSpin_);
-
-    dropFramesCheck_ = new QCheckBox(tr("Process latest only (drop intermediate frames)"), this);
-    dropFramesCheck_->setToolTip(tr("When enabled, realtime processing skips queued frames and processes only the most recent frame to reduce latency. (Ignored while an experiment is running.)"));
-    dropFramesCheck_->setChecked(backend_.processing().getRealtimeDropFrames());
-    layout->addRow(tr("Realtime"), dropFramesCheck_);
+    ui->invalidSamplingSpin->setValue(static_cast<int>(backend_.processing().getInvalidFrameSamplingRate()));
+    ui->flushIntervalSpin->setValue(static_cast<int>(backend_.processing().getFlushInterval()));
+    ui->dropFramesCheck->setChecked(backend_.processing().getRealtimeDropFrames());
 
     // Update ROI limits and load current values
     updateRoiLimits();
 
-    buttons_ = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Apply, this);
-    layout->addRow(buttons_);
-
-    connect(buttons_, &QDialogButtonBox::accepted, this, [this]() {
+    connect(ui->buttons, &QDialogButtonBox::accepted, this, [this]() {
         applySettings();
         accept();
     });
-    connect(buttons_, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    connect(buttons_->button(QDialogButtonBox::Apply), &QPushButton::clicked, this, [this](bool) { onApply(); });
+    connect(ui->buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(ui->buttons->button(QDialogButtonBox::Apply), &QPushButton::clicked, this, [this](bool) { onApply(); });
+}
+
+ProcessingSettingsDialog::~ProcessingSettingsDialog() {
+    delete ui;
 }
 
 void ProcessingSettingsDialog::onApply() {
@@ -111,10 +62,10 @@ void ProcessingSettingsDialog::updateRoiLimits() {
     }
 
     // Update spinbox maximums
-    roiXSpin_->setMaximum(std::max(0, maxWidth - 1));
-    roiYSpin_->setMaximum(std::max(0, maxHeight - 1));
-    roiWidthSpin_->setMaximum(maxWidth);
-    roiHeightSpin_->setMaximum(maxHeight);
+    ui->roiXSpin->setMaximum(std::max(0, maxWidth - 1));
+    ui->roiYSpin->setMaximum(std::max(0, maxHeight - 1));
+    ui->roiWidthSpin->setMaximum(maxWidth);
+    ui->roiHeightSpin->setMaximum(maxHeight);
 
     // Load current ROI values
     QRect currentRoi;
@@ -129,65 +80,61 @@ void ProcessingSettingsDialog::updateRoiLimits() {
     }
 
     if (currentRoi.isValid() && !currentRoi.isNull()) {
-        roiXSpin_->setValue(currentRoi.x());
-        roiYSpin_->setValue(currentRoi.y());
-        roiWidthSpin_->setValue(currentRoi.width());
-        roiHeightSpin_->setValue(currentRoi.height());
+        ui->roiXSpin->setValue(currentRoi.x());
+        ui->roiYSpin->setValue(currentRoi.y());
+        ui->roiWidthSpin->setValue(currentRoi.width());
+        ui->roiHeightSpin->setValue(currentRoi.height());
     } else {
         // Default to full image or clear
-        roiXSpin_->setValue(0);
-        roiYSpin_->setValue(0);
-        roiWidthSpin_->setValue(maxWidth > 0 ? maxWidth : 1);
-        roiHeightSpin_->setValue(maxHeight > 0 ? maxHeight : 1);
+        ui->roiXSpin->setValue(0);
+        ui->roiYSpin->setValue(0);
+        ui->roiWidthSpin->setValue(maxWidth > 0 ? maxWidth : 1);
+        ui->roiHeightSpin->setValue(maxHeight > 0 ? maxHeight : 1);
     }
 }
 
 void ProcessingSettingsDialog::applySettings() {
     auto& proc = backend_.processing();
-    const int invalidNth = invalidSamplingSpin_->value();
-    const int flushEvery = flushIntervalSpin_->value();
+    const int invalidNth = ui->invalidSamplingSpin->value();
+    const int flushEvery = ui->flushIntervalSpin->value();
 
     proc.setInvalidFrameSamplingRate(static_cast<size_t>(invalidNth));
     proc.setFlushInterval(static_cast<size_t>(flushEvery));
-    if (dropFramesCheck_) {
-        proc.setRealtimeDropFrames(dropFramesCheck_->isChecked());
-    }
+    proc.setRealtimeDropFrames(ui->dropFramesCheck->isChecked());
     SPDLOG_INFO("Processing settings applied: invalidNth={}, flushEvery={}", invalidNth, flushEvery);
 
     // Apply ROI settings
-    if (roiXSpin_ && roiYSpin_ && roiWidthSpin_ && roiHeightSpin_) {
-        const int roiX = roiXSpin_->value();
-        const int roiY = roiYSpin_->value();
-        const int roiW = roiWidthSpin_->value();
-        const int roiH = roiHeightSpin_->value();
+    const int roiX = ui->roiXSpin->value();
+    const int roiY = ui->roiYSpin->value();
+    const int roiW = ui->roiWidthSpin->value();
+    const int roiH = ui->roiHeightSpin->value();
 
-        // Get current image dimensions for validation
-        int maxWidth = roiWidthSpin_->maximum();
-        int maxHeight = roiHeightSpin_->maximum();
+    // Get current image dimensions for validation
+    int maxWidth = ui->roiWidthSpin->maximum();
+    int maxHeight = ui->roiHeightSpin->maximum();
 
-        // Validate ROI bounds
-        int clampedX = std::max(0, std::min(roiX, maxWidth - 1));
-        int clampedY = std::max(0, std::min(roiY, maxHeight - 1));
-        int clampedW = std::max(1, std::min(roiW, maxWidth - clampedX));
-        int clampedH = std::max(1, std::min(roiH, maxHeight - clampedY));
+    // Validate ROI bounds
+    int clampedX = std::max(0, std::min(roiX, maxWidth - 1));
+    int clampedY = std::max(0, std::min(roiY, maxHeight - 1));
+    int clampedW = std::max(1, std::min(roiW, maxWidth - clampedX));
+    int clampedH = std::max(1, std::min(roiH, maxHeight - clampedY));
 
-        QRect roi(clampedX, clampedY, clampedW, clampedH);
+    QRect roi(clampedX, clampedY, clampedW, clampedH);
 
-        // Apply to PlaybackPanel if available
-        if (playbackPanel_) {
-            playbackPanel_->setRoi(roi);
-        }
-
-        // Also sync to backend
-        backend::services::ProcessingService::Roi backendRoi{};
-        backendRoi.x = clampedX;
-        backendRoi.y = clampedY;
-        backendRoi.w = clampedW;
-        backendRoi.h = clampedH;
-        proc.setRealtimeRoi(backendRoi);
-
-        SPDLOG_INFO("ROI settings applied: x={}, y={}, w={}, h={}", clampedX, clampedY, clampedW, clampedH);
+    // Apply to PlaybackPanel if available
+    if (playbackPanel_) {
+        playbackPanel_->setRoi(roi);
     }
+
+    // Also sync to backend
+    backend::services::ProcessingService::Roi backendRoi{};
+    backendRoi.x = clampedX;
+    backendRoi.y = clampedY;
+    backendRoi.w = clampedW;
+    backendRoi.h = clampedH;
+    proc.setRealtimeRoi(backendRoi);
+
+    SPDLOG_INFO("ROI settings applied: x={}, y={}, w={}, h={}", clampedX, clampedY, clampedW, clampedH);
 }
 
 

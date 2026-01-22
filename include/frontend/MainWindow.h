@@ -15,11 +15,13 @@ template<typename T> class QFutureWatcher;
 namespace backend { class AppBackend; }
 namespace frontend { class OverviewTab; }
 namespace frontend { class AutoUpdater; }
+namespace Ui { class MainWindow; }
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
     explicit MainWindow(backend::AppBackend& backend, QWidget* parent = nullptr);
+    ~MainWindow();
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -37,11 +39,13 @@ private:
     void updateTabStates();
     void startExperimentServices();
     void stopExperimentServices();
+    void setupCornerWidgets();
+    
+    Ui::MainWindow* ui;
     backend::AppBackend& backend_;
     QLabel* statusLabel_ = nullptr;
     QTimer* statsTimer_ = nullptr;
     PlaybackPanel* playbackPanel_ = nullptr;
-    QTabWidget* tabs_ = nullptr;
     QTabWidget* experimentTabs_ = nullptr;
     frontend::OverviewTab* overviewTab_ = nullptr;
     frontend::AutoUpdater* updater_ = nullptr;
