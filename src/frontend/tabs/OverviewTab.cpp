@@ -66,9 +66,18 @@ namespace frontend
         delete ui->canvasPlaceholder;
         ui->canvasLayout->addWidget(canvas_, 1);
 
-        // Set initial proportions (3:2 ratio)
-        ui->splitter->setStretchFactor(0, 3);
-        ui->splitter->setStretchFactor(1, 2);
+        // Set initial proportions (50/50 ratio)
+        ui->splitter->setStretchFactor(0, 1);
+        ui->splitter->setStretchFactor(1, 1);
+        
+        // Set explicit sizes for 50/50 split after widget is shown
+        QTimer::singleShot(0, this, [this]() {
+            int height = ui->splitter->height();
+            if (height > 0) {
+                int half = height / 2;
+                ui->splitter->setSizes({half, half});
+            }
+        });
 
         // Connect button signals
         connect(ui->jsReloadBtn, &QPushButton::clicked, this, &OverviewTab::onReloadJs);

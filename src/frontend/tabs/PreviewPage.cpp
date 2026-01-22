@@ -38,9 +38,18 @@ namespace frontend
         // Replace placeholder with actual ConfigTabs widget
         ui->splitter->replaceWidget(1, configTabs_);
         
-        // Set initial proportions (3:2 ratio)
-        ui->splitter->setStretchFactor(0, 3);
-        ui->splitter->setStretchFactor(1, 2);
+        // Set initial proportions (50/50 ratio)
+        ui->splitter->setStretchFactor(0, 1);
+        ui->splitter->setStretchFactor(1, 1);
+        
+        // Set explicit sizes for 50/50 split after widget is shown
+        QTimer::singleShot(0, this, [this]() {
+            int height = ui->splitter->height();
+            if (height > 0) {
+                int half = height / 2;
+                ui->splitter->setSizes({half, half});
+            }
+        });
 
         // Live config watcher: watch current path and apply changes to services and playback
         configWatcher_ = new AppConfigWatcher(backend_, playback_, this);
