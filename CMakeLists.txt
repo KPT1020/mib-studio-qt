@@ -175,64 +175,88 @@ endif()
 
 # Frontend application (Qt Widgets)
 set(FRONTEND_COMMON_SOURCES
-    src/frontend/MainWindow.cpp
-    include/frontend/MainWindow.h
+    # Core
+    src/frontend/core/MainWindow.cpp
+    include/frontend/core/MainWindow.h
     resources/ui/MainWindow.ui
-    src/frontend/HdfReviewTab.cpp
-    include/frontend/HdfReviewTab.h
-    resources/ui/HdfReviewTab.ui
-    src/frontend/PlaybackPanel.cpp
-    include/frontend/PlaybackPanel.h
-    src/frontend/BufferSaveDialog.cpp
-    include/frontend/BufferSaveDialog.h
-    resources/ui/BufferSaveDialog.ui
-    resources/defaults.qrc
-    src/frontend/ConnectTab.cpp
-    include/frontend/ConnectTab.h
+    # Tabs
+    src/frontend/tabs/ConnectTab.cpp
+    include/frontend/tabs/ConnectTab.h
     resources/ui/ConnectTab.ui
-    src/frontend/OverviewTab.cpp
-    include/frontend/OverviewTab.h
-    resources/ui/OverviewTab.ui
-    src/frontend/PreviewPage.cpp
-    include/frontend/PreviewPage.h
-    resources/ui/PreviewPage.ui
-    src/frontend/ConfigTabs.cpp
-    include/frontend/ConfigTabs.h
-    src/frontend/NanopositionerTab.cpp
-    include/frontend/NanopositionerTab.h
-    resources/ui/NanopositionerTab.ui
-    src/frontend/ProcessingSettingsDialog.cpp
-    include/frontend/ProcessingSettingsDialog.h
-    resources/ui/ProcessingSettingsDialog.ui
-    src/frontend/FrameViewerDialog.cpp
-    include/frontend/FrameViewerDialog.h
-    resources/ui/FrameViewerDialog.ui
-    src/frontend/MockConfigDialog.cpp
-    include/frontend/MockConfigDialog.h
-    resources/ui/MockConfigDialog.ui
-    src/frontend/ExperimentMonitoringTab.cpp
-    include/frontend/ExperimentMonitoringTab.h
+    src/frontend/tabs/ConfigTabs.cpp
+    include/frontend/tabs/ConfigTabs.h
+    src/frontend/tabs/ExperimentMonitoringTab.cpp
+    include/frontend/tabs/ExperimentMonitoringTab.h
     resources/ui/ExperimentMonitoringTab.ui
-    src/frontend/HdfMetricsModel.cpp
-    include/frontend/HdfMetricsModel.h
-    src/frontend/MonitoringSettingsDialog.cpp
-    include/frontend/MonitoringSettingsDialog.h
-    resources/ui/MonitoringSettingsDialog.ui
-    src/frontend/ConversionFactorDialog.cpp
-    include/frontend/ConversionFactorDialog.h
+    src/frontend/tabs/HdfReviewTab.cpp
+    include/frontend/tabs/HdfReviewTab.h
+    resources/ui/HdfReviewTab.ui
+    src/frontend/tabs/NanopositionerTab.cpp
+    include/frontend/tabs/NanopositionerTab.h
+    resources/ui/NanopositionerTab.ui
+    src/frontend/tabs/OverviewTab.cpp
+    include/frontend/tabs/OverviewTab.h
+    resources/ui/OverviewTab.ui
+    src/frontend/tabs/PreviewPage.cpp
+    include/frontend/tabs/PreviewPage.h
+    resources/ui/PreviewPage.ui
+    # Dialogs
+    src/frontend/dialogs/BufferSaveDialog.cpp
+    include/frontend/dialogs/BufferSaveDialog.h
+    resources/ui/BufferSaveDialog.ui
+    src/frontend/dialogs/ConversionFactorDialog.cpp
+    include/frontend/dialogs/ConversionFactorDialog.h
     resources/ui/ConversionFactorDialog.ui
-    src/frontend/JsonTableModel.cpp
-    include/frontend/JsonTableModel.h
-    src/frontend/JsonFlatten.cpp
-    include/frontend/JsonFlatten.h
-    src/frontend/AppConfigWatcher.cpp
-    include/frontend/AppConfigWatcher.h
-    src/frontend/AutoUpdater.cpp
-    include/frontend/AutoUpdater.h
+    src/frontend/dialogs/FrameViewerDialog.cpp
+    include/frontend/dialogs/FrameViewerDialog.h
+    resources/ui/FrameViewerDialog.ui
+    src/frontend/dialogs/MockConfigDialog.cpp
+    include/frontend/dialogs/MockConfigDialog.h
+    resources/ui/MockConfigDialog.ui
+    src/frontend/dialogs/MonitoringSettingsDialog.cpp
+    include/frontend/dialogs/MonitoringSettingsDialog.h
+    resources/ui/MonitoringSettingsDialog.ui
+    src/frontend/dialogs/ProcessingSettingsDialog.cpp
+    include/frontend/dialogs/ProcessingSettingsDialog.h
+    resources/ui/ProcessingSettingsDialog.ui
+    # Controllers
+    src/frontend/controllers/CameraController.cpp
+    include/frontend/controllers/CameraController.h
+    src/frontend/controllers/ExperimentController.cpp
+    include/frontend/controllers/ExperimentController.h
+    # Utils
+    src/frontend/utils/ConfigPathManager.cpp
+    include/frontend/utils/ConfigPathManager.h
+    src/frontend/utils/EgrabberConfigParser.cpp
+    include/frontend/utils/EgrabberConfigParser.h
+    src/frontend/utils/FileIOUtils.cpp
+    include/frontend/utils/FileIOUtils.h
+    src/frontend/utils/JsonFlatten.cpp
+    include/frontend/utils/JsonFlatten.h
+    src/frontend/utils/RoiManager.cpp
+    include/frontend/utils/RoiManager.h
+    src/frontend/utils/SimpleImageCanvas.cpp
+    include/frontend/utils/SimpleImageCanvas.h
+    src/frontend/utils/StatsDisplayManager.cpp
+    include/frontend/utils/StatsDisplayManager.h
+    # Models
+    src/frontend/models/HdfMetricsModel.cpp
+    include/frontend/models/HdfMetricsModel.h
+    src/frontend/models/JsonTableModel.cpp
+    include/frontend/models/JsonTableModel.h
+    # System
+    src/frontend/system/AppConfigWatcher.cpp
+    include/frontend/system/AppConfigWatcher.h
+    src/frontend/system/AutoUpdater.cpp
+    include/frontend/system/AutoUpdater.h
+    src/frontend/system/PlaybackPanel.cpp
+    include/frontend/system/PlaybackPanel.h
+    # Resources
+    resources/defaults.qrc
 )
 
 add_executable(mib_studio_qt WIN32
-    src/frontend/main.cpp
+    src/frontend/core/main.cpp
     ${FRONTEND_COMMON_SOURCES}
     resources/app_icon.rc
 )
