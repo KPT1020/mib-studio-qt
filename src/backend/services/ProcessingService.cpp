@@ -375,7 +375,8 @@ double ProcessingService::calculateRingRatio(const std::vector<cv::Point>& inner
     return std::sqrt(outerArea - innerArea);
 }
 
-std::tuple<std::vector<std::vector<cv::Point>>, bool, std::vector<std::vector<cv::Point>>, std::vector<int>> 
+std::tuple<std::vector<std::vector<cv::Point>>, bool, std::vector<std::vector<cv::Point>>, std::vector<int>, 
+           std::vector<std::vector<cv::Point>>, std::vector<cv::Vec4i>> 
 ProcessingService::findContours(const cv::Mat& processedImage) {
     std::vector<std::vector<cv::Point>> contours;
     std::vector<cv::Vec4i> hierarchy;
@@ -415,7 +416,7 @@ ProcessingService::findContours(const cv::Mat& processedImage) {
         }
     }
 
-    return std::make_tuple(filteredContours, hasNestedContours, innerContours, parentIndices);
+    return std::make_tuple(filteredContours, hasNestedContours, innerContours, parentIndices, contours, hierarchy);
 }
 
 BrightnessQuantiles ProcessingService::calculateBrightnessQuantiles(const cv::Mat& originalImage, const cv::Mat& mask) {
@@ -454,7 +455,14 @@ FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedIma
                                                      const ProcessingConfig& config, const cv::Mat& originalImage) {
     FilterResult result{};
 
-    auto [contours, hasNestedContours, innerContours, parentIndices] = findContours(processedImage);
+    auto [filteredContours, hasNestedContours, innerContours, parentIndices, allContours, hierarchy] = findContours(processedImage);
+    
+    // Store all contours and hierarchy for snapshot/display
+    result.allContours = allContours;
+    result.hierarchy = hierarchy;
+    
+    // Use filteredContours for the rest of the function (renamed from contours to avoid confusion)
+    const auto& contours = filteredContours;
     
     result.innerContourCount = static_cast<int>(innerContours.size());
     result.hasSingleInnerContour = (innerContours.size() == 1);
@@ -686,20 +694,6 @@ void ProcessingService::realtimeLoop() {
                 cv::morphologyEx(thresh, mask, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
                 cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
-                // Contours - now working on ROI-sized mask
-                std::vector<std::vector<cv::Point>> contours;
-                std::vector<cv::Vec4i> hierarchy;
-                cv::findContours(mask, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-
-                // Adjust contour coordinates to be relative to full frame (for validation)
-                // Validation expects contours in full frame coordinates
-                for (auto& contour : contours) {
-                    for (auto& pt : contour) {
-                        pt.x += roi.x;
-                        pt.y += roi.y;
-                    }
-                }
-
                 // Always run validation for monitoring (even without experiment)
                 // cvRoi is now relative to full frame, mask is ROI-sized
                 cv::Rect cvRoi(roi.x, roi.y, roi.w, roi.h);
@@ -709,6 +703,16 @@ void ProcessingService::realtimeLoop() {
                     grayFull = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
                 }
                 FilterResult validation = filterProcessedImage(mask, cvRoi, config, grayFull.empty() ? grayROI : grayFull);
+                
+                // Extract contours from validation result and adjust coordinates for full-frame snapshot
+                // Contours from filterProcessedImage are in ROI coordinates, need to adjust for full frame
+                std::vector<std::vector<cv::Point>> contours = validation.allContours;
+                for (auto& contour : contours) {
+                    for (auto& pt : contour) {
+                        pt.x += roi.x;
+                        pt.y += roi.y;
+                    }
+                }
                 const auto algoEnd = clock::now();
                 const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
                 algoMsSinceSummary += algoMs;
@@ -905,12 +909,10 @@ void ProcessingService::realtimeLoop() {
                 cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
                 cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
-                // Contours
-                std::vector<std::vector<cv::Point>> contours;
-                std::vector<cv::Vec4i> hierarchy;
-                cv::findContours(mask, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-
                 FilterResult validation = filterProcessedImage(mask, cvRoi, config, gray);
+                
+                // Extract contours from validation result for snapshot
+                std::vector<std::vector<cv::Point>> contours = validation.allContours;
                 const auto algoEnd = clock::now();
                 const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
                 algoMsSinceSummary += algoMs;
@@ -1153,14 +1155,11 @@ void ProcessingService::realtimeLoop() {
                 cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
                 cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
-                // Contours
-                std::vector<std::vector<cv::Point>> contours;
-                std::vector<cv::Vec4i> hierarchy;
-                cv::findContours(mask, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-
                 // Always run validation for monitoring (even without experiment)
-
                 FilterResult validation = filterProcessedImage(mask, cvRoi, config, gray);
+                
+                // Extract contours from validation result for snapshot
+                std::vector<std::vector<cv::Point>> contours = validation.allContours;
                 const auto algoEnd = clock::now();
                 const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
                 algoMsSinceSummary += algoMs;

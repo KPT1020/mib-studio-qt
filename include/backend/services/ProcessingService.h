@@ -53,6 +53,10 @@ struct FilterResult {
     double areaRatio{0.0};
     double ringRatio{0.0};
     BrightnessQuantiles brightness;
+    // Contours found during processing (for snapshot/display)
+    // These are in the same coordinate space as the processedImage mask
+    std::vector<std::vector<cv::Point>> allContours;
+    std::vector<cv::Vec4i> hierarchy;
 };
 
 struct ProcessedFrame {
@@ -169,7 +173,8 @@ private:
                                       const ProcessingConfig& config, const cv::Mat& originalImage);
     BrightnessQuantiles calculateBrightnessQuantiles(const cv::Mat& originalImage, const cv::Mat& mask);
     double calculateRingRatio(const std::vector<cv::Point>& innerContour, const std::vector<cv::Point>& outerContour);
-    std::tuple<std::vector<std::vector<cv::Point>>, bool, std::vector<std::vector<cv::Point>>, std::vector<int>> 
+    std::tuple<std::vector<std::vector<cv::Point>>, bool, std::vector<std::vector<cv::Point>>, std::vector<int>, 
+               std::vector<std::vector<cv::Point>>, std::vector<cv::Vec4i>> 
         findContours(const cv::Mat& processedImage);
 
     std::vector<std::thread> workers_;
