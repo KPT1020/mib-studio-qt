@@ -6,6 +6,7 @@ class QLabel;
 class QTimer;
 class PlaybackPanel;
 class QTabWidget;
+class QSplitter;
 class QSpinBox;
 class QAction;
 class QPushButton;
@@ -15,6 +16,7 @@ template<typename T> class QFutureWatcher;
 namespace backend { class AppBackend; }
 namespace frontend { class OverviewTab; }
 namespace frontend { class AutoUpdater; }
+namespace frontend { class SidebarWidget; }
 namespace Ui { class MainWindow; }
 
 class MainWindow : public QMainWindow {
@@ -40,6 +42,7 @@ private:
     void startExperimentServices();
     void stopExperimentServices();
     void setupCornerWidgets();
+    void setupSidebar();
     
     Ui::MainWindow* ui;
     backend::AppBackend& backend_;
@@ -49,6 +52,8 @@ private:
     QTabWidget* experimentTabs_ = nullptr;
     frontend::OverviewTab* overviewTab_ = nullptr;
     frontend::AutoUpdater* updater_ = nullptr;
+    frontend::SidebarWidget* sidebarWidget_ = nullptr;
+    QSplitter* mainSplitter_ = nullptr;
     uint64_t experimentStartTimeNs_{0};
     bool experimentActive_{false};
     bool experimentServicesActive_{false};

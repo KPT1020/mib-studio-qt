@@ -7,6 +7,7 @@
 #include <QStatusBar>
 #include <QTimer>
 #include <QTabWidget>
+#include <QSplitter>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QMessageBox>
@@ -31,6 +32,8 @@
 #include "frontend/tabs/OverviewTab.h"
 #include "frontend/tabs/ConfigTabs.h"
 #include "frontend/system/AutoUpdater.h"
+#include "frontend/utils/SidebarWidget.h"
+#include "frontend/utils/StatisticsPanel.h"
 #include <spdlog/spdlog.h>
 #include <opencv2/core.hpp>
 #include <chrono>
@@ -141,6 +144,9 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
             SPDLOG_INFO("Auto-flushed {} frames to HDF5", flushed);
         } });
 
+    // Setup sidebar and main layout
+    setupSidebar();
+
     // Tabs: Connect + Overview + Experiment (Preview + Monitoring) + Review
     auto *connectTab = new frontend::ConnectTab(backend_, ui->tabs);
     overviewTab_ = new frontend::OverviewTab(backend_, ui->tabs);
@@ -186,6 +192,46 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
 
 MainWindow::~MainWindow() {
     delete ui;
+}
+
+void MainWindow::setupSidebar()
+{
+    // Remove the existing tabs widget from the central widget layout
+    ui->verticalLayout->removeWidget(ui->tabs);
+
+    // Create horizontal splitter
+    mainSplitter_ = new QSplitter(Qt::Horizontal, ui->centralwidget);
+    mainSplitter_->setChildrenCollapsible(false);
+
+    // Create sidebar widget
+    sidebarWidget_ = new frontend::SidebarWidget(backend_, mainSplitter_);
+    connect(sidebarWidget_, &frontend::SidebarWidget::collapseStateChanged, this, [this](bool collapsed) {
+        if (mainSplitter_ && mainSplitter_->count() >= 2) {
+            int targetWidth = collapsed ? 30 : sidebarWidget_->expandedWidth();
+            QList<int> sizes = mainSplitter_->sizes();
+            if (sizes.size() >= 2) {
+                sizes[0] = targetWidth;
+                mainSplitter_->setSizes(sizes);
+            }
+        }
+    });
+
+    // Add sidebar to splitter
+    mainSplitter_->addWidget(sidebarWidget_);
+    
+    // Add tabs widget to splitter
+    mainSplitter_->addWidget(ui->tabs);
+
+    // Set splitter stretch factors (sidebar: 0, tabs: 1)
+    mainSplitter_->setStretchFactor(0, 0);
+    mainSplitter_->setStretchFactor(1, 1);
+
+    // Set initial sizes - sidebar width depends on collapsed state
+    int sidebarWidth = sidebarWidget_->isCollapsed() ? 30 : sidebarWidget_->expandedWidth();
+    mainSplitter_->setSizes({sidebarWidth, 1000});
+
+    // Add splitter to central widget layout
+    ui->verticalLayout->addWidget(mainSplitter_);
 }
 
 void MainWindow::setupCornerWidgets() {
@@ -505,8 +551,7 @@ void MainWindow::onUpdateStats()
     const uint64_t tFetchEndUs = backend::Tools::getTimestamp();
     const double fetchMs = static_cast<double>(tFetchEndUs - tFetchStartUs) / 1000.0;
 
-    QString status;
-    // Display / algo / classification rates and totals
+    // Collect statistics data
     double displayFps = 0.0;
     if (experimentTabs_ && experimentTabs_->count() > 0) {
         auto* previewPage = qobject_cast<frontend::PreviewPage*>(experimentTabs_->widget(0));
@@ -522,6 +567,38 @@ void MainWindow::onUpdateStats()
     const double invalidFps = proc.getInvalidFps1s();
     const uint64_t totalValidFlushed = proc.getTotalValidFlushed();
 
+    // Calculate experiment runtime
+    double experimentRuntimeSeconds = 0.0;
+    if (experimentActive_ && experimentStartTimeNs_ > 0) {
+        uint64_t currentTimeNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                     std::chrono::system_clock::now().time_since_epoch())
+                                     .count();
+        experimentRuntimeSeconds = static_cast<double>(currentTimeNs - experimentStartTimeNs_) / 1e9;
+    }
+
+    // Update statistics panel if sidebar exists
+    if (sidebarWidget_ && sidebarWidget_->statisticsPanel()) {
+        frontend::StatisticsData data;
+        data.displayFps = displayFps;
+        data.algoAvgUs = algoAvgUs;
+        data.validFps = validFps;
+        data.invalidFps = invalidFps;
+        data.totalValidFlushed = totalValidFlushed;
+        data.cameraRunning = cap.isRunning();
+        data.cameraFps = s.lastFrameRate.load();
+        data.cameraDataRateMBps = s.lastDataRateMBps.load();
+        data.meanRingRatio = backend_.autofocus().getAverageRingRatio();
+        data.experimentActive = experimentActive_;
+        data.validBuffered = validFrames.size();
+        data.invalidBuffered = invalidFrames.size();
+        data.flushInProgress = flushInProgress_;
+        data.experimentRuntimeSeconds = experimentRuntimeSeconds;
+
+        sidebarWidget_->statisticsPanel()->updateStatistics(data);
+    }
+
+    // Also update status bar for backward compatibility
+    QString status;
     status = QString("Display=%1 fps | Algo=%2 us | Valid=%3/s | Invalid=%4/s | Flushed(valid)=%5")
                  .arg(QString::number(displayFps, 'f', 1))
                  .arg(QString::number(algoAvgUs, 'f', 1))

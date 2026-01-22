@@ -43,7 +43,6 @@
 #include "backend/AppBackend.h"
 #include "frontend/models/JsonTableModel.h"
 #include "frontend/utils/JsonFlatten.h"
-#include "frontend/tabs/NanopositionerTab.h"
 
 namespace frontend {
 
@@ -288,12 +287,6 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
             if (jsUnsavedLabel_) jsUnsavedLabel_->setVisible(true);
         });
         connect(profilesIncludeJsCheck_, &QCheckBox::toggled, this, &ConfigTabs::onIncludeJsToggled);
-    }
-
-    // Nanopositioner tab
-    {
-        auto* nanoTab = new frontend::NanopositionerTab(backend_, this);
-        tabs_->addTab(nanoTab, tr("Nanopositioner"));
     }
 
     layout->addWidget(tabs_, 1);

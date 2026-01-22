@@ -239,6 +239,10 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/utils/SimpleImageCanvas.h
     src/frontend/utils/StatsDisplayManager.cpp
     include/frontend/utils/StatsDisplayManager.h
+    src/frontend/utils/StatisticsPanel.cpp
+    include/frontend/utils/StatisticsPanel.h
+    src/frontend/utils/SidebarWidget.cpp
+    include/frontend/utils/SidebarWidget.h
     # Models
     src/frontend/models/HdfMetricsModel.cpp
     include/frontend/models/HdfMetricsModel.h
