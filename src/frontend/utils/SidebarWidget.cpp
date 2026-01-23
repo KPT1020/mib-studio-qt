@@ -9,6 +9,7 @@
 
 #include "backend/AppBackend.h"
 #include "frontend/utils/StatisticsPanel.h"
+#include "frontend/utils/BackgroundPreviewWidget.h"
 #include "frontend/tabs/NanopositionerTab.h"
 
 namespace frontend
@@ -31,11 +32,21 @@ namespace frontend
         mainLayout->setContentsMargins(0, 0, 0, 0);
         mainLayout->setSpacing(0);
 
-        // Content widget (contains statistics and nanopositioner)
+        // Content widget (contains background preview, statistics and nanopositioner)
         contentWidget_ = new QWidget(this);
         contentLayout_ = new QVBoxLayout(contentWidget_);
         contentLayout_->setContentsMargins(0, 0, 0, 0);
         contentLayout_->setSpacing(0);
+
+        // Background preview widget (at the top)
+        backgroundPreview_ = new BackgroundPreviewWidget(contentWidget_);
+        contentLayout_->addWidget(backgroundPreview_);
+
+        // Separator
+        auto* previewSeparator = new QFrame(contentWidget_);
+        previewSeparator->setFrameShape(QFrame::HLine);
+        previewSeparator->setFrameShadow(QFrame::Sunken);
+        contentLayout_->addWidget(previewSeparator);
 
         // Statistics panel
         statisticsPanel_ = new StatisticsPanel(contentWidget_);
@@ -135,6 +146,14 @@ namespace frontend
         QSettings settings;
         settings.setValue("Sidebar/Collapsed", collapsed_);
         settings.setValue("Sidebar/ExpandedWidth", expandedWidth_);
+    }
+
+    void SidebarWidget::updateBackgroundPreview(const QImage& image)
+    {
+        if (backgroundPreview_)
+        {
+            backgroundPreview_->setBackgroundImage(image);
+        }
     }
 
 } // namespace frontend

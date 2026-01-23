@@ -241,6 +241,8 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/utils/StatsDisplayManager.h
     src/frontend/utils/StatisticsPanel.cpp
     include/frontend/utils/StatisticsPanel.h
+    src/frontend/utils/BackgroundPreviewWidget.cpp
+    include/frontend/utils/BackgroundPreviewWidget.h
     src/frontend/utils/SidebarWidget.cpp
     include/frontend/utils/SidebarWidget.h
     # Models

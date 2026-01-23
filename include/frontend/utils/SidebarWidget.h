@@ -5,10 +5,12 @@
 namespace backend { class AppBackend; }
 namespace frontend { class StatisticsPanel; }
 namespace frontend { class NanopositionerTab; }
+namespace frontend { class BackgroundPreviewWidget; }
 class QSplitter;
 class QToolButton;
 class QVBoxLayout;
 class QHBoxLayout;
+class QImage;
 
 namespace frontend
 {
@@ -32,6 +34,7 @@ namespace frontend
 
     public slots:
         void toggleCollapse();
+        void updateBackgroundPreview(const QImage& image);
 
     signals:
         void collapseStateChanged(bool collapsed);
@@ -43,6 +46,7 @@ namespace frontend
         void saveCollapseState();
 
         backend::AppBackend& backend_;
+        BackgroundPreviewWidget* backgroundPreview_ = nullptr;
         StatisticsPanel* statisticsPanel_ = nullptr;
         NanopositionerTab* nanopositionerTab_ = nullptr;
         QToolButton* toggleButton_ = nullptr;

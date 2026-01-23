@@ -35,6 +35,12 @@ public:
     double getDisplayFps() const { return lastDisplayFps_; }
 		void setDisplayFps(int fps);
 
+    // Background image access
+    QImage getBackgroundImage() const;
+
+signals:
+    void backgroundImageSet(const QImage& image);
+
 private slots:
     void onTick();
     void onSliderPressed();

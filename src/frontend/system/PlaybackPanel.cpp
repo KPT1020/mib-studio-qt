@@ -739,6 +739,14 @@ void PlaybackPanel::onSetBackground()
     
     // Update background indicator on button
     updateBackgroundIndicator();
+    
+    // Emit signal for background image change
+    emit backgroundImageSet(backgroundGray_);
+}
+
+QImage PlaybackPanel::getBackgroundImage() const
+{
+    return backgroundGray_.copy();
 }
 
 void PlaybackPanel::onClearRoi()

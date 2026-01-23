@@ -158,6 +158,20 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     experimentTabs_->addTab(previewPage, tr("Preview"));
     experimentTabs_->addTab(monitoringTab, tr("Monitoring"));
     
+    // Connect PlaybackPanel background signal to SidebarWidget
+    if (sidebarWidget_ && previewPage) {
+        PlaybackPanel* playbackPanel = previewPage->getPlaybackPanel();
+        if (playbackPanel) {
+            connect(playbackPanel, &PlaybackPanel::backgroundImageSet,
+                    sidebarWidget_, &frontend::SidebarWidget::updateBackgroundPreview);
+            // Set initial background if one exists
+            QImage currentBg = playbackPanel->getBackgroundImage();
+            if (!currentBg.isNull()) {
+                sidebarWidget_->updateBackgroundPreview(currentBg);
+            }
+        }
+    }
+    
     setupCornerWidgets();
     
     auto *hdfReviewTab = new frontend::HdfReviewTab(backend_, ui->tabs);
