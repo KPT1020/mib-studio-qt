@@ -14,6 +14,7 @@ namespace backend::services
     class PlaybackService;
     class CameraControlService;
     class AutofocusService;
+    class YoloService;
 }
 
 namespace backend
@@ -46,6 +47,7 @@ namespace backend
         services::PlaybackService &playback();
         services::CameraControlService &cameraControl();
         services::AutofocusService &autofocus();
+        services::YoloService &yolo();
         
         // Get frame store for service lifecycle management
         std::shared_ptr<playback::FrameStore> getFrameStore() const { return frameStore_; }
@@ -77,6 +79,7 @@ namespace backend
         std::unique_ptr<services::PlaybackService> playbackService_;
         std::unique_ptr<services::CameraControlService> cameraControlService_;
         std::unique_ptr<services::AutofocusService> autofocusService_;
+        std::unique_ptr<services::YoloService> yoloService_;
         std::shared_ptr<playback::FrameStore> frameStore_;
 
         // Last selected hardware device (for script apply)

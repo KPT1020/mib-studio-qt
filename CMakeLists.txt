@@ -64,6 +64,7 @@ find_package(Qt6 COMPONENTS Core Widgets Gui Charts Network REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG QUIET)
 find_package(OpenCV CONFIG REQUIRED)
+find_package(onnxruntime CONFIG REQUIRED)
 
 # Prefer official SQLite3 package; fallback to unofficial config if needed
 find_package(SQLite3 QUIET)
@@ -97,6 +98,7 @@ add_library(mib_backend STATIC
     src/backend/services/ProcessingService.cpp
     src/backend/services/PlaybackService.cpp
     src/backend/services/AutofocusService.cpp
+    src/backend/services/YoloService.cpp
     src/backend/playback/FrameStore.cpp
     src/camera/common/EGrabberCamera.cpp
     src/camera/mock/MockCamera.cpp
@@ -131,6 +133,13 @@ endif()
 
 if(TARGET nlohmann_json::nlohmann_json)
     target_link_libraries(mib_backend PUBLIC nlohmann_json::nlohmann_json)
+endif()
+
+# ONNX Runtime linking
+if(TARGET onnxruntime::onnxruntime)
+    target_link_libraries(mib_backend PUBLIC onnxruntime::onnxruntime)
+else()
+    message(WARNING "onnxruntime::onnxruntime target not found - YOLO service will not be available")
 endif()
 
 # SQLite linking (whichever is available)
@@ -592,6 +601,15 @@ if(WIN32)
                     $<TARGET_FILE_DIR:${app_target}>
             COMMAND_EXPAND_LISTS
             COMMENT "Copying Conan package DLLs for ${app_target}"
+        )
+        # Copy resources/models directory (YOLO model files)
+        add_custom_command(TARGET ${app_target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "$<TARGET_FILE_DIR:${app_target}>/resources/models"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${CMAKE_CURRENT_SOURCE_DIR}/resources/models/yolo11n-seg.onnx"
+                    "$<TARGET_FILE_DIR:${app_target}>/resources/models/"
+            COMMENT "Copying YOLO model files for ${app_target}"
         )
     endforeach()
 endif()

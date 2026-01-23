@@ -11,6 +11,7 @@
 #include "camera/mock/MockCamera.h"
 #include "backend/services/CameraControlService.h"
 #include "backend/services/AutofocusService.h"
+#include "backend/services/YoloService.h"
 #include "backend/BackgroundCaptureNotifier.h"
 #include <QImage>
 #include <QTimer>
@@ -86,10 +87,20 @@ namespace backend
         playbackService_ = std::make_unique<services::PlaybackService>();
         cameraControlService_ = std::make_unique<services::CameraControlService>();
         autofocusService_ = std::make_unique<services::AutofocusService>();
+        yoloService_ = std::make_unique<services::YoloService>();
         frameStore_ = std::make_shared<playback::FrameStore>(5000);
 
         sqliteService_->initialize((std::filesystem::path(dataDir) / "app.sqlite3").string());
         hdf5Service_->initialize(dataDir);
+
+        // Initialize YOLO service - resolve model path relative to data directory
+        // dataDir is typically {exeDir}/data, so we go up one level to get exeDir
+        std::filesystem::path dataPath(dataDir);
+        std::filesystem::path exeDir = dataPath.parent_path();
+        std::filesystem::path modelPath = exeDir / "resources" / "models" / "yolo11n-seg.onnx";
+        if (!yoloService_->initialize(modelPath.string())) {
+            SPDLOG_WARN("YOLO model not loaded - segmentation features will not be available");
+        }
 
         processingService_->start();
         // Note: startRealtime() is now called when Experiment tab becomes active, not during initialization
@@ -199,6 +210,7 @@ namespace backend
     services::PlaybackService &AppBackend::playback() { return *playbackService_; }
     services::CameraControlService &AppBackend::cameraControl() { return *cameraControlService_; }
     services::AutofocusService &AppBackend::autofocus() { return *autofocusService_; }
+    services::YoloService &AppBackend::yolo() { return *yoloService_; }
 
     void AppBackend::configureMockCamera(const camera::mock::MockCameraOptions &options)
     {
