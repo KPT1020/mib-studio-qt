@@ -40,6 +40,9 @@ struct ProcessingConfig {
     bool enable_area_range_check{true};
     bool require_single_inner_contour{true};
     int empty_frame_pixel_threshold{100};
+    bool auto_background_enabled{false};
+    int auto_background_empty_frames{30};
+    int auto_background_cooldown_frames{1000};
 };
 
 struct FilterResult {
@@ -166,6 +169,10 @@ public:
     using RingRatioCallback = std::function<void(double ringRatio, int64_t timestampNs)>;
     void setRingRatioCallback(RingRatioCallback callback);
 
+    // Background capture callback for auto-capture (called when background is auto-captured)
+    using BackgroundCaptureCallback = std::function<void(const cv::Mat& background, uint64_t frameIndex)>;
+    void setBackgroundCaptureCallback(BackgroundCaptureCallback callback);
+
 private:
     void workerLoop();
     void realtimeLoop();
@@ -265,6 +272,16 @@ private:
     // Ring ratio callback for autofocus
     mutable std::mutex ringRatioCallbackMutex_;
     RingRatioCallback ringRatioCallback_;
+    
+    // Background capture callback for auto-capture
+    mutable std::mutex backgroundCaptureCallbackMutex_;
+    BackgroundCaptureCallback backgroundCaptureCallback_;
+    
+    // Auto-capture state tracking
+    std::atomic<uint64_t> consecutiveEmptyFrames_{0};
+    std::atomic<uint64_t> lastAutoBackgroundFrame_{0};
+    cv::Mat previousFrameForAutoCapture_; // Store previous frame for frame-to-frame diff when no background
+    std::mutex previousFrameMutex_; // Protect previous frame access
     
     // Realtime throughput metrics (published once per ~1s window)
     std::atomic<double> algoFps1s_{0.0};

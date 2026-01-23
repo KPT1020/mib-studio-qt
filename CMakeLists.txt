@@ -85,6 +85,8 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor)
 # Backend library (services, APIs)
 add_library(mib_backend STATIC
     src/backend/AppBackend.cpp
+    src/backend/BackgroundCaptureNotifier.cpp
+    include/backend/BackgroundCaptureNotifier.h
     src/backend/Tools.cpp
     src/backend/services/Logger.cpp
     src/backend/services/SqliteService.cpp
@@ -100,6 +102,9 @@ add_library(mib_backend STATIC
     src/camera/mock/MockCamera.cpp
 )
 
+# Explicitly enable AUTOMOC for this target to ensure MOC files are generated
+set_target_properties(mib_backend PROPERTIES AUTOMOC ON)
+
 target_include_directories(mib_backend PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor
@@ -110,6 +115,7 @@ target_include_directories(mib_backend PUBLIC
 set(COREMOR_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor)
 target_link_libraries(mib_backend PUBLIC
     spdlog::spdlog
+    Qt6::Core
     Qt6::Gui
     ${COREMOR_LIB_DIR}/XMT_DLL_SER.lib
 )

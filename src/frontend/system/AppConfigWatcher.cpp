@@ -215,6 +215,12 @@ namespace frontend
 					pcfg.area_threshold_max = ip.value("area_threshold_max").toInt(pcfg.area_threshold_max);
 				if (ip.contains("empty_frame_pixel_threshold"))
 					pcfg.empty_frame_pixel_threshold = ip.value("empty_frame_pixel_threshold").toInt(pcfg.empty_frame_pixel_threshold);
+				if (ip.contains("auto_background_enabled"))
+					pcfg.auto_background_enabled = ip.value("auto_background_enabled").toBool(pcfg.auto_background_enabled);
+				if (ip.contains("auto_background_empty_frames"))
+					pcfg.auto_background_empty_frames = ip.value("auto_background_empty_frames").toInt(pcfg.auto_background_empty_frames);
+				if (ip.contains("auto_background_cooldown_frames"))
+					pcfg.auto_background_cooldown_frames = ip.value("auto_background_cooldown_frames").toInt(pcfg.auto_background_cooldown_frames);
 				if (ip.contains("filters") && ip.value("filters").isObject())
 				{
 					const QJsonObject fl = ip.value("filters").toObject();

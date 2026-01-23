@@ -11,6 +11,9 @@
 #include "camera/mock/MockCamera.h"
 #include "backend/services/CameraControlService.h"
 #include "backend/services/AutofocusService.h"
+#include "backend/BackgroundCaptureNotifier.h"
+#include <QImage>
+#include <QTimer>
 
 #include <algorithm>
 #include <chrono>
@@ -63,7 +66,9 @@ namespace backend
         }
     }
 
-    AppBackend::AppBackend() = default;
+    AppBackend::AppBackend() {
+        backgroundCaptureNotifier_ = std::make_unique<BackgroundCaptureNotifier>();
+    }
     AppBackend::~AppBackend() = default;
 
     bool AppBackend::initialize(const std::string &dataDir)
@@ -95,6 +100,20 @@ namespace backend
             if (autofocusService_) {
                 autofocusService_->onRingRatio(ringRatio, timestampNs);
             } });
+
+        // Wire background capture callback to emit Qt signal
+        processingService_->setBackgroundCaptureCallback([this](const cv::Mat& bg, uint64_t frameIndex) {
+            if (backgroundCaptureNotifier_) {
+                // Convert cv::Mat to QImage
+                QImage qimg(bg.data, bg.cols, bg.rows, static_cast<int>(bg.step), QImage::Format_Grayscale8);
+                QImage qimgCopy = qimg.copy(); // Ensure we own the data
+                // Use QTimer::singleShot to ensure we're in the Qt event loop thread
+                QTimer::singleShot(0, backgroundCaptureNotifier_.get(), [this, qimgCopy, frameIndex]() {
+                    emit backgroundCaptureNotifier_->backgroundAutoCaptured(qimgCopy, frameIndex);
+                });
+            }
+            SPDLOG_INFO("Background auto-captured at frame {}", frameIndex);
+        });
 
         // Wire capture -> frame store for playback/display
         captureService_->setFrameStore(frameStore_);
@@ -248,6 +267,10 @@ namespace backend
     {
         // Camera is configured if hardware camera is selected OR mock camera is configured
         return (selectedIfIndex_ >= 0 && selectedDevIndex_ >= 0) || mockCameraConfigured_;
+    }
+
+    BackgroundCaptureNotifier* AppBackend::backgroundCaptureNotifier() const {
+        return backgroundCaptureNotifier_.get();
     }
 
 } // namespace backend

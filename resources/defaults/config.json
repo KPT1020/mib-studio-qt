@@ -5,6 +5,9 @@
         "area_threshold_min": 250,
         "bg_subtract_threshold": 8,
         "empty_frame_pixel_threshold": 100,
+        "auto_background_enabled": false,
+        "auto_background_empty_frames": 30,
+        "auto_background_cooldown_frames": 1000,
         "filters": {
             "enable_area_range_check": true,
             "enable_border_check": true,

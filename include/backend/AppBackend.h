@@ -3,6 +3,8 @@
 #include <memory>
 #include <string>
 
+namespace backend { class BackgroundCaptureNotifier; }
+
 namespace backend::services
 {
     class SqliteService;
@@ -64,6 +66,9 @@ namespace backend
         // Check if a camera is configured (either hardware or mock)
         bool isCameraConfigured() const;
 
+        // Get background capture notifier for Qt signal connections
+        BackgroundCaptureNotifier* backgroundCaptureNotifier() const;
+
     private:
         std::unique_ptr<services::SqliteService> sqliteService_;
         std::unique_ptr<services::Hdf5Service> hdf5Service_;
@@ -79,6 +84,9 @@ namespace backend
         int selectedDevIndex_{-1};
         std::string selectedLabel_;
         bool mockCameraConfigured_{false};
+        
+        // Background capture notifier for Qt signals
+        std::unique_ptr<BackgroundCaptureNotifier> backgroundCaptureNotifier_;
     };
 
 } // namespace backend

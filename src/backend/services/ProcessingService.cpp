@@ -81,6 +81,12 @@ void ProcessingService::startRealtime(std::shared_ptr<backend::playback::FrameSt
     if (rtRunning_.load()) return;
     rtStore_ = std::move(store);
     rtRunning_.store(true);
+    consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
+    lastAutoBackgroundFrame_.store(0, std::memory_order_relaxed);
+    {
+        std::scoped_lock prevFrameLk(previousFrameMutex_);
+        previousFrameForAutoCapture_.release();
+    }
     realtimeThread_ = std::thread(&ProcessingService::realtimeLoop, this);
     SPDLOG_INFO("ProcessingService: realtime processing started");
 }
@@ -152,6 +158,8 @@ void ProcessingService::startExperiment() {
     invalidFrameCounter_.store(0);
     totalValidFlushed_.store(0, std::memory_order_relaxed);
     resetRealtimeMetrics();
+    // Reset auto-capture counter when experiment starts
+    consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
     experimentActive_.store(true);
     SPDLOG_INFO("ProcessingService: experiment started, frame buffers cleared (flush interval: {} frames, invalid sampling: every {}th)", 
                 flushInterval_.load(), invalidFrameSamplingRate_.load());
@@ -293,6 +301,11 @@ bool ProcessingService::isFrameEmpty(const backend::playback::Frame& frame,
 void ProcessingService::setRingRatioCallback(RingRatioCallback callback) {
     std::scoped_lock lk(ringRatioCallbackMutex_);
     ringRatioCallback_ = std::move(callback);
+}
+
+void ProcessingService::setBackgroundCaptureCallback(BackgroundCaptureCallback callback) {
+    std::scoped_lock lk(backgroundCaptureCallbackMutex_);
+    backgroundCaptureCallback_ = std::move(callback);
 }
 
 size_t ProcessingService::flushBufferedFrames(class Hdf5Service& hdf5) {
@@ -662,7 +675,7 @@ void ProcessingService::realtimeLoop() {
                 
                 // Create ROI-sized mask (much smaller than full frame)
                 cv::Mat mask(roi.h, roi.w, CV_8UC1, cv::Scalar(0));
-                cv::Mat blurredCurr, blurredBg, diff, thresh;
+                cv::Mat blurredCurr, blurredBg, thresh;
                 const auto algoStart = clock::now();
                 auto toOdd = [](int v) -> int { if (v < 1) v = 1; if ((v % 2) == 0) v += 1; return v; };
                 const int blurK = toOdd(config.gaussian_blur_size);
@@ -671,14 +684,38 @@ void ProcessingService::realtimeLoop() {
                 const int threshVal = std::max(0, config.bg_subtract_threshold);
 
                 cv::GaussianBlur(grayROI, blurredCurr, cv::Size(blurK, blurK), 0);
-                if (bgShared && !bgShared->empty() && bgShared->size() == cv::Size(static_cast<int>(f.width), static_cast<int>(f.height)) && bgShared->type() == CV_8UC1) {
+                bool hasBackground = (bgShared && !bgShared->empty() && bgShared->size() == cv::Size(static_cast<int>(f.width), static_cast<int>(f.height)) && bgShared->type() == CV_8UC1);
+                
+                // For processing: use background subtraction if available
+                cv::Mat diffForProcessing;
+                if (hasBackground) {
                     cv::Rect bgRoi(roi.x, roi.y, roi.w, roi.h);
                     cv::Mat bgROI = (*bgShared)(bgRoi);
                     cv::GaussianBlur(bgROI, blurredBg, cv::Size(blurK, blurK), 0);
-                    cv::subtract(blurredCurr, blurredBg, diff);
+                    cv::subtract(blurredCurr, blurredBg, diffForProcessing);
                 } else {
-                    diff = blurredCurr;
+                    diffForProcessing = blurredCurr;
                 }
+                
+                // For auto-capture detection: always use frame-to-frame difference when enabled
+                cv::Mat diffForAutoCapture;
+                if (config.auto_background_enabled && !experimentActive_.load()) {
+                    std::scoped_lock prevFrameLk(previousFrameMutex_);
+                    if (!previousFrameForAutoCapture_.empty() && 
+                        previousFrameForAutoCapture_.size() == blurredCurr.size() &&
+                        previousFrameForAutoCapture_.type() == blurredCurr.type()) {
+                        cv::absdiff(blurredCurr, previousFrameForAutoCapture_, diffForAutoCapture);
+                    } else {
+                        // First frame or size mismatch: store current frame and skip auto-capture check
+                        previousFrameForAutoCapture_ = blurredCurr.clone();
+                        diffForAutoCapture = blurredCurr; // Use current frame for thresholding (will not be empty)
+                    }
+                } else {
+                    diffForAutoCapture = diffForProcessing; // Fallback to processing diff
+                }
+                
+                // Use frame-to-frame diff for empty frame detection when auto-capture is enabled
+                cv::Mat diff = (config.auto_background_enabled && !experimentActive_.load()) ? diffForAutoCapture : diffForProcessing;
                 cv::threshold(diff, thresh, threshVal, 255, cv::THRESH_BINARY);
                 
                 // Check for empty frame: count non-zero pixels after binary threshold
@@ -686,10 +723,66 @@ void ProcessingService::realtimeLoop() {
                 if (pixelCount < config.empty_frame_pixel_threshold) {
                     SPDLOG_DEBUG("Empty frame detected (idx={}, pixel_count={}, threshold={}), skipping further processing", 
                                 idx, pixelCount, config.empty_frame_pixel_threshold);
+                    
+                    // Auto-capture logic (only when experiment is NOT running)
+                    if (config.auto_background_enabled && !experimentActive_.load()) {
+                        uint64_t currentEmpty = consecutiveEmptyFrames_.fetch_add(1, std::memory_order_relaxed) + 1;
+                        uint64_t lastCapture = lastAutoBackgroundFrame_.load(std::memory_order_relaxed);
+                        uint64_t framesSinceCapture = (idx > lastCapture) ? (idx - lastCapture) : 0;
+                        
+                        // Check if we should capture: enough consecutive empty frames AND cooldown period passed
+                        if (currentEmpty >= static_cast<uint64_t>(config.auto_background_empty_frames) &&
+                            framesSinceCapture >= static_cast<uint64_t>(config.auto_background_cooldown_frames)) {
+                            
+                            // Capture full frame as background (not just ROI)
+                            cv::Mat fullGray = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
+                            if (!fullGray.empty()) {
+                                setRealtimeBackgroundGray(fullGray);
+                                lastAutoBackgroundFrame_.store(idx, std::memory_order_relaxed);
+                                consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
+                                
+                                // Update previous frame cache to current frame (for next frame-to-frame comparison)
+                                {
+                                    std::scoped_lock prevFrameLk(previousFrameMutex_);
+                                    previousFrameForAutoCapture_ = blurredCurr.clone();
+                                }
+                                
+                                // Notify via callback
+                                {
+                                    std::scoped_lock callbackLk(backgroundCaptureCallbackMutex_);
+                                    if (backgroundCaptureCallback_) {
+                                        backgroundCaptureCallback_(fullGray.clone(), idx);
+                                    }
+                                }
+                                
+                                SPDLOG_INFO("Auto-captured background at frame {} ({} consecutive empty frames)", 
+                                           idx, currentEmpty);
+                            }
+                        }
+                    } else {
+                        // Reset counter if auto-capture disabled, experiment running, or movement detected
+                        if (!config.auto_background_enabled || experimentActive_.load()) {
+                            consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
+                        }
+                    }
+                    
                     rtLastProcessed_.store(idx);
                     continue; // Skip morphology, contours, validation, and frame accumulation
                 }
                 
+                // Reset counter on non-empty frames
+                if (config.auto_background_enabled && !experimentActive_.load()) {
+                    consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
+                }
+                
+                // Update previous frame for frame-to-frame comparison (always when auto-capture enabled)
+                if (config.auto_background_enabled && !experimentActive_.load()) {
+                    std::scoped_lock prevFrameLk(previousFrameMutex_);
+                    previousFrameForAutoCapture_ = blurredCurr.clone();
+                }
+                
+                // Use background subtraction diff for actual processing (morphology, contours, etc.)
+                cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
                 cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
                 cv::morphologyEx(thresh, mask, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
                 cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
@@ -879,7 +972,7 @@ void ProcessingService::realtimeLoop() {
                 cv::Mat mask(gray.rows, gray.cols, CV_8UC1, cv::Scalar(0));
                 cv::Mat roiCurr = gray(cvRoi);
                 cv::Mat roiDst = mask(cvRoi);
-                cv::Mat blurredCurr, blurredBg, diff, thresh;
+                cv::Mat blurredCurr, blurredBg, thresh;
                 const auto algoStart = clock::now();
                 auto toOdd = [](int v) -> int { if (v < 1) v = 1; if ((v % 2) == 0) v += 1; return v; };
                 const int blurK = toOdd(config.gaussian_blur_size);
@@ -888,12 +981,36 @@ void ProcessingService::realtimeLoop() {
                 const int threshVal = std::max(0, config.bg_subtract_threshold);
 
                 cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(blurK, blurK), 0);
-                if (bgShared && !bgShared->empty() && bgShared->size() == gray.size() && bgShared->type() == CV_8UC1) {
+                bool hasBackground = (bgShared && !bgShared->empty() && bgShared->size() == gray.size() && bgShared->type() == CV_8UC1);
+                
+                // For processing: use background subtraction if available
+                cv::Mat diffForProcessing;
+                if (hasBackground) {
                     cv::GaussianBlur((*bgShared)(cvRoi), blurredBg, cv::Size(blurK, blurK), 0);
-                    cv::subtract(blurredCurr, blurredBg, diff);
+                    cv::subtract(blurredCurr, blurredBg, diffForProcessing);
                 } else {
-                    diff = blurredCurr;
+                    diffForProcessing = blurredCurr;
                 }
+                
+                // For auto-capture detection: always use frame-to-frame difference when enabled
+                cv::Mat diffForAutoCapture;
+                if (config.auto_background_enabled && !experimentActive_.load()) {
+                    std::scoped_lock prevFrameLk(previousFrameMutex_);
+                    if (!previousFrameForAutoCapture_.empty() && 
+                        previousFrameForAutoCapture_.size() == blurredCurr.size() &&
+                        previousFrameForAutoCapture_.type() == blurredCurr.type()) {
+                        cv::absdiff(blurredCurr, previousFrameForAutoCapture_, diffForAutoCapture);
+                    } else {
+                        // First frame or size mismatch: store current frame and skip auto-capture check
+                        previousFrameForAutoCapture_ = blurredCurr.clone();
+                        diffForAutoCapture = blurredCurr; // Use current frame for thresholding (will not be empty)
+                    }
+                } else {
+                    diffForAutoCapture = diffForProcessing; // Fallback to processing diff
+                }
+                
+                // Use frame-to-frame diff for empty frame detection when auto-capture is enabled
+                cv::Mat diff = (config.auto_background_enabled && !experimentActive_.load()) ? diffForAutoCapture : diffForProcessing;
                 cv::threshold(diff, thresh, threshVal, 255, cv::THRESH_BINARY);
                 
                 // Check for empty frame: count non-zero pixels after binary threshold
@@ -901,8 +1018,71 @@ void ProcessingService::realtimeLoop() {
                 if (pixelCount < config.empty_frame_pixel_threshold) {
                     SPDLOG_DEBUG("Empty frame detected (idx={}, pixel_count={}, threshold={}), skipping further processing", 
                                 idx, pixelCount, config.empty_frame_pixel_threshold);
+                    
+                    // Auto-capture logic (only when experiment is NOT running)
+                    if (config.auto_background_enabled && !experimentActive_.load()) {
+                        uint64_t currentEmpty = consecutiveEmptyFrames_.fetch_add(1, std::memory_order_relaxed) + 1;
+                        uint64_t lastCapture = lastAutoBackgroundFrame_.load(std::memory_order_relaxed);
+                        uint64_t framesSinceCapture = (idx > lastCapture) ? (idx - lastCapture) : 0;
+                        
+                        // Check if we should capture: enough consecutive empty frames AND cooldown period passed
+                        if (currentEmpty >= static_cast<uint64_t>(config.auto_background_empty_frames) &&
+                            framesSinceCapture >= static_cast<uint64_t>(config.auto_background_cooldown_frames)) {
+                            
+                            // Capture full frame as background (not just ROI)
+                            cv::Mat fullGray = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
+                            if (!fullGray.empty()) {
+                                setRealtimeBackgroundGray(fullGray);
+                                lastAutoBackgroundFrame_.store(idx, std::memory_order_relaxed);
+                                consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
+                                
+                                // Update previous frame cache to current frame (for next frame-to-frame comparison)
+                                {
+                                    std::scoped_lock prevFrameLk(previousFrameMutex_);
+                                    previousFrameForAutoCapture_ = blurredCurr.clone();
+                                }
+                                
+                                // Notify via callback
+                                {
+                                    std::scoped_lock callbackLk(backgroundCaptureCallbackMutex_);
+                                    if (backgroundCaptureCallback_) {
+                                        backgroundCaptureCallback_(fullGray.clone(), idx);
+                                    }
+                                }
+                                
+                                SPDLOG_INFO("Auto-captured background at frame {} ({} consecutive empty frames)", 
+                                           idx, currentEmpty);
+                            }
+                        }
+                    } else {
+                        // Reset counter if auto-capture disabled, experiment running, or movement detected
+                        if (!config.auto_background_enabled || experimentActive_.load()) {
+                            consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
+                        }
+                    }
+                    
                     rtLastProcessed_.store(idx);
                     continue;
+                }
+                
+                // Reset counter on non-empty frames
+                if (config.auto_background_enabled && !experimentActive_.load()) {
+                    consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
+                }
+                
+                // Update previous frame for frame-to-frame comparison (always when auto-capture enabled)
+                if (config.auto_background_enabled && !experimentActive_.load()) {
+                    std::scoped_lock prevFrameLk(previousFrameMutex_);
+                    previousFrameForAutoCapture_ = blurredCurr.clone();
+                }
+                
+                // Use background subtraction diff for actual processing (morphology, contours, etc.)
+                cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+                
+                // Update previous frame for frame-to-frame comparison (when no background and auto-capture enabled)
+                if (!hasBackground && config.auto_background_enabled && !experimentActive_.load()) {
+                    std::scoped_lock prevFrameLk(previousFrameMutex_);
+                    previousFrameForAutoCapture_ = blurredCurr.clone();
                 }
                 
                 cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
@@ -1125,7 +1305,7 @@ void ProcessingService::realtimeLoop() {
                 cv::Mat mask(gray.rows, gray.cols, CV_8UC1, cv::Scalar(0));
                 cv::Mat roiCurr = gray(cvRoi);
                 cv::Mat roiDst = mask(cvRoi);
-                cv::Mat blurredCurr, blurredBg, diff, thresh;
+                cv::Mat blurredCurr, blurredBg, thresh;
                 const auto algoStart = clock::now();
                 auto toOdd = [](int v) -> int { if (v < 1) v = 1; if ((v % 2) == 0) v += 1; return v; };
                 const int blurK = toOdd(config.gaussian_blur_size);
@@ -1134,12 +1314,36 @@ void ProcessingService::realtimeLoop() {
                 const int threshVal = std::max(0, config.bg_subtract_threshold);
 
                 cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(blurK, blurK), 0);
-                if (bgShared && !bgShared->empty() && bgShared->size() == gray.size() && bgShared->type() == CV_8UC1) {
+                bool hasBackground = (bgShared && !bgShared->empty() && bgShared->size() == gray.size() && bgShared->type() == CV_8UC1);
+                
+                // For processing: use background subtraction if available
+                cv::Mat diffForProcessing;
+                if (hasBackground) {
                     cv::GaussianBlur((*bgShared)(cvRoi), blurredBg, cv::Size(blurK, blurK), 0);
-                    cv::subtract(blurredCurr, blurredBg, diff);
+                    cv::subtract(blurredCurr, blurredBg, diffForProcessing);
                 } else {
-                    diff = blurredCurr;
+                    diffForProcessing = blurredCurr;
                 }
+                
+                // For auto-capture detection: always use frame-to-frame difference when enabled
+                cv::Mat diffForAutoCapture;
+                if (config.auto_background_enabled && !experimentActive_.load()) {
+                    std::scoped_lock prevFrameLk(previousFrameMutex_);
+                    if (!previousFrameForAutoCapture_.empty() && 
+                        previousFrameForAutoCapture_.size() == blurredCurr.size() &&
+                        previousFrameForAutoCapture_.type() == blurredCurr.type()) {
+                        cv::absdiff(blurredCurr, previousFrameForAutoCapture_, diffForAutoCapture);
+                    } else {
+                        // First frame or size mismatch: store current frame and skip auto-capture check
+                        previousFrameForAutoCapture_ = blurredCurr.clone();
+                        diffForAutoCapture = blurredCurr; // Use current frame for thresholding (will not be empty)
+                    }
+                } else {
+                    diffForAutoCapture = diffForProcessing; // Fallback to processing diff
+                }
+                
+                // Use frame-to-frame diff for empty frame detection when auto-capture is enabled
+                cv::Mat diff = (config.auto_background_enabled && !experimentActive_.load()) ? diffForAutoCapture : diffForProcessing;
                 cv::threshold(diff, thresh, threshVal, 255, cv::THRESH_BINARY);
 
                 // Check for empty frame: count non-zero pixels after binary threshold
@@ -1147,8 +1351,71 @@ void ProcessingService::realtimeLoop() {
                 if (pixelCount < config.empty_frame_pixel_threshold) {
                     SPDLOG_DEBUG("Empty frame detected (idx={}, pixel_count={}, threshold={}), skipping further processing",
                                 idx, pixelCount, config.empty_frame_pixel_threshold);
+                    
+                    // Auto-capture logic (only when experiment is NOT running)
+                    if (config.auto_background_enabled && !experimentActive_.load()) {
+                        uint64_t currentEmpty = consecutiveEmptyFrames_.fetch_add(1, std::memory_order_relaxed) + 1;
+                        uint64_t lastCapture = lastAutoBackgroundFrame_.load(std::memory_order_relaxed);
+                        uint64_t framesSinceCapture = (idx > lastCapture) ? (idx - lastCapture) : 0;
+                        
+                        // Check if we should capture: enough consecutive empty frames AND cooldown period passed
+                        if (currentEmpty >= static_cast<uint64_t>(config.auto_background_empty_frames) &&
+                            framesSinceCapture >= static_cast<uint64_t>(config.auto_background_cooldown_frames)) {
+                            
+                            // Capture full frame as background (not just ROI)
+                            cv::Mat fullGray = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
+                            if (!fullGray.empty()) {
+                                setRealtimeBackgroundGray(fullGray);
+                                lastAutoBackgroundFrame_.store(idx, std::memory_order_relaxed);
+                                consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
+                                
+                                // Update previous frame cache to current frame (for next frame-to-frame comparison)
+                                {
+                                    std::scoped_lock prevFrameLk(previousFrameMutex_);
+                                    previousFrameForAutoCapture_ = blurredCurr.clone();
+                                }
+                                
+                                // Notify via callback
+                                {
+                                    std::scoped_lock callbackLk(backgroundCaptureCallbackMutex_);
+                                    if (backgroundCaptureCallback_) {
+                                        backgroundCaptureCallback_(fullGray.clone(), idx);
+                                    }
+                                }
+                                
+                                SPDLOG_INFO("Auto-captured background at frame {} ({} consecutive empty frames)", 
+                                           idx, currentEmpty);
+                            }
+                        }
+                    } else {
+                        // Reset counter if auto-capture disabled, experiment running, or movement detected
+                        if (!config.auto_background_enabled || experimentActive_.load()) {
+                            consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
+                        }
+                    }
+                    
                     rtLastProcessed_.store(idx);
                     continue; // Skip morphology, contours, validation, and frame accumulation
+                }
+                
+                // Reset counter on non-empty frames
+                if (config.auto_background_enabled && !experimentActive_.load()) {
+                    consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
+                }
+                
+                // Update previous frame for frame-to-frame comparison (always when auto-capture enabled)
+                if (config.auto_background_enabled && !experimentActive_.load()) {
+                    std::scoped_lock prevFrameLk(previousFrameMutex_);
+                    previousFrameForAutoCapture_ = blurredCurr.clone();
+                }
+                
+                // Use background subtraction diff for actual processing (morphology, contours, etc.)
+                cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+                
+                // Update previous frame for frame-to-frame comparison (when no background and auto-capture enabled)
+                if (!hasBackground && config.auto_background_enabled && !experimentActive_.load()) {
+                    std::scoped_lock prevFrameLk(previousFrameMutex_);
+                    previousFrameForAutoCapture_ = blurredCurr.clone();
                 }
 
                 cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));

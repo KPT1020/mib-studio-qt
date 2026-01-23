@@ -16,6 +16,7 @@ class QTimer;
 class QSlider;
 class QWidget;
 class QToolButton;
+class QCheckBox;
 
 class PlaybackPanel : public QWidget {
     Q_OBJECT
@@ -41,6 +42,9 @@ public:
 signals:
     void backgroundImageSet(const QImage& image);
 
+public slots:
+    void onBackgroundAutoCaptured(const QImage& background, uint64_t frameIndex);
+
 private slots:
     void onTick();
     void onSliderPressed();
@@ -53,6 +57,7 @@ private slots:
     void onSaveBuffer();
     void onLogMetrics();
     void onToggleFit();
+    void onAutoBackgroundToggled(bool enabled);
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -74,6 +79,7 @@ private:
     QSlider* slider_ = nullptr;
     QToolButton* overlayBtn_ = nullptr;
     QToolButton* setBgBtn_ = nullptr;
+    QCheckBox* autoBgCheck_ = nullptr;
     QToolButton* clearRoiBtn_ = nullptr;
     QToolButton* saveBufferBtn_ = nullptr;
     QToolButton* fitBtn_ = nullptr;

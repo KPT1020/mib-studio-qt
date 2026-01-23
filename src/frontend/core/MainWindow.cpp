@@ -18,6 +18,7 @@
 #include <QPushButton>
 
 #include "backend/AppBackend.h"
+#include "backend/BackgroundCaptureNotifier.h"
 #include "backend/services/CaptureService.h"
 #include "backend/services/ProcessingService.h"
 #include "backend/services/Hdf5Service.h"
@@ -169,6 +170,10 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
             if (!currentBg.isNull()) {
                 sidebarWidget_->updateBackgroundPreview(currentBg);
             }
+            
+            // Connect auto-capture signal
+            connect(backend_.backgroundCaptureNotifier(), &backend::BackgroundCaptureNotifier::backgroundAutoCaptured,
+                    playbackPanel, &PlaybackPanel::onBackgroundAutoCaptured);
         }
     }
     

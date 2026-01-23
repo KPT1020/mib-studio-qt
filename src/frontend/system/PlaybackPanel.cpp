@@ -6,6 +6,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QToolButton>
+#include <QCheckBox>
 #include <QMouseEvent>
 #include <QKeyEvent>
 #include <QMenu>
@@ -315,6 +316,10 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     setBgBtn_ = new QToolButton(controls);
     setBgBtn_->setText("Set Background");
     setBgBtn_->setToolTip("Capture current frame as background (when paused)");
+    autoBgCheck_ = new QCheckBox(controls);
+    autoBgCheck_->setText("Auto");
+    autoBgCheck_->setToolTip("Automatically capture background when no movement detected (disabled during experiments)");
+    autoBgCheck_->setChecked(false); // Default off
     clearRoiBtn_ = new QToolButton(controls);
     clearRoiBtn_->setText("Clear ROI");
     clearRoiBtn_->setToolTip("Clear the region of interest (ROI)");
@@ -327,6 +332,7 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     fitBtn_->setToolTip("Toggle between fit-to-window and 100% zoom");
     controlsLayout->addWidget(overlayBtn_);
     controlsLayout->addWidget(setBgBtn_);
+    controlsLayout->addWidget(autoBgCheck_);
     controlsLayout->addWidget(clearRoiBtn_);
     controlsLayout->addWidget(saveBufferBtn_);
     controlsLayout->addWidget(fitBtn_);
@@ -340,6 +346,7 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     connect(slider_, &QSlider::valueChanged, this, &PlaybackPanel::onSliderValueChanged);
     connect(overlayBtn_, &QToolButton::clicked, this, &PlaybackPanel::onToggleOverlay);
     connect(setBgBtn_, &QToolButton::clicked, this, &PlaybackPanel::onSetBackground);
+    connect(autoBgCheck_, &QCheckBox::toggled, this, &PlaybackPanel::onAutoBackgroundToggled);
     connect(clearRoiBtn_, &QToolButton::clicked, this, &PlaybackPanel::onClearRoi);
     connect(saveBufferBtn_, &QToolButton::clicked, this, &PlaybackPanel::onSaveBuffer);
     connect(fitBtn_, &QToolButton::clicked, this, &PlaybackPanel::onToggleFit);
@@ -747,6 +754,44 @@ void PlaybackPanel::onSetBackground()
 QImage PlaybackPanel::getBackgroundImage() const
 {
     return backgroundGray_.copy();
+}
+
+void PlaybackPanel::onBackgroundAutoCaptured(const QImage& background, uint64_t frameIndex) {
+    if (background.isNull()) return;
+    
+    // Ensure grayscale format
+    if (background.format() == QImage::Format_Grayscale8) {
+        backgroundGray_ = background.copy();
+    } else {
+        backgroundGray_ = background.convertToFormat(QImage::Format_Grayscale8);
+    }
+    hasBackground_ = !backgroundGray_.isNull();
+    
+    SPDLOG_INFO("PlaybackPanel: auto-captured background updated ({}x{}, frame {})",
+                backgroundGray_.width(), backgroundGray_.height(), frameIndex);
+    
+    // Update backend (already set, but ensure sync)
+    if (!backgroundGray_.isNull()) {
+        QImage gray = backgroundGray_.format() == QImage::Format_Grayscale8 ? backgroundGray_
+                                                                          : backgroundGray_.convertToFormat(QImage::Format_Grayscale8);
+        cv::Mat bg(gray.height(), gray.width(), CV_8UC1, const_cast<uchar *>(gray.bits()), gray.bytesPerLine());
+        backend_.processing().setRealtimeBackgroundGray(bg.clone());
+    }
+    
+    updateBackgroundIndicator();
+    emit backgroundImageSet(backgroundGray_);
+    
+    if (overlayMode_ != OverlayMode::Off) {
+        computeProcessedOverlay();
+        if (canvas_) canvas_->update();
+    }
+}
+
+void PlaybackPanel::onAutoBackgroundToggled(bool enabled) {
+    backend::services::ProcessingConfig cfg = backend_.processing().getProcessingConfig();
+    cfg.auto_background_enabled = enabled;
+    backend_.processing().setProcessingConfig(cfg);
+    SPDLOG_INFO("PlaybackPanel: auto-background capture {}", enabled ? "enabled" : "disabled");
 }
 
 void PlaybackPanel::onClearRoi()
