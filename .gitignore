@@ -1,4 +1,5 @@
 build/
+export/
 data/logs/app.log
 
 # Exclude .exe files in installers directory
