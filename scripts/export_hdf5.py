@@ -301,12 +301,29 @@ def export_images_to_tiff(
     return exported_count
 
 
-def main() -> int:
-    """Main entry point."""
-    args = parse_args()
+def export_hdf5(
+    input_path: Path,
+    output_dir: Path,
+    format_type: str = "csv",
+    frame_type: str = "both",
+    pixel_to_micron: float = 0.4886
+) -> int:
+    """
+    Export HDF5 data to CSV and/or images.
     
+    This function can be called programmatically (e.g., from GUI) or via CLI.
+    
+    Args:
+        input_path: Path to input HDF5 file
+        output_dir: Output directory
+        format_type: "csv", "images", or "all"
+        frame_type: "valid", "invalid", or "both"
+        pixel_to_micron: Pixel to micron conversion factor
+        
+    Returns:
+        0 on success, 1 on error
+    """
     # Validate input file
-    input_path = Path(args.input)
     if not input_path.exists():
         print(f"ERROR: Input file does not exist: {input_path}", file=sys.stderr)
         return 1
@@ -316,7 +333,6 @@ def main() -> int:
         return 1
     
     # Create output directory
-    output_dir = Path(args.output)
     try:
         output_dir.mkdir(parents=True, exist_ok=True)
     except OSError as e:
@@ -324,7 +340,7 @@ def main() -> int:
         return 1
     
     # Check if cv2 is needed
-    if args.format in ("images", "all") and not HAS_CV2:
+    if format_type in ("images", "all") and not HAS_CV2:
         print("ERROR: opencv-python (cv2) is required for image export.", file=sys.stderr)
         print("Install with: pip install opencv-python", file=sys.stderr)
         return 1
@@ -336,12 +352,12 @@ def main() -> int:
             metadata_valid = None
             metadata_invalid = None
             
-            if args.frame_type in ("valid", "both"):
+            if frame_type in ("valid", "both"):
                 metadata_valid = read_hdf5_metadata(h5_file, "/valid_frames/metadata")
                 if metadata_valid is None:
                     print("WARNING: /valid_frames/metadata dataset not found", file=sys.stderr)
             
-            if args.frame_type in ("invalid", "both"):
+            if frame_type in ("invalid", "both"):
                 metadata_invalid = read_hdf5_metadata(h5_file, "/invalid_frames/metadata")
                 if metadata_invalid is None:
                     print("WARNING: /invalid_frames/metadata dataset not found", file=sys.stderr)
@@ -352,25 +368,25 @@ def main() -> int:
                 return 1
             
             # Export CSV if requested
-            if args.format in ("csv", "all"):
+            if format_type in ("csv", "all"):
                 csv_path = output_dir / "metrics.csv"
                 valid_count, invalid_count = export_metrics_to_csv(
                     metadata_valid,
                     metadata_invalid,
                     csv_path,
-                    args.pixel_to_micron,
-                    args.frame_type
+                    pixel_to_micron,
+                    frame_type
                 )
                 total_count = valid_count + invalid_count
                 print(f"Exported {total_count} frames to CSV (Valid: {valid_count}, Invalid: {invalid_count})")
                 print(f"CSV file: {csv_path}")
             
             # Export images if requested
-            if args.format in ("images", "all"):
+            if format_type in ("images", "all"):
                 total_exported = 0
                 
                 # Export valid frames
-                if args.frame_type in ("valid", "both") and metadata_valid is not None:
+                if frame_type in ("valid", "both") and metadata_valid is not None:
                     images_valid = read_hdf5_images(h5_file, "/valid_frames/images")
                     if images_valid is not None:
                         exported = export_images_to_tiff(
@@ -385,7 +401,7 @@ def main() -> int:
                         print("WARNING: /valid_frames/images dataset not found", file=sys.stderr)
                 
                 # Export invalid frames
-                if args.frame_type in ("invalid", "both") and metadata_invalid is not None:
+                if frame_type in ("invalid", "both") and metadata_invalid is not None:
                     images_invalid = read_hdf5_images(h5_file, "/invalid_frames/images")
                     if images_invalid is not None:
                         exported = export_images_to_tiff(
@@ -419,6 +435,20 @@ def main() -> int:
     
     print(f"\nExport complete. Output directory: {output_dir}")
     return 0
+
+
+def main() -> int:
+    """Main entry point for command-line interface."""
+    args = parse_args()
+    
+    # Call the main export function
+    return export_hdf5(
+        Path(args.input),
+        Path(args.output),
+        args.format,
+        args.frame_type,
+        args.pixel_to_micron
+    )
 
 
 if __name__ == "__main__":
