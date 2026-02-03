@@ -149,7 +149,7 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     setupSidebar();
 
     // Tabs: Connect + Overview + Experiment (Preview + Monitoring) + Review
-    auto *connectTab = new frontend::ConnectTab(backend_, ui->tabs);
+    connectTab_ = new frontend::ConnectTab(backend_, ui->tabs);
     overviewTab_ = new frontend::OverviewTab(backend_, ui->tabs);
     
     // Create Experiment tab with nested Preview and Monitoring tabs
@@ -180,19 +180,22 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     setupCornerWidgets();
     
     auto *hdfReviewTab = new frontend::HdfReviewTab(backend_, ui->tabs);
-    ui->tabs->addTab(connectTab, tr("Connect"));
+    ui->tabs->addTab(connectTab_, tr("Connect"));
     ui->tabs->addTab(overviewTab_, tr("Overview"));
     ui->tabs->addTab(experimentTabs_, tr("Experiment"));
     ui->tabs->addTab(hdfReviewTab, tr("Review"));
 
-    connect(connectTab, &frontend::ConnectTab::connected, this, [this]()
+    connect(connectTab_, &frontend::ConnectTab::connected, this, [this]()
             {
+        // On connection, switch to Overview and enable ROI overlay by default.
+        if (overviewTab_) {
+            overviewTab_->setRoiOverlayVisible(true);
+        }
         if (ui->tabs) {
-            ui->tabs->setCurrentIndex(1); // Switch to Experiment tab
-            if (experimentTabs_) {
-                experimentTabs_->setCurrentIndex(0); // Switch to Preview sub-tab
-            }
+            ui->tabs->setCurrentIndex(1); // Overview tab
         } });
+
+    connect(connectTab_, &frontend::ConnectTab::noCamerasFound, this, &MainWindow::onNoCamerasFound);
 
     // Connect tab change signal for auto-applying camera scripts
     connect(ui->tabs, &QTabWidget::currentChanged, this, &MainWindow::onTabChanged);
@@ -202,6 +205,11 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     
     // Initialize tab states (all tabs enabled initially since no experiment is active)
     updateTabStates();
+
+    // Auto-connect on startup: if exactly one camera is discoverable, connect to it
+    QTimer::singleShot(400, this, [this]() {
+        if (connectTab_) connectTab_->tryAutoConnect();
+    });
 
     // Quiet update check on startup (only prompts if an update is available)
     QTimer::singleShot(1500, this, [this]() {
@@ -736,6 +744,34 @@ void MainWindow::stopExperimentServices()
     SPDLOG_INFO("MainWindow: Experiment services stopped");
 }
 
+void MainWindow::onNoCamerasFound()
+{
+    if (ui->tabs)
+    {
+        ui->tabs->setCurrentIndex(0); // Connect tab
+    }
+
+    QMessageBox box(this);
+    box.setWindowTitle(tr("No camera found"));
+    box.setIcon(QMessageBox::Information);
+    box.setText(tr("No camera was found.\n\n"
+                   "Please check that the camera is powered on and that the camera LED is green (ready).\n"
+                   "Then try connecting again."));
+
+    auto *tryAgainBtn = box.addButton(tr("Try again"), QMessageBox::ActionRole);
+    box.addButton(QMessageBox::Ok);
+
+    box.exec();
+
+    if (box.clickedButton() == tryAgainBtn)
+    {
+        // Defer to avoid re-entrancy if discovery immediately emits noCamerasFound().
+        QTimer::singleShot(0, this, [this]() {
+            if (connectTab_) connectTab_->tryAutoConnect();
+        });
+    }
+}
+
 void MainWindow::onTabChanged(int index)
 {
     // Guard: Once experiment started, overview is disabled until end of experiment
@@ -760,15 +796,41 @@ void MainWindow::onTabChanged(int index)
         return;
     }
 
-    // Handle service lifecycle for Experiment tab (index 2)
+    // Handle service lifecycle for Overview (index 1) + Experiment (index 2)
+    // Both tabs rely on playback/processing to show live frames.
+    const int OVERVIEW_TAB_INDEX = 1;
     const int EXPERIMENT_TAB_INDEX = 2;
     
-    if (index == EXPERIMENT_TAB_INDEX) {
-        // Switching TO Experiment tab: start services
+    if (index == OVERVIEW_TAB_INDEX || index == EXPERIMENT_TAB_INDEX) {
+        // Switching TO Overview/Experiment: start services
         startExperimentServices();
     } else if (experimentServicesActive_) {
-        // Switching FROM Experiment tab: stop services
+        // Switching away from Overview/Experiment: stop services
         stopExperimentServices();
+    }
+
+    // Auto-start camera when navigating to Overview
+    if (index == OVERVIEW_TAB_INDEX)
+    {
+        auto &cap = backend_.capture();
+        if (!cap.isRunning() && backend_.isCameraConfigured())
+        {
+            SPDLOG_INFO("MainWindow: auto-starting camera on Overview navigation");
+            if (cap.start())
+            {
+                if (statsTimer_)
+                    statsTimer_->start();
+                if (statusLabel_)
+                    statusLabel_->setText("Camera running");
+            }
+            else
+            {
+                QMessageBox::warning(this, tr("Start Camera"),
+                                     tr("Failed to start camera. Please check camera connection and try again."));
+                if (statusLabel_)
+                    statusLabel_->setText("Camera start failed");
+            }
+        }
     }
 
     // Guard: Camera script application - skip during experiment

@@ -23,32 +23,6 @@
      <property name="currentIndex">
       <number>0</number>
      </property>
-     <widget class="QWidget" name="framegrabberTab">
-      <attribute name="title">
-       <string>Framegrabbers</string>
-      </attribute>
-      <layout class="QVBoxLayout" name="framegrabberLayout">
-       <property name="leftMargin">
-        <number>0</number>
-       </property>
-       <property name="topMargin">
-        <number>0</number>
-       </property>
-       <property name="rightMargin">
-        <number>0</number>
-       </property>
-       <property name="bottomMargin">
-        <number>0</number>
-       </property>
-       <item>
-        <widget class="QListWidget" name="framegrabberList">
-         <property name="selectionMode">
-          <enum>QAbstractItemView::SingleSelection</enum>
-         </property>
-        </widget>
-       </item>
-      </layout>
-     </widget>
      <widget class="QWidget" name="cameraTab">
       <attribute name="title">
        <string>Cameras</string>
@@ -68,6 +42,32 @@
        </property>
        <item>
         <widget class="QListWidget" name="cameraList">
+         <property name="selectionMode">
+          <enum>QAbstractItemView::SingleSelection</enum>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+     <widget class="QWidget" name="framegrabberTab">
+      <attribute name="title">
+       <string>Framegrabbers</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="framegrabberLayout">
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="topMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
+       <item>
+        <widget class="QListWidget" name="framegrabberList">
          <property name="selectionMode">
           <enum>QAbstractItemView::SingleSelection</enum>
          </property>
