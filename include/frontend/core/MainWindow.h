@@ -15,6 +15,7 @@ template<typename T> class QFutureWatcher;
 
 namespace backend { class AppBackend; }
 namespace frontend { class OverviewTab; }
+namespace frontend { class ConnectTab; }
 namespace frontend { class AutoUpdater; }
 namespace frontend { class SidebarWidget; }
 namespace Ui { class MainWindow; }
@@ -35,6 +36,7 @@ private slots:
     void onStopExperiment();
     void onUpdateStats();
     void onTabChanged(int index);
+    void onNoCamerasFound();
 
 private:
     void updateExperimentButtonStates();
@@ -50,6 +52,7 @@ private:
     QTimer* statsTimer_ = nullptr;
     PlaybackPanel* playbackPanel_ = nullptr;
     QTabWidget* experimentTabs_ = nullptr;
+    frontend::ConnectTab* connectTab_ = nullptr;
     frontend::OverviewTab* overviewTab_ = nullptr;
     frontend::AutoUpdater* updater_ = nullptr;
     frontend::SidebarWidget* sidebarWidget_ = nullptr;

@@ -63,6 +63,65 @@ void ConnectTab::onRefresh() {
     populateDevices();
 }
 
+void ConnectTab::tryAutoConnect()
+{
+    // Guard: Cannot change camera connection while camera is running
+    if (backend_.capture().isRunning())
+    {
+        SPDLOG_INFO("ConnectTab: auto-connect skipped (capture running)");
+        return;
+    }
+
+    // Guard: Do not overwrite an already-configured camera (hardware or mock)
+    if (backend_.isCameraConfigured())
+    {
+        SPDLOG_INFO("ConnectTab: auto-connect skipped (camera already configured)");
+        return;
+    }
+
+    auto &cc = backend_.cameraControl();
+    const auto cameras = cc.discoverCameras();
+
+    SPDLOG_INFO("ConnectTab: auto-connect discovery found {} camera(s)", cameras.size());
+
+    if (cameras.empty())
+    {
+        ui->statusLabel->setText(tr("No cameras found."));
+        emit noCamerasFound();
+        return;
+    }
+
+    if (cameras.size() == 1)
+    {
+        const auto &cam = cameras[0];
+        SPDLOG_INFO("ConnectTab: auto-connecting to camera {} (if={}, dev={})",
+                    cam.label, cam.interfaceIndex, cam.deviceIndex);
+
+        backend_.setHardwareCameraSelection(cam.interfaceIndex, cam.deviceIndex, cam.label);
+
+        ui->statusLabel->setText(tr("Connected to %1 (not capturing)")
+                                     .arg(QString::fromStdString(cam.label)));
+
+        // Best-effort: focus Cameras tab and select the matching entry if present
+        ui->tabWidget->setCurrentIndex(0); // Cameras tab
+        for (int i = 0; i < ui->cameraList->count(); ++i)
+        {
+            auto *item = ui->cameraList->item(i);
+            if (item && item->text().toStdString() == cam.label)
+            {
+                ui->cameraList->setCurrentRow(i);
+                break;
+            }
+        }
+
+        emit connected();
+        return;
+    }
+
+    // 2+ cameras: user must select manually
+    ui->statusLabel->setText(tr("Multiple cameras found; select one and click Connect."));
+}
+
 void ConnectTab::populateDevices() {
     ui->framegrabberList->clear();
     ui->cameraList->clear();
@@ -114,11 +173,11 @@ void ConnectTab::onConnect() {
     
     int currentTab = ui->tabWidget->currentIndex();
     if (currentTab == 0) {
-        currentList = ui->framegrabberList;
-        deviceType = tr("framegrabber");
-    } else if (currentTab == 1) {
         currentList = ui->cameraList;
         deviceType = tr("camera");
+    } else if (currentTab == 1) {
+        currentList = ui->framegrabberList;
+        deviceType = tr("framegrabber");
     } else {
         QMessageBox::information(this, tr("Connect Device"), tr("Please select a device from the list."));
         return;

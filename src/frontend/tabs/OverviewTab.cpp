@@ -139,6 +139,19 @@ namespace frontend
         return FileIOUtils::saveEditorToFile(editor, path, err);
     }
 
+    void OverviewTab::setRoiOverlayVisible(bool visible)
+    {
+        roiOverlayVisible_ = visible;
+        if (ui->roiOverlayBtn)
+        {
+            ui->roiOverlayBtn->setText(roiOverlayVisible_ ? tr("ROI Overlay: On") : tr("ROI Overlay: Off"));
+        }
+        if (canvas_)
+        {
+            canvas_->update();
+        }
+    }
+
     void OverviewTab::onTick()
     {
         // Fetch latest frame from playback service
