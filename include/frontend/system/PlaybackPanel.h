@@ -89,7 +89,7 @@ private:
     uint64_t pinnedIndex_ = 0;         // selected index when reviewing
     QImage frameImage_;
     // Overlay/ROI state
-    OverlayMode overlayMode_ { OverlayMode::Off };
+    OverlayMode overlayMode_ { OverlayMode::Both };
     FitMode fitMode_ { FitMode::FitToWindow };
     QRect imageRoi_;
     bool roiActive_ = false;
