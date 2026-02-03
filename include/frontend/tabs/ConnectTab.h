@@ -18,6 +18,14 @@ public:
 
 signals:
     void connected();
+    void noCamerasFound();
+
+public slots:
+    // On app launch: if exactly one camera is discoverable, auto-select it.
+    // Emits:
+    //  - connected() on auto-connect success
+    //  - noCamerasFound() when discovery finds 0 cameras
+    void tryAutoConnect();
 
 private slots:
     void onRefresh();
