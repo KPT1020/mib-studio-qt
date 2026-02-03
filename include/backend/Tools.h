@@ -3,6 +3,7 @@
 #include <string>
 #include <chrono>
 #include <cstdint>
+#include <vector>
 
 namespace backend {
 
@@ -10,6 +11,10 @@ class Tools {
 public:
     // High-precision timestamp in microseconds (matches SDK pattern)
     static uint64_t getTimestamp();
+
+    // Enumerate available COM port numbers (e.g. 1 for COM1, 3 for COM3).
+    // Windows: registry HKLM\HARDWARE\DEVICEMAP\SERIALCOMM; other platforms: empty.
+    static std::vector<int> availableComPortNumbers();
 
     // Process memory usage (MB). Windows-first; returns 0 on unsupported platforms.
     static double getProcessMemoryMB();
