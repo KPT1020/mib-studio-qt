@@ -96,8 +96,8 @@ python scripts/reanalyse_hdf5.py -i experiment.h5 -o ./reanalysis --blur 5 --thr
   The same structure is used under `invalid/` when processing invalid frames. The `index` is taken from the HDF5 metadata so it matches the original experiment frame indices.
 
 - **Optional**:
-  - `{output_dir}/metrics.csv` (if `--export-csv`): same column format as the HDF5 export script.
-  - `{output_dir}/reanalysis.h5` (if `--export-h5`): HDF5 with `/valid_frames` and `/invalid_frames` groups, each containing `images`, `masks`, and `metadata` datasets, plus `/experiment_info` attributes when present in the source file.
+  - `{output_dir}/metrics.csv` (if `--export-csv`): same column format as the HDF5 export script, plus ROI columns (ROI X, ROI Y, ROI W, ROI H).
+  - `{output_dir}/reanalysis.h5` (if `--export-h5`): HDF5 with `/valid_frames` and `/invalid_frames` groups, each containing `images`, `masks`, and `metadata` datasets, plus `/experiment_info` attributes (including `roi_x`, `roi_y`, `roi_w`, `roi_h` when present in the source or after reanalysis).
 
 ## Parameters and app config
 
@@ -106,7 +106,9 @@ For results that match the app as closely as possible, use the same processing p
 - Pass `--config path/to/config.json` where the JSON has an `image_processing` section (and optional `filters` subsection) as in the app’s config (e.g. `resources/defaults/config.json`).
 - Or set `--blur`, `--threshold`, `--morph-kernel`, and `--morph-iterations` explicitly.
 
-Defaults in the script match the app defaults (blur 3, threshold 8, morph kernel 3, morph iterations 1). ROI is not supported in the reanalysis tool; processing is full-frame only.
+Defaults in the script match the app defaults (blur 3, threshold 8, morph kernel 3, morph iterations 1).
+
+**ROI:** The reanalysis tool uses the same ROI as at recording when it is stored in the .h5. MIB Studio writes ROI to `/experiment_info` as attributes `roi_x`, `roi_y`, `roi_w`, `roi_h`. If the input .h5 has no ROI metadata (e.g. older files), the script auto-synthesizes an ROI from the region where objects are most densely populated: it uses `/valid_frames/masks`, computes object centroids across (sampled) valid frames, and defines the ROI as the 5th-95th percentile bounding box of those centroids with a small margin. If no objects are found, processing falls back to full-frame. The chosen ROI is printed at startup (source: `stored`, `synthetic`, or `full_frame`). Exported `metrics.csv` includes ROI columns (ROI X, ROI Y, ROI W, ROI H), and `reanalysis.h5` writes ROI into `/experiment_info` so downstream use is consistent.
 
 From this version onward, MIB Studio saves the run’s background image in the .h5 (at `/experiment_info/background`) when a background was set for the run. Use `--background stored` when re-running the same pipeline for reproducible results.
 

@@ -54,6 +54,122 @@ BORDER_THRESHOLD = 2
 RING_RATIO_MIN = 15.0
 RING_RATIO_MAX = 25.0
 
+# Percentile range for synthetic ROI from object centroids (5th--95th)
+SYNTHETIC_ROI_PERCENTILE_LO = 5.0
+SYNTHETIC_ROI_PERCENTILE_HI = 95.0
+SYNTHETIC_ROI_MARGIN_FRAC = 0.02  # 2% margin on each side
+SYNTHETIC_ROI_MAX_SAMPLE_FRAMES = 500  # Cap frames when estimating ROI from masks
+
+# Stable filter trace / rejection reason strings (used in CSV + overlay text)
+REASON_VALID = "valid"
+REASON_NO_CONTOURS = "no_contours"
+REASON_NO_SINGLE_INNER = "no_single_inner_contour"
+REASON_TOUCHES_BORDER = "touches_border"
+REASON_AREA_OOR = "area_out_of_range"
+REASON_RING_OOR = "ring_ratio_out_of_range"
+
+
+def _int_attr(value: Any) -> Optional[int]:
+    """Convert an HDF5 attr (possibly numpy scalar) to int, or None if invalid."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def extract_roi_from_exp_info(
+    exp_info: Optional[dict],
+    img_width: int,
+    img_height: int,
+) -> Optional[tuple[int, int, int, int]]:
+    """
+    Extract and sanitize ROI from experiment_info (roi_x, roi_y, roi_w, roi_h).
+    Returns (x, y, w, h) clamped to image bounds with w, h >= 1, or None if missing/invalid.
+    """
+    if not exp_info or img_width <= 0 or img_height <= 0:
+        return None
+    x = _int_attr(exp_info.get("roi_x"))
+    y = _int_attr(exp_info.get("roi_y"))
+    w = _int_attr(exp_info.get("roi_w"))
+    h = _int_attr(exp_info.get("roi_h"))
+    if x is None or y is None or w is None or h is None or w < 1 or h < 1:
+        return None
+    # Clamp to image bounds
+    x = max(0, min(x, img_width - 1))
+    y = max(0, min(y, img_height - 1))
+    w = max(1, min(w, img_width - x))
+    h = max(1, min(h, img_height - y))
+    return (x, y, w, h)
+
+
+def get_image_shape_from_h5(h5_file: h5py.File) -> Optional[tuple[int, int]]:
+    """Return (height, width) from first available images dataset, or None."""
+    for path_prefix in ("/valid_frames", "/invalid_frames"):
+        images_ds = path_prefix + "/images"
+        if images_ds not in h5_file:
+            continue
+        imgs = h5_file[images_ds]
+        if imgs.shape[0] == 0:
+            continue
+        # shape is (n, height, width) or (n, height, width, channels)
+        if imgs.ndim >= 3:
+            return (int(imgs.shape[1]), int(imgs.shape[2]))
+    return None
+
+
+def compute_synthetic_roi_from_valid_masks(
+    h5_file: h5py.File,
+    img_width: int,
+    img_height: int,
+) -> tuple[int, int, int, int]:
+    """
+    Compute synthetic ROI from valid_frames/masks: centroid percentiles (5th--95th) + margin.
+    Uses only valid frames. Returns (x, y, w, h) clamped to image; if no objects, returns full frame.
+    """
+    masks_ds = "/valid_frames/masks"
+    if masks_ds not in h5_file:
+        return (0, 0, img_width, img_height)
+    masks = h5_file[masks_ds]
+    n = masks.shape[0]
+    if n == 0:
+        return (0, 0, img_width, img_height)
+    sample_step = max(1, n // min(n, SYNTHETIC_ROI_MAX_SAMPLE_FRAMES))
+    centroids_x: list[float] = []
+    centroids_y: list[float] = []
+    for idx in range(0, n, sample_step):
+        mask = np.asarray(masks[idx])
+        if mask.ndim > 2:
+            mask = mask.squeeze()
+        contours, _ = cv2.findContours(
+            mask.astype(np.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
+        )
+        for c in contours:
+            if cv2.contourArea(c) < MIN_NOISE_AREA:
+                continue
+            M = cv2.moments(c)
+            if M["m00"] and M["m00"] > 0:
+                cx = M["m10"] / M["m00"]
+                cy = M["m01"] / M["m00"]
+                centroids_x.append(cx)
+                centroids_y.append(cy)
+    if not centroids_x or not centroids_y:
+        return (0, 0, img_width, img_height)
+    x_lo = float(np.percentile(centroids_x, SYNTHETIC_ROI_PERCENTILE_LO))
+    x_hi = float(np.percentile(centroids_x, SYNTHETIC_ROI_PERCENTILE_HI))
+    y_lo = float(np.percentile(centroids_y, SYNTHETIC_ROI_PERCENTILE_LO))
+    y_hi = float(np.percentile(centroids_y, SYNTHETIC_ROI_PERCENTILE_HI))
+    margin_x = max(1, int(img_width * SYNTHETIC_ROI_MARGIN_FRAC))
+    margin_y = max(1, int(img_height * SYNTHETIC_ROI_MARGIN_FRAC))
+    x = max(0, int(x_lo) - margin_x)
+    y = max(0, int(y_lo) - margin_y)
+    x2 = min(img_width, int(x_hi) + margin_x)
+    y2 = min(img_height, int(y_hi) + margin_y)
+    w = max(1, x2 - x)
+    h = max(1, y2 - y)
+    return (x, y, w, h)
+
 
 def _to_odd(v: int) -> int:
     if v < 1:
@@ -159,8 +275,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--threshold", type=int, default=None, help="Binary threshold value. Overrides config.")
     parser.add_argument("--morph-kernel", type=int, default=None, help="Morphology kernel size (odd). Overrides config.")
     parser.add_argument("--morph-iterations", type=int, default=None, help="Morphology iterations. Overrides config.")
-    parser.add_argument("--save-overlay", action="store_true", help="Save contour overlay image per frame.")
-    parser.add_argument("--export-csv", action="store_true", help="Recompute metrics and write metrics.csv.")
+    parser.add_argument("--save-overlay", action="store_true", dest="save_overlay", default=True, help="Save contour overlay per frame (default).")
+    parser.add_argument("--no-save-overlay", action="store_false", dest="save_overlay", help="Do not save overlay.")
+    parser.add_argument("--export-csv", action="store_true", dest="export_csv", default=True, help="Recompute metrics and write metrics.csv (default).")
+    parser.add_argument("--no-export-csv", action="store_false", dest="export_csv", help="Do not write metrics.csv.")
     parser.add_argument("--export-h5", action="store_true", help="Write reanalysis.h5 with images, masks, metadata.")
     parser.add_argument(
         "--pixel-to-micron",
@@ -234,8 +352,13 @@ def run_pipeline(
     return blurred, diff, thresh, mask
 
 
-def find_contours_filtered(mask: np.ndarray) -> tuple[list, list, list, list, Any]:
-    """Mirror ProcessingService::findContours. Returns (filtered_contours, inner_contours, parent_indices, all_contours, hierarchy)."""
+def find_contours_filtered(mask: np.ndarray) -> tuple[list, list, list, list, Any, list[int]]:
+    """Mirror ProcessingService::findContours.
+
+    Returns (filtered_contours, inner_contours, parent_indices, all_contours, hierarchy, inner_filtered_indices).
+    - parent_indices are indices into filtered_contours (or -1 if parent not found)
+    - inner_filtered_indices are indices into filtered_contours for each entry in inner_contours
+    """
     contours, hierarchy = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)[-2:]
     if hierarchy is None:
         hierarchy = np.zeros((0, 4), dtype=np.int32)
@@ -251,12 +374,14 @@ def find_contours_filtered(mask: np.ndarray) -> tuple[list, list, list, list, An
 
     inner_contours = []
     parent_indices = []
+    inner_filtered_indices: list[int] = []
     for i, orig_i in enumerate(original_indices):
         if orig_i >= len(hierarchy):
             continue
         h = hierarchy[orig_i]
         if h[3] > -1:  # parent (original contour index)
             inner_contours.append(filtered[i])
+            inner_filtered_indices.append(i)
             parent_orig = int(h[3])
             filt_parent = -1
             for j in range(len(filtered)):
@@ -265,7 +390,7 @@ def find_contours_filtered(mask: np.ndarray) -> tuple[list, list, list, list, An
                     break
             parent_indices.append(filt_parent)
 
-    return filtered, inner_contours, parent_indices, contours, hierarchy
+    return filtered, inner_contours, parent_indices, contours, hierarchy, inner_filtered_indices
 
 
 def calculate_ring_ratio(inner: np.ndarray, outer: np.ndarray) -> float:
@@ -297,7 +422,7 @@ def filter_processed_image(
 ) -> dict[str, Any]:
     """Mirror ProcessingService::filterProcessedImage. roi = (x, y, w, h). Returns dict of metrics."""
     rx, ry, rw, rh = roi
-    filtered, inner_contours, parent_indices, all_contours, hierarchy = find_contours_filtered(mask)
+    filtered, inner_contours, parent_indices, all_contours, hierarchy, inner_filtered_indices = find_contours_filtered(mask)
 
     result = {
         "isValid": False,
@@ -313,14 +438,57 @@ def filter_processed_image(
         "brightness_q2": 0.0,
         "brightness_q3": 0.0,
         "brightness_q4": 0.0,
+        # Filter trace / debug fields (for reanalysis visibility)
+        "rejectReason": "",
+        "failedAt": "",
+        "passSingleInnerCheck": False,
+        "passBorderCheck": False,
+        "passAreaCheck": False,
+        "passRingCheck": False,
+        "contourUsed": "none",  # inner | largest_outer | none
+        "allContourCount": int(len(all_contours)) if all_contours is not None else 0,
+        "filteredContourCount": int(len(filtered)),
+        "selectedFilteredIndex": -1,
+        "selectedParentFilteredIndex": -1,
+        "selectedContourArea": 0.0,
+        "selectedHullArea": 0.0,
     }
     if not original_gray.size:
         pass
     else:
         result["brightness_q1"], result["brightness_q2"], result["brightness_q3"], result["brightness_q4"] = brightness_quantiles(original_gray, mask)
 
-    if config["require_single_inner_contour"] and not result["hasSingleInnerContour"]:
+    if len(filtered) == 0:
+        result["rejectReason"] = REASON_NO_CONTOURS
+        result["failedAt"] = REASON_NO_CONTOURS
+        # Checks: we did not pass any contour-dependent checks
+        result["passSingleInnerCheck"] = not config["require_single_inner_contour"]
+        result["passBorderCheck"] = not config["enable_border_check"]
+        result["passAreaCheck"] = not config["enable_area_range_check"]
+        result["passRingCheck"] = False
         return result
+
+    result["passSingleInnerCheck"] = (not config["require_single_inner_contour"]) or result["hasSingleInnerContour"]
+    if config["require_single_inner_contour"] and not result["hasSingleInnerContour"]:
+        result["rejectReason"] = REASON_NO_SINGLE_INNER
+        result["failedAt"] = REASON_NO_SINGLE_INNER
+        # Border/area/ring checks not applicable (we early return in the live pipeline)
+        result["passBorderCheck"] = not config["enable_border_check"]
+        result["passAreaCheck"] = not config["enable_area_range_check"]
+        result["passRingCheck"] = False
+        return result
+
+    # Pre-select which contour would be used for metrics (so overlays/CSV can show it even if later rejected)
+    if result["hasSingleInnerContour"]:
+        result["contourUsed"] = "inner"
+        if inner_filtered_indices:
+            result["selectedFilteredIndex"] = int(inner_filtered_indices[0])
+        if parent_indices:
+            result["selectedParentFilteredIndex"] = int(parent_indices[0]) if parent_indices[0] is not None else -1
+    elif filtered and not config["require_single_inner_contour"]:
+        idx = max(range(len(filtered)), key=lambda i: cv2.contourArea(filtered[i]))
+        result["contourUsed"] = "largest_outer"
+        result["selectedFilteredIndex"] = int(idx)
 
     # Border check
     if config["enable_border_check"]:
@@ -339,7 +507,12 @@ def filter_processed_image(
                 break
 
     if result["touchesBorder"] and config["enable_border_check"]:
+        result["passBorderCheck"] = False
+        result["rejectReason"] = REASON_TOUCHES_BORDER
+        result["failedAt"] = REASON_TOUCHES_BORDER
         return result
+
+    result["passBorderCheck"] = True
 
     if result["hasSingleInnerContour"]:
         c = inner_contours[0]
@@ -351,13 +524,31 @@ def filter_processed_image(
         circularity = (math.sqrt(4 * math.pi * hull_area) / perim) if perim > 0 else 0.0
         result["deformability"] = 1.0 - circularity
         result["area"] = hull_area
+        result["contourUsed"] = "inner"
+        if inner_filtered_indices:
+            result["selectedFilteredIndex"] = int(inner_filtered_indices[0])
         if parent_indices and parent_indices[0] >= 0 and parent_indices[0] < len(filtered):
+            result["selectedParentFilteredIndex"] = int(parent_indices[0])
             result["ringRatio"] = calculate_ring_ratio(c, filtered[parent_indices[0]])
+
+        result["selectedContourArea"] = float(contour_area)
+        result["selectedHullArea"] = float(hull_area)
         area_ok = not config["enable_area_range_check"] or (config["area_threshold_min"] <= hull_area <= config["area_threshold_max"])
         ring_ok = (result["ringRatio"] > RING_RATIO_MIN and result["ringRatio"] < RING_RATIO_MAX)
+        result["passAreaCheck"] = bool(area_ok)
+        result["passRingCheck"] = bool(ring_ok)
         if area_ok and ring_ok:
             result["inRange"] = True
             result["isValid"] = True
+            result["rejectReason"] = REASON_VALID
+            result["failedAt"] = ""
+        else:
+            if not area_ok:
+                result["rejectReason"] = REASON_AREA_OOR
+                result["failedAt"] = REASON_AREA_OOR
+            else:
+                result["rejectReason"] = REASON_RING_OOR
+                result["failedAt"] = REASON_RING_OOR
     elif filtered and not config["require_single_inner_contour"]:
         idx = max(range(len(filtered)), key=lambda i: cv2.contourArea(filtered[i]))
         c = filtered[idx]
@@ -369,19 +560,63 @@ def filter_processed_image(
         circularity = (math.sqrt(4 * math.pi * hull_area) / perim) if perim > 0 else 0.0
         result["deformability"] = 1.0 - circularity
         result["area"] = hull_area
-        if not config["enable_area_range_check"] or (config["area_threshold_min"] <= hull_area <= config["area_threshold_max"]):
+        result["contourUsed"] = "largest_outer"
+        result["selectedFilteredIndex"] = int(idx)
+        result["selectedContourArea"] = float(contour_area)
+        result["selectedHullArea"] = float(hull_area)
+        area_ok = (not config["enable_area_range_check"]) or (config["area_threshold_min"] <= hull_area <= config["area_threshold_max"])
+        result["passAreaCheck"] = bool(area_ok)
+        # Ring ratio check not used on this path (keep true to indicate not the cause of rejection)
+        result["passRingCheck"] = True
+        if area_ok:
             result["inRange"] = True
             result["isValid"] = True
+            result["rejectReason"] = REASON_VALID
+            result["failedAt"] = ""
+        else:
+            result["rejectReason"] = REASON_AREA_OOR
+            result["failedAt"] = REASON_AREA_OOR
+    else:
+        # No metrics path (e.g., require_single_inner_contour is true, but earlier return handled;
+        # or filtered exists but no allowed contour selection). Be explicit.
+        result["rejectReason"] = REASON_NO_SINGLE_INNER if config["require_single_inner_contour"] else REASON_NO_CONTOURS
+        result["failedAt"] = result["rejectReason"]
 
     return result
 
 
-def draw_overlay(original: np.ndarray, mask: np.ndarray, contours: list) -> np.ndarray:
+def draw_overlay(
+    original: np.ndarray,
+    mask: np.ndarray,
+    all_contours: list,
+    filtered_contours: list,
+    trace: dict[str, Any],
+) -> np.ndarray:
     out = cv2.cvtColor(original, cv2.COLOR_GRAY2BGR) if len(original.shape) == 2 else original.copy()
     if out.shape[2] == 1:
         out = cv2.cvtColor(out, cv2.COLOR_GRAY2BGR)
-    for c in contours:
-        cv2.drawContours(out, [c], -1, (0, 255, 0), 1)
+
+    # Draw all raw contours (thin) in blue
+    for c in all_contours:
+        cv2.drawContours(out, [c], -1, (255, 0, 0), 1)
+
+    # Highlight inner contour (green) and outer contour (red), thicker
+    sel_idx = int(trace.get("selectedFilteredIndex", -1))
+    parent_idx = int(trace.get("selectedParentFilteredIndex", -1))
+    if 0 <= parent_idx < len(filtered_contours):
+        cv2.drawContours(out, [filtered_contours[parent_idx]], -1, (0, 0, 255), 1)  # BGR red (outer)
+    if 0 <= sel_idx < len(filtered_contours):
+        cv2.drawContours(out, [filtered_contours[sel_idx]], -1, (0, 255, 0), 1)  # BGR green (inner)
+
+    # Label (reason + contour used)
+    reason = str(trace.get("rejectReason", ""))
+    contour_used = str(trace.get("contourUsed", ""))
+    idx = trace.get("index", "")
+    rr = trace.get("ringRatio", 0.0)
+    area = trace.get("area", 0.0)
+    line = f"idx={idx} reason={reason} contour={contour_used} ring={rr:.3f} area={area:.1f}"
+    cv2.putText(out, line, (8, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+
     return out
 
 
@@ -393,8 +628,9 @@ def process_one_frame_set(
     args: argparse.Namespace,
     bg_blurred: Optional[np.ndarray],
     blur_k: int,
+    roi: tuple[int, int, int, int],
 ) -> tuple[list[dict], list[np.ndarray], list[np.ndarray]]:
-    """Process valid or invalid frames. Returns (list of metric dicts, list of masks, list of original images for export-h5)."""
+    """Process valid or invalid frames. roi = (x, y, w, h). Returns (list of metric dicts, list of masks, list of original images for export-h5)."""
     path_prefix = "/valid_frames" if frame_type == "valid" else "/invalid_frames"
     images_ds = path_prefix + "/images"
     meta_ds = path_prefix + "/metadata"
@@ -410,6 +646,7 @@ def process_one_frame_set(
     metrics_list = []
     masks_list = []
     images_list = []
+    rx, ry, rw, rh = roi
 
     for i in range(n):
         frame_index = int(meta[i]["index"])
@@ -423,10 +660,26 @@ def process_one_frame_set(
             else:
                 gray = gray.astype(np.uint8)
 
-        blurred, diff, thresh, mask = run_pipeline(gray, bg_blurred, config)
+        h_img, w_img = gray.shape[0], gray.shape[1]
+        use_roi_crop = not (rx == 0 and ry == 0 and rw == w_img and rh == h_img)
+        if not use_roi_crop:
+            blurred, diff, thresh, mask = run_pipeline(gray, bg_blurred, config)
+        else:
+            gray_roi = gray[ry : ry + rh, rx : rx + rw]
+            bg_roi = None
+            if bg_blurred is not None and bg_blurred.shape == gray.shape:
+                bg_roi = bg_blurred[ry : ry + rh, rx : rx + rw]
+            blurred_roi, diff_roi, thresh_roi, mask_roi = run_pipeline(gray_roi, bg_roi, config)
+            blurred = np.zeros_like(gray)
+            diff = np.zeros_like(gray)
+            thresh = np.zeros_like(gray)
+            mask = np.zeros_like(gray)
+            blurred[ry : ry + rh, rx : rx + rw] = blurred_roi
+            diff[ry : ry + rh, rx : rx + rw] = diff_roi
+            thresh[ry : ry + rh, rx : rx + rw] = thresh_roi
+            mask[ry : ry + rh, rx : rx + rw] = mask_roi
 
-        roi = (0, 0, gray.shape[1], gray.shape[0])
-        rec_metrics = filter_processed_image(mask, roi, config, gray) if (args.export_csv or args.export_h5) else {}
+        rec_metrics = filter_processed_image(mask, roi, config, gray) if (args.export_csv or args.export_h5 or args.save_overlay) else {}
         rec_metrics["index"] = frame_index
         rec_metrics["timestampNs"] = timestamp_ns
         metrics_list.append(rec_metrics)
@@ -441,29 +694,53 @@ def process_one_frame_set(
         _save_tiff(frame_dir / "thresh.tiff", thresh)
         _save_tiff(frame_dir / "mask.tiff", mask)
         if args.save_overlay:
-            _, _, _, all_contours, _ = find_contours_filtered(mask)
-            overlay = draw_overlay(gray, mask, list(all_contours))
+            filtered, _, _, all_contours, _, _ = find_contours_filtered(mask)
+            overlay = draw_overlay(gray, mask, list(all_contours), filtered, rec_metrics)
             _save_tiff(frame_dir / "overlay.tiff", overlay)
 
     return metrics_list, masks_list, images_list
 
 
-def write_csv(rows_valid: list[dict], rows_invalid: list[dict], output_path: Path, pixel_to_micron: float, frame_type: str) -> None:
+def write_csv(
+    rows_valid: list[dict],
+    rows_invalid: list[dict],
+    output_path: Path,
+    pixel_to_micron: float,
+    frame_type: str,
+    roi: tuple[int, int, int, int],
+) -> None:
     area_factor = pixel_to_micron * pixel_to_micron
+    roi_x, roi_y, roi_w, roi_h = roi
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("Frame Type,Index,Timestamp,Deformability,Area,Area (um²),Area Ratio,Ring Ratio,")
         f.write("Valid,Touches Border,Single Inner,In Range,Inner Count,")
-        f.write("Bright Q1,Bright Q2,Bright Q3,Bright Q4\n")
+        f.write("Bright Q1,Bright Q2,Bright Q3,Bright Q4,")
+        # Reanalysis visibility fields
+        f.write("Reject Reason,Failed At,Contour Used,")
+        f.write("Filtered Contours,All Contours,Selected Idx,Selected Parent Idx,")
+        f.write("Selected Contour Area,Selected Hull Area,")
+        f.write("Pass Single Inner,Pass Border,Pass Area,Pass Ring,")
+        f.write("ROI X,ROI Y,ROI W,ROI H\n")
 
         def write_row(ft: str, r: dict) -> None:
+            def yn(v: Any) -> str:
+                return "Yes" if bool(v) else "No"
+
             area_um = r.get("area", 0) * area_factor
             f.write(f"{ft},{r['index']},{r['timestampNs']},{r.get('deformability', 0):.3f},{r.get('area', 0):.2f},{area_um:.2f},{r.get('areaRatio', 0):.3f},{r.get('ringRatio', 0):.3f},")
-            f.write("Yes," if r.get("isValid") else "No,")
-            f.write("Yes," if r.get("touchesBorder") else "No,")
-            f.write("Yes," if r.get("hasSingleInnerContour") else "No,")
-            f.write("Yes," if r.get("inRange") else "No,")
+            f.write(f"{yn(r.get('isValid'))},")
+            f.write(f"{yn(r.get('touchesBorder'))},")
+            f.write(f"{yn(r.get('hasSingleInnerContour'))},")
+            f.write(f"{yn(r.get('inRange'))},")
             f.write(f"{r.get('innerContourCount', 0)},")
-            f.write(f"{r.get('brightness_q1', 0):.2f},{r.get('brightness_q2', 0):.2f},{r.get('brightness_q3', 0):.2f},{r.get('brightness_q4', 0):.2f}\n")
+            f.write(f"{r.get('brightness_q1', 0):.2f},{r.get('brightness_q2', 0):.2f},{r.get('brightness_q3', 0):.2f},{r.get('brightness_q4', 0):.2f},")
+
+            f.write(f"{r.get('rejectReason', '')},{r.get('failedAt', '')},{r.get('contourUsed', '')},")
+            f.write(f"{r.get('filteredContourCount', 0)},{r.get('allContourCount', 0)},")
+            f.write(f"{r.get('selectedFilteredIndex', -1)},{r.get('selectedParentFilteredIndex', -1)},")
+            f.write(f"{r.get('selectedContourArea', 0.0):.2f},{r.get('selectedHullArea', 0.0):.2f},")
+            f.write(f"{yn(r.get('passSingleInnerCheck'))},{yn(r.get('passBorderCheck'))},{yn(r.get('passAreaCheck'))},{yn(r.get('passRingCheck'))},")
+            f.write(f"{roi_x},{roi_y},{roi_w},{roi_h}\n")
 
         if frame_type in ("valid", "both"):
             for r in rows_valid:
@@ -558,6 +835,18 @@ def main() -> int:
     try:
         with h5py.File(input_path, "r") as h5_file:
             exp_info = read_experiment_info(h5_file)
+            img_shape = get_image_shape_from_h5(h5_file)
+            if img_shape is None:
+                print("ERROR: No images found in .h5 (valid_frames or invalid_frames)", file=sys.stderr)
+                return 1
+            img_h, img_w = img_shape
+            roi = extract_roi_from_exp_info(exp_info, img_w, img_h)
+            if roi is None:
+                roi = compute_synthetic_roi_from_valid_masks(h5_file, img_w, img_h)
+                roi_origin = "synthetic" if roi != (0, 0, img_w, img_h) else "full_frame"
+            else:
+                roi_origin = "stored"
+            print(f"ROI: {roi} (source: {roi_origin})")
 
             bg_blurred_valid = None
             bg_blurred_invalid = None
@@ -608,29 +897,34 @@ def main() -> int:
 
             if args.frame_type in ("valid", "both"):
                 m, masks, imgs = process_one_frame_set(
-                    h5_file, "valid", config, output_dir, args, bg_blurred_valid, blur_k
+                    h5_file, "valid", config, output_dir, args, bg_blurred_valid, blur_k, roi
                 )
                 all_metrics_valid, all_masks_valid, all_images_valid = m, masks, imgs
                 print(f"Processed {len(m)} valid frames -> {output_dir / 'valid'}")
             if args.frame_type in ("invalid", "both"):
                 m, masks, imgs = process_one_frame_set(
-                    h5_file, "invalid", config, output_dir, args, bg_blurred_invalid, blur_k
+                    h5_file, "invalid", config, output_dir, args, bg_blurred_invalid, blur_k, roi
                 )
                 all_metrics_invalid, all_masks_invalid, all_images_invalid = m, masks, imgs
                 print(f"Processed {len(m)} invalid frames -> {output_dir / 'invalid'}")
 
             if args.export_csv and (all_metrics_valid or all_metrics_invalid):
                 csv_path = output_dir / "metrics.csv"
-                write_csv(all_metrics_valid, all_metrics_invalid, csv_path, args.pixel_to_micron, args.frame_type)
+                write_csv(all_metrics_valid, all_metrics_invalid, csv_path, args.pixel_to_micron, args.frame_type, roi)
                 print(f"Wrote {csv_path}")
 
             if args.export_h5 and (all_images_valid or all_images_invalid):
                 h5_path = output_dir / "reanalysis.h5"
+                exp_info_for_h5 = dict(exp_info) if exp_info else {}
+                exp_info_for_h5["roi_x"] = roi[0]
+                exp_info_for_h5["roi_y"] = roi[1]
+                exp_info_for_h5["roi_w"] = roi[2]
+                exp_info_for_h5["roi_h"] = roi[3]
                 write_reanalysis_h5(
                     h5_path,
                     all_images_valid, all_masks_valid, all_metrics_valid,
                     all_images_invalid, all_masks_invalid, all_metrics_invalid,
-                    exp_info,
+                    exp_info_for_h5,
                 )
                 print(f"Wrote {h5_path}")
 
