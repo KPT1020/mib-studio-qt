@@ -19,6 +19,7 @@
 #endif
 
 #include "backend/AppBackend.h"
+#include "backend/Tools.h"
 #include "backend/services/AutofocusService.h"
 
 using json = nlohmann::json;
@@ -112,12 +113,15 @@ namespace frontend
 		// Connect signals
 		connect(ui->connectBtn, &QPushButton::clicked, this, &NanopositionerTab::onConnectNanopositioner);
 		connect(ui->disconnectBtn, &QPushButton::clicked, this, &NanopositionerTab::onDisconnectNanopositioner);
+		connect(ui->refreshComPortBtn, &QPushButton::clicked, this, &NanopositionerTab::populateComPortList);
 		connect(ui->autofocusEnabledCheck, &QCheckBox::stateChanged, this, &NanopositionerTab::onAutofocusEnabledChanged);
 		connect(ui->increaseVoltageBtn, &QPushButton::clicked, this, &NanopositionerTab::onIncreaseVoltage);
 		connect(ui->decreaseVoltageBtn, &QPushButton::clicked, this, &NanopositionerTab::onDecreaseVoltage);
 
-		// Load config and update UI
+		// Load config first so probe/auto-connect use saved baud and device address
 		loadConfig();
+		// Populate COM port list (probe uses baud/address from config now)
+		populateComPortList();
 		updateNanopositionerUI();
 
 		// Status update timer
@@ -132,12 +136,77 @@ namespace frontend
 		if (ui->statusLabel) {
 			ui->statusLabel->setText(QString::fromStdString(message));
 		} });
+
+		// Delay auto-connect so COM/USB has time to enumerate (singleShot(0) is often too early)
+		QTimer::singleShot(1800, this, &NanopositionerTab::tryAutoConnectNanopositioner);
 	}
 
 	NanopositionerTab::~NanopositionerTab() {
 		delete ui;
 	}
 
+	void NanopositionerTab::populateComPortList()
+	{
+		ui->comPortCombo->clear();
+		if (backend_.autofocus().isConnected())
+		{
+			// Do not probe while connected (SDK uses single global COM handle). Show current port only.
+			int port = backend_.autofocus().getComPort();
+			ui->comPortCombo->addItem(QString("COM%1").arg(port), port);
+			ui->comPortCombo->setCurrentIndex(0);
+			return;
+		}
+		int baudRate = ui->baudRateCombo->currentData().toInt();
+		unsigned char deviceAddress = static_cast<unsigned char>(ui->deviceAddressSpinBox->value());
+		std::vector<int> ports = backend::Tools::availableComPortNumbers();
+		for (int port : ports)
+		{
+			if (backend::services::AutofocusService::probeComPort(port, baudRate, deviceAddress))
+			{
+				ui->comPortCombo->addItem(QString("COM%1").arg(port), port);
+			}
+		}
+	}
+
+	void NanopositionerTab::tryAutoConnectNanopositioner()
+	{
+		if (backend_.autofocus().isConnected())
+		{
+			return;
+		}
+		populateComPortList();
+		// If no nanopositioner found and we haven't retried yet, try once more after a delay (USB can enumerate late).
+		if (ui->comPortCombo->count() == 0 && !autoConnectRetried_)
+		{
+			autoConnectRetried_ = true;
+			QTimer::singleShot(2500, this, &NanopositionerTab::tryAutoConnectNanopositioner);
+			return;
+		}
+		// Auto-connect only when exactly one port responded as nanopositioner (probe passed).
+		if (ui->comPortCombo->count() != 1)
+		{
+			return;
+		}
+		const int port = ui->comPortCombo->currentData().toInt();
+		ui->comPortCombo->setCurrentIndex(0);
+		loadConfig();
+		int baudRate = ui->baudRateCombo->currentData().toInt();
+		unsigned char deviceAddress = static_cast<unsigned char>(ui->deviceAddressSpinBox->value());
+		bool success = backend_.autofocus().connect(port, baudRate, deviceAddress);
+		if (success)
+		{
+			saveConfig();
+			updateNanopositionerUI();
+			SPDLOG_INFO("NanopositionerTab: auto-connected to nanopositioner on COM{}", port);
+		}
+		else
+		{
+			if (ui->statusLabel)
+			{
+				ui->statusLabel->setText(tr("Auto-connect failed on COM%1").arg(port));
+			}
+		}
+	}
 
 	void NanopositionerTab::updateNanopositionerUI()
 	{
@@ -145,9 +214,10 @@ namespace frontend
 		bool connected = autofocus.isConnected();
 		bool enabled = autofocus.isEnabled();
 
-		ui->connectBtn->setEnabled(!connected);
+		ui->connectBtn->setEnabled(!connected && ui->comPortCombo->count() > 0);
 		ui->disconnectBtn->setEnabled(connected);
-		ui->comPortSpinBox->setEnabled(!connected);
+		ui->comPortCombo->setEnabled(!connected);
+		ui->refreshComPortBtn->setEnabled(!connected);
 		ui->baudRateCombo->setEnabled(!connected);
 		ui->deviceAddressSpinBox->setEnabled(!connected);
 		ui->autofocusEnabledCheck->setEnabled(connected);
@@ -169,7 +239,11 @@ namespace frontend
 
 	void NanopositionerTab::onConnectNanopositioner()
 	{
-		int comPort = ui->comPortSpinBox->value();
+		if (ui->comPortCombo->count() == 0)
+		{
+			return;
+		}
+		int comPort = ui->comPortCombo->currentData().toInt();
 		int baudRate = ui->baudRateCombo->currentData().toInt();
 		unsigned char deviceAddress = static_cast<unsigned char>(ui->deviceAddressSpinBox->value());
 
@@ -254,7 +328,12 @@ namespace frontend
 			// Load autofocus settings
 			if (config.contains("autofocus_com_port"))
 			{
-				ui->comPortSpinBox->setValue(config["autofocus_com_port"].get<int>());
+				int port = config["autofocus_com_port"].get<int>();
+				int idx = ui->comPortCombo->findData(port);
+				if (idx >= 0)
+				{
+					ui->comPortCombo->setCurrentIndex(idx);
+				}
 			}
 			if (config.contains("autofocus_baud_rate"))
 			{
@@ -350,7 +429,10 @@ namespace frontend
 			json config = json::parse(data.constData(), data.constData() + data.size());
 
 			// Save autofocus settings
-			config["autofocus_com_port"] = ui->comPortSpinBox->value();
+			if (ui->comPortCombo->currentIndex() >= 0)
+			{
+				config["autofocus_com_port"] = ui->comPortCombo->currentData().toInt();
+			}
 			config["autofocus_baud_rate"] = ui->baudRateCombo->currentData().toInt();
 			config["autofocus_device_address"] = ui->deviceAddressSpinBox->value();
 

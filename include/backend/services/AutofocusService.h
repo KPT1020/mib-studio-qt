@@ -21,6 +21,11 @@ public:
     bool connect(int comPort, int baudRate, unsigned char deviceAddress);
     void disconnect();
     bool isConnected() const { return connected_.load(); }
+    int getComPort() const { return comPort_; }
+
+    // Probe: open port, send XMT read (voltage channel), check plausible response, close.
+    // Returns true only if port responds with a valid voltage (0–250 V). Must not be connected.
+    static bool probeComPort(int comPort, int baudRate, unsigned char deviceAddress);
 
     // Autofocus control
     void setEnabled(bool enabled);

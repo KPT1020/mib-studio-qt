@@ -27,10 +27,13 @@ private:
 	void loadConfig();
 	void saveConfig();
 	QString configPath() const;
+	void populateComPortList();
+	void tryAutoConnectNanopositioner();
 
 	Ui::NanopositionerTab* ui;
 	backend::AppBackend& backend_;
 	QTimer* statusUpdateTimer_ = nullptr;
+	bool autoConnectRetried_ = false;
 };
 
 } // namespace frontend

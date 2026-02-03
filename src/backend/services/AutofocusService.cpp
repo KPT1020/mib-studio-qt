@@ -12,6 +12,12 @@
 
 namespace backend::services {
 
+namespace {
+    // Plausible voltage range for XMT nanopositioner (V). Used to validate probe response.
+    constexpr double PROBE_VOLTAGE_MIN = 0.0;
+    constexpr double PROBE_VOLTAGE_MAX = 250.0;
+} // namespace
+
 AutofocusService::AutofocusService() = default;
 
 AutofocusService::~AutofocusService() {
@@ -100,6 +106,21 @@ void AutofocusService::disconnect() {
     if (statusCallback_) {
         statusCallback_("Disconnected from nanopositioner");
     }
+}
+
+bool AutofocusService::probeComPort(int comPort, int baudRate, unsigned char deviceAddress) {
+    // Caller must not be connected (SDK uses a single global COM handle).
+    int result = OpenComConnectRS232(comPort, baudRate);
+    if (result == 0) {
+        return false;
+    }
+    double val = XMT_COMMAND_ReadData(deviceAddress, 5, 0, 0);
+    CloseSer();
+    bool plausible = std::isfinite(val) && val >= PROBE_VOLTAGE_MIN && val <= PROBE_VOLTAGE_MAX;
+    if (plausible) {
+        SPDLOG_DEBUG("AutofocusService: COM{} probe OK (read {:.2f} V)", comPort, val);
+    }
+    return plausible;
 }
 
 void AutofocusService::setEnabled(bool enabled) {
