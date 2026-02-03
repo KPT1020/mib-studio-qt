@@ -234,6 +234,10 @@ python scripts/export_hdf5.py -i experiment.h5 -o ./export --format all
 
 See `scripts/export_hdf5.py --help` for all options.
 
+## Related: Reanalysis tool
+
+To re-run the processing pipeline on an existing .h5 and save all intermediate images (blurred, diff, threshold, mask) for analysis, use the reanalysis script. See [reanalyse-hdf5.md](reanalyse-hdf5.md) for usage and output layout.
+
 ## Distribution
 
 ### Windows
