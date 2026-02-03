@@ -118,9 +118,10 @@ namespace frontend
 		connect(ui->increaseVoltageBtn, &QPushButton::clicked, this, &NanopositionerTab::onIncreaseVoltage);
 		connect(ui->decreaseVoltageBtn, &QPushButton::clicked, this, &NanopositionerTab::onDecreaseVoltage);
 
-		// Populate COM port list from connected devices, then load config and update UI
-		populateComPortList();
+		// Load config first so probe/auto-connect use saved baud and device address
 		loadConfig();
+		// Populate COM port list (probe uses baud/address from config now)
+		populateComPortList();
 		updateNanopositionerUI();
 
 		// Status update timer
@@ -136,8 +137,8 @@ namespace frontend
 			ui->statusLabel->setText(QString::fromStdString(message));
 		} });
 
-		// After first event loop tick: if exactly one COM port, auto-connect nanopositioner
-		QTimer::singleShot(0, this, &NanopositionerTab::tryAutoConnectNanopositioner);
+		// Delay auto-connect so COM/USB has time to enumerate (singleShot(0) is often too early)
+		QTimer::singleShot(1800, this, &NanopositionerTab::tryAutoConnectNanopositioner);
 	}
 
 	NanopositionerTab::~NanopositionerTab() {
@@ -147,10 +148,23 @@ namespace frontend
 	void NanopositionerTab::populateComPortList()
 	{
 		ui->comPortCombo->clear();
+		if (backend_.autofocus().isConnected())
+		{
+			// Do not probe while connected (SDK uses single global COM handle). Show current port only.
+			int port = backend_.autofocus().getComPort();
+			ui->comPortCombo->addItem(QString("COM%1").arg(port), port);
+			ui->comPortCombo->setCurrentIndex(0);
+			return;
+		}
+		int baudRate = ui->baudRateCombo->currentData().toInt();
+		unsigned char deviceAddress = static_cast<unsigned char>(ui->deviceAddressSpinBox->value());
 		std::vector<int> ports = backend::Tools::availableComPortNumbers();
 		for (int port : ports)
 		{
-			ui->comPortCombo->addItem(QString("COM%1").arg(port), port);
+			if (backend::services::AutofocusService::probeComPort(port, baudRate, deviceAddress))
+			{
+				ui->comPortCombo->addItem(QString("COM%1").arg(port), port);
+			}
 		}
 	}
 
@@ -161,17 +175,20 @@ namespace frontend
 			return;
 		}
 		populateComPortList();
-		std::vector<int> ports = backend::Tools::availableComPortNumbers();
-		if (ports.size() != 1)
+		// If no nanopositioner found and we haven't retried yet, try once more after a delay (USB can enumerate late).
+		if (ui->comPortCombo->count() == 0 && !autoConnectRetried_)
+		{
+			autoConnectRetried_ = true;
+			QTimer::singleShot(2500, this, &NanopositionerTab::tryAutoConnectNanopositioner);
+			return;
+		}
+		// Auto-connect only when exactly one port responded as nanopositioner (probe passed).
+		if (ui->comPortCombo->count() != 1)
 		{
 			return;
 		}
-		const int port = ports[0];
-		int idx = ui->comPortCombo->findData(port);
-		if (idx >= 0)
-		{
-			ui->comPortCombo->setCurrentIndex(idx);
-		}
+		const int port = ui->comPortCombo->currentData().toInt();
+		ui->comPortCombo->setCurrentIndex(0);
 		loadConfig();
 		int baudRate = ui->baudRateCombo->currentData().toInt();
 		unsigned char deviceAddress = static_cast<unsigned char>(ui->deviceAddressSpinBox->value());

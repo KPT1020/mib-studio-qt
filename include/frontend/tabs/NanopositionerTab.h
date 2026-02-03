@@ -33,6 +33,7 @@ private:
 	Ui::NanopositionerTab* ui;
 	backend::AppBackend& backend_;
 	QTimer* statusUpdateTimer_ = nullptr;
+	bool autoConnectRetried_ = false;
 };
 
 } // namespace frontend
