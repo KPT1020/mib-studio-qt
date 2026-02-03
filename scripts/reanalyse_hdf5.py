@@ -9,7 +9,7 @@ Optionally recomputes metrics (contours, deformability, area, ring ratio) and
 exports CSV and/or a new HDF5 with recomputed masks.
 
 Usage:
-    # Reanalyse and save all intermediates (background = first frame)
+    # Reanalyse and save all intermediates (background = stored in .h5, or from_all if absent)
     python scripts/reanalyse_hdf5.py -i experiment.h5 -o ./reanalysis
 
     # No background subtraction, save contour overlay and CSV
@@ -90,6 +90,44 @@ def _save_tiff(path: Path, img: np.ndarray) -> bool:
     return cv2.imwrite(str(path), img)
 
 
+def build_background_from_all_images(
+    h5_file: h5py.File,
+    path_prefix: str,
+    config: dict[str, Any],
+    blur_k: int,
+) -> Optional[np.ndarray]:
+    """
+    Build background as pixel-wise mean of all images in the dataset (one frame at a time).
+    Returns blurred mean image (uint8) or None if dataset missing/empty.
+    """
+    images_ds_path = path_prefix + "/images"
+    if images_ds_path not in h5_file:
+        return None
+    imgs = h5_file[images_ds_path]
+    n = imgs.shape[0]
+    if n == 0:
+        return None
+    # First frame to get shape
+    first = _ensure_grayscale(np.asarray(imgs[0]))
+    if first.dtype != np.uint8 and first.size > 0:
+        first = (first.astype(np.float64) / first.max() * 255).astype(np.uint8)
+    h, w = first.shape[:2]
+    acc = np.zeros((h, w), dtype=np.float64)
+    first_float = first.astype(np.float64)
+    acc += first_float
+    for i in range(1, n):
+        frame = _ensure_grayscale(np.asarray(imgs[i]))
+        if frame.ndim > 2:
+            frame = np.squeeze(frame, axis=2) if frame.shape[2] == 1 else frame[:, :, 0]
+        if frame.dtype != np.uint8 and frame.size > 0:
+            frame = (frame.astype(np.float64) / frame.max() * 255).astype(np.uint8)
+        if frame.shape[0] != h or frame.shape[1] != w:
+            continue
+        acc += frame.astype(np.float64)
+    mean_img = np.clip(acc / n, 0, 255).astype(np.uint8)
+    return cv2.GaussianBlur(mean_img, (blur_k, blur_k), 0)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Reanalyse HDF5 dataset and save all intermediate images.",
@@ -108,8 +146,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--background",
         type=str,
-        default="first",
-        help="Background for subtraction: none, first, stored, or path to image file. Default: first. Use 'stored' to use the background saved in the .h5 (if present).",
+        default="stored",
+        help="Background for subtraction: none, stored, from_all, or path to image file. Default: stored. Use 'stored' to use the background saved in the .h5 (if present; else falls back to from_all); 'from_all' to build from pixel-wise mean of all images.",
     )
     parser.add_argument(
         "--config",
@@ -529,8 +567,8 @@ def main() -> int:
                     ds = h5_file[bg_path_h5]
                     bg_raw = np.asarray(ds)
                     if bg_raw.size == 0:
-                        print("WARNING: /experiment_info/background is empty; falling back to --background first", file=sys.stderr)
-                        args.background = "first"
+                        print("WARNING: /experiment_info/background is empty; falling back to --background from_all", file=sys.stderr)
+                        args.background = "from_all"
                     else:
                         if bg_raw.ndim == 3 and bg_raw.shape[0] == 1:
                             bg_img = np.squeeze(bg_raw, 0)
@@ -542,23 +580,21 @@ def main() -> int:
                         bg_blurred_valid = cv2.GaussianBlur(bg_img, (blur_k, blur_k), 0)
                         bg_blurred_invalid = bg_blurred_valid.copy()
                 else:
-                    print("WARNING: No stored background in .h5 (/experiment_info/background); falling back to --background first", file=sys.stderr)
-                    args.background = "first"
-            if args.background == "first":
-                for ft, path in [("valid", "/valid_frames/images"), ("invalid", "/invalid_frames/images")]:
-                    if path not in h5_file or args.frame_type not in (ft, "both"):
-                        continue
-                    imgs = h5_file[path]
-                    if imgs.shape[0] == 0:
-                        continue
-                    first = _ensure_grayscale(np.asarray(imgs[0]))
-                    if first.dtype != np.uint8 and first.size > 0:
-                        first = (first.astype(np.float64) / first.max() * 255).astype(np.uint8)
-                    bg_b, _, _, _ = run_pipeline(first, None, config)
-                    if ft == "valid":
-                        bg_blurred_valid = bg_b
-                    else:
-                        bg_blurred_invalid = bg_b
+                    print("WARNING: No stored background in .h5 (/experiment_info/background); falling back to --background from_all", file=sys.stderr)
+                    args.background = "from_all"
+            if args.background == "from_all":
+                if args.frame_type in ("valid", "both"):
+                    bg_blurred_valid = build_background_from_all_images(
+                        h5_file, "/valid_frames", config, blur_k
+                    )
+                    if bg_blurred_valid is not None:
+                        print("Built background from all valid frame images (pixel-wise mean)")
+                if args.frame_type in ("invalid", "both"):
+                    bg_blurred_invalid = build_background_from_all_images(
+                        h5_file, "/invalid_frames", config, blur_k
+                    )
+                    if bg_blurred_invalid is not None:
+                        print("Built background from all invalid frame images (pixel-wise mean)")
             elif args.background != "none" and args.background != "stored":
                 bg_path = Path(args.background)
                 if bg_path.exists():

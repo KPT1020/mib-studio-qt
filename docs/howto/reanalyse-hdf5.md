@@ -39,14 +39,14 @@ pip install -r scripts/requirements.txt
 Run from the repository root or from the `scripts` directory:
 
 ```bash
-# Reanalyse and save all intermediates (background = first frame)
+# Reanalyse and save all intermediates (background = stored in .h5, or from_all if absent)
 python scripts/reanalyse_hdf5.py -i experiment.h5 -o ./reanalysis
 
 # Process only valid or only invalid frames
 python scripts/reanalyse_hdf5.py -i experiment.h5 -o ./reanalysis --frame-type valid
 
-# Use the background saved in the .h5 (for reproducibility; falls back to first if absent)
-python scripts/reanalyse_hdf5.py -i experiment.h5 -o ./reanalysis --background stored
+# Build background from pixel-wise mean of all images
+python scripts/reanalyse_hdf5.py -i experiment.h5 -o ./reanalysis --background from_all
 
 # No background subtraction
 python scripts/reanalyse_hdf5.py -i experiment.h5 -o ./reanalysis --background none
@@ -71,7 +71,7 @@ python scripts/reanalyse_hdf5.py -i experiment.h5 -o ./reanalysis --blur 5 --thr
 | `--input`, `-i` | Path to input .h5 file | (required) |
 | `--output`, `-o` | Output directory | (required) |
 | `--frame-type`, `-t` | `valid`, `invalid`, or `both` | `both` |
-| `--background` | `none`, `first`, `stored`, or path to image file. Use `stored` to use the background saved in the .h5 (if present; otherwise warns and falls back to `first`). | `first` |
+| `--background` | `none`, `stored`, `from_all`, or path to image file. Use `stored` to use the background saved in the .h5 (if present; otherwise warns and falls back to `from_all`); `from_all` to build from pixel-wise mean of all images. | `stored` |
 | `--config` | Path to JSON config with `image_processing` section | (none) |
 | `--blur` | Gaussian blur kernel size (odd) | from config or 3 |
 | `--threshold` | Binary threshold value | from config or 8 |
