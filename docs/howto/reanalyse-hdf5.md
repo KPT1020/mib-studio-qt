@@ -45,6 +45,9 @@ python scripts/reanalyse_hdf5.py -i experiment.h5 -o ./reanalysis
 # Process only valid or only invalid frames
 python scripts/reanalyse_hdf5.py -i experiment.h5 -o ./reanalysis --frame-type valid
 
+# Use the background saved in the .h5 (for reproducibility; falls back to first if absent)
+python scripts/reanalyse_hdf5.py -i experiment.h5 -o ./reanalysis --background stored
+
 # No background subtraction
 python scripts/reanalyse_hdf5.py -i experiment.h5 -o ./reanalysis --background none
 
@@ -68,7 +71,7 @@ python scripts/reanalyse_hdf5.py -i experiment.h5 -o ./reanalysis --blur 5 --thr
 | `--input`, `-i` | Path to input .h5 file | (required) |
 | `--output`, `-o` | Output directory | (required) |
 | `--frame-type`, `-t` | `valid`, `invalid`, or `both` | `both` |
-| `--background` | `none`, `first`, or path to image file | `first` |
+| `--background` | `none`, `first`, `stored`, or path to image file. Use `stored` to use the background saved in the .h5 (if present; otherwise warns and falls back to `first`). | `first` |
 | `--config` | Path to JSON config with `image_processing` section | (none) |
 | `--blur` | Gaussian blur kernel size (odd) | from config or 3 |
 | `--threshold` | Binary threshold value | from config or 8 |
@@ -104,6 +107,8 @@ For results that match the app as closely as possible, use the same processing p
 - Or set `--blur`, `--threshold`, `--morph-kernel`, and `--morph-iterations` explicitly.
 
 Defaults in the script match the app defaults (blur 3, threshold 8, morph kernel 3, morph iterations 1). ROI is not supported in the reanalysis tool; processing is full-frame only.
+
+From this version onward, MIB Studio saves the run’s background image in the .h5 (at `/experiment_info/background`) when a background was set for the run. Use `--background stored` when re-running the same pipeline for reproducible results.
 
 ## Related
 

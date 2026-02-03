@@ -109,7 +109,7 @@ def parse_args() -> argparse.Namespace:
         "--background",
         type=str,
         default="first",
-        help="Background for subtraction: none, first, or path to image file. Default: first",
+        help="Background for subtraction: none, first, stored, or path to image file. Default: first. Use 'stored' to use the background saved in the .h5 (if present).",
     )
     parser.add_argument(
         "--config",
@@ -523,6 +523,27 @@ def main() -> int:
 
             bg_blurred_valid = None
             bg_blurred_invalid = None
+            if args.background == "stored":
+                bg_path_h5 = "/experiment_info/background"
+                if bg_path_h5 in h5_file:
+                    ds = h5_file[bg_path_h5]
+                    bg_raw = np.asarray(ds)
+                    if bg_raw.size == 0:
+                        print("WARNING: /experiment_info/background is empty; falling back to --background first", file=sys.stderr)
+                        args.background = "first"
+                    else:
+                        if bg_raw.ndim == 3 and bg_raw.shape[0] == 1:
+                            bg_img = np.squeeze(bg_raw, 0)
+                        else:
+                            bg_img = bg_raw
+                        bg_img = _ensure_grayscale(bg_img.astype(np.float64) if bg_img.dtype != np.uint8 else bg_img)
+                        if bg_img.dtype != np.uint8 and bg_img.size > 0:
+                            bg_img = (bg_img.astype(np.float64) / bg_img.max() * 255).astype(np.uint8)
+                        bg_blurred_valid = cv2.GaussianBlur(bg_img, (blur_k, blur_k), 0)
+                        bg_blurred_invalid = bg_blurred_valid.copy()
+                else:
+                    print("WARNING: No stored background in .h5 (/experiment_info/background); falling back to --background first", file=sys.stderr)
+                    args.background = "first"
             if args.background == "first":
                 for ft, path in [("valid", "/valid_frames/images"), ("invalid", "/invalid_frames/images")]:
                     if path not in h5_file or args.frame_type not in (ft, "both"):
@@ -538,7 +559,7 @@ def main() -> int:
                         bg_blurred_valid = bg_b
                     else:
                         bg_blurred_invalid = bg_b
-            elif args.background != "none":
+            elif args.background != "none" and args.background != "stored":
                 bg_path = Path(args.background)
                 if bg_path.exists():
                     bg_img = cv2.imread(str(bg_path), cv2.IMREAD_GRAYSCALE)

@@ -134,11 +134,13 @@ namespace frontend
             validFrames = validFramesVec.size();
             invalidFrames = invalidFramesVec.size();
 
-            // Write experiment metadata
+            // Write experiment metadata (including background image for reproducibility if set)
             auto processingConfig = processing.getProcessingConfig();
             auto roi = processing.getRealtimeRoi();
+            cv::Mat bg = processing.getRealtimeBackgroundGray();
             hdf5.writeExperimentInfo(startTimeNs_, endTimeNs_,
-                                     validFrames, invalidFrames, processingConfig, roi);
+                                     validFrames, invalidFrames, processingConfig, roi,
+                                     bg.empty() ? nullptr : &bg);
 
             hdf5.closeFile();
         }
