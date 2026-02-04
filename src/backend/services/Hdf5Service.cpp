@@ -745,7 +745,8 @@ namespace backend::services
     bool Hdf5Service::writeExperimentInfo(uint64_t startTimeNs, uint64_t endTimeNs,
                                           size_t totalValidFrames, size_t totalInvalidFrames,
                                           const ProcessingConfig& processingConfig,
-                                          const ProcessingService::Roi& roi)
+                                          const ProcessingService::Roi& roi,
+                                          const cv::Mat* background)
     {
         if (!isFileOpen())
         {
@@ -935,6 +936,34 @@ namespace backend::services
 
         H5Sclose(scalarSpaceId);
         H5Gclose(infoGroupId);
+
+        // Write background image for reproducibility (if provided and non-empty)
+        if (background != nullptr && !background->empty())
+        {
+            cv::Mat bgToWrite;
+            if (background->channels() == 1 && background->type() == CV_8UC1)
+            {
+                bgToWrite = *background;
+            }
+            else if (background->channels() >= 3)
+            {
+                cv::cvtColor(*background, bgToWrite, cv::COLOR_BGR2GRAY);
+            }
+            else
+            {
+                background->convertTo(bgToWrite, CV_8UC1);
+            }
+            std::vector<cv::Mat> bgVec{bgToWrite};
+            if (!writeImageDataset(impl_->fileId_, "/experiment_info/background", bgVec))
+            {
+                SPDLOG_WARN("Failed to write experiment background image to HDF5");
+            }
+            else
+            {
+                SPDLOG_DEBUG("Wrote experiment background image to HDF5");
+            }
+        }
+
         SPDLOG_DEBUG("Wrote experiment info, processing config, and ROI to HDF5");
         return true;
     }
@@ -1631,6 +1660,14 @@ namespace backend::services {
         SPDLOG_TRACE("readImageByIndex: success for {}[{}], bytes={}",
                      datasetPath, index, static_cast<size_t>(height) * width * channels);
         return true;
+    }
+
+    bool Hdf5Service::readBackgroundImage(cv::Mat& out) const
+    {
+        out.release();
+        if (!isFileOpen())
+            return false;
+        return readImageByIndex("/experiment_info/background", 0, out);
     }
 
     bool Hdf5Service::readImagesRange(const std::string& datasetPath,

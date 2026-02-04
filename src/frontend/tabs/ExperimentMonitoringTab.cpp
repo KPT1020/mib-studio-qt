@@ -107,6 +107,8 @@ namespace frontend
         scatterplotChart_->addAxis(scatterYAxis_, Qt::AlignLeft);
         scatterSeries_->attachAxis(scatterXAxis_);
         scatterSeries_->attachAxis(scatterYAxis_);
+        scatterXAxis_->setRange(scatterXMin_, scatterXMax_);
+        scatterYAxis_->setRange(scatterYMin_, scatterYMax_);
 
         scatterplotView_ = new QChartView(scatterplotChart_);
         scatterplotView_->setRenderHint(QPainter::Antialiasing);
@@ -155,6 +157,10 @@ namespace frontend
         barSeries_->attachAxis(histogramCategoryAxis_);
         barSeries_->attachAxis(histogramYAxis_);
 #endif
+
+        if (histogramXAxis_)
+            histogramXAxis_->setRange(histogramXMin_, histogramXMax_);
+        histogramYAxis_->setRange(0, std::max(1.0, histogramYMax_));
 
         histogramView_ = new QChartView(histogramChart_);
         histogramView_->setRenderHint(QPainter::Antialiasing);
@@ -249,80 +255,25 @@ namespace frontend
     {
         scatterSeries_->clear();
 
-        if (validFrames.empty())
-        {
-            scatterXAxis_->setRange(0, 1000);
-            scatterYAxis_->setRange(0, 1);
-            return;
-        }
-
-        // Get conversion factor from backend (pixels to microns)
         const double conversionFactor = backend_.processing().getPixelToMicronFactor();
-        // Area conversion: pixels² to microns² = pixels² * (microns/pixel)²
         const double areaConversionFactor = conversionFactor * conversionFactor;
-
-        // Collect points
-        std::vector<std::pair<double, double>> points;
-        double minArea = std::numeric_limits<double>::max();
-        double maxArea = std::numeric_limits<double>::lowest();
-        double minDeform = std::numeric_limits<double>::max();
-        double maxDeform = std::numeric_limits<double>::lowest();
 
         for (const auto &frame : validFrames)
         {
             if (frame.validation.isValid)
             {
-                // Convert area from pixels² to microns²
-                double areaPixels = frame.validation.area;
-                double areaMicrons = areaPixels * areaConversionFactor;
+                double areaMicrons = frame.validation.area * areaConversionFactor;
                 double deform = frame.validation.deformability;
-                points.push_back({areaMicrons, deform});
-
-                minArea = std::min(minArea, areaMicrons);
-                maxArea = std::max(maxArea, areaMicrons);
-                minDeform = std::min(minDeform, deform);
-                maxDeform = std::max(maxDeform, deform);
+                scatterSeries_->append(areaMicrons, deform);
             }
         }
 
-        if (points.empty())
-        {
-            scatterXAxis_->setRange(0, 1000);
-            scatterYAxis_->setRange(0, 1);
-            return;
-        }
-
-        // Add the original scatter points (KDE disabled for performance)
-        for (const auto &p : points)
-        {
-            scatterSeries_->append(p.first, p.second);
-        }
-
-        // Set axis ranges with padding
-        if (minArea < maxArea)
-        {
-            double areaPadding = (maxArea - minArea) * 0.1;
-            scatterXAxis_->setRange(minArea - areaPadding, maxArea + areaPadding);
-        }
-        else
-        {
-            scatterXAxis_->setRange(0, 1000);
-        }
-
-        if (minDeform < maxDeform)
-        {
-            double deformPadding = (maxDeform - minDeform) * 0.1;
-            scatterYAxis_->setRange(minDeform - deformPadding, maxDeform + deformPadding);
-        }
-        else
-        {
-            scatterYAxis_->setRange(0, 1);
-        }
+        scatterXAxis_->setRange(scatterXMin_, scatterXMax_);
+        scatterYAxis_->setRange(scatterYMin_, scatterYMax_);
     }
 
     void ExperimentMonitoringTab::updateHistogram(const std::vector<backend::services::ProcessedFrame> &validFrames)
     {
-        // Reset series
 #if MIB_HAS_QHISTOGRAMSERIES
         if (histogramSeries_)
             histogramSeries_->clear();
@@ -331,20 +282,17 @@ namespace frontend
             barSeries_->clear();
 #endif
 
-        // Use fixed range for consistent comparison across datasets
-        const double minVal = HISTOGRAM_MIN;
-        const double maxVal = HISTOGRAM_MAX;
-        const double binWidth = HISTOGRAM_BIN_WIDTH;
+        const double minVal = histogramXMin_;
+        const double maxVal = histogramXMax_;
+        const double binWidth = histogramBinWidth_;
+        const int histogramBins = std::max(1, static_cast<int>(std::round((maxVal - minVal) / binWidth)));
 
-        // Always set fixed x-axis range regardless of data
-#if MIB_HAS_QHISTOGRAMSERIES
-        histogramXAxis_->setRange(minVal, maxVal);
-        histogramXAxis_->setTickCount(6);
-#else
-        // For fallback, we'll set the category axis later
-#endif
+        if (histogramXAxis_)
+        {
+            histogramXAxis_->setRange(minVal, maxVal);
+            histogramXAxis_->setTickCount(6);
+        }
 
-        // Collect ring ratio values from valid frames
         std::vector<double> ringRatios;
         if (!validFrames.empty())
         {
@@ -357,12 +305,12 @@ namespace frontend
             }
         }
 
-        // If no data, show empty histogram with fixed range
+        const double yMax = std::max(1.0, histogramYMax_);
+        histogramYAxis_->setRange(0, yMax);
+
         if (ringRatios.empty())
         {
-            histogramYAxis_->setRange(0, 1);
 #if !MIB_HAS_QHISTOGRAMSERIES
-            // For fallback, create empty category axis with fixed range
             if (histogramCategoryAxis_)
             {
                 histogramChart_->removeAxis(histogramCategoryAxis_);
@@ -371,51 +319,33 @@ namespace frontend
             }
             histogramCategoryAxis_ = new QBarCategoryAxis();
             QStringList categories;
-            categories.reserve(HISTOGRAM_BINS);
-            for (int i = 0; i < HISTOGRAM_BINS; ++i)
+            categories.reserve(histogramBins);
+            for (int i = 0; i < histogramBins; ++i)
             {
                 const double start = minVal + i * binWidth;
-                const double end = (i == HISTOGRAM_BINS - 1) ? maxVal : (start + binWidth);
+                const double end = (i == histogramBins - 1) ? maxVal : (start + binWidth);
                 categories << QString("%1-%2").arg(start, 0, 'f', 1).arg(end, 0, 'f', 1);
             }
             histogramCategoryAxis_->append(categories);
             histogramCategoryAxis_->setLabelsAngle(-90);
             histogramChart_->addAxis(histogramCategoryAxis_, Qt::AlignBottom);
             barSeries_->attachAxis(histogramCategoryAxis_);
-            // Note: histogramYAxis_ is already attached in constructor, no need to reattach
 #endif
             return;
         }
 
-        // Count values in each bin (used for Y-axis headroom and fallback bar series)
-        std::vector<int> binCounts(HISTOGRAM_BINS, 0);
+        std::vector<int> binCounts(static_cast<size_t>(histogramBins), 0);
         for (double val : ringRatios)
         {
-            // Clamp values outside the fixed range to first or last bin
             double clampedVal = std::clamp(val, minVal, maxVal);
             int binIndex = static_cast<int>((clampedVal - minVal) / binWidth);
-            // Ensure binIndex is within valid range (handle edge case where clampedVal == maxVal)
-            if (binIndex >= HISTOGRAM_BINS)
-            {
-                binIndex = HISTOGRAM_BINS - 1;
-            }
-            binIndex = std::clamp(binIndex, 0, HISTOGRAM_BINS - 1);
-            binCounts[binIndex]++;
+            if (binIndex >= histogramBins)
+                binIndex = histogramBins - 1;
+            binIndex = std::clamp(binIndex, 0, histogramBins - 1);
+            binCounts[static_cast<size_t>(binIndex)]++;
         }
-
-        int maxCount = 0;
-        for (int count : binCounts)
-        {
-            maxCount = std::max(maxCount, count);
-        }
-
-        // Set Y-axis range (with headroom for empty data case)
-        const int yMax = std::max(1, static_cast<int>(std::ceil(maxCount * 1.1)));
-        histogramYAxis_->setRange(0, yMax);
-        histogramYAxis_->applyNiceNumbers();
 
 #if MIB_HAS_QHISTOGRAMSERIES
-        // Populate histogram series with samples and set bins
         if (histogramSeries_)
         {
             QVector<qreal> samples;
@@ -424,19 +354,16 @@ namespace frontend
             {
                 samples.append(static_cast<qreal>(v));
             }
-            histogramSeries_->setBinsCount(HISTOGRAM_BINS);
+            histogramSeries_->setBinsCount(histogramBins);
             histogramSeries_->setSamples(samples);
         }
-        // X-axis range already set above (fixed range for consistent comparison)
 #else
-        // Fallback: build bar set and category axis
         auto *barSet = new QBarSet("");
         for (int count : binCounts)
         {
             *barSet << count;
         }
         barSeries_->append(barSet);
-        // Build/update category axis labels to match bins
         if (histogramCategoryAxis_)
         {
             histogramChart_->removeAxis(histogramCategoryAxis_);
@@ -446,11 +373,11 @@ namespace frontend
         histogramCategoryAxis_ = new QBarCategoryAxis();
         {
             QStringList categories;
-            categories.reserve(HISTOGRAM_BINS);
-            for (int i = 0; i < HISTOGRAM_BINS; ++i)
+            categories.reserve(histogramBins);
+            for (int i = 0; i < histogramBins; ++i)
             {
                 const double start = minVal + i * binWidth;
-                const double end = (i == HISTOGRAM_BINS - 1) ? maxVal : (start + binWidth);
+                const double end = (i == histogramBins - 1) ? maxVal : (start + binWidth);
                 categories << QString("%1-%2").arg(start, 0, 'f', 1).arg(end, 0, 'f', 1);
             }
             histogramCategoryAxis_->append(categories);
@@ -458,7 +385,6 @@ namespace frontend
         histogramCategoryAxis_->setLabelsAngle(-90);
         histogramChart_->addAxis(histogramCategoryAxis_, Qt::AlignBottom);
         barSeries_->attachAxis(histogramCategoryAxis_);
-        // Note: histogramYAxis_ is already attached in constructor, no need to reattach
 #endif
     }
 
@@ -843,6 +769,50 @@ namespace frontend
         kdeGridResolution_ = resolution;
         // Trigger update to refresh scatterplot
         updateScatterplot(recentValidFrames_);
+    }
+
+    void ExperimentMonitoringTab::setScatterXRange(double minVal, double maxVal)
+    {
+        if (minVal >= maxVal)
+            return;
+        scatterXMin_ = minVal;
+        scatterXMax_ = maxVal;
+    }
+
+    void ExperimentMonitoringTab::setScatterYRange(double minVal, double maxVal)
+    {
+        if (minVal >= maxVal)
+            return;
+        scatterYMin_ = minVal;
+        scatterYMax_ = maxVal;
+    }
+
+    void ExperimentMonitoringTab::setHistogramXRange(double minVal, double maxVal)
+    {
+        if (minVal >= maxVal)
+            return;
+        histogramXMin_ = minVal;
+        histogramXMax_ = maxVal;
+    }
+
+    void ExperimentMonitoringTab::setHistogramYMax(double maxVal)
+    {
+        if (maxVal <= 0)
+            return;
+        histogramYMax_ = maxVal;
+    }
+
+    void ExperimentMonitoringTab::setHistogramBinWidth(double width)
+    {
+        if (width <= 0)
+            return;
+        histogramBinWidth_ = width;
+    }
+
+    void ExperimentMonitoringTab::refreshCharts()
+    {
+        updateScatterplot(recentValidFrames_);
+        updateHistogram(recentValidFrames_);
     }
 
     void ExperimentMonitoringTab::loadIsoelasticCurves()

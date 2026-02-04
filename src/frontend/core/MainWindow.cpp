@@ -540,15 +540,17 @@ void MainWindow::onStopExperiment()
             }
         }
 
-        // Write experiment metadata
+        // Write experiment metadata (including background image for reproducibility if set)
         size_t totalValid = validFrames.size();
         size_t totalInvalid = invalidFrames.size();
         // Note: We can't easily track total frames written via append, so we use current counts
         // In a production system, you'd want to track cumulative counts
         auto processingConfig = processing.getProcessingConfig();
         auto roi = processing.getRealtimeRoi();
+        cv::Mat bg = processing.getRealtimeBackgroundGray();
         hdf5.writeExperimentInfo(experimentStartTimeNs_, experimentEndTimeNs,
-                                 totalValid, totalInvalid, processingConfig, roi);
+                                 totalValid, totalInvalid, processingConfig, roi,
+                                 bg.empty() ? nullptr : &bg);
 
         // Note: Chart snapshots are no longer saved during experiment stop.
         // Charts are now generated on-demand from HDF5 data in the Review tab.
