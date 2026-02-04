@@ -46,6 +46,25 @@ public:
     void setKdeBandwidth(double bandwidth);
     void setKdeGridResolution(int resolution);
 
+    // Fixed chart axis ranges (user-definable via Monitoring Settings)
+    double getScatterXMin() const { return scatterXMin_; }
+    double getScatterXMax() const { return scatterXMax_; }
+    double getScatterYMin() const { return scatterYMin_; }
+    double getScatterYMax() const { return scatterYMax_; }
+    void setScatterXRange(double minVal, double maxVal);
+    void setScatterYRange(double minVal, double maxVal);
+
+    double getHistogramXMin() const { return histogramXMin_; }
+    double getHistogramXMax() const { return histogramXMax_; }
+    double getHistogramYMax() const { return histogramYMax_; }
+    double getHistogramBinWidth() const { return histogramBinWidth_; }
+    void setHistogramXRange(double minVal, double maxVal);
+    void setHistogramYMax(double maxVal);
+    void setHistogramBinWidth(double width);
+
+    /** Redraw scatter and histogram with current data and axis ranges (e.g. after settings change). */
+    void refreshCharts();
+
     // Chart snapshot capture for HDF5 saving
     bool captureChartSnapshots(cv::Mat& histogramImage, cv::Mat& scatterPlotImage) const;
 
@@ -116,6 +135,16 @@ private:
     double kdeBandwidth_ = 50.0;
     int kdeGridResolution_ = 50;
 
+    // Fixed chart axis ranges (user-definable)
+    double scatterXMin_ = 0.0;
+    double scatterXMax_ = 1000.0;
+    double scatterYMin_ = 0.0;
+    double scatterYMax_ = 1.0;
+    double histogramXMin_ = 15.0;
+    double histogramXMax_ = 25.0;
+    double histogramYMax_ = 100.0;
+    double histogramBinWidth_ = 0.5;
+
     // Rolling buffers to maintain recent frames even after flush
     std::vector<backend::services::ProcessedFrame> recentValidFrames_;
     std::vector<backend::services::ProcessedFrame> recentInvalidFrames_;
@@ -127,10 +156,6 @@ private:
     static constexpr int MAX_FRAMES_TO_SHOW = 25;
     static constexpr int MAX_RECENT_FRAMES = 1000; // Keep more frames for scatterplot/histogram
     static constexpr int UPDATE_INTERVAL_MS = 500;
-    static constexpr double HISTOGRAM_BIN_WIDTH = 0.5;
-    static constexpr double HISTOGRAM_MIN = 15.0;
-    static constexpr double HISTOGRAM_MAX = 25.0;
-    static constexpr int HISTOGRAM_BINS = static_cast<int>((HISTOGRAM_MAX - HISTOGRAM_MIN) / HISTOGRAM_BIN_WIDTH);
 };
 
 } // namespace frontend
