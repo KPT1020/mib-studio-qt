@@ -25,7 +25,7 @@ Uniform JSON format for processing pipeline metrics so **mib-studio-qt** pipelin
 | `ring_ratio` | number | sqrt(outer_area − inner_area); ring metric. |
 | `is_valid` | boolean | True if frame passed all validation checks. |
 | `touches_border` | boolean | True if contour touches image border. |
-| `has_single_inner_contour` | boolean | True if exactly one inner contour. |
+| `has_single_inner_contour` | boolean | True if exactly one inner contour (informational; acceptance uses at least one nested contour). |
 | `in_range` | boolean | True if area within configured min/max. |
 | `inner_contour_count` | integer | Number of inner contours. |
 | `brightness_q1` | number | 25th percentile brightness in masked region. |
@@ -34,6 +34,10 @@ Uniform JSON format for processing pipeline metrics so **mib-studio-qt** pipelin
 | `brightness_q4` | number | 100th percentile (max) brightness. |
 
 Field names align with `FilterResult` and `BrightnessQuantiles` in [ProcessingService.h](../include/backend/services/ProcessingService.h) and with the CSV header used by `export_hdf5.py` (snake_case in JSON).
+
+### Processing pipeline (nested contours)
+
+When `require_single_inner_contour` (or equivalent) is enabled, the pipeline keeps any object that has **at least one** nested (inner) contour. Metrics (area, deformability, area_ratio, ring_ratio) are computed using **only the first** nested contour. The field `has_single_inner_contour` is informational: it is true only when there is exactly one inner contour; acceptance is based on having at least one nested contour.
 
 ## Workflow (summary)
 
