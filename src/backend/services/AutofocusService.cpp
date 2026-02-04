@@ -1,4 +1,5 @@
 #include "backend/services/AutofocusService.h"
+#include "backend/Tools.h"
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -100,6 +101,7 @@ void AutofocusService::disconnect() {
         ringRatioTimestamps_.clear();
         ringRatioSequence_.store(0);
         lastRingRatioTimestampNs_.store(0);
+        lastRingRatioUpdateUs_.store(0, std::memory_order_relaxed);
     }
 
     SPDLOG_INFO("AutofocusService: Disconnected from nanopositioner");
@@ -176,7 +178,8 @@ void AutofocusService::onRingRatio(double ringRatio, int64_t timestampNs) {
     // Update sequence and timestamp
     ringRatioSequence_.fetch_add(1, std::memory_order_relaxed);
     lastRingRatioTimestampNs_.store(timestampNs, std::memory_order_relaxed);
-    
+    lastRingRatioUpdateUs_.store(backend::Tools::getTimestamp(), std::memory_order_relaxed);
+
     // Update statistics
     updateStatistics();
 }
@@ -280,14 +283,12 @@ void AutofocusService::controlLoop() {
             // Get median ring ratio
             double medianRingRatio = medianRingRatio_.load();
 
-            // Check freshness and sample requirements
+            // Check freshness and sample requirements (monotonic clock for consistent staleness)
             uint64_t currentSequence = ringRatioSequence_.load(std::memory_order_relaxed);
-            int64_t lastTsNs = lastRingRatioTimestampNs_.load(std::memory_order_relaxed);
-            int64_t nowNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                std::chrono::steady_clock::now().time_since_epoch())
-                                .count();
-            bool freshTimestamp = (lastTsNs > 0) && 
-                                  (nowNs - lastTsNs <= static_cast<int64_t>(cfg.ringRatioStaleMs) * 1000000LL);
+            uint64_t lastUpdateUs = lastRingRatioUpdateUs_.load(std::memory_order_relaxed);
+            uint64_t nowUs = backend::Tools::getTimestamp();
+            bool freshTimestamp = (lastUpdateUs > 0) &&
+                                  (nowUs - lastUpdateUs <= static_cast<uint64_t>(cfg.ringRatioStaleMs) * 1000ULL);
             bool hasNewSample = (currentSequence != lastAppliedSequence_);
             uint64_t samplesSinceStep = currentSequence - lastAppliedSequence_;
             bool hasEnoughSamples = samplesSinceStep >= static_cast<uint64_t>(cfg.minSamplesPerStep);
@@ -335,6 +336,7 @@ void AutofocusService::controlLoop() {
                         ringRatioTimestamps_.clear();
                         ringRatioSequence_.store(0);
                         lastRingRatioTimestampNs_.store(0);
+                        lastRingRatioUpdateUs_.store(0, std::memory_order_relaxed);
                         updateStatistics(); // Update statistics to reflect empty buffer
                     }
 

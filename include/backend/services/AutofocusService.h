@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <condition_variable>
 #include <deque>
 #include <functional>
@@ -61,6 +62,8 @@ public:
 
     // Expose running average of ring ratio for UI/status
     double getAverageRingRatio() const { return averageRingRatio_.load(std::memory_order_relaxed); }
+    // Monotonic timestamp (microseconds) when ring ratio was last updated; 0 if never
+    uint64_t getLastRingRatioUpdateUs() const { return lastRingRatioUpdateUs_.load(std::memory_order_relaxed); }
 
     // Status callbacks for UI
     using StatusCallback = std::function<void(const std::string& message)>;
@@ -93,6 +96,7 @@ private:
     static constexpr size_t MAX_BUFFER_SIZE = 1000;
     std::atomic<uint64_t> ringRatioSequence_{0};
     std::atomic<int64_t> lastRingRatioTimestampNs_{0};
+    std::atomic<uint64_t> lastRingRatioUpdateUs_{0}; // monotonic us when a ring ratio sample was last accepted
 
     // Statistics
     std::atomic<double> medianRingRatio_{0.0};
