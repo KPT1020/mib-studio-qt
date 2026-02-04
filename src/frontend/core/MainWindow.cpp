@@ -596,6 +596,10 @@ void MainWindow::onUpdateStats()
     const double invalidFps = proc.getInvalidFps1s();
     const uint64_t totalValidFlushed = proc.getTotalValidFlushed();
 
+    const uint64_t nowUs = backend::Tools::getTimestamp();
+    const double algoAvgUsAgeMs = (nowUs - proc.getAlgoAvgUs1sUpdatedUs()) / 1000.0;
+    const double meanRingRatioAgeMs = (nowUs - backend_.autofocus().getLastRingRatioUpdateUs()) / 1000.0;
+
     // Calculate experiment runtime
     double experimentRuntimeSeconds = 0.0;
     if (experimentActive_ && experimentStartTimeNs_ > 0) {
@@ -622,6 +626,8 @@ void MainWindow::onUpdateStats()
         data.invalidBuffered = invalidFrames.size();
         data.flushInProgress = flushInProgress_;
         data.experimentRuntimeSeconds = experimentRuntimeSeconds;
+        data.algoAvgUsAgeMs = algoAvgUsAgeMs;
+        data.meanRingRatioAgeMs = meanRingRatioAgeMs;
 
         sidebarWidget_->statisticsPanel()->updateStatistics(data);
     }

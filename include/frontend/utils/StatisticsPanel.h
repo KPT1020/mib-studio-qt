@@ -27,6 +27,9 @@ namespace frontend
         size_t invalidBuffered = 0;
         bool flushInProgress = false;
         double experimentRuntimeSeconds = 0.0;
+        // Age in ms since last backend update (for stale indicator); 0 = just updated, large = stale
+        double algoAvgUsAgeMs = 0.0;
+        double meanRingRatioAgeMs = 0.0;
     };
 
     class StatisticsPanel : public QWidget
