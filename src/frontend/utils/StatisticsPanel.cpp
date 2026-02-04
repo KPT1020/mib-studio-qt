@@ -168,6 +168,13 @@ namespace frontend
 
         // Processing metrics
         algoTimeValue_->setText(QString::number(data.algoAvgUs, 'f', 1) + " us");
+        if (data.algoAvgUsAgeMs > 1000.0) {
+            algoTimeValue_->setStyleSheet("font-weight: bold; color: gray;");
+            algoTimeValue_->setToolTip(tr("Stale: last update %1 ms ago").arg(static_cast<int>(data.algoAvgUsAgeMs)));
+        } else {
+            algoTimeValue_->setStyleSheet("font-weight: bold;");
+            algoTimeValue_->setToolTip(QString());
+        }
         validFpsValue_->setText(QString::number(data.validFps, 'f', 1));
         invalidFpsValue_->setText(QString::number(data.invalidFps, 'f', 1));
         flushedValue_->setText(QString::number(static_cast<qulonglong>(data.totalValidFlushed)));
@@ -190,6 +197,13 @@ namespace frontend
 
         // Autofocus metrics
         ringwidthValue_->setText(QString::number(data.meanRingRatio, 'f', 3));
+        if (data.meanRingRatioAgeMs > 1000.0) {
+            ringwidthValue_->setStyleSheet("font-weight: bold; color: gray;");
+            ringwidthValue_->setToolTip(tr("Stale: last update %1 ms ago").arg(static_cast<int>(data.meanRingRatioAgeMs)));
+        } else {
+            ringwidthValue_->setStyleSheet("font-weight: bold;");
+            ringwidthValue_->setToolTip(QString());
+        }
 
         // Experiment metrics
         if (data.experimentActive)

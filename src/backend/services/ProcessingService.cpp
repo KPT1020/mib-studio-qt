@@ -1227,6 +1227,7 @@ void ProcessingService::realtimeLoop() {
                 invalidFps1s_.store(ifps, std::memory_order_relaxed);
                 const double algoAvgUs = algoAvgMs * 1000.0;
                 algoAvgUs1s_.store(algoAvgUs, std::memory_order_relaxed);
+                algoAvgUs1sUpdatedUs_.store(backend::Tools::getTimestamp(), std::memory_order_relaxed);
                 SPDLOG_INFO("Realtime processing summary: processed={} skipped={} window_ms={:.0f} avg_ms={:.3f} algo_avg_ms={:.3f} ~fps={:.1f}",
                             framesSinceSummary, framesSkippedSinceSummary, windowMs, avgMs, algoAvgMs, fps);
 
@@ -1568,6 +1569,7 @@ void ProcessingService::realtimeLoop() {
                     invalidFps1s_.store(ifps, std::memory_order_relaxed);
                     const double algoAvgUs = algoAvgMs * 1000.0;
                     algoAvgUs1s_.store(algoAvgUs, std::memory_order_relaxed);
+                    algoAvgUs1sUpdatedUs_.store(backend::Tools::getTimestamp(), std::memory_order_relaxed);
                     SPDLOG_INFO("Realtime processing summary: processed={} skipped={} window_ms={:.0f} avg_ms={:.3f} algo_avg_ms={:.3f} ~fps={:.1f}",
                                 framesSinceSummary, framesSkippedSinceSummary, windowMs, avgMs, algoAvgMs, fps);
 
