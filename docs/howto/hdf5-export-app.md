@@ -2,6 +2,8 @@
 
 This guide explains how to build and use the standalone HDF5 Export GUI application, which provides a user-friendly interface for exporting metrics and images from MIB Studio HDF5 files.
 
+**User download:** For pre-built executables and the full tools bundle, see [tools.md](tools.md).
+
 ## Overview
 
 The HDF5 Export GUI Application is a standalone PySide6 (Qt for Python) application that wraps the functionality of `scripts/export_hdf5.py` in a graphical user interface. It can be packaged as a standalone executable for Windows (.exe) and macOS (.app/.dmg).
@@ -234,9 +236,10 @@ python scripts/export_hdf5.py -i experiment.h5 -o ./export --format all
 
 See `scripts/export_hdf5.py --help` for all options.
 
-## Related: Reanalysis tool
+## Related
 
-To re-run the processing pipeline on an existing .h5 and save all intermediate images (blurred, diff, threshold, mask) for analysis, use the reanalysis script. See [reanalyse-hdf5.md](reanalyse-hdf5.md) for usage and output layout.
+- **Reanalysis tool:** To re-run the processing pipeline on an existing .h5 and save all intermediate images (blurred, diff, threshold, mask) for analysis, see [reanalyse-hdf5.md](reanalyse-hdf5.md).
+- **All tools and downloads:** [tools.md](tools.md).
 
 ## Distribution
 

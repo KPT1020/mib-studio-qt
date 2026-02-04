@@ -1,0 +1,6 @@
+# Runtime dependencies for MIB Studio Tools (export, reanalyse)
+# Used when running scripts directly or when PyInstaller collects imports.
+PySide6>=6.5.0
+h5py>=3.8.0
+numpy>=1.24.0
+opencv-python>=4.8.0

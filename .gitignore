@@ -14,3 +14,7 @@ test_*.txt
 test_*.json
 
 **/.venv/
+
+# Tools build output (binaries published, not committed)
+tools/dist/
+tools/build/
