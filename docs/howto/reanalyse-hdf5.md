@@ -2,6 +2,8 @@
 
 This guide describes the command-line reanalysis tool that re-runs the MIB Studio processing pipeline on an existing .h5 dataset and saves all intermediate images so they can be analysed later (e.g. in ImageJ, Python, or other tools).
 
+**User download:** For the standalone `mib_reanalyse_hdf5.exe` and the full tools bundle, see [tools.md](tools.md).
+
 ## Purpose
 
 - **Re-run the pipeline** on stored images: grayscale, Gaussian blur, (optional) background subtraction, binary threshold, morphology (close, open) to produce a mask. This matches the C++ `ProcessingService` pipeline used during live recording.
@@ -114,5 +116,6 @@ From this version onward, MIB Studio saves the run’s background image in the .
 
 ## Related
 
-- **Export only (no re-run)**: use `scripts/export_hdf5.py` to export existing metrics and images from an .h5 without re-running the pipeline.
-- **HDF5 Export GUI**: see [hdf5-export-app.md](hdf5-export-app.md) for the GUI that wraps `export_hdf5.py`.
+- **Export only (no re-run):** use `scripts/export_hdf5.py` or the HDF5 Export GUI to export existing metrics and images from an .h5 without re-running the pipeline.
+- **HDF5 Export GUI:** [hdf5-export-app.md](hdf5-export-app.md).
+- **All tools and downloads:** [tools.md](tools.md).

@@ -244,6 +244,21 @@ def build_background_from_all_images(
     return cv2.GaussianBlur(mean_img, (blur_k, blur_k), 0)
 
 
+def _interactive_prompt_args() -> None:
+    """When running as frozen exe with no args, prompt for input and output and set sys.argv."""
+    print("MIB Studio Reanalyse HDF5")
+    print("Re-run the processing pipeline on an .h5 file and save intermediate images.")
+    print("(Leave a line blank to exit.)")
+    print()
+    in_path = input("Input .h5 file: ").strip()
+    if not in_path:
+        sys.exit(0)
+    out_path = input("Output directory: ").strip()
+    if not out_path:
+        sys.exit(0)
+    sys.argv.extend(["-i", in_path, "-o", out_path])
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Reanalyse HDF5 dataset and save all intermediate images.",
@@ -822,6 +837,8 @@ def write_reanalysis_h5(
 
 
 def main() -> int:
+    if getattr(sys, "frozen", False) and len(sys.argv) == 1:
+        _interactive_prompt_args()
     args = parse_args()
     input_path = Path(args.input)
     output_dir = Path(args.output)
@@ -942,4 +959,10 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except SystemExit as e:
+        # When double-clicked, the console closes immediately; pause so the user can read the message
+        if getattr(sys, "frozen", False) and e.code != 0:
+            input("\nPress Enter to close...")
+        raise

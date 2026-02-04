@@ -1,0 +1,2 @@
+# Build-time only: packaging tools into standalone executables
+pyinstaller>=5.13.0
