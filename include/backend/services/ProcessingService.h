@@ -151,12 +151,15 @@ public:
         validFps1s_.store(0.0, std::memory_order_relaxed);
         invalidFps1s_.store(0.0, std::memory_order_relaxed);
         algoAvgUs1s_.store(0.0, std::memory_order_relaxed);
+        algoAvgUs1sUpdatedUs_.store(0, std::memory_order_relaxed);
     }
     
     // Totals for current experiment
     uint64_t getTotalValidFlushed() const { return totalValidFlushed_.load(std::memory_order_relaxed); }
     // Average algorithm processing time per frame over last 1s window (microseconds)
     double getAlgoAvgUs1s() const { return algoAvgUs1s_.load(std::memory_order_relaxed); }
+    // Monotonic timestamp (microseconds) when algoAvgUs1s_ was last published; 0 if never
+    uint64_t getAlgoAvgUs1sUpdatedUs() const { return algoAvgUs1sUpdatedUs_.load(std::memory_order_relaxed); }
 
     // Helper function to check if a raw frame is empty (for filtering during save)
     // Returns true if frame is empty (pixel count below threshold)
@@ -288,6 +291,7 @@ private:
     std::atomic<double> validFps1s_{0.0};
     std::atomic<double> invalidFps1s_{0.0};
     std::atomic<double> algoAvgUs1s_{0.0};
+    std::atomic<uint64_t> algoAvgUs1sUpdatedUs_{0}; // monotonic us when algoAvgUs1s_ was last published
     
     // Experiment totals
     std::atomic<uint64_t> totalValidFlushed_{0};
