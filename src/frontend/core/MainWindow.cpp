@@ -810,6 +810,10 @@ void MainWindow::onTabChanged(int index)
     if (index == OVERVIEW_TAB_INDEX || index == EXPERIMENT_TAB_INDEX) {
         // Switching TO Overview/Experiment: start services
         startExperimentServices();
+        // Only run processing pipeline when Experiment tab is visible. When Overview is visible,
+        // disable processing to avoid wrong processing times, slowdown, and overview frames
+        // being used as auto-background.
+        backend_.processing().setRealtimeEnabled(index == EXPERIMENT_TAB_INDEX);
     } else if (experimentServicesActive_) {
         // Switching away from Overview/Experiment: stop services
         stopExperimentServices();
