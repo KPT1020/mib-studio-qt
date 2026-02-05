@@ -183,6 +183,42 @@
        </widget>
       </item>
       <item>
+       <layout class="QFormLayout" name="targetRingWidthFormLayout">
+        <property name="labelAlignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+        <item row="0" column="0">
+         <widget class="QLabel" name="targetRingWidthLabel">
+          <property name="text">
+           <string>Target ring width:</string>
+          </property>
+          <property name="toolTip">
+           <string>Ring width setpoint for autofocus (median ring ratio target)</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QDoubleSpinBox" name="targetRingWidthSpinBox">
+          <property name="decimals">
+           <number>2</number>
+          </property>
+          <property name="maximum">
+           <double>100.000000000000000</double>
+          </property>
+          <property name="minimum">
+           <double>1.000000000000000</double>
+          </property>
+          <property name="value">
+           <double>20.000000000000000</double>
+          </property>
+          <property name="toolTip">
+           <string>Ring width setpoint for autofocus (median ring ratio target)</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
        <layout class="QFormLayout" name="statusFormLayout">
         <property name="labelAlignment">
          <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>

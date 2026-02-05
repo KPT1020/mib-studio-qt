@@ -340,10 +340,10 @@ void AutofocusService::controlLoop() {
                         updateStatistics(); // Update statistics to reflect empty buffer
                     }
 
-                    SPDLOG_DEBUG("AutofocusService: Adjusted voltage to {}V (ring ratio: {:.3f}, deviation: {:.3f})",
+                    SPDLOG_DEBUG("AutofocusService: Adjusted voltage to {}V (ring width: {:.3f}, deviation: {:.3f})",
                                 newVoltage, medianRingRatio, deviation);
                     if (statusCallback_) {
-                        statusCallback_("Voltage: " + std::to_string(newVoltage) + "V (ring ratio: " + 
+                        statusCallback_("Voltage: " + std::to_string(newVoltage) + "V (ring width: " + 
                                       std::to_string(medianRingRatio) + ")");
                     }
                 }

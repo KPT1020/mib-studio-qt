@@ -21,6 +21,7 @@ private slots:
 	void onIncreaseVoltage();
 	void onDecreaseVoltage();
 	void onUpdateAutofocusStatus();
+	void onTargetRingWidthChanged(double value);
 
 private:
 	void updateNanopositionerUI();

@@ -119,6 +119,7 @@ namespace frontend
 		connect(ui->autofocusEnabledCheck, &QCheckBox::stateChanged, this, &NanopositionerTab::onAutofocusEnabledChanged);
 		connect(ui->increaseVoltageBtn, &QPushButton::clicked, this, &NanopositionerTab::onIncreaseVoltage);
 		connect(ui->decreaseVoltageBtn, &QPushButton::clicked, this, &NanopositionerTab::onDecreaseVoltage);
+		connect(ui->targetRingWidthSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, &NanopositionerTab::onTargetRingWidthChanged);
 
 		// Load config first so probe/auto-connect use saved baud and device address
 		loadConfig();
@@ -303,6 +304,14 @@ namespace frontend
 		updateNanopositionerUI();
 	}
 
+	void NanopositionerTab::onTargetRingWidthChanged(double value)
+	{
+		backend::services::AutofocusService::Config config = backend_.autofocus().getConfig();
+		config.focusSetpoint = value;
+		backend_.autofocus().setConfig(config);
+		saveConfig();
+	}
+
 	QString NanopositionerTab::configPath() const
 	{
 		QSettings s;
@@ -360,6 +369,9 @@ namespace frontend
 			if (config.contains("autofocus_focus_setpoint"))
 			{
 				afConfig.focusSetpoint = config["autofocus_focus_setpoint"].get<double>();
+				ui->targetRingWidthSpinBox->blockSignals(true);
+				ui->targetRingWidthSpinBox->setValue(afConfig.focusSetpoint);
+				ui->targetRingWidthSpinBox->blockSignals(false);
 			}
 			if (config.contains("autofocus_focus_range"))
 			{
@@ -441,6 +453,7 @@ namespace frontend
 			}
 			config["autofocus_baud_rate"] = ui->baudRateCombo->currentData().toInt();
 			config["autofocus_device_address"] = ui->deviceAddressSpinBox->value();
+			config["autofocus_focus_setpoint"] = ui->targetRingWidthSpinBox->value();
 
 			// Persist current voltage as initial for next session when connected
 			if (backend_.autofocus().isConnected())

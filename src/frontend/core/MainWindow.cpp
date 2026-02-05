@@ -620,7 +620,7 @@ void MainWindow::onUpdateStats()
         data.cameraRunning = cap.isRunning();
         data.cameraFps = s.lastFrameRate.load();
         data.cameraDataRateMBps = s.lastDataRateMBps.load();
-        data.meanRingRatio = backend_.autofocus().getAverageRingRatio();
+        data.meanRingRatio = backend_.autofocus().getMedianRingRatio();
         data.experimentActive = experimentActive_;
         data.validBuffered = validFrames.size();
         data.invalidBuffered = invalidFrames.size();
@@ -650,10 +650,10 @@ void MainWindow::onUpdateStats()
         status += " | Camera: stopped";
     }
 
-    // Append live mean ringwidth (from AutofocusService running average)
+    // Append live ring width (median from AutofocusService, same value used by autofocus)
     {
-        const double meanRing = backend_.autofocus().getAverageRingRatio();
-        status += QString(" | Ringwidth(mean)=%1").arg(QString::number(meanRing, 'f', 3));
+        const double ringWidth = backend_.autofocus().getMedianRingRatio();
+        status += QString(" | Ring width=%1").arg(QString::number(ringWidth, 'f', 3));
     }
 
     if (experimentActive_)
