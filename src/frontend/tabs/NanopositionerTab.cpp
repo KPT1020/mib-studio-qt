@@ -1,6 +1,7 @@
 #include "frontend/tabs/NanopositionerTab.h"
 #include "ui_NanopositionerTab.h"
 
+#include <QApplication>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -12,6 +13,7 @@
 
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #ifdef _WIN32
 #define NOMINMAX // Prevent Windows.h from defining min/max macros
 #include <windows.h>
@@ -139,6 +141,9 @@ namespace frontend
 
 		// Delay auto-connect so COM/USB has time to enumerate (singleShot(0) is often too early)
 		QTimer::singleShot(1800, this, &NanopositionerTab::tryAutoConnectNanopositioner);
+
+		// Persist nanopositioner voltage on app quit so next launch restores position
+		connect(qApp, &QApplication::aboutToQuit, this, [this]() { saveConfig(); });
 	}
 
 	NanopositionerTab::~NanopositionerTab() {
@@ -265,6 +270,7 @@ namespace frontend
 
 	void NanopositionerTab::onDisconnectNanopositioner()
 	{
+		saveConfig();
 		backend_.autofocus().disconnect();
 		updateNanopositionerUI();
 	}
@@ -435,6 +441,15 @@ namespace frontend
 			}
 			config["autofocus_baud_rate"] = ui->baudRateCombo->currentData().toInt();
 			config["autofocus_device_address"] = ui->deviceAddressSpinBox->value();
+
+			// Persist current voltage as initial for next session when connected
+			if (backend_.autofocus().isConnected())
+			{
+				auto cfg = backend_.autofocus().getConfig();
+				double v = backend_.autofocus().getCurrentVoltage();
+				v = std::clamp(v, cfg.minVoltage, cfg.maxVoltage);
+				config["autofocus_initial_voltage"] = v;
+			}
 
 			file.resize(0);
 			QTextStream out(&file);
