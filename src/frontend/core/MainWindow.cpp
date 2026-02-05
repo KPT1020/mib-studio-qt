@@ -33,6 +33,7 @@
 #include "frontend/tabs/OverviewTab.h"
 #include "frontend/tabs/ConfigTabs.h"
 #include "frontend/system/AutoUpdater.h"
+#include "frontend/system/DeviceInitManager.h"
 #include "frontend/utils/SidebarWidget.h"
 #include "frontend/utils/StatisticsPanel.h"
 #include <spdlog/spdlog.h>
@@ -197,6 +198,12 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
 
     connect(connectTab_, &frontend::ConnectTab::noCamerasFound, this, &MainWindow::onNoCamerasFound);
 
+    // Device init manager runs camera and nanopositioner auto-connect off the UI thread
+    initManager_ = new frontend::DeviceInitManager(backend_, this);
+    initManager_->setConnectTab(connectTab_);
+    initManager_->setNanopositionerTab(sidebarWidget_ ? sidebarWidget_->nanopositionerTab() : nullptr);
+    connectTab_->setDeviceInitManager(initManager_);
+
     // Connect tab change signal for auto-applying camera scripts
     connect(ui->tabs, &QTabWidget::currentChanged, this, &MainWindow::onTabChanged);
 
@@ -206,10 +213,8 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     // Initialize tab states (all tabs enabled initially since no experiment is active)
     updateTabStates();
 
-    // Auto-connect on startup: if exactly one camera is discoverable, connect to it
-    QTimer::singleShot(400, this, [this]() {
-        if (connectTab_) connectTab_->tryAutoConnect();
-    });
+    // Auto-connect on startup (camera at 400 ms, then nanopositioner after camera completes)
+    initManager_->start();
 
     // Quiet update check on startup (only prompts if an update is available)
     QTimer::singleShot(1500, this, [this]() {
@@ -620,7 +625,7 @@ void MainWindow::onUpdateStats()
         data.cameraRunning = cap.isRunning();
         data.cameraFps = s.lastFrameRate.load();
         data.cameraDataRateMBps = s.lastDataRateMBps.load();
-        data.meanRingRatio = backend_.autofocus().getAverageRingRatio();
+        data.meanRingRatio = backend_.autofocus().getMedianRingRatio();
         data.experimentActive = experimentActive_;
         data.validBuffered = validFrames.size();
         data.invalidBuffered = invalidFrames.size();
@@ -650,10 +655,10 @@ void MainWindow::onUpdateStats()
         status += " | Camera: stopped";
     }
 
-    // Append live mean ringwidth (from AutofocusService running average)
+    // Append live ring width (median from AutofocusService, same value used by autofocus)
     {
-        const double meanRing = backend_.autofocus().getAverageRingRatio();
-        status += QString(" | Ringwidth(mean)=%1").arg(QString::number(meanRing, 'f', 3));
+        const double ringWidth = backend_.autofocus().getMedianRingRatio();
+        status += QString(" | Ring width=%1").arg(QString::number(ringWidth, 'f', 3));
     }
 
     if (experimentActive_)

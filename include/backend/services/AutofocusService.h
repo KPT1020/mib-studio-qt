@@ -62,6 +62,8 @@ public:
 
     // Expose running average of ring ratio for UI/status
     double getAverageRingRatio() const { return averageRingRatio_.load(std::memory_order_relaxed); }
+    // Expose median ring ratio (same value used by autofocus control) for UI/status
+    double getMedianRingRatio() const { return medianRingRatio_.load(std::memory_order_relaxed); }
     // Monotonic timestamp (microseconds) when ring ratio was last updated; 0 if never
     uint64_t getLastRingRatioUpdateUs() const { return lastRingRatioUpdateUs_.load(std::memory_order_relaxed); }
 

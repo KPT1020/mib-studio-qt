@@ -483,8 +483,8 @@ def filter_processed_image(
         result["passRingCheck"] = False
         return result
 
-    result["passSingleInnerCheck"] = (not config["require_single_inner_contour"]) or result["hasSingleInnerContour"]
-    if config["require_single_inner_contour"] and not result["hasSingleInnerContour"]:
+    result["passSingleInnerCheck"] = (not config["require_single_inner_contour"]) or (len(inner_contours) >= 1)
+    if config["require_single_inner_contour"] and len(inner_contours) == 0:
         result["rejectReason"] = REASON_NO_SINGLE_INNER
         result["failedAt"] = REASON_NO_SINGLE_INNER
         # Border/area/ring checks not applicable (we early return in the live pipeline)
@@ -494,7 +494,7 @@ def filter_processed_image(
         return result
 
     # Pre-select which contour would be used for metrics (so overlays/CSV can show it even if later rejected)
-    if result["hasSingleInnerContour"]:
+    if inner_contours:
         result["contourUsed"] = "inner"
         if inner_filtered_indices:
             result["selectedFilteredIndex"] = int(inner_filtered_indices[0])
@@ -529,7 +529,7 @@ def filter_processed_image(
 
     result["passBorderCheck"] = True
 
-    if result["hasSingleInnerContour"]:
+    if inner_contours:
         c = inner_contours[0]
         contour_area = cv2.contourArea(c)
         hull = cv2.convexHull(c)

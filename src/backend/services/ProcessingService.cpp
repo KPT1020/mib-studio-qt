@@ -484,7 +484,7 @@ FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedIma
         result.brightness = calculateBrightnessQuantiles(originalImage, processedImage);
     }
 
-    if (config.require_single_inner_contour && !result.hasSingleInnerContour) {
+    if (config.require_single_inner_contour && innerContours.empty()) {
         return result;
     }
 
@@ -529,7 +529,7 @@ FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedIma
     }
 
     if (!result.touchesBorder || !config.enable_border_check) {
-        if (result.hasSingleInnerContour) {
+        if (!innerContours.empty()) {
             double contourArea = cv::contourArea(innerContours[0]);
             std::vector<cv::Point> hull;
             cv::convexHull(innerContours[0], hull);

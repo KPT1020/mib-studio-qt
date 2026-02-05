@@ -123,7 +123,7 @@ namespace frontend
         // Autofocus metrics group
         auto* autofocusGroup = new QGroupBox(tr("Autofocus"), this);
         auto* autofocusLayout = new QFormLayout(autofocusGroup);
-        ringwidthLabel_ = new QLabel(tr("Ringwidth:"), autofocusGroup);
+        ringwidthLabel_ = new QLabel(tr("Ring width:"), autofocusGroup);
         ringwidthValue_ = new QLabel("0.000", autofocusGroup);
         ringwidthValue_->setStyleSheet("font-weight: bold;");
         autofocusLayout->addRow(ringwidthLabel_, ringwidthValue_);

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 # Default version (fallback if git is not available or no tags exist)
-set(DEFAULT_VERSION "0.1.7")
+set(DEFAULT_VERSION "0.2.0")
 
 # Try to get version from git tags
 set(GIT_VERSION "")
@@ -60,7 +60,7 @@ if(MSVC)
     add_compile_options(/wd4828)
 endif()
 
-find_package(Qt6 COMPONENTS Core Widgets Gui Charts Network REQUIRED)
+find_package(Qt6 COMPONENTS Core Widgets Gui Charts Network Concurrent REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG QUIET)
 find_package(OpenCV CONFIG REQUIRED)
@@ -270,6 +270,8 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/system/AppConfigWatcher.h
     src/frontend/system/AutoUpdater.cpp
     include/frontend/system/AutoUpdater.h
+    src/frontend/system/DeviceInitManager.cpp
+    include/frontend/system/DeviceInitManager.h
     src/frontend/system/PlaybackPanel.cpp
     include/frontend/system/PlaybackPanel.h
     # Resources
@@ -295,6 +297,7 @@ target_link_libraries(mib_studio_qt PRIVATE
     Qt6::Widgets
     Qt6::Charts
     Qt6::Network
+    Qt6::Concurrent
     mib_backend
     spdlog::spdlog
 )

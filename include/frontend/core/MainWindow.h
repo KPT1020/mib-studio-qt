@@ -18,6 +18,7 @@ namespace frontend { class OverviewTab; }
 namespace frontend { class ConnectTab; }
 namespace frontend { class AutoUpdater; }
 namespace frontend { class SidebarWidget; }
+namespace frontend { class DeviceInitManager; }
 namespace Ui { class MainWindow; }
 
 class MainWindow : public QMainWindow {
@@ -56,6 +57,7 @@ private:
     frontend::OverviewTab* overviewTab_ = nullptr;
     frontend::AutoUpdater* updater_ = nullptr;
     frontend::SidebarWidget* sidebarWidget_ = nullptr;
+    frontend::DeviceInitManager* initManager_ = nullptr;
     QSplitter* mainSplitter_ = nullptr;
     uint64_t experimentStartTimeNs_{0};
     bool experimentActive_{false};
