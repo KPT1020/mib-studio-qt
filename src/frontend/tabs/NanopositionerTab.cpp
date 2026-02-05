@@ -140,8 +140,7 @@ namespace frontend
 			ui->statusLabel->setText(QString::fromStdString(message));
 		} });
 
-		// Delay auto-connect so COM/USB has time to enumerate (singleShot(0) is often too early)
-		QTimer::singleShot(1800, this, &NanopositionerTab::tryAutoConnectNanopositioner);
+		// Auto-connect is managed by DeviceInitManager (runs probe in worker, connect on main thread).
 
 		// Persist nanopositioner voltage on app quit so next launch restores position
 		connect(qApp, &QApplication::aboutToQuit, this, [this]() { saveConfig(); });
@@ -174,44 +173,32 @@ namespace frontend
 		}
 	}
 
-	void NanopositionerTab::tryAutoConnectNanopositioner()
+	int NanopositionerTab::getBaudRate() const
 	{
-		if (backend_.autofocus().isConnected())
+		return ui->baudRateCombo->currentData().toInt();
+	}
+
+	unsigned char NanopositionerTab::getDeviceAddress() const
+	{
+		return static_cast<unsigned char>(ui->deviceAddressSpinBox->value());
+	}
+
+	void NanopositionerTab::setNanopositionerStatus(const QString &message)
+	{
+		if (ui->statusLabel)
 		{
-			return;
+			ui->statusLabel->setText(message);
 		}
-		populateComPortList();
-		// If no nanopositioner found and we haven't retried yet, try once more after a delay (USB can enumerate late).
-		if (ui->comPortCombo->count() == 0 && !autoConnectRetried_)
-		{
-			autoConnectRetried_ = true;
-			QTimer::singleShot(2500, this, &NanopositionerTab::tryAutoConnectNanopositioner);
-			return;
-		}
-		// Auto-connect only when exactly one port responded as nanopositioner (probe passed).
-		if (ui->comPortCombo->count() != 1)
-		{
-			return;
-		}
-		const int port = ui->comPortCombo->currentData().toInt();
+	}
+
+	void NanopositionerTab::applyAutoConnectResult(int port)
+	{
+		// Backend already connected by DeviceInitManager. Update combo to show selected port and save config.
+		ui->comPortCombo->clear();
+		ui->comPortCombo->addItem(QString("COM%1").arg(port), port);
 		ui->comPortCombo->setCurrentIndex(0);
-		loadConfig();
-		int baudRate = ui->baudRateCombo->currentData().toInt();
-		unsigned char deviceAddress = static_cast<unsigned char>(ui->deviceAddressSpinBox->value());
-		bool success = backend_.autofocus().connect(port, baudRate, deviceAddress);
-		if (success)
-		{
-			saveConfig();
-			updateNanopositionerUI();
-			SPDLOG_INFO("NanopositionerTab: auto-connected to nanopositioner on COM{}", port);
-		}
-		else
-		{
-			if (ui->statusLabel)
-			{
-				ui->statusLabel->setText(tr("Auto-connect failed on COM%1").arg(port));
-			}
-		}
+		saveConfig();
+		updateNanopositionerUI();
 	}
 
 	void NanopositionerTab::updateNanopositionerUI()

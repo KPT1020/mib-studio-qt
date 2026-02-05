@@ -10,6 +10,7 @@
 #include "backend/services/CameraControlService.h"
 #include "backend/services/CaptureService.h"
 #include "frontend/dialogs/MockConfigDialog.h"
+#include "frontend/system/DeviceInitManager.h"
 #include "camera/mock/MockCamera.h"
 
 #include <filesystem>
@@ -65,14 +66,17 @@ void ConnectTab::onRefresh() {
 
 void ConnectTab::tryAutoConnect()
 {
-    // Guard: Cannot change camera connection while camera is running
+    if (initManager_) {
+        initManager_->runCameraStep();
+        return;
+    }
+
+    // Fallback when no DeviceInitManager: run discovery on UI thread (may block)
     if (backend_.capture().isRunning())
     {
         SPDLOG_INFO("ConnectTab: auto-connect skipped (capture running)");
         return;
     }
-
-    // Guard: Do not overwrite an already-configured camera (hardware or mock)
     if (backend_.isCameraConfigured())
     {
         SPDLOG_INFO("ConnectTab: auto-connect skipped (camera already configured)");
@@ -94,31 +98,38 @@ void ConnectTab::tryAutoConnect()
     if (cameras.size() == 1)
     {
         const auto &cam = cameras[0];
-        SPDLOG_INFO("ConnectTab: auto-connecting to camera {} (if={}, dev={})",
-                    cam.label, cam.interfaceIndex, cam.deviceIndex);
-
         backend_.setHardwareCameraSelection(cam.interfaceIndex, cam.deviceIndex, cam.label);
-
-        ui->statusLabel->setText(tr("Connected to %1 (not capturing)")
-                                     .arg(QString::fromStdString(cam.label)));
-
-        // Best-effort: focus Cameras tab and select the matching entry if present
-        ui->tabWidget->setCurrentIndex(0); // Cameras tab
-        for (int i = 0; i < ui->cameraList->count(); ++i)
-        {
-            auto *item = ui->cameraList->item(i);
-            if (item && item->text().toStdString() == cam.label)
-            {
-                ui->cameraList->setCurrentRow(i);
-                break;
-            }
-        }
-
-        emit connected();
+        applyCameraSelection(cam.interfaceIndex, cam.deviceIndex, QString::fromStdString(cam.label));
         return;
     }
 
-    // 2+ cameras: user must select manually
+    ui->statusLabel->setText(tr("Multiple cameras found; select one and click Connect."));
+}
+
+void ConnectTab::applyCameraSelection(int interfaceIndex, int deviceIndex, const QString& label)
+{
+    ui->statusLabel->setText(tr("Connected to %1 (not capturing)").arg(label));
+    ui->tabWidget->setCurrentIndex(0);
+    for (int i = 0; i < ui->cameraList->count(); ++i)
+    {
+        auto *item = ui->cameraList->item(i);
+        if (item && item->text() == label)
+        {
+            ui->cameraList->setCurrentRow(i);
+            break;
+        }
+    }
+    emit connected();
+}
+
+void ConnectTab::reportNoCameras()
+{
+    ui->statusLabel->setText(tr("No cameras found."));
+    emit noCamerasFound();
+}
+
+void ConnectTab::reportMultipleCameras()
+{
     ui->statusLabel->setText(tr("Multiple cameras found; select one and click Connect."));
 }
 

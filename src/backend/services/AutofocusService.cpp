@@ -29,6 +29,8 @@ bool AutofocusService::connect(int comPort, int baudRate, unsigned char deviceAd
     if (connected_.load()) {
         disconnect();
     }
+    // Ensure port is closed before opening (e.g. after force-close or failed probe)
+    CloseSer();
 
     comPort_ = comPort;
     baudRate_ = baudRate;
@@ -112,6 +114,7 @@ void AutofocusService::disconnect() {
 
 bool AutofocusService::probeComPort(int comPort, int baudRate, unsigned char deviceAddress) {
     // Caller must not be connected (SDK uses a single global COM handle).
+    CloseSer();
     int result = OpenComConnectRS232(comPort, baudRate);
     if (result == 0) {
         return false;
