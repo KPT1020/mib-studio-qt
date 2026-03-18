@@ -242,6 +242,8 @@ set(FRONTEND_COMMON_SOURCES
     # Utils
     src/frontend/utils/ConfigPathManager.cpp
     include/frontend/utils/ConfigPathManager.h
+    src/frontend/utils/OverlayRenderer.cpp
+    include/frontend/utils/OverlayRenderer.h
     src/frontend/utils/EgrabberConfigParser.cpp
     include/frontend/utils/EgrabberConfigParser.h
     src/frontend/utils/FileIOUtils.cpp

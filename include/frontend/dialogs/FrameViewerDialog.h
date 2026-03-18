@@ -9,8 +9,10 @@ namespace backend::services {
     struct ProcessedFrame;
 }
 #include "backend/services/ProcessingService.h"
+#include "frontend/utils/OverlayRenderer.h"
 
 class QLabel;
+class QComboBox;
 class QPushButton;
 class QCheckBox;
 class QScrollArea;
@@ -27,16 +29,18 @@ class FrameViewerDialog : public QDialog {
 public:
     explicit FrameViewerDialog(const backend::services::ProcessedFrame& frame,
                               const backend::services::ProcessingService::Roi& roi,
-                              bool showOverlays,
+                              OverlayMode overlayMode,
+                              bool showRoiOverlay,
                               QWidget* parent = nullptr);
     ~FrameViewerDialog();
     
     void setFrame(const backend::services::ProcessedFrame& frame);
     void setRoi(const backend::services::ProcessingService::Roi& roi);
-    void setShowOverlays(bool show);
+    void setOverlayMode(OverlayMode mode);
+    void setShowRoiOverlay(bool show);
 
 private slots:
-    void onToggleProcessingOverlay(bool enabled);
+    void onOverlayModeChanged(int index);
     void onToggleRoiOverlay(bool enabled);
     void onPreviousFrame();
     void onNextFrame();
@@ -55,13 +59,12 @@ protected:
 
 private:
     void updateImage();
-    QImage createProcessingOverlay(const cv::Mat& original, const cv::Mat& mask) const;
     QImage matToQImage(const cv::Mat& mat) const;
     void updateFrameInfo();
 
     const backend::services::ProcessedFrame* frame_;
     backend::services::ProcessingService::Roi roi_;
-    bool showProcessingOverlay_;
+    OverlayMode overlayMode_;
     bool showRoiOverlay_;
     
     QImage displayImage_;

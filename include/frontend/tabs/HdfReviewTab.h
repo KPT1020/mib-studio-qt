@@ -21,8 +21,10 @@ namespace backend::services
 }
 
 #include "backend/services/ProcessingService.h"
+#include "frontend/utils/OverlayRenderer.h"
 
 class QPushButton;
+class QComboBox;
 class QLabel;
 class QTabWidget;
 class QTableView;
@@ -66,6 +68,7 @@ namespace frontend
         void onExportMetrics();
         void onExportAll();
         void onExportCharts();
+        void onOverlayModeChanged(int index);
         void onToggleRoiOverlay(bool enabled);
         void onTabChanged(int index);
         void onThumbnailClicked(int frameIndex);
@@ -87,7 +90,6 @@ namespace frontend
         void onScrollValueChanged(int value);
         void exportMetricsToCsv(const QString &filePath);
         QImage drawRoiOverlay(const QImage &image, int imgWidth, int imgHeight) const;
-        QImage createProcessingOverlay(const cv::Mat &original, const cv::Mat &mask) const;
         void showFrameViewer(int frameIndex);
         // Carousel/refresh helpers
         void computeVisibleRange(bool isValid, size_t &outStartIndex, size_t &outEndIndex) const;
@@ -140,6 +142,7 @@ namespace frontend
         std::vector<backend::services::ProcessedFrame> invalidFrames_;
         int selectedFrameIndex_ = -1;
         bool isShowingValid_ = true;
+        OverlayMode overlayMode_{OverlayMode::None};
         bool showRoiOverlay_ = false;
         backend::services::ProcessingService::Roi roi_{0, 0, 0, 0};
 

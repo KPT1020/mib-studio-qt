@@ -15,6 +15,7 @@
 #include <QMessageBox>
 #include <QScrollBar>
 #include <QEventLoop>
+#include <QComboBox>
 #include <QChartView>
 #include <QLineSeries>
 #include <QCoreApplication>
@@ -45,6 +46,7 @@
 #include "backend/services/ProcessingService.h"
 #include "frontend/dialogs/FrameViewerDialog.h"
 #include "frontend/models/HdfMetricsModel.h"
+#include "frontend/utils/OverlayRenderer.h"
 
 #include <spdlog/spdlog.h>
 #include <opencv2/core.hpp>
@@ -119,6 +121,8 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
     connect(ui->exportMetricsBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportMetrics);
     connect(ui->exportAllBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportAll);
     connect(ui->exportChartsBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportCharts);
+    connect(ui->overlayModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &HdfReviewTab::onOverlayModeChanged);
     connect(ui->roiOverlayCheck, &QCheckBox::toggled, this, &HdfReviewTab::onToggleRoiOverlay);
 
     // Setup valid frames tab widgets
@@ -333,8 +337,10 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
     ui->exportAllBtn->setEnabled(hasData);
     ui->exportChartsBtn->setEnabled(hasData);
     
-    // Enable overlay checkbox if we have frames (for processing overlay)
+    // Enable overlay controls if we have frames
     if (hasData) {
+        ui->overlayModeLabel->setEnabled(true);
+        ui->overlayModeCombo->setEnabled(true);
         ui->roiOverlayCheck->setEnabled(true);
     }
 
@@ -544,22 +550,24 @@ void HdfReviewTab::loadThumbnailsBatch(const std::vector<backend::services::Proc
                 continue;
             }
 
-            // Optional processing overlay if ROI/checkbox is enabled and mask exists
-            if (showRoiOverlay_) {
+            // Optional processing overlay when overlay mode is not None
+            const auto& framesRef = isValid ? validFrames_ : invalidFrames_;
+            const backend::services::FilterResult* validation = (i < framesRef.size()) ? &framesRef[i].validation : nullptr;
+            if (overlayMode_ != OverlayMode::None) {
                 cv::Mat mask;
                 if (hdfReader_->readImageByIndex(maskPath, i, mask) && !mask.empty()) {
-                    thumbImage = createProcessingOverlay(original, mask);
+                    thumbImage = createProcessingOverlay(original, mask, validation, overlayMode_);
                 } else {
                     SPDLOG_DEBUG("HdfReviewTab: mask not available for {}[{}] (overlay on)", maskPath, i);
                     thumbImage = matToQImage(original);
                 }
-
-                // ROI rectangle overlay
-                if (!thumbImage.isNull() && roi_.w > 0 && roi_.h > 0) {
-                    thumbImage = drawRoiOverlay(thumbImage, original.cols, original.rows);
-                }
             } else {
                 thumbImage = matToQImage(original);
+            }
+
+            // ROI rectangle overlay if enabled
+            if (showRoiOverlay_ && !thumbImage.isNull() && roi_.w > 0 && roi_.h > 0) {
+                thumbImage = drawRoiOverlay(thumbImage, original.cols, original.rows);
             }
 
             // Scale and cache
@@ -907,11 +915,33 @@ void HdfReviewTab::exportMetricsToCsv(const QString& filePath) {
     SPDLOG_INFO("Exported {} frames to CSV: {}", totalFrames, filePath.toStdString());
 }
 
+void HdfReviewTab::onOverlayModeChanged(int index) {
+    overlayMode_ = static_cast<OverlayMode>(index);
+    SPDLOG_INFO("Overlay mode changed to index {} (OverlayMode={})", index, static_cast<int>(overlayMode_));
+    thumbnailCache_.clear();
+
+    if (ui->validImageScroll && ui->validImageScroll->verticalScrollBar()) {
+        validScrollValue_ = ui->validImageScroll->verticalScrollBar()->value();
+    }
+    if (ui->invalidImageScroll && ui->invalidImageScroll->verticalScrollBar()) {
+        invalidScrollValue_ = ui->invalidImageScroll->verticalScrollBar()->value();
+    }
+    refreshVisibleThumbnails(true);
+    refreshVisibleThumbnails(false);
+    pruneOffscreenThumbnails(true);
+    pruneOffscreenThumbnails(false);
+    if (ui->validImageScroll && ui->validImageScroll->verticalScrollBar()) {
+        ui->validImageScroll->verticalScrollBar()->setValue(validScrollValue_);
+    }
+    if (ui->invalidImageScroll && ui->invalidImageScroll->verticalScrollBar()) {
+        ui->invalidImageScroll->verticalScrollBar()->setValue(invalidScrollValue_);
+    }
+}
+
 void HdfReviewTab::onToggleRoiOverlay(bool enabled) {
     showRoiOverlay_ = enabled;
     SPDLOG_INFO("ROI overlay toggled: {}, ROI: x={}, y={}, w={}, h={}", 
                 enabled, roi_.x, roi_.y, roi_.w, roi_.h);
-    // Clear thumbnail cache so images get rebuilt with new overlay state
     thumbnailCache_.clear();
 
     // Preserve current scroll positions
@@ -971,40 +1001,6 @@ QImage HdfReviewTab::drawRoiOverlay(const QImage& image, int imgWidth, int imgHe
     return overlayImage;
 }
 
-QImage HdfReviewTab::createProcessingOverlay(const cv::Mat& original, const cv::Mat& mask) const {
-    if (original.empty() || mask.empty()) {
-        return matToQImage(original);
-    }
-    
-    // Convert original to RGB if needed
-    cv::Mat rgb;
-    if (original.channels() == 1) {
-        cv::cvtColor(original, rgb, cv::COLOR_GRAY2RGB);
-    } else {
-        rgb = original.clone();
-        if (rgb.channels() == 3) {
-            cv::cvtColor(rgb, rgb, cv::COLOR_BGR2RGB);
-        }
-    }
-    
-    // Create overlay: green tint where mask is non-zero
-    cv::Mat overlay = rgb.clone();
-    for (int y = 0; y < overlay.rows && y < mask.rows; ++y) {
-        for (int x = 0; x < overlay.cols && x < mask.cols; ++x) {
-            if (mask.at<uchar>(y, x) > 0) {
-                cv::Vec3b& pixel = overlay.at<cv::Vec3b>(y, x);
-                // Blend with green (0, 255, 0) at 30% opacity
-                pixel[0] = static_cast<uchar>(pixel[0] * 0.7); // R
-                pixel[1] = static_cast<uchar>(std::min(255.0, pixel[1] * 0.7 + 255.0 * 0.3)); // G
-                pixel[2] = static_cast<uchar>(pixel[2] * 0.7); // B
-            }
-        }
-    }
-    
-    QImage img(overlay.data, overlay.cols, overlay.rows, static_cast<int>(overlay.step), QImage::Format_RGB888);
-    return img.copy();
-}
-
 void HdfReviewTab::computeVisibleRange(bool isValid, size_t &outStartIndex, size_t &outEndIndex) const {
     const auto& frames = isValid ? validFrames_ : invalidFrames_;
     outStartIndex = 0;
@@ -1049,18 +1045,20 @@ QImage HdfReviewTab::buildThumbnailForIndex(size_t index, bool isValid) {
         return thumbImage;
     }
 
-    if (showRoiOverlay_) {
+    const auto& framesRef = isValid ? validFrames_ : invalidFrames_;
+    const backend::services::FilterResult* validation = (index < framesRef.size()) ? &framesRef[index].validation : nullptr;
+    if (overlayMode_ != OverlayMode::None) {
         cv::Mat mask;
         if (hdfReader_->readImageByIndex(maskPath, index, mask) && !mask.empty()) {
-            thumbImage = createProcessingOverlay(original, mask);
+            thumbImage = createProcessingOverlay(original, mask, validation, overlayMode_);
         } else {
             thumbImage = matToQImage(original);
         }
-        if (!thumbImage.isNull() && roi_.w > 0 && roi_.h > 0) {
-            thumbImage = drawRoiOverlay(thumbImage, original.cols, original.rows);
-        }
     } else {
         thumbImage = matToQImage(original);
+    }
+    if (showRoiOverlay_ && !thumbImage.isNull() && roi_.w > 0 && roi_.h > 0) {
+        thumbImage = drawRoiOverlay(thumbImage, original.cols, original.rows);
     }
 
     if (!thumbImage.isNull()) {
@@ -1245,8 +1243,8 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
         }
     }
     
-    // Create dialog
-    auto* dialog = new FrameViewerDialog(initialFrame, roi_, showRoiOverlay_, this);
+    // Create dialog with current overlay mode and ROI overlay state
+    auto* dialog = new FrameViewerDialog(initialFrame, roi_, overlayMode_, showRoiOverlay_, this);
     
     // Store current index in a way that can be modified by lambdas
     struct NavigationState {

@@ -7,8 +7,10 @@
 #include <QMessageBox>
 #include <QEvent>
 #include <QFileDialog>
+#include <QComboBox>
 
 #include "backend/services/ProcessingService.h"
+#include "frontend/utils/OverlayRenderer.h"
 #include <spdlog/spdlog.h>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
@@ -18,37 +20,33 @@ namespace frontend {
 
 FrameViewerDialog::FrameViewerDialog(const backend::services::ProcessedFrame& frame,
                                      const backend::services::ProcessingService::Roi& roi,
-                                     bool showOverlays,
+                                     OverlayMode overlayMode,
+                                     bool showRoiOverlay,
                                      QWidget* parent)
     : QDialog(parent),
       ui(new Ui::FrameViewerDialog),
       frame_(&frame),
       roi_(roi),
-      showProcessingOverlay_(showOverlays),
-      showRoiOverlay_(showOverlays),
+      overlayMode_(overlayMode),
+      showRoiOverlay_(showRoiOverlay),
       zoomFactor_(1.0)
 {
     ui->setupUi(this);
     setWindowTitle(tr("Frame Viewer - Frame %1").arg(frame.index));
     
-    // Set initial zoom to fit window
     zoomFactor_ = 1.0;
 
-    // Configure scroll area
     ui->imageScrollArea->setBackgroundRole(QPalette::Dark);
     ui->imageScrollArea->installEventFilter(this);
-    
-    // Configure image label
     ui->imageLabel->setBackgroundRole(QPalette::Base);
     
-    // Set overlay checkboxes
-    ui->processingOverlayCheck->setChecked(showProcessingOverlay_);
+    ui->overlayModeCombo->setCurrentIndex(static_cast<int>(overlayMode_));
     ui->roiOverlayCheck->setChecked(showRoiOverlay_);
 
-    // Connect signals
     connect(ui->prevButton, &QPushButton::clicked, this, &FrameViewerDialog::onPreviousFrame);
     connect(ui->nextButton, &QPushButton::clicked, this, &FrameViewerDialog::onNextFrame);
-    connect(ui->processingOverlayCheck, &QCheckBox::toggled, this, &FrameViewerDialog::onToggleProcessingOverlay);
+    connect(ui->overlayModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &FrameViewerDialog::onOverlayModeChanged);
     connect(ui->roiOverlayCheck, &QCheckBox::toggled, this, &FrameViewerDialog::onToggleRoiOverlay);
     connect(ui->zoomInButton, &QPushButton::clicked, this, &FrameViewerDialog::onZoomIn);
     connect(ui->zoomOutButton, &QPushButton::clicked, this, &FrameViewerDialog::onZoomOut);
@@ -77,16 +75,20 @@ void FrameViewerDialog::setRoi(const backend::services::ProcessingService::Roi& 
     updateImage();
 }
 
-void FrameViewerDialog::setShowOverlays(bool show) {
-    showProcessingOverlay_ = show;
+void FrameViewerDialog::setOverlayMode(OverlayMode mode) {
+    overlayMode_ = mode;
+    ui->overlayModeCombo->setCurrentIndex(static_cast<int>(overlayMode_));
+    updateImage();
+}
+
+void FrameViewerDialog::setShowRoiOverlay(bool show) {
     showRoiOverlay_ = show;
-    ui->processingOverlayCheck->setChecked(show);
     ui->roiOverlayCheck->setChecked(show);
     updateImage();
 }
 
-void FrameViewerDialog::onToggleProcessingOverlay(bool enabled) {
-    showProcessingOverlay_ = enabled;
+void FrameViewerDialog::onOverlayModeChanged(int index) {
+    overlayMode_ = static_cast<OverlayMode>(index);
     updateImage();
 }
 
@@ -157,10 +159,9 @@ void FrameViewerDialog::updateImage() {
     }
 
     QImage baseImage;
-
-    // Apply processing overlay if enabled
-    if (showProcessingOverlay_ && !frame_->processedImage.empty()) {
-        baseImage = createProcessingOverlay(frame_->originalImage, frame_->processedImage);
+    if (overlayMode_ != OverlayMode::None && !frame_->processedImage.empty()) {
+        baseImage = createProcessingOverlay(frame_->originalImage, frame_->processedImage,
+                                           &frame_->validation, overlayMode_);
     } else {
         baseImage = matToQImage(frame_->originalImage);
     }
@@ -197,40 +198,6 @@ void FrameViewerDialog::updateImage() {
     } else {
         ui->imageLabel->setPixmap(QPixmap());
     }
-}
-
-QImage FrameViewerDialog::createProcessingOverlay(const cv::Mat& original, const cv::Mat& mask) const {
-    if (original.empty() || mask.empty()) {
-        return matToQImage(original);
-    }
-    
-    // Convert original to RGB if needed
-    cv::Mat rgb;
-    if (original.channels() == 1) {
-        cv::cvtColor(original, rgb, cv::COLOR_GRAY2RGB);
-    } else {
-        rgb = original.clone();
-        if (rgb.channels() == 3) {
-            cv::cvtColor(rgb, rgb, cv::COLOR_BGR2RGB);
-        }
-    }
-    
-    // Create overlay: green tint where mask is non-zero
-    cv::Mat overlay = rgb.clone();
-    for (int y = 0; y < overlay.rows && y < mask.rows; ++y) {
-        for (int x = 0; x < overlay.cols && x < mask.cols; ++x) {
-            if (mask.at<uchar>(y, x) > 0) {
-                cv::Vec3b& pixel = overlay.at<cv::Vec3b>(y, x);
-                // Blend with green (0, 255, 0) at 30% opacity
-                pixel[0] = static_cast<uchar>(pixel[0] * 0.7); // R
-                pixel[1] = static_cast<uchar>(std::min(255.0, pixel[1] * 0.7 + 255.0 * 0.3)); // G
-                pixel[2] = static_cast<uchar>(pixel[2] * 0.7); // B
-            }
-        }
-    }
-    
-    QImage img(overlay.data, overlay.cols, overlay.rows, static_cast<int>(overlay.step), QImage::Format_RGB888);
-    return img.copy();
 }
 
 QImage FrameViewerDialog::matToQImage(const cv::Mat& mat) const {
@@ -311,36 +278,28 @@ void FrameViewerDialog::onExportFrame() {
         filePath += ".tiff";
     }
 
-    // Prepare image for export (use original, not zoomed display)
     cv::Mat exportImage;
-    
-    if (showProcessingOverlay_ && !frame_->processedImage.empty()) {
-        // Create overlay image
-        if (frame_->originalImage.channels() == 1) {
-            cv::cvtColor(frame_->originalImage, exportImage, cv::COLOR_GRAY2BGR);
+    if (overlayMode_ != OverlayMode::None && !frame_->processedImage.empty()) {
+        QImage overlayQImage = createProcessingOverlay(frame_->originalImage, frame_->processedImage,
+                                                       &frame_->validation, overlayMode_);
+        if (!overlayQImage.isNull()) {
+            QImage rgb888 = overlayQImage.format() == QImage::Format_RGB888
+                ? overlayQImage
+                : overlayQImage.convertToFormat(QImage::Format_RGB888);
+            cv::Mat rgb(rgb888.height(), rgb888.width(), CV_8UC3,
+                       const_cast<uchar*>(rgb888.constBits()), rgb888.bytesPerLine());
+            cv::cvtColor(rgb.clone(), exportImage, cv::COLOR_RGB2BGR);
         } else {
-            exportImage = frame_->originalImage.clone();
-            if (exportImage.channels() == 3) {
-                // Already BGR, keep as is
-            } else if (exportImage.channels() == 4) {
-                cv::cvtColor(exportImage, exportImage, cv::COLOR_BGRA2BGR);
-            }
-        }
-        
-        // Apply processing overlay (green tint where mask is non-zero)
-        for (int y = 0; y < exportImage.rows && y < frame_->processedImage.rows; ++y) {
-            for (int x = 0; x < exportImage.cols && x < frame_->processedImage.cols; ++x) {
-                if (frame_->processedImage.at<uchar>(y, x) > 0) {
-                    cv::Vec3b& pixel = exportImage.at<cv::Vec3b>(y, x);
-                    // Blend with green (0, 255, 0) at 30% opacity
-                    pixel[0] = static_cast<uchar>(pixel[0] * 0.7); // B
-                    pixel[1] = static_cast<uchar>(std::min(255.0, pixel[1] * 0.7 + 255.0 * 0.3)); // G
-                    pixel[2] = static_cast<uchar>(pixel[2] * 0.7); // R
+            if (frame_->originalImage.channels() == 1) {
+                cv::cvtColor(frame_->originalImage, exportImage, cv::COLOR_GRAY2BGR);
+            } else {
+                exportImage = frame_->originalImage.clone();
+                if (exportImage.channels() == 4) {
+                    cv::cvtColor(exportImage, exportImage, cv::COLOR_BGRA2BGR);
                 }
             }
         }
     } else {
-        // Export original image
         if (frame_->originalImage.channels() == 1) {
             exportImage = frame_->originalImage.clone();
         } else if (frame_->originalImage.channels() == 3) {
@@ -348,7 +307,6 @@ void FrameViewerDialog::onExportFrame() {
         } else if (frame_->originalImage.channels() == 4) {
             cv::cvtColor(frame_->originalImage, exportImage, cv::COLOR_BGRA2BGR);
         } else {
-            // Convert to grayscale as fallback
             cv::cvtColor(frame_->originalImage, exportImage, cv::COLOR_BGR2GRAY);
         }
     }

@@ -113,10 +113,39 @@
       </spacer>
      </item>
      <item>
-      <widget class="QCheckBox" name="processingOverlayCheck">
+      <widget class="QLabel" name="overlayModeLabel">
        <property name="text">
-        <string>Processing Overlay</string>
+        <string>Overlay:</string>
        </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QComboBox" name="overlayModeCombo">
+       <item>
+        <property name="text">
+         <string>None</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>All contours</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>Outer+inner (color)</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>All mask</string>
+        </property>
+       </item>
+       <item>
+        <property name="text">
+         <string>Filtered mask</string>
+        </property>
+       </item>
       </widget>
      </item>
      <item>
