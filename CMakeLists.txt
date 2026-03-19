@@ -706,6 +706,26 @@ add_test(
     WORKING_DIRECTORY "$<TARGET_FILE_DIR:mindvision_visual_test>"
 )
 
+# MindVision hardware validation test (applies config, reads back from hardware)
+add_executable(mindvision_hardware_validation_test
+    src/tests/mindvision_hardware_validation_test.cpp
+)
+target_include_directories(mindvision_hardware_validation_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    "C:/Program Files/Euresys/eGrabber/include"
+)
+target_link_libraries(mindvision_hardware_validation_test PRIVATE
+    mib_backend
+    Qt6::Core
+    spdlog::spdlog
+)
+set_target_properties(mindvision_hardware_validation_test PROPERTIES AUTOMOC ON)
+add_test(
+    NAME  mindvision_hardware_validation
+    COMMAND mindvision_hardware_validation_test
+    WORKING_DIRECTORY "$<TARGET_FILE_DIR:mindvision_hardware_validation_test>"
+)
+
 # Windows installer packaging (InnoSetup)
 if(WIN32)
     # Find InnoSetup compiler
