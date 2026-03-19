@@ -4,12 +4,83 @@ This guide documents the complete end-to-end process for releasing a new version
 
 ## Overview
 
-The release workflow consists of four main steps:
+There are two ways to release:
+
+### Automated (Recommended)
+
+Push a version tag to trigger the CI/CD pipeline, which builds, tests, creates a GitHub Release with installers, and publishes to RustFS automatically.
+
+```powershell
+# One-command release: bump version, tag, push (CI does the rest)
+.\release.ps1 --patch --push --skip-build
+
+# Or with local build verification first
+.\release.ps1 --patch --push
+```
+
+### Manual
+
+The release workflow consists of four manual steps:
 
 1. **Version Bump** - Increment the version number in `CMakeLists.txt` (and optionally create a git tag)
 2. **Build Release** - Compile the application in Release configuration with all dependencies
 3. **Build Installers** - Create both full installer and update package using InnoSetup
 4. **Publish** - Upload packages to RustFS (S3-compatible) storage for distribution
+
+## CI/CD Pipeline
+
+### Continuous Integration (`.github/workflows/ci.yml`)
+
+Runs on every push to `main`/`develop` and on pull requests:
+
+- Installs Conan dependencies (cached for speed)
+- Configures and builds the project
+- Runs tests via CTest
+- Uploads build logs on failure
+
+### Release Pipeline (`.github/workflows/release.yml`)
+
+Triggered automatically when a version tag (`v*`) is pushed:
+
+1. Builds the Release configuration
+2. Runs tests to verify the build
+3. Builds both InnoSetup installers (full + update)
+4. Creates a GitHub Release with both installers and SHA-256 checksums
+5. Publishes the update package to RustFS for auto-updates
+
+**Required GitHub Secrets** (for RustFS publishing):
+- `AWS_ACCESS_KEY_ID` — RustFS access key
+- `AWS_SECRET_ACCESS_KEY` — RustFS secret key
+
+If secrets are not configured, the GitHub Release is still created but RustFS publishing is skipped.
+
+### Unified Release Script (`release.ps1`)
+
+One-command release orchestration:
+
+```powershell
+# Bump, build locally, tag, push (triggers CI/CD)
+.\release.ps1 --patch --push
+
+# Bump, tag, push — let CI handle the entire build
+.\release.ps1 --minor --push --skip-build
+
+# Bump and tag only (push manually later)
+.\release.ps1 --patch
+
+# Preview what would happen
+.\release.ps1 --patch --dry-run
+```
+
+Options:
+- `--patch|--minor|--major` — Version bump type (required)
+- `--push` — Push branch and tag to remote (triggers release pipeline)
+- `--skip-build` — Skip local build (let CI handle it)
+- `--dry-run` — Show what would happen without making changes
+
+### Conan Cache
+
+CI caches Conan packages keyed on `conanfile.txt` hash. After the first build, subsequent CI runs reuse cached dependencies, significantly reducing build time.
 
 ## Prerequisites
 
@@ -284,7 +355,14 @@ flowchart TD
 
 ## Quick Reference
 
-For experienced users, here's the condensed workflow:
+### Automated Release (Recommended)
+
+```powershell
+# One command: bump, tag, push — CI builds, tests, releases, and publishes
+.\release.ps1 --patch --push --skip-build
+```
+
+### Manual Release
 
 ```powershell
 # 1. Bump version (patch example)
@@ -296,14 +374,17 @@ git push origin v0.1.1
 # 3. Build Release
 cmake --build build --config Release --target mib_studio_qt
 
-# 4. Build installers
+# 4. Run tests
+ctest --test-dir build --build-config Release --output-on-failure
+
+# 5. Build installers
 cmake --build build --config Release --target package_installer
 cmake --build build --config Release --target package_installer_update
 
-# 5. Publish update package (for auto-updates)
+# 6. Publish update package (for auto-updates)
 .\publish-update.ps1 -Installer "build\dist\MIB_Studio_Qt_Update_v0.1.1.exe" -Profile rustfs
 
-# 6. Publish full installer (optional)
+# 7. Publish full installer (optional)
 .\publish-update.ps1 -Installer "build\dist\MIB_Studio_Qt_Setup_v0.1.1.exe" -Profile rustfs
 ```
 

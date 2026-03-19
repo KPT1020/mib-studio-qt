@@ -1,0 +1,126 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write  # Required for creating GitHub Releases
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building release: $TAG (version $VERSION)"
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Conan
+        run: |
+          pip install conan
+          conan profile detect --force
+
+      - name: Cache Conan packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.conan2
+          key: conan-${{ runner.os }}-${{ hashFiles('conanfile.txt') }}-release
+          restore-keys: |
+            conan-${{ runner.os }}-${{ hashFiles('conanfile.txt') }}-
+            conan-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: conan install . -of build --build=missing -s build_type=Release
+
+      - name: Configure CMake
+        run: cmake --preset windows-default
+
+      - name: Build Release
+        run: cmake --build build --config Release --target mib_studio_qt
+
+      - name: Run tests
+        run: ctest --test-dir build --build-config Release --output-on-failure --timeout 30
+
+      - name: Build full installer
+        run: cmake --build build --config Release --target package_installer
+
+      - name: Build update package
+        run: cmake --build build --config Release --target package_installer_update
+
+      - name: Compute checksums
+        id: checksums
+        shell: pwsh
+        run: |
+          $setupExe = Get-ChildItem "build/dist/MIB_Studio_Qt_Setup_v*.exe" | Select-Object -First 1
+          $updateExe = Get-ChildItem "build/dist/MIB_Studio_Qt_Update_v*.exe" | Select-Object -First 1
+
+          if ($setupExe) {
+            $setupHash = (Get-FileHash -Algorithm SHA256 $setupExe.FullName).Hash.ToLower()
+            "setup_hash=$setupHash" | Out-File -Append $env:GITHUB_OUTPUT
+            "setup_file=$($setupExe.Name)" | Out-File -Append $env:GITHUB_OUTPUT
+            Write-Host "Setup: $($setupExe.Name) SHA256: $setupHash"
+          }
+          if ($updateExe) {
+            $updateHash = (Get-FileHash -Algorithm SHA256 $updateExe.FullName).Hash.ToLower()
+            "update_hash=$updateHash" | Out-File -Append $env:GITHUB_OUTPUT
+            "update_file=$($updateExe.Name)" | Out-File -Append $env:GITHUB_OUTPUT
+            Write-Host "Update: $($updateExe.Name) SHA256: $updateHash"
+          }
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: MIB Studio Qt ${{ steps.version.outputs.tag }}
+          body: |
+            ## MIB Studio Qt ${{ steps.version.outputs.tag }}
+
+            ### Downloads
+            - **Full Installer** — For first-time installations (includes eGrabber SDK + VC++ Redistributable)
+            - **Update Package** — For existing installations (app files only, smaller download)
+
+            ### Checksums (SHA-256)
+            ```
+            ${{ steps.checksums.outputs.setup_hash }}  ${{ steps.checksums.outputs.setup_file }}
+            ${{ steps.checksums.outputs.update_hash }}  ${{ steps.checksums.outputs.update_file }}
+            ```
+          files: |
+            build/dist/MIB_Studio_Qt_Setup_v*.exe
+            build/dist/MIB_Studio_Qt_Update_v*.exe
+          draft: false
+          prerelease: false
+
+      - name: Publish to RustFS (auto-update server)
+        if: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
+        shell: pwsh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          $updateExe = Get-ChildItem "build/dist/MIB_Studio_Qt_Update_v*.exe" | Select-Object -First 1
+          if ($updateExe) {
+            .\publish-update.ps1 `
+              -Installer $updateExe.FullName `
+              -ReleaseNotesUrl "https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }}"
+          } else {
+            Write-Host "WARNING: Update package not found, skipping RustFS publish"
+          }
