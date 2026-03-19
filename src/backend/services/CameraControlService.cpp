@@ -1,6 +1,21 @@
 #include "backend/services/CameraControlService.h"
 
+// EGrabber SDK – included here (not in the header) to avoid polluting
+// MindVision-related compilation units with eGrabber headers.
+#include <EGrabber.h>
+
+// MindVision SDK – extern declarations only (API_LOAD_MAIN is defined in
+// MindVisionCamera.cpp which provides all global definitions).
+#ifdef _WIN32
+#include <windows.h>
+#endif
+#include "MindVision/CameraApiLoad.h"
+
 #include <spdlog/spdlog.h>
+
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include <sstream>
 
@@ -241,6 +256,219 @@ namespace backend::services
             }
             return false;
         }
+    }
+
+    std::vector<DiscoveredCamera> CameraControlService::discoverMindVisionCameras()
+    {
+        std::vector<DiscoveredCamera> results;
+        try
+        {
+            // Load the MindVision SDK DLL (idempotent)
+            if (LoadSdkApi() != CAMERA_STATUS_SUCCESS)
+            {
+                SPDLOG_WARN("CameraControlService::discoverMindVisionCameras: SDK DLL not available");
+                return results;
+            }
+
+            CameraSdkStatus status = CameraSdkInit(0);
+            if (status != CAMERA_STATUS_SUCCESS)
+            {
+                SPDLOG_WARN("CameraControlService: CameraSdkInit returned {}", status);
+            }
+
+            tSdkCameraDevInfo devList[32];
+            INT count = 32;
+            status = CameraEnumerateDevice(devList, &count);
+            if (status != CAMERA_STATUS_SUCCESS)
+            {
+                SPDLOG_WARN("CameraControlService: CameraEnumerateDevice returned {}", status);
+                return results;
+            }
+
+            for (int i = 0; i < count; ++i)
+            {
+                const tSdkCameraDevInfo& info = devList[i];
+
+                DiscoveredCamera dc{};
+                dc.cameraType  = CameraType::MindVision;
+                dc.cameraIndex = i;
+                dc.modelName   = info.acProductName[0] != '\0' ? info.acProductName : "Unknown";
+
+                std::ostringstream oss;
+                oss << "[MV] " << dc.modelName;
+                if (info.acFriendlyName[0] != '\0' && std::string(info.acFriendlyName) != dc.modelName)
+                {
+                    oss << " (" << info.acFriendlyName << ")";
+                }
+                if (info.acSn[0] != '\0')
+                {
+                    oss << " [SN: " << info.acSn << "]";
+                }
+                dc.label = oss.str();
+
+                results.push_back(std::move(dc));
+            }
+
+            SPDLOG_INFO("MindVision discovery found {} camera(s)", results.size());
+        }
+        catch (const std::exception& ex)
+        {
+            SPDLOG_ERROR("CameraControlService::discoverMindVisionCameras failed: {}", ex.what());
+            results.clear();
+        }
+        return results;
+    }
+
+    std::vector<DiscoveredCamera> CameraControlService::discoverAllCameras()
+    {
+        auto cameras = discoverCameras();
+        auto mvCameras = discoverMindVisionCameras();
+        cameras.insert(cameras.end(),
+                       std::make_move_iterator(mvCameras.begin()),
+                       std::make_move_iterator(mvCameras.end()));
+        return cameras;
+    }
+
+    bool CameraControlService::applyMindVisionConfig(int cameraIndex,
+                                                     const std::string& jsonPath,
+                                                     std::string* errorOut)
+    {
+        auto setErr = [&](const std::string& msg) {
+            if (errorOut) {
+                *errorOut = msg;
+            }
+        };
+
+        // Load SDK (idempotent)
+        if (LoadSdkApi() != CAMERA_STATUS_SUCCESS)
+        {
+            setErr("MindVision SDK DLL not available");
+            return false;
+        }
+
+        CameraSdkStatus status = CameraSdkInit(0);
+        if (status != CAMERA_STATUS_SUCCESS)
+        {
+            SPDLOG_WARN("applyMindVisionConfig: CameraSdkInit returned {}", status);
+        }
+
+        // Enumerate devices
+        tSdkCameraDevInfo devList[32];
+        INT count = 32;
+        status = CameraEnumerateDevice(devList, &count);
+        if (status != CAMERA_STATUS_SUCCESS || count == 0)
+        {
+            setErr("CameraEnumerateDevice failed (status=" + std::to_string(status) + ", count=" + std::to_string(count) + ")");
+            return false;
+        }
+        if (cameraIndex < 0 || cameraIndex >= count)
+        {
+            setErr("Camera index out of range");
+            return false;
+        }
+
+        // Open camera
+        CameraHandle hCamera = -1;
+        status = CameraInit(&devList[cameraIndex], -1, -1, &hCamera);
+        if (status != CAMERA_STATUS_SUCCESS)
+        {
+            setErr("CameraInit failed (status=" + std::to_string(status) + ")");
+            return false;
+        }
+
+        bool ok = true;
+
+        // Read JSON config file
+        QFile f(QString::fromStdString(jsonPath));
+        if (!f.open(QIODevice::ReadOnly))
+        {
+            CameraUnInit(hCamera);
+            setErr("Failed to open JSON file: " + jsonPath);
+            return false;
+        }
+        QJsonParseError parseErr;
+        QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &parseErr);
+        f.close();
+        if (doc.isNull())
+        {
+            CameraUnInit(hCamera);
+            setErr("JSON parse error: " + parseErr.errorString().toStdString());
+            return false;
+        }
+        QJsonObject obj = doc.object();
+
+        int width        = obj.value("width").toInt(512);
+        int height       = obj.value("height").toInt(96);
+        int offset_x     = obj.value("offset_x").toInt(0);
+        int offset_y     = obj.value("offset_y").toInt(0);
+        double expUs     = obj.value("exposure_time_us").toDouble(3000.0);
+        int triggerMode  = obj.value("trigger_mode").toInt(0);
+        int analogGain   = obj.value("analog_gain").toInt(1);
+
+        SPDLOG_INFO("applyMindVisionConfig: w={} h={} ox={} oy={} exp={} trig={} gain={}",
+                    width, height, offset_x, offset_y, expUs, triggerMode, analogGain);
+
+        // Apply resolution with custom ROI (iIndex=0xFF)
+        tSdkImageResolution res{};
+        res.iIndex      = 0xFF;
+        res.iHOffsetFOV = offset_x;
+        res.iVOffsetFOV = offset_y;
+        res.iWidthFOV   = width;
+        res.iHeightFOV  = height;
+        res.iWidth      = width;
+        res.iHeight     = height;
+
+        status = CameraSetImageResolution(hCamera, &res);
+        if (status != CAMERA_STATUS_SUCCESS)
+        {
+            SPDLOG_WARN("applyMindVisionConfig: CameraSetImageResolution returned {}", status);
+            ok = false;
+            setErr("CameraSetImageResolution failed (status=" + std::to_string(status) + ")");
+        }
+
+        status = CameraSetExposureTime(hCamera, expUs);
+        if (status != CAMERA_STATUS_SUCCESS)
+        {
+            SPDLOG_WARN("applyMindVisionConfig: CameraSetExposureTime returned {}", status);
+            ok = false;
+            if (errorOut && errorOut->empty())
+            {
+                setErr("CameraSetExposureTime failed (status=" + std::to_string(status) + ")");
+            }
+        }
+
+        status = CameraSetTriggerMode(hCamera, triggerMode);
+        if (status != CAMERA_STATUS_SUCCESS)
+        {
+            SPDLOG_WARN("applyMindVisionConfig: CameraSetTriggerMode returned {}", status);
+            ok = false;
+            if (errorOut && errorOut->empty())
+            {
+                setErr("CameraSetTriggerMode failed (status=" + std::to_string(status) + ")");
+            }
+        }
+
+        status = CameraSetAnalogGain(hCamera, analogGain);
+        if (status != CAMERA_STATUS_SUCCESS)
+        {
+            SPDLOG_WARN("applyMindVisionConfig: CameraSetAnalogGain returned {}", status);
+            ok = false;
+            if (errorOut && errorOut->empty())
+            {
+                setErr("CameraSetAnalogGain failed (status=" + std::to_string(status) + ")");
+            }
+        }
+
+        CameraUnInit(hCamera);
+        if (ok)
+        {
+            SPDLOG_INFO("applyMindVisionConfig: config applied from {} to camera index {}", jsonPath, cameraIndex);
+        }
+        else
+        {
+            SPDLOG_ERROR("applyMindVisionConfig: config apply failed for {} (camera index {})", jsonPath, cameraIndex);
+        }
+        return ok;
     }
 
 } // namespace backend::services

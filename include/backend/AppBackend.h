@@ -54,12 +54,22 @@ namespace backend
 
         void configureMockCamera(const camera::mock::MockCameraOptions &options);
 
-        // Select a specific hardware device (does not start capture)
+        // Select a specific eGrabber hardware device (does not start capture)
         void setHardwareCameraSelection(int interfaceIndex, int deviceIndex, const std::string &label);
+
+        // Select a MindVision camera by enumeration index (does not start capture)
+        void setMindVisionCameraSelection(int cameraIndex, const std::string &label);
 
         // Apply a JS camera script to currently selected hardware device.
         // If capture is running, it will be stopped first. Capture remains stopped.
         bool applyCameraScriptFromFile(const std::string &path, std::string *errorOut = nullptr);
+
+        // Apply a JSON config file to the currently selected MindVision camera.
+        // If capture is running, it will be stopped first. Capture remains stopped.
+        bool applyMindVisionConfigFromFile(const std::string &path, std::string *errorOut = nullptr);
+
+        // Returns true if a MindVision camera is currently selected.
+        bool isMindVisionCameraSelected() const;
 
         // Issue GenICam DeviceReset to the selected hardware camera.
         // If capture is running, it will be stopped first. Capture remains stopped.
@@ -82,10 +92,15 @@ namespace backend
         std::unique_ptr<services::YoloService> yoloService_;
         std::shared_ptr<playback::FrameStore> frameStore_;
 
-        // Last selected hardware device (for script apply)
+        // Last selected eGrabber hardware device (for script apply / reset)
         int selectedIfIndex_{-1};
         int selectedDevIndex_{-1};
         std::string selectedLabel_;
+
+        // Last selected MindVision camera
+        int selectedMvCameraIndex_{-1};
+        std::string lastMvConfigPath_;  // Most-recently applied JSON config path
+
         bool mockCameraConfigured_{false};
         
         // Background capture notifier for Qt signals

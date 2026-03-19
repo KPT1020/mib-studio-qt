@@ -120,6 +120,13 @@ namespace frontend
     QString OverviewTab::currentJsPath() const
     {
         QSettings s;
+        if (backend_.isMindVisionCameraSelected())
+        {
+            const QString ext = s.value("Config/ExternalMindVisionOverviewConfigPath").toString().trimmed();
+            if (!ext.isEmpty())
+                return ext;
+            return appDirIncludePath("mindvisionOverviewConfig.json");
+        }
         const QString ext = s.value("Config/ExternalOverviewScriptPath").toString().trimmed();
         if (!ext.isEmpty())
             return ext;
@@ -181,7 +188,18 @@ namespace frontend
     void OverviewTab::onReloadJs()
     {
         const QString path = currentJsPath();
-        if (path == defaultJsPath())
+        if (backend_.isMindVisionCameraSelected())
+        {
+            if (path == appDirIncludePath("mindvisionOverviewConfig.json"))
+            {
+                QString err;
+                if (!FileIOUtils::ensureDefaultsFile(path, ":/defaults/mindvisionOverviewConfig.json", &err))
+                {
+                    SPDLOG_WARN("ensureDefaultsFile(mindvisionOverviewConfig.json) failed: {}", err.toStdString());
+                }
+            }
+        }
+        else if (path == defaultJsPath())
         {
             QString err;
             if (!FileIOUtils::ensureDefaultsFile(path, ":/defaults/overviewConfig.js", &err))
@@ -192,8 +210,8 @@ namespace frontend
         QString err;
         if (!loadFileToEditor(path, ui->jsEdit, &err))
         {
-            SPDLOG_WARN("Failed to load overviewConfig.js from {}: {}", path.toStdString(), err.toStdString());
-            QMessageBox::warning(this, tr("Reset overviewConfig.js"), tr("Failed to load: %1").arg(err));
+            SPDLOG_WARN("Failed to load overview config from {}: {}", path.toStdString(), err.toStdString());
+            QMessageBox::warning(this, tr("Reset Overview Config"), tr("Failed to load: %1").arg(err));
             return;
         }
         ui->jsPathLabel->setText(path);
@@ -219,48 +237,69 @@ namespace frontend
     void OverviewTab::onApplyJs()
     {
         const QString path = currentJsPath();
-        QString err;
         // Always save first to ensure the latest content is applied
         {
             QString saveErr;
             if (!saveEditorToFile(ui->jsEdit, path, &saveErr))
             {
-                QMessageBox::warning(this, tr("Apply Camera Script"), tr("Failed to save script: %1").arg(saveErr));
+                QMessageBox::warning(this, tr("Apply Camera Config"), tr("Failed to save: %1").arg(saveErr));
                 return;
             }
         }
 
         std::string backendErr;
-        if (!backend_.applyCameraScriptFromFile(path.toStdString(), &backendErr))
+        if (backend_.isMindVisionCameraSelected())
         {
-            QMessageBox::warning(this,
-                                 tr("Apply Camera Script"),
-                                 tr("Failed to apply script: %1").arg(QString::fromStdString(backendErr)));
-            return;
+            if (!backend_.applyMindVisionConfigFromFile(path.toStdString(), &backendErr))
+            {
+                QMessageBox::warning(this,
+                                     tr("Apply Camera Config"),
+                                     tr("Failed to apply config: %1").arg(QString::fromStdString(backendErr)));
+                return;
+            }
         }
-        QMessageBox::information(this, tr("Apply Camera Script"), tr("Applied to camera. Capture remains stopped."));
+        else
+        {
+            if (!backend_.applyCameraScriptFromFile(path.toStdString(), &backendErr))
+            {
+                QMessageBox::warning(this,
+                                     tr("Apply Camera Script"),
+                                     tr("Failed to apply script: %1").arg(QString::fromStdString(backendErr)));
+                return;
+            }
+        }
+        QMessageBox::information(this, tr("Apply Camera Config"), tr("Applied to camera. Capture remains stopped."));
     }
 
     void OverviewTab::onBrowseJs()
     {
+        const bool isMv = backend_.isMindVisionCameraSelected();
         const QString current = currentJsPath();
         const QString initialDir = QFileInfo(current).absolutePath();
-        const QString selected = QFileDialog::getOpenFileName(this,
-                                                              tr("Select Camera script (overviewConfig.js)"),
-                                                              initialDir,
-                                                              tr("JavaScript files (*.js);;All Files (*.*)"));
+        const QString selected = isMv
+            ? QFileDialog::getOpenFileName(this,
+                                           tr("Select MindVision overview config"),
+                                           initialDir,
+                                           tr("JSON files (*.json);;All Files (*.*)"))
+            : QFileDialog::getOpenFileName(this,
+                                           tr("Select Camera script (overviewConfig.js)"),
+                                           initialDir,
+                                           tr("JavaScript files (*.js);;All Files (*.*)"));
         if (selected.isEmpty())
             return;
         {
             QSettings s;
-            s.setValue("Config/ExternalOverviewScriptPath", selected);
+            if (isMv)
+                s.setValue("Config/ExternalMindVisionOverviewConfigPath", selected);
+            else
+                s.setValue("Config/ExternalOverviewScriptPath", selected);
         }
-        SPDLOG_INFO("External Overview script set to {}", selected.toStdString());
+        SPDLOG_INFO("External overview config set to {}", selected.toStdString());
         QString err;
         if (!loadFileToEditor(selected, ui->jsEdit, &err))
         {
-            SPDLOG_WARN("Failed to load external overviewConfig.js from {}: {}", selected.toStdString(), err.toStdString());
-            QMessageBox::warning(this, tr("Reset overviewConfig.js"), tr("Failed to load: %1").arg(err));
+            SPDLOG_WARN("Failed to load external overview config from {}: {}", selected.toStdString(), err.toStdString());
+            QMessageBox::warning(this, tr("Load Overview Config"), tr("Failed to load: %1").arg(err));
             return;
         }
         ui->jsPathLabel->setText(selected);
@@ -271,8 +310,16 @@ namespace frontend
     void OverviewTab::onClearJs()
     {
         QSettings s;
-        s.remove("Config/ExternalOverviewScriptPath");
-        SPDLOG_INFO("External Overview script cleared; reverting to default include path");
+        if (backend_.isMindVisionCameraSelected())
+        {
+            s.remove("Config/ExternalMindVisionOverviewConfigPath");
+            SPDLOG_INFO("External MindVision overview config cleared; reverting to default");
+        }
+        else
+        {
+            s.remove("Config/ExternalOverviewScriptPath");
+            SPDLOG_INFO("External Overview script cleared; reverting to default include path");
+        }
         const auto ret = QMessageBox::question(this,
                                                tr("Camera Script Path Cleared"),
                                                tr("External Camera script path cleared.\nReset from default include path now?\n\nNote: Save to apply any changes."),

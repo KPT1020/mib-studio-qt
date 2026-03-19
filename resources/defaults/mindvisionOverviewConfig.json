@@ -1,0 +1,9 @@
+{
+  "width": 1920,
+  "height": 1080,
+  "offset_x": 0,
+  "offset_y": 0,
+  "exposure_time_us": 3000.0,
+  "trigger_mode": 0,
+  "analog_gain": 1
+}

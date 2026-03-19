@@ -317,6 +317,12 @@ QString ConfigTabs::currentJsonPath() const {
 
 QString ConfigTabs::currentJsPath() const {
     QSettings s;
+    if (backend_.isMindVisionCameraSelected())
+    {
+        const QString ext = s.value("Config/ExternalMindVisionCameraConfigPath").toString().trimmed();
+        if (!ext.isEmpty()) return ext;
+        return appDirIncludePath("mindvisionConfig.json");
+    }
     const QString ext = s.value("Config/ExternalCameraScriptPath").toString().trimmed();
     if (!ext.isEmpty()) return ext;
     return defaultJsPath();
@@ -416,7 +422,19 @@ void ConfigTabs::onSaveJson() {
 
 void ConfigTabs::onReloadJs() {
     const QString path = currentJsPath();
-    if (path == defaultJsPath()) {
+    if (backend_.isMindVisionCameraSelected())
+    {
+        if (path == appDirIncludePath("mindvisionConfig.json"))
+        {
+            QString err;
+            if (!ensureDefaultsFile(path, ":/defaults/mindvisionConfig.json", &err))
+            {
+                SPDLOG_WARN("ensureDefaultsFile(mindvisionConfig.json) failed: {}", err.toStdString());
+            }
+        }
+    }
+    else if (path == defaultJsPath())
+    {
         QString err;
         if (!ensureDefaultsFile(path, ":/defaults/egrabberConfig.js", &err)) {
             SPDLOG_WARN("ensureDefaultsFile(egrabberConfig.js) failed: {}", err.toStdString());
@@ -424,8 +442,8 @@ void ConfigTabs::onReloadJs() {
     }
     QString err;
     if (!loadFileToEditor(path, jsEdit_, &err)) {
-        SPDLOG_WARN("Failed to load egrabberConfig.js from {}: {}", path.toStdString(), err.toStdString());
-        QMessageBox::warning(this, tr("Reset egrabberConfig.js"), tr("Failed to load: %1").arg(err));
+        SPDLOG_WARN("Failed to load camera config from {}: {}", path.toStdString(), err.toStdString());
+        QMessageBox::warning(this, tr("Reset Camera Config"), tr("Failed to load: %1").arg(err));
         return;
     }
     jsPathLabel_->setText(path);
@@ -481,24 +499,35 @@ void ConfigTabs::onResetCamera() {
 
 void ConfigTabs::onApplyJs() {
     const QString path = currentJsPath();
-    QString err;
     // Always save first to ensure the latest content is applied
     {
         QString saveErr;
         if (!saveEditorToFile(jsEdit_, path, &saveErr)) {
-            QMessageBox::warning(this, tr("Apply Camera Script"), tr("Failed to save script: %1").arg(saveErr));
+            QMessageBox::warning(this, tr("Apply Camera Config"), tr("Failed to save: %1").arg(saveErr));
             return;
         }
     }
 
     std::string backendErr;
-    if (!backend_.applyCameraScriptFromFile(path.toStdString(), &backendErr)) {
-        QMessageBox::warning(this,
-                             tr("Apply Camera Script"),
-                             tr("Failed to apply script: %1").arg(QString::fromStdString(backendErr)));
-        return;
+    if (backend_.isMindVisionCameraSelected())
+    {
+        if (!backend_.applyMindVisionConfigFromFile(path.toStdString(), &backendErr)) {
+            QMessageBox::warning(this,
+                                 tr("Apply Camera Config"),
+                                 tr("Failed to apply config: %1").arg(QString::fromStdString(backendErr)));
+            return;
+        }
     }
-    QMessageBox::information(this, tr("Apply Camera Script"), tr("Applied to camera. Capture remains stopped."));
+    else
+    {
+        if (!backend_.applyCameraScriptFromFile(path.toStdString(), &backendErr)) {
+            QMessageBox::warning(this,
+                                 tr("Apply Camera Script"),
+                                 tr("Failed to apply script: %1").arg(QString::fromStdString(backendErr)));
+            return;
+        }
+    }
+    QMessageBox::information(this, tr("Apply Camera Config"), tr("Applied to camera. Capture remains stopped."));
 }
 
 void ConfigTabs::onBrowseJson() {
@@ -544,22 +573,31 @@ void ConfigTabs::onClearJson() {
 }
 
 void ConfigTabs::onBrowseJs() {
+    const bool isMv = backend_.isMindVisionCameraSelected();
     const QString current = currentJsPath();
     const QString initialDir = QFileInfo(current).absolutePath();
-    const QString selected = QFileDialog::getOpenFileName(this,
-                                                          tr("Select Camera script (egrabberConfig.js)"),
-                                                          initialDir,
-                                                          tr("JavaScript files (*.js);;All Files (*.*)"));
+    const QString selected = isMv
+        ? QFileDialog::getOpenFileName(this,
+                                       tr("Select MindVision camera config"),
+                                       initialDir,
+                                       tr("JSON files (*.json);;All Files (*.*)"))
+        : QFileDialog::getOpenFileName(this,
+                                       tr("Select Camera script (egrabberConfig.js)"),
+                                       initialDir,
+                                       tr("JavaScript files (*.js);;All Files (*.*)"));
     if (selected.isEmpty()) return;
     {
         QSettings s;
-        s.setValue("Config/ExternalCameraScriptPath", selected);
+        if (isMv)
+            s.setValue("Config/ExternalMindVisionCameraConfigPath", selected);
+        else
+            s.setValue("Config/ExternalCameraScriptPath", selected);
     }
-    SPDLOG_INFO("External Camera script set to {}", selected.toStdString());
+    SPDLOG_INFO("External camera config set to {}", selected.toStdString());
     QString err;
     if (!loadFileToEditor(selected, jsEdit_, &err)) {
-        SPDLOG_WARN("Failed to load external egrabberConfig.js from {}: {}", selected.toStdString(), err.toStdString());
-        QMessageBox::warning(this, tr("Reset egrabberConfig.js"), tr("Failed to load: %1").arg(err));
+        SPDLOG_WARN("Failed to load external camera config from {}: {}", selected.toStdString(), err.toStdString());
+        QMessageBox::warning(this, tr("Load Camera Config"), tr("Failed to load: %1").arg(err));
         return;
     }
     jsPathLabel_->setText(selected);
@@ -568,8 +606,16 @@ void ConfigTabs::onBrowseJs() {
 
 void ConfigTabs::onClearJs() {
     QSettings s;
-    s.remove("Config/ExternalCameraScriptPath");
-    SPDLOG_INFO("External Camera script cleared; reverting to default include path");
+    if (backend_.isMindVisionCameraSelected())
+    {
+        s.remove("Config/ExternalMindVisionCameraConfigPath");
+        SPDLOG_INFO("External MindVision camera config cleared; reverting to default");
+    }
+    else
+    {
+        s.remove("Config/ExternalCameraScriptPath");
+        SPDLOG_INFO("External Camera script cleared; reverting to default include path");
+    }
     const auto ret = QMessageBox::question(this,
                                            tr("Camera Script Path Cleared"),
                                            tr("External Camera script path cleared.\nReset from default include path now?\n\nNote: Save to apply any changes."),

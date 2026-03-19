@@ -3,6 +3,8 @@
 
 #include <QAction>
 #include <QCoreApplication>
+#include <QDir>
+#include <QFile>
 #include <QLabel>
 #include <QStatusBar>
 #include <QTimer>
@@ -892,24 +894,42 @@ void MainWindow::onTabChanged(int index)
         scriptPath = configTabs->currentJsPath();
     }
 
-    // Verify the script file exists
     if (scriptPath.isEmpty()) {
         SPDLOG_WARN("MainWindow::onTabChanged: Script path is empty");
         return;
     }
 
-    QFileInfo fileInfo(scriptPath);
-    if (!fileInfo.exists()) {
-        SPDLOG_WARN("MainWindow::onTabChanged: Script file does not exist: {}", scriptPath.toStdString());
-        return;
-    }
-
-    // Apply the script
-    SPDLOG_INFO("MainWindow::onTabChanged: Auto-applying camera script from {}", scriptPath.toStdString());
     std::string backendErr;
-    if (!backend_.applyCameraScriptFromFile(scriptPath.toStdString(), &backendErr)) {
-        SPDLOG_ERROR("MainWindow::onTabChanged: Failed to apply script: {}", backendErr);
-        return;
+    if (backend_.isMindVisionCameraSelected()) {
+        // For MindVision: copy default JSON from resource if the file doesn't exist yet
+        if (!QFileInfo::exists(scriptPath)) {
+            const QString resourcePath = (index == 1)
+                ? QStringLiteral(":/defaults/mindvisionOverviewConfig.json")
+                : QStringLiteral(":/defaults/mindvisionConfig.json");
+            QDir().mkpath(QFileInfo(scriptPath).absolutePath());
+            QFile::copy(resourcePath, scriptPath);
+        }
+        if (!QFileInfo::exists(scriptPath)) {
+            SPDLOG_WARN("MainWindow::onTabChanged: MindVision config file could not be created: {}",
+                        scriptPath.toStdString());
+            return;
+        }
+        SPDLOG_INFO("MainWindow::onTabChanged: Auto-applying MindVision config from {}", scriptPath.toStdString());
+        if (!backend_.applyMindVisionConfigFromFile(scriptPath.toStdString(), &backendErr)) {
+            SPDLOG_ERROR("MainWindow::onTabChanged: Failed to apply MindVision config: {}", backendErr);
+            return;
+        }
+    } else {
+        // eGrabber path: script file must exist
+        if (!QFileInfo::exists(scriptPath)) {
+            SPDLOG_WARN("MainWindow::onTabChanged: Script file does not exist: {}", scriptPath.toStdString());
+            return;
+        }
+        SPDLOG_INFO("MainWindow::onTabChanged: Auto-applying camera script from {}", scriptPath.toStdString());
+        if (!backend_.applyCameraScriptFromFile(scriptPath.toStdString(), &backendErr)) {
+            SPDLOG_ERROR("MainWindow::onTabChanged: Failed to apply script: {}", backendErr);
+            return;
+        }
     }
 
     // If camera was running, restart it

@@ -8,6 +8,7 @@
 #include "backend/services/PlaybackService.h"
 #include "backend/playback/FrameStore.h"
 #include "camera/common/EGrabberCamera.h"
+#include "camera/common/MindVisionCamera.h"
 #include "camera/mock/MockCamera.h"
 #include "backend/services/CameraControlService.h"
 #include "backend/services/AutofocusService.h"
@@ -218,8 +219,9 @@ namespace backend
             return;
         captureService_->setCameraFactory([options]() mutable
                                           { return std::make_unique<camera::mock::MockCamera>(options); });
-        selectedIfIndex_ = -1;
-        selectedDevIndex_ = -1;
+        selectedIfIndex_       = -1;
+        selectedDevIndex_      = -1;
+        selectedMvCameraIndex_ = -1;
         selectedLabel_.clear();
         mockCameraConfigured_ = true;
     }
@@ -231,12 +233,29 @@ namespace backend
         selectedIfIndex_ = interfaceIndex;
         selectedDevIndex_ = deviceIndex;
         selectedLabel_ = label;
+        selectedMvCameraIndex_ = -1;
         mockCameraConfigured_ = false;
 
         captureService_->setCameraFactory([interfaceIndex, deviceIndex]()
                                           { return std::make_unique<camera::common::EGrabberCamera>(interfaceIndex, deviceIndex); });
         SPDLOG_INFO("Hardware camera selected: {} (if={}, dev={})",
                     label, interfaceIndex, deviceIndex);
+    }
+
+    void AppBackend::setMindVisionCameraSelection(int cameraIndex, const std::string &label)
+    {
+        if (!captureService_)
+            return;
+        selectedMvCameraIndex_ = cameraIndex;
+        selectedIfIndex_  = -1;
+        selectedDevIndex_ = -1;
+        selectedLabel_    = label;
+        lastMvConfigPath_.clear();
+        mockCameraConfigured_ = false;
+
+        captureService_->setCameraFactory([cameraIndex]()
+                                          { return std::make_unique<camera::common::MindVisionCamera>(cameraIndex); });
+        SPDLOG_INFO("MindVision camera selected: {} (index={})", label, cameraIndex);
     }
 
     bool AppBackend::applyCameraScriptFromFile(const std::string &path, std::string *errorOut)
@@ -255,6 +274,41 @@ namespace backend
         }
         SPDLOG_INFO("Applying camera script to {} from {}", selectedLabel_, path);
         return cameraControlService_->applyScriptToDevice(selectedIfIndex_, selectedDevIndex_, path, errorOut);
+    }
+
+    bool AppBackend::applyMindVisionConfigFromFile(const std::string &path, std::string *errorOut)
+    {
+        if (selectedMvCameraIndex_ < 0)
+        {
+            if (errorOut) *errorOut = "No MindVision camera selected";
+            return false;
+        }
+        if (captureService_ && captureService_->isRunning())
+        {
+            SPDLOG_INFO("Stopping capture before applying MindVision config");
+            captureService_->stop();
+        }
+        SPDLOG_INFO("Applying MindVision config to {} from {}", selectedLabel_, path);
+        const bool ok = cameraControlService_->applyMindVisionConfig(selectedMvCameraIndex_, path, errorOut);
+        if (ok)
+        {
+            // Store path so the capture factory re-applies the same settings
+            // in the same camera session used for preview/capture.
+            lastMvConfigPath_ = path;
+            const int idx        = selectedMvCameraIndex_;
+            const std::string cp = lastMvConfigPath_;
+            captureService_->setCameraFactory([idx, cp]()
+            {
+                return std::make_unique<camera::common::MindVisionCamera>(idx, cp);
+            });
+            SPDLOG_INFO("MindVision capture factory updated with config: {}", path);
+        }
+        return ok;
+    }
+
+    bool AppBackend::isMindVisionCameraSelected() const
+    {
+        return selectedMvCameraIndex_ >= 0;
     }
 
     bool AppBackend::resetSelectedHardwareCamera(std::string *errorOut)
@@ -277,8 +331,9 @@ namespace backend
 
     bool AppBackend::isCameraConfigured() const
     {
-        // Camera is configured if hardware camera is selected OR mock camera is configured
-        return (selectedIfIndex_ >= 0 && selectedDevIndex_ >= 0) || mockCameraConfigured_;
+        return (selectedIfIndex_ >= 0 && selectedDevIndex_ >= 0)
+            || (selectedMvCameraIndex_ >= 0)
+            || mockCameraConfigured_;
     }
 
     BackgroundCaptureNotifier* AppBackend::backgroundCaptureNotifier() const {

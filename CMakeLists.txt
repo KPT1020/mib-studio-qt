@@ -101,6 +101,7 @@ add_library(mib_backend STATIC
     src/backend/services/YoloService.cpp
     src/backend/playback/FrameStore.cpp
     src/camera/common/EGrabberCamera.cpp
+    src/camera/common/MindVisionCamera.cpp
     src/camera/mock/MockCamera.cpp
 )
 
@@ -110,6 +111,7 @@ set_target_properties(mib_backend PROPERTIES AUTOMOC ON)
 target_include_directories(mib_backend PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/MindVision
     "C:/Program Files/Euresys/eGrabber/include"
 )
 
@@ -622,6 +624,87 @@ endif()
 if(TARGET nlohmann_json::nlohmann_json)
     target_link_libraries(mib_studio_qt PRIVATE nlohmann_json::nlohmann_json)
 endif()
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+enable_testing()
+
+# MindVision config apply unit tests
+add_executable(mindvision_config_test
+    src/tests/mindvision_config_test.cpp
+)
+
+target_include_directories(mindvision_config_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    "C:/Program Files/Euresys/eGrabber/include"
+)
+
+target_link_libraries(mindvision_config_test PRIVATE
+    mib_backend
+    Qt6::Core
+    spdlog::spdlog
+)
+
+set_target_properties(mindvision_config_test PROPERTIES
+    AUTOMOC ON
+)
+
+add_test(
+    NAME  mindvision_config
+    COMMAND mindvision_config_test
+    WORKING_DIRECTORY "$<TARGET_FILE_DIR:mindvision_config_test>"
+)
+
+# Capture-processing integration test (existing, now registered with CTest)
+add_executable(capture_processing_test
+    src/tests/capture_processing_test.cpp
+)
+
+target_include_directories(capture_processing_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    "C:/Program Files/Euresys/eGrabber/include"
+)
+
+target_link_libraries(capture_processing_test PRIVATE
+    mib_backend
+    Qt6::Core
+    spdlog::spdlog
+)
+
+add_test(
+    NAME  capture_processing
+    COMMAND capture_processing_test
+    WORKING_DIRECTORY "$<TARGET_FILE_DIR:capture_processing_test>"
+)
+
+# MindVision visual capture test (grabs frames and saves PNGs)
+add_executable(mindvision_visual_test
+    src/tests/mindvision_visual_test.cpp
+)
+
+target_include_directories(mindvision_visual_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    "C:/Program Files/Euresys/eGrabber/include"
+)
+
+target_link_libraries(mindvision_visual_test PRIVATE
+    mib_backend
+    Qt6::Core
+    spdlog::spdlog
+)
+
+set_target_properties(mindvision_visual_test PROPERTIES AUTOMOC ON)
+
+target_compile_definitions(mindvision_visual_test PRIVATE
+    MV_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+add_test(
+    NAME  mindvision_visual
+    COMMAND mindvision_visual_test
+    WORKING_DIRECTORY "$<TARGET_FILE_DIR:mindvision_visual_test>"
+)
 
 # Windows installer packaging (InnoSetup)
 if(WIN32)

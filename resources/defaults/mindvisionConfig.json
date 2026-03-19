@@ -1,0 +1,9 @@
+{
+  "width": 512,
+  "height": 96,
+  "offset_x": 704,
+  "offset_y": 500,
+  "exposure_time_us": 3000.0,
+  "trigger_mode": 2,
+  "analog_gain": 1
+}

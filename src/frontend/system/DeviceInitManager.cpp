@@ -20,7 +20,7 @@ namespace {
 
 std::vector<backend::services::DiscoveredCamera> discoverCamerasInWorker() {
     backend::services::CameraControlService cc;
-    return cc.discoverCameras();
+    return cc.discoverAllCameras();
 }
 
 std::vector<int> probeNanopositionerPortsInWorker(int baudRate, unsigned char deviceAddress) {
@@ -112,7 +112,11 @@ void DeviceInitManager::onCameraDiscoveryFinished() {
 
     if (cameras.size() == 1) {
         const auto& cam = cameras[0];
-        backend_.setHardwareCameraSelection(cam.interfaceIndex, cam.deviceIndex, cam.label);
+        if (cam.cameraType == backend::services::CameraType::MindVision) {
+            backend_.setMindVisionCameraSelection(cam.cameraIndex, cam.label);
+        } else {
+            backend_.setHardwareCameraSelection(cam.interfaceIndex, cam.deviceIndex, cam.label);
+        }
         if (connectTab_) {
             connectTab_->applyCameraSelection(cam.interfaceIndex, cam.deviceIndex, QString::fromStdString(cam.label));
         }
