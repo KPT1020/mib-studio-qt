@@ -61,16 +61,28 @@ bool MindVisionCamera::applyJsonConfig(int hCamera) {
     }
     QJsonObject obj = doc.object();
 
-    int    width       = obj.value("width").toInt(512);
-    int    height      = obj.value("height").toInt(96);
-    int    offset_x    = obj.value("offset_x").toInt(0);
-    int    offset_y    = obj.value("offset_y").toInt(0);
-    double expUs       = obj.value("exposure_time_us").toDouble(3000.0);
-    int    triggerMode = obj.value("trigger_mode").toInt(0);
-    int    analogGain  = obj.value("analog_gain").toInt(1);
+    int    width          = obj.value("width").toInt(512);
+    int    height         = obj.value("height").toInt(96);
+    int    offset_x       = obj.value("offset_x").toInt(0);
+    int    offset_y       = obj.value("offset_y").toInt(0);
+    double expUs          = obj.value("exposure_time_us").toDouble(3000.0);
+    int    triggerMode    = obj.value("trigger_mode").toInt(0);
+    int    analogGain     = obj.value("analog_gain").toInt(1);
+    bool   aeEnabled      = obj.value("auto_exposure_enabled").toBool(false);
+    int    aeTarget       = obj.value("ae_target_brightness").toInt(100);
+    int    gamma          = obj.value("gamma").toInt(100);
+    int    contrast       = obj.value("contrast").toInt(100);
+    int    sharpness      = obj.value("sharpness").toInt(0);
+    int    frameSpeed     = obj.value("frame_speed").toInt(2);
+    bool   flipH          = obj.value("flip_horizontal").toBool(false);
+    bool   flipV          = obj.value("flip_vertical").toBool(false);
+    int    strobeMode     = obj.value("strobe_mode").toInt(0);
+    int    strobePulseUs  = obj.value("strobe_pulse_width_us").toInt(500);
+    int    strobeDelayUs  = obj.value("strobe_delay_us").toInt(0);
+    int    strobePolarity = obj.value("strobe_polarity").toInt(1);
 
-    SPDLOG_INFO("MindVisionCamera: applying config w={} h={} ox={} oy={} exp={} trig={} gain={}",
-                width, height, offset_x, offset_y, expUs, triggerMode, analogGain);
+    SPDLOG_INFO("MindVisionCamera: applying config w={} h={} ox={} oy={} exp={} trig={} gain={} ae={} gamma={} speed={}",
+                width, height, offset_x, offset_y, expUs, triggerMode, analogGain, aeEnabled, gamma, frameSpeed);
 
     // Resolution — custom ROI (iIndex=0xFF)
     tSdkImageResolution res{};
@@ -101,6 +113,54 @@ bool MindVisionCamera::applyJsonConfig(int hCamera) {
     if (s != CAMERA_STATUS_SUCCESS) {
         SPDLOG_WARN("MindVisionCamera: CameraSetAnalogGain returned {}", s);
     }
+
+    s = CameraSetAeState(hCamera, aeEnabled ? TRUE : FALSE);
+    if (s != CAMERA_STATUS_SUCCESS)
+        SPDLOG_WARN("MindVisionCamera: CameraSetAeState returned {}", s);
+
+    s = CameraSetAeTarget(hCamera, aeTarget);
+    if (s != CAMERA_STATUS_SUCCESS)
+        SPDLOG_WARN("MindVisionCamera: CameraSetAeTarget returned {}", s);
+
+    s = CameraSetGamma(hCamera, gamma);
+    if (s != CAMERA_STATUS_SUCCESS)
+        SPDLOG_WARN("MindVisionCamera: CameraSetGamma returned {}", s);
+
+    s = CameraSetContrast(hCamera, contrast);
+    if (s != CAMERA_STATUS_SUCCESS)
+        SPDLOG_WARN("MindVisionCamera: CameraSetContrast returned {}", s);
+
+    s = CameraSetSharpness(hCamera, sharpness);
+    if (s != CAMERA_STATUS_SUCCESS)
+        SPDLOG_WARN("MindVisionCamera: CameraSetSharpness returned {}", s);
+
+    s = CameraSetFrameSpeed(hCamera, frameSpeed);
+    if (s != CAMERA_STATUS_SUCCESS)
+        SPDLOG_WARN("MindVisionCamera: CameraSetFrameSpeed returned {}", s);
+
+    s = CameraSetMirror(hCamera, 0, flipH ? TRUE : FALSE);
+    if (s != CAMERA_STATUS_SUCCESS)
+        SPDLOG_WARN("MindVisionCamera: CameraSetMirror(H) returned {}", s);
+
+    s = CameraSetMirror(hCamera, 1, flipV ? TRUE : FALSE);
+    if (s != CAMERA_STATUS_SUCCESS)
+        SPDLOG_WARN("MindVisionCamera: CameraSetMirror(V) returned {}", s);
+
+    s = CameraSetStrobeMode(hCamera, strobeMode);
+    if (s != CAMERA_STATUS_SUCCESS)
+        SPDLOG_WARN("MindVisionCamera: CameraSetStrobeMode returned {}", s);
+
+    s = CameraSetStrobePulseWidth(hCamera, static_cast<UINT>(strobePulseUs));
+    if (s != CAMERA_STATUS_SUCCESS)
+        SPDLOG_WARN("MindVisionCamera: CameraSetStrobePulseWidth returned {}", s);
+
+    s = CameraSetStrobeDelayTime(hCamera, static_cast<UINT>(strobeDelayUs));
+    if (s != CAMERA_STATUS_SUCCESS)
+        SPDLOG_WARN("MindVisionCamera: CameraSetStrobeDelayTime returned {}", s);
+
+    s = CameraSetStrobePolarity(hCamera, strobePolarity);
+    if (s != CAMERA_STATUS_SUCCESS)
+        SPDLOG_WARN("MindVisionCamera: CameraSetStrobePolarity returned {}", s);
 
     return true;
 }

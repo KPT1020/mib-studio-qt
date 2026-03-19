@@ -1,9 +1,21 @@
 {
   "width": 512,
   "height": 96,
-  "offset_x": 704,
-  "offset_y": 500,
+  "offset_x": 152,
+  "offset_y": 264,
   "exposure_time_us": 3000.0,
   "trigger_mode": 2,
-  "analog_gain": 1
+  "analog_gain": 1,
+  "auto_exposure_enabled": false,
+  "ae_target_brightness": 100,
+  "gamma": 100,
+  "contrast": 100,
+  "sharpness": 0,
+  "frame_speed": 2,
+  "flip_horizontal": false,
+  "flip_vertical": false,
+  "strobe_mode": 0,
+  "strobe_pulse_width_us": 500,
+  "strobe_delay_us": 0,
+  "strobe_polarity": 1
 }
