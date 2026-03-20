@@ -11,8 +11,11 @@ There are two ways to release:
 Push a version tag to trigger the CI/CD pipeline, which builds, tests, creates a GitHub Release with installers, and publishes to RustFS automatically.
 
 ```powershell
-# One-command release: bump version, tag, push (CI does the rest)
+# PRODUCTION release: publishes to stable channel, users get auto-update
 .\release.ps1 --patch --push --skip-build
+
+# TEST release: publishes to test channel, marked as pre-release on GitHub
+.\release.ps1 --patch --beta --push --skip-build
 
 # Or with local build verification first
 .\release.ps1 --patch --push
@@ -40,13 +43,19 @@ Runs on every push to `main`/`develop` and on pull requests:
 
 ### Release Pipeline (`.github/workflows/release.yml`)
 
-Triggered automatically when a version tag (`v*`) is pushed:
+Triggered automatically when a version tag (`v*`) is pushed. The pipeline detects the release channel from the tag format:
 
+| Tag Format | Channel | GitHub Release | RustFS Path | Example |
+|---|---|---|---|---|
+| `v1.2.3` | `stable` | Full release | `stable/latest.json` | Production push |
+| `v1.2.3-beta.1` | `test` | Pre-release | `test/latest.json` | Test push |
+
+Steps:
 1. Builds the Release configuration
 2. Runs tests to verify the build
 3. Builds both InnoSetup installers (full + update)
 4. Creates a GitHub Release with both installers and SHA-256 checksums
-5. Publishes the update package to RustFS for auto-updates
+5. Publishes the update package to the appropriate RustFS channel
 
 **Required GitHub Secrets** (for RustFS publishing):
 - `AWS_ACCESS_KEY_ID` — RustFS access key
@@ -59,11 +68,14 @@ If secrets are not configured, the GitHub Release is still created but RustFS pu
 One-command release orchestration:
 
 ```powershell
-# Bump, build locally, tag, push (triggers CI/CD)
+# PRODUCTION: bump, build locally, tag, push → publishes to stable channel
 .\release.ps1 --patch --push
 
-# Bump, tag, push — let CI handle the entire build
+# PRODUCTION: let CI handle the build
 .\release.ps1 --minor --push --skip-build
+
+# TEST: bump, tag as v0.2.2-beta.1, push → publishes to test channel
+.\release.ps1 --patch --beta --push --skip-build
 
 # Bump and tag only (push manually later)
 .\release.ps1 --patch
@@ -74,6 +86,7 @@ One-command release orchestration:
 
 Options:
 - `--patch|--minor|--major` — Version bump type (required)
+- `--beta` — Create a test/pre-release (publishes to `test` channel instead of `stable`)
 - `--push` — Push branch and tag to remote (triggers release pipeline)
 - `--skip-build` — Skip local build (let CI handle it)
 - `--dry-run` — Show what would happen without making changes
