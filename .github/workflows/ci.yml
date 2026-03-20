@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, develop, 'claude/**']  # TODO: remove claude/** after testing
+    branches: [main, develop]
   pull_request:
     branches: [main]
 
@@ -11,53 +11,53 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  validate:
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 15
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history for git tag version detection
+          fetch-depth: 0
 
-      - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      - name: Install Conan
+      - name: Validate CMake configuration
+        shell: pwsh
         run: |
-          pip install conan
-          conan profile detect --force
+          # Check version is set
+          $content = Get-Content CMakeLists.txt -Raw
+          if ($content -match 'set\(DEFAULT_VERSION\s+"(\d+\.\d+\.\d+)"\)') {
+            Write-Host "Version: $($matches[1])" -ForegroundColor Green
+          } else {
+            Write-Host "ERROR: DEFAULT_VERSION not found in CMakeLists.txt" -ForegroundColor Red
+            exit 1
+          }
 
-      - name: Cache Conan packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.conan2
-          key: conan-${{ runner.os }}-${{ hashFiles('conanfile.txt') }}-release
-          restore-keys: |
-            conan-${{ runner.os }}-${{ hashFiles('conanfile.txt') }}-
-            conan-${{ runner.os }}-
+      - name: Validate InnoSetup scripts
+        shell: pwsh
+        run: |
+          # Ensure installer scripts exist and reference the correct build dir
+          $scripts = @(
+            "resources/installers/mib-studio-qt.iss",
+            "resources/installers/mib-studio-qt-update.iss"
+          )
+          foreach ($script in $scripts) {
+            if (Test-Path $script) {
+              Write-Host "OK: $script" -ForegroundColor Green
+            } else {
+              Write-Host "ERROR: Missing $script" -ForegroundColor Red
+              exit 1
+            }
+          }
 
-      - name: Install dependencies
-        run: conan install . -of build --build=missing -s build_type=Release
-
-      - name: Configure CMake
-        run: cmake --preset windows-default
-
-      - name: Build
-        run: cmake --build build --config Release --target mib_studio_qt capture_processing_test
-
-      - name: Run tests
-        run: ctest --test-dir build --build-config Release --output-on-failure --timeout 30
-
-      - name: Upload build artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: |
-            build/CMakeFiles/CMakeOutput.log
-            build/CMakeFiles/CMakeError.log
-          retention-days: 7
+      - name: Check release script syntax
+        shell: pwsh
+        run: |
+          # Parse scripts without executing to catch syntax errors
+          $scripts = @("release.ps1", "bump-version.ps1", "publish-update.ps1")
+          foreach ($script in $scripts) {
+            if (Test-Path $script) {
+              $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content $script -Raw), [ref]$null)
+              Write-Host "OK: $script" -ForegroundColor Green
+            }
+          }

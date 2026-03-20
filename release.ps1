@@ -1,13 +1,13 @@
 # Unified release script for MIB Studio Qt
-# Orchestrates: version bump -> build -> installers -> tag -> push (triggers CI/CD)
+# Builds locally, creates GitHub Release, and publishes to RustFS — all from your machine.
 #
 # Usage:
-#   .\release.ps1 --patch                    # Production: bump patch, build, create tag (v0.2.2)
-#   .\release.ps1 --minor                    # Production: bump minor, build, create tag (v0.3.0)
-#   .\release.ps1 --patch --push             # Production: bump, build, tag, push (triggers stable release)
-#   .\release.ps1 --patch --push --skip-build # Production: bump, tag, push (CI builds + publishes to stable)
-#   .\release.ps1 --patch --beta             # Test: bump patch, tag as v0.2.2-beta.1 (publishes to test channel)
-#   .\release.ps1 --patch --beta --push      # Test: bump, tag, push (CI builds + publishes to test channel)
+#   .\release.ps1 --patch                    # Production: bump, build, tag (v0.2.2)
+#   .\release.ps1 --patch --push             # Production: bump, build, tag, push, create GitHub Release, publish to stable
+#   .\release.ps1 --patch --beta             # Test: bump, build, tag as v0.2.2-beta.1
+#   .\release.ps1 --patch --beta --push      # Test: bump, build, tag, push, create GitHub pre-release, publish to test
+#   .\release.ps1 --patch --skip-build --push # Bump, tag, push (skip build + publish)
+#   .\release.ps1 --patch --dry-run          # Preview what would happen
 
 param(
     [switch]$Patch,
@@ -16,7 +16,8 @@ param(
     [switch]$Beta,
     [switch]$Push,
     [switch]$SkipBuild,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [string]$Profile = "rustfs"
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,22 +31,34 @@ if ($Major) { $bumpCount++ }
 if ($bumpCount -ne 1) {
     Write-Host "ERROR: Specify exactly one of --patch, --minor, or --major" -ForegroundColor Red
     Write-Host ""
-    Write-Host "Usage: .\release.ps1 --patch|--minor|--major [--push] [--skip-build] [--dry-run]" -ForegroundColor Yellow
+    Write-Host "Usage: .\release.ps1 --patch|--minor|--major [--beta] [--push] [--skip-build] [--dry-run]" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "Options:" -ForegroundColor Yellow
     Write-Host "  --patch       Bump patch version (bug fixes)"
     Write-Host "  --minor       Bump minor version (new features)"
     Write-Host "  --major       Bump major version (breaking changes)"
     Write-Host "  --beta        Create a test/pre-release (publishes to test channel)"
-    Write-Host "  --push        Push tag to remote (triggers CI/CD release)"
-    Write-Host "  --skip-build  Skip local build (let CI handle it)"
+    Write-Host "  --push        Push tag, create GitHub Release, publish to RustFS"
+    Write-Host "  --skip-build  Skip local build (tag and push only)"
     Write-Host "  --dry-run     Show what would happen without making changes"
+    Write-Host "  --profile     AWS CLI profile for RustFS (default: rustfs)"
     exit 1
 }
 
-# --- Check git status ---
+# --- Check prerequisites ---
 Write-Host "=== MIB Studio Qt Release ===" -ForegroundColor Cyan
 
+if ($Push -and -not $SkipBuild) {
+    # Check gh CLI is available
+    try {
+        $null = gh --version 2>&1
+    } catch {
+        Write-Host "ERROR: 'gh' CLI not found. Install from https://cli.github.com/" -ForegroundColor Red
+        exit 1
+    }
+}
+
+# --- Check git status ---
 $gitStatus = git status --porcelain
 if ($gitStatus) {
     Write-Host "WARNING: Working tree has uncommitted changes:" -ForegroundColor Yellow
@@ -138,10 +151,14 @@ if (-not $SkipBuild) {
             exit 1
         }
         Write-Host "Build succeeded" -ForegroundColor Green
+    }
 
-        # --- Step 4: Build installers ---
-        Write-Host "`n--- Step 4: Build Installers ---" -ForegroundColor Cyan
+    # --- Step 4: Build installers ---
+    Write-Host "`n--- Step 4: Build Installers ---" -ForegroundColor Cyan
 
+    if ($DryRun) {
+        Write-Host "[DRY RUN] Would build installers" -ForegroundColor Gray
+    } else {
         Write-Host "Building full installer..." -ForegroundColor Yellow
         cmake --build build --config Release --target package_installer
         if ($LASTEXITCODE -ne 0) {
@@ -166,10 +183,10 @@ if (-not $SkipBuild) {
         }
     }
 } else {
-    Write-Host "`n--- Step 3: Build (skipped - CI will handle) ---" -ForegroundColor Cyan
+    Write-Host "`n--- Step 3-4: Build (skipped) ---" -ForegroundColor Cyan
 }
 
-# --- Step 5: Push ---
+# --- Step 5: Push + Publish ---
 if ($Push) {
     Write-Host "`n--- Step 5: Push to Remote ---" -ForegroundColor Cyan
 
@@ -189,11 +206,95 @@ if ($Push) {
             Write-Host "ERROR: Tag push failed" -ForegroundColor Red
             exit 1
         }
-        Write-Host "Tag pushed - CI/CD $channel release pipeline triggered" -ForegroundColor Green
+        Write-Host "Tag pushed" -ForegroundColor Green
+    }
+
+    # --- Step 6: Create GitHub Release ---
+    if (-not $SkipBuild) {
+        Write-Host "`n--- Step 6: Create GitHub Release ---" -ForegroundColor Cyan
+
+        $setupExe = Get-ChildItem "build\dist\MIB_Studio_Qt_Setup_v*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        $updateExe = Get-ChildItem "build\dist\MIB_Studio_Qt_Update_v*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+
+        if (-not $setupExe -and -not $updateExe) {
+            Write-Host "WARNING: No installer files found in build\dist\, skipping GitHub Release" -ForegroundColor Yellow
+        } else {
+            # Build checksums for release body
+            $checksumLines = ""
+            $releaseFiles = @()
+            if ($setupExe) {
+                $setupHash = (Get-FileHash -Algorithm SHA256 $setupExe.FullName).Hash.ToLower()
+                $checksumLines += "$setupHash  $($setupExe.Name)`n"
+                $releaseFiles += $setupExe.FullName
+            }
+            if ($updateExe) {
+                $updateHash = (Get-FileHash -Algorithm SHA256 $updateExe.FullName).Hash.ToLower()
+                $checksumLines += "$updateHash  $($updateExe.Name)`n"
+                $releaseFiles += $updateExe.FullName
+            }
+
+            $releaseBody = @"
+## MIB Studio Qt $tagName
+
+**Channel:** ``$channel``
+
+### Downloads
+- **Full Installer** - For first-time installations (includes eGrabber SDK + VC++ Redistributable)
+- **Update Package** - For existing installations (app files only, smaller download)
+
+### Checksums (SHA-256)
+``````
+$checksumLines``````
+"@
+
+            $ghArgs = @("release", "create", "$tagName", "--title", "MIB Studio Qt $tagName", "--notes", $releaseBody)
+            if ($Beta) {
+                $ghArgs += "--prerelease"
+            }
+            $ghArgs += $releaseFiles
+
+            if ($DryRun) {
+                Write-Host "[DRY RUN] Would create GitHub Release for $tagName with $($releaseFiles.Count) files" -ForegroundColor Gray
+            } else {
+                Write-Host "Creating GitHub Release for $tagName..." -ForegroundColor Yellow
+                & gh @ghArgs
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host "WARNING: GitHub Release creation failed" -ForegroundColor Yellow
+                } else {
+                    Write-Host "GitHub Release created" -ForegroundColor Green
+                }
+            }
+        }
+
+        # --- Step 7: Publish to RustFS ---
+        Write-Host "`n--- Step 7: Publish to RustFS ($channel) ---" -ForegroundColor Cyan
+
+        if ($updateExe) {
+            if ($DryRun) {
+                Write-Host "[DRY RUN] Would publish $($updateExe.Name) to $channel channel" -ForegroundColor Gray
+            } else {
+                Write-Host "Publishing to $channel channel..." -ForegroundColor Yellow
+                & "$PSScriptRoot\publish-update.ps1" `
+                    -Installer $updateExe.FullName `
+                    -Channel $channel `
+                    -Profile $Profile `
+                    -ReleaseNotesUrl "https://github.com/gavinlouuu-kpt/mib-studio-qt/releases/tag/$tagName"
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host "WARNING: RustFS publish failed" -ForegroundColor Yellow
+                } else {
+                    Write-Host "Published to RustFS ($channel)" -ForegroundColor Green
+                }
+            }
+        } else {
+            Write-Host "WARNING: Update package not found, skipping RustFS publish" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "`n--- Step 6-7: Publish (skipped - no build) ---" -ForegroundColor Cyan
     }
 } else {
     Write-Host "`n--- Step 5: Push (manual) ---" -ForegroundColor Cyan
-    Write-Host "To trigger the $channel release pipeline, push the tag:" -ForegroundColor Yellow
+    Write-Host "To publish this release:" -ForegroundColor Yellow
+    Write-Host "  .\release.ps1 --push   (or push manually below)" -ForegroundColor White
     Write-Host "  git push origin main" -ForegroundColor White
     Write-Host "  git push origin $tagName" -ForegroundColor White
 }
@@ -209,10 +310,11 @@ if (-not $SkipBuild) {
     }
 }
 
-if ($Push) {
+if ($Push -and -not $SkipBuild) {
     Write-Host "Channel: $channel" -ForegroundColor Green
-    Write-Host "Status: Pushed - CI/CD release pipeline running" -ForegroundColor Green
-    Write-Host "Check: https://github.com/<your-org>/mib-studio-qt/actions" -ForegroundColor Cyan
+    Write-Host "Status: Released (GitHub Release + RustFS)" -ForegroundColor Green
+} elseif ($Push) {
+    Write-Host "Status: Tag pushed (no installers published)" -ForegroundColor Yellow
 } else {
-    Write-Host "Status: Local release ready. Push tag to trigger CI/CD." -ForegroundColor Yellow
+    Write-Host "Status: Local only. Run with --push to publish." -ForegroundColor Yellow
 }
