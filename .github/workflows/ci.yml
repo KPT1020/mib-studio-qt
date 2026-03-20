@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, 'claude/**']  # TODO: remove claude/** after testing
   pull_request:
     branches: [main]
 
