@@ -4,6 +4,10 @@
 See `docs/README.md` for structure and links. Active tasks live in `knowledge_map/task/`.
 
 
+## Algorithm Experiments & MLflow
+
+When running algorithm experiments (reanalysis, parameter sweeps, pipeline comparisons), all intermediate images and results must be uploaded to the MLflow tracking server at `mlflow.yofo.bio`. This includes intermediate pipeline images (original, blurred, diff, thresh, mask, overlay), metrics CSV, processing parameters, and summary metrics. See `CLAUDE.md` for detailed integration instructions and example code.
+
 ## Post-processing tools
 
 Standalone tools for working with HDF5 files after recording (export, reanalyse) are built and distributed separately. See [docs/howto/tools.md](docs/howto/tools.md) for download location, quickstart, and compatibility.
