@@ -50,6 +50,11 @@ namespace backend::playback
         // Retrieve a copy by absolute write index; returns false if out-of-range
         bool getByWriteIndex(uint64_t writeIndex, Frame &out) const;
 
+        // Retrieve ROI region from frame by absolute write index without full frame copy
+        // Returns false if out-of-range or invalid ROI
+        // The ROI is extracted directly from the frame data, avoiding full frame copy
+        bool getByWriteIndexROI(uint64_t writeIndex, int roiX, int roiY, int roiW, int roiH, Frame &out) const;
+
         // Absolute index helpers (monotonic sequence since start)
         // Earliest absolute index currently retained in the ring
         uint64_t earliestAvailableIndex() const;
@@ -94,6 +99,10 @@ namespace backend::playback
         // Get available timestamp range
         // Returns false if no frames available
         bool getAvailableTimestampRange(TimestampRange& out) const;
+
+        // Estimate memory in bytes needed for a given capacity
+        // Uses average frame size from existing frames if available, otherwise uses conservative default
+        size_t estimateMemoryBytesForCapacity(size_t capacity) const;
 
     private:
         size_t capacity_;

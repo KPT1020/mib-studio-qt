@@ -92,9 +92,21 @@ void CaptureService::run() {
         }
 
         constexpr uint64_t kStatsInterval = 1'000'000ULL;
+        constexpr uint64_t kHealthCheckInterval = 5'000'000ULL;  // 5 seconds
         uint64_t nextStatsPoll = Tools::getTimestamp() + kStatsInterval;
+        uint64_t nextHealthCheck = Tools::getTimestamp() + kHealthCheckInterval;
 
         while (running_.load()) {
+            // Periodic health check
+            const uint64_t now = Tools::getTimestamp();
+            if (now >= nextHealthCheck) {
+                if (!camera->checkDeviceHealth()) {
+                    SPDLOG_WARN("CaptureService: Device health check failed, stopping capture gracefully");
+                    break;
+                }
+                nextHealthCheck = now + kHealthCheckInterval;
+            }
+
             camera::common::Frame frame;
             if (!camera->grabFrame(frame)) {
                 if (!running_.load()) {
@@ -126,7 +138,6 @@ void CaptureService::run() {
             }
             stats_.framesProcessed.fetch_add(1, std::memory_order_relaxed);
 
-            const uint64_t now = Tools::getTimestamp();
             if (now >= nextStatsPoll) {
                 camera::common::CameraStats cameraStats{};
                 if (camera->pollStats(cameraStats)) {

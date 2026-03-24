@@ -5,6 +5,9 @@
 #include <algorithm>
 #include <stdexcept>
 #include <vector>
+#include <thread>
+#include <chrono>
+#include <mutex>
 
 using namespace Euresys;
 
@@ -26,6 +29,8 @@ void EGrabberCamera::applyConfig(const CameraConfig& config) {
 }
 
 bool EGrabberCamera::start() {
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    
     if (running_) {
         return true;
     }
@@ -39,6 +44,35 @@ bool EGrabberCamera::start() {
             grabber_ = std::make_unique<EGrabber<CallbackOnDemand>>(*genTL_);
         }
 
+        // CRITICAL: Verify device is accessible before proceeding
+        std::string deviceModel = "Unknown";
+        std::string deviceVendor = "Unknown";
+        try {
+            deviceModel = grabber_->getString<DeviceModule>("DeviceModelName");
+            try {
+                deviceVendor = grabber_->getString<DeviceModule>("DeviceVendorName");
+            } catch (const std::exception&) {
+                // Vendor name may not be available, continue
+            }
+            SPDLOG_DEBUG("Camera device: {} {}", deviceVendor, deviceModel);
+        } catch (const std::exception& ex) {
+            SPDLOG_ERROR("Camera not accessible - device may be disconnected or in invalid state: {}", ex.what());
+            grabber_.reset();
+            genTL_.reset();
+            return false;
+        }
+
+        // CRITICAL: Stop any existing acquisition first to ensure clean state
+        try {
+            grabber_->execute<RemoteModule>("AcquisitionStop");
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            SPDLOG_DEBUG("EGrabberCamera: AcquisitionStop sent, waiting for camera to stabilize");
+        } catch (const std::exception& ex) {
+            // Graceful degradation: If AcquisitionStop fails, it may already be stopped
+            // Log but continue - this is not a fatal error
+            SPDLOG_DEBUG("EGrabberCamera AcquisitionStop before start (expected if not running): {}", ex.what());
+        }
+
         // Follow SDK sample 310-high-frame-rate.cpp: probe resolution, then configure buffers.
         grabber_->setInteger<StreamModule>("BufferPartCount", 1);
         width_ = grabber_->getInteger<StreamModule>("Width");
@@ -46,14 +80,33 @@ bool EGrabberCamera::start() {
 
         grabber_->setInteger<StreamModule>("BufferPartCount", config_.bufferPartCount);
         grabber_->reallocBuffers(config_.numBuffers);
+
+        // CRITICAL: Start acquisition on remote device BEFORE starting grabber stream
+        try {
+            grabber_->execute<RemoteModule>("AcquisitionStart");
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            SPDLOG_DEBUG("EGrabberCamera: AcquisitionStart sent, camera ready");
+        } catch (const std::exception& ex) {
+            SPDLOG_ERROR("EGrabberCamera AcquisitionStart failed - camera may be in invalid state: {}", ex.what());
+            // Clean up and return false - this is a fatal error
+            grabber_.reset();
+            genTL_.reset();
+            return false;
+        }
+
         grabber_->start();
 
         running_ = true;
         pendingFrames_.clear();
 
-        SPDLOG_INFO("EGrabberCamera started: {}x{}, parts={}, buffers={}",
-                    width_, height_, config_.bufferPartCount, config_.numBuffers);
+        SPDLOG_INFO("EGrabberCamera started successfully: {}x{}, parts={}, buffers={}, device={} {}",
+                    width_, height_, config_.bufferPartCount, config_.numBuffers, deviceVendor, deviceModel);
         return true;
+    } catch (const gentl_error& e) {
+        SPDLOG_ERROR("EGrabberCamera start failed with GenTL error (code={}): {}", 
+                    static_cast<int>(e.gc_err), e.what());
+        stop();
+        return false;
     } catch (const std::exception& ex) {
         SPDLOG_ERROR("EGrabberCamera start failed: {}", ex.what());
         stop();
@@ -62,16 +115,38 @@ bool EGrabberCamera::start() {
 }
 
 void EGrabberCamera::stop() {
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    
     if (!running_) {
         return;
     }
 
+    bool wasRunning = running_;
     running_ = false;
+    
+    // Wait a brief moment for any in-flight grabFrame() calls to finish
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    
     pendingFrames_.clear();
 
     if (grabber_) {
         try {
+            // CRITICAL: Stop remote acquisition FIRST before stopping grabber stream
+            try {
+                grabber_->execute<RemoteModule>("AcquisitionStop");
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                SPDLOG_DEBUG("EGrabberCamera: AcquisitionStop sent, waiting for camera to stop");
+            } catch (const std::exception& ex) {
+                // Graceful degradation: If AcquisitionStop fails, it may already be stopped
+                // Log but continue - this is not a fatal error
+                SPDLOG_DEBUG("EGrabberCamera AcquisitionStop error (may already be stopped): {}", ex.what());
+            }
+
+            // Now stop the grabber stream
             grabber_->stop();
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            SPDLOG_DEBUG("EGrabberCamera: grabber stream stopped");
+            
         } catch (const gentl_error& e) {
             if (e.gc_err != gc::GC_ERR_ABORT) {
                 SPDLOG_WARN("EGrabberCamera stop error: {}", e.what());
@@ -89,18 +164,31 @@ void EGrabberCamera::stop() {
             SPDLOG_DEBUG("EGrabberCamera cancelPop note: {}", ex.what());
         }
 
+        // CRITICAL: Wait before releasing buffers to ensure they're all returned
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
         try {
             grabber_->reallocBuffers(0);
+            SPDLOG_DEBUG("EGrabberCamera: buffers released");
         } catch (const std::exception& ex) {
             SPDLOG_WARN("EGrabberCamera buffer release error: {}", ex.what());
         }
+
+        // Final wait before destroying grabber
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
     grabber_.reset();
     genTL_.reset();
+    
+    if (wasRunning) {
+        SPDLOG_INFO("EGrabberCamera: fully stopped and cleaned up");
+    }
 }
 
 bool EGrabberCamera::grabFrame(Frame& out) {
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    
     if (!running_) {
         return false;
     }
@@ -123,17 +211,22 @@ bool EGrabberCamera::grabFrame(Frame& out) {
             SPDLOG_DEBUG("EGrabberCamera grab aborted (expected during stop): {}", e.what());
             return false;
         }
-        SPDLOG_ERROR("EGrabberCamera grab failed: {}", e.what());
-        stop();
+        SPDLOG_ERROR("EGrabberCamera grab failed with GenTL error (code={}): {}", 
+                    static_cast<int>(e.gc_err), e.what());
+        // Note: Don't call stop() here as it would try to acquire the same mutex
+        running_ = false;
         return false;
     } catch (const std::exception& ex) {
         SPDLOG_ERROR("EGrabberCamera grab failed: {}", ex.what());
-        stop();
+        // Note: Don't call stop() here as it would try to acquire the same mutex
+        running_ = false;
         return false;
     }
 }
 
 bool EGrabberCamera::pollStats(CameraStats& out) const {
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    
     if (!running_ || !grabber_) {
         return false;
     }
@@ -150,6 +243,9 @@ bool EGrabberCamera::pollStats(CameraStats& out) const {
 }
 
 void EGrabberCamera::replenishPendingFrames() {
+    // Note: This is called from grabFrame() which already holds the mutex
+    // So we don't need to lock again here
+    
     if (!grabber_) {
         return;
     }
@@ -188,6 +284,29 @@ void EGrabberCamera::replenishPendingFrames() {
             return;
         }
         throw;
+    }
+}
+
+bool EGrabberCamera::checkDeviceHealth() const {
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    
+    if (!grabber_) {
+        SPDLOG_DEBUG("Device health check: grabber not initialized");
+        return false;
+    }
+    
+    try {
+        // Try to read a simple property to verify device is responsive
+        std::string model = grabber_->getString<DeviceModule>("DeviceModelName");
+        SPDLOG_TRACE("Device health check passed: {}", model);
+        return true;
+    } catch (const gentl_error& e) {
+        SPDLOG_WARN("Device health check failed with GenTL error (code={}): {}", 
+                   static_cast<int>(e.gc_err), e.what());
+        return false;
+    } catch (const std::exception& ex) {
+        SPDLOG_WARN("Device health check failed: {}", ex.what());
+        return false;
     }
 }
 

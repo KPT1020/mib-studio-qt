@@ -61,6 +61,45 @@ bool FrameStore::getByWriteIndex(uint64_t writeIndex, Frame& out) const {
     return !out.data.empty();
 }
 
+bool FrameStore::getByWriteIndexROI(uint64_t writeIndex, int roiX, int roiY, int roiW, int roiH, Frame& out) const {
+    const uint64_t w = totalWritten_.load();
+    if (writeIndex >= w || capacity_ == 0) return false;
+    const size_t idx = static_cast<size_t>(writeIndex % capacity_);
+    
+    std::scoped_lock lk(mutex_);
+    const Frame& src = ring_[idx];
+    if (src.data.empty() || src.width == 0 || src.height == 0) return false;
+    
+    // Clamp ROI to frame bounds
+    const int frameW = static_cast<int>(src.width);
+    const int frameH = static_cast<int>(src.height);
+    const int clampedX = std::max(0, std::min(roiX, frameW - 1));
+    const int clampedY = std::max(0, std::min(roiY, frameH - 1));
+    const int clampedW = std::max(1, std::min(roiW, frameW - clampedX));
+    const int clampedH = std::max(1, std::min(roiH, frameH - clampedY));
+    
+    // Copy frame metadata
+    out.width = static_cast<uint64_t>(clampedW);
+    out.height = static_cast<uint64_t>(clampedH);
+    out.pixelFormat = src.pixelFormat;
+    out.timestamp = src.timestamp;
+    out.linePitch = 0; // ROI will be contiguous
+    
+    // Extract ROI region
+    const size_t srcPitch = (src.linePitch == 0 ? static_cast<size_t>(src.width) : src.linePitch);
+    const size_t roiSize = static_cast<size_t>(clampedW * clampedH);
+    out.data.resize(roiSize);
+    
+    const uint8_t* srcPtr = src.data.data() + (clampedY * srcPitch) + clampedX;
+    uint8_t* dstPtr = out.data.data();
+    
+    for (int y = 0; y < clampedH; ++y) {
+        std::memcpy(dstPtr + y * clampedW, srcPtr + y * srcPitch, static_cast<size_t>(clampedW));
+    }
+    
+    return true;
+}
+
 uint64_t FrameStore::earliestAvailableIndex() const {
     const uint64_t w = totalWritten_.load();
     if (capacity_ == 0 || w == 0) return 0;
@@ -275,6 +314,59 @@ bool FrameStore::getAvailableTimestampRange(TimestampRange& out) const {
     out.start = firstFrame.timestamp;
     out.end = lastFrame.timestamp;
     return true;
+}
+
+size_t FrameStore::estimateMemoryBytesForCapacity(size_t capacity) const {
+    if (capacity == 0) {
+        return 0;
+    }
+
+    // Try to calculate average frame size from existing frames
+    size_t avgFrameSize = 0;
+    size_t sampleCount = 0;
+    const size_t maxSamples = 10; // Sample up to 10 frames for average
+
+    std::scoped_lock lk(mutex_);
+    const uint64_t w = totalWritten_.load();
+    const size_t available = availableCount();
+
+    if (available > 0 && w > 0) {
+        const uint64_t earliest = earliestAvailableIndex();
+        const uint64_t latest = latestAvailableIndex();
+        const size_t sampleStep = std::max<size_t>(1, available / maxSamples);
+
+        size_t totalSize = 0;
+        for (uint64_t idx = earliest; idx <= latest && sampleCount < maxSamples; idx += sampleStep) {
+            if (idx >= w) break;
+            const size_t ringIdx = static_cast<size_t>(idx % capacity_);
+            if (ringIdx < ring_.size() && !ring_[ringIdx].data.empty()) {
+                // Frame size = data size + overhead (Frame struct + vector overhead)
+                // Frame struct: ~48 bytes (width, height, pixelFormat, linePitch, timestamp)
+                // Vector overhead: typically 24 bytes on 64-bit systems
+                const size_t frameOverhead = 48 + 24;
+                totalSize += ring_[ringIdx].data.size() + frameOverhead;
+                ++sampleCount;
+            }
+        }
+
+        if (sampleCount > 0) {
+            avgFrameSize = totalSize / sampleCount;
+        }
+    }
+
+    // If no frames available, use conservative default: 1920x1080 Mono8 = ~2MB per frame
+    if (avgFrameSize == 0) {
+        // 1920 * 1080 * 1 byte per pixel = 2,073,600 bytes
+        // Add overhead for Frame struct and vector
+        const size_t defaultFrameData = 1920ULL * 1080ULL;
+        const size_t frameOverhead = 48 + 24;
+        avgFrameSize = defaultFrameData + frameOverhead;
+    }
+
+    // Total memory = capacity * average frame size
+    // Add some overhead for the vector container itself
+    const size_t containerOverhead = sizeof(std::vector<Frame>) + (capacity * sizeof(Frame));
+    return (capacity * avgFrameSize) + containerOverhead;
 }
 
 bool FrameStore::saveFrameAsTiff(const Frame& frame, const std::string& filepath) const {

@@ -745,7 +745,8 @@ namespace backend::services
     bool Hdf5Service::writeExperimentInfo(uint64_t startTimeNs, uint64_t endTimeNs,
                                           size_t totalValidFrames, size_t totalInvalidFrames,
                                           const ProcessingConfig& processingConfig,
-                                          const ProcessingService::Roi& roi)
+                                          const ProcessingService::Roi& roi,
+                                          const cv::Mat* background)
     {
         if (!isFileOpen())
         {
@@ -935,6 +936,34 @@ namespace backend::services
 
         H5Sclose(scalarSpaceId);
         H5Gclose(infoGroupId);
+
+        // Write background image for reproducibility (if provided and non-empty)
+        if (background != nullptr && !background->empty())
+        {
+            cv::Mat bgToWrite;
+            if (background->channels() == 1 && background->type() == CV_8UC1)
+            {
+                bgToWrite = *background;
+            }
+            else if (background->channels() >= 3)
+            {
+                cv::cvtColor(*background, bgToWrite, cv::COLOR_BGR2GRAY);
+            }
+            else
+            {
+                background->convertTo(bgToWrite, CV_8UC1);
+            }
+            std::vector<cv::Mat> bgVec{bgToWrite};
+            if (!writeImageDataset(impl_->fileId_, "/experiment_info/background", bgVec))
+            {
+                SPDLOG_WARN("Failed to write experiment background image to HDF5");
+            }
+            else
+            {
+                SPDLOG_DEBUG("Wrote experiment background image to HDF5");
+            }
+        }
+
         SPDLOG_DEBUG("Wrote experiment info, processing config, and ROI to HDF5");
         return true;
     }
@@ -1633,6 +1662,14 @@ namespace backend::services {
         return true;
     }
 
+    bool Hdf5Service::readBackgroundImage(cv::Mat& out) const
+    {
+        out.release();
+        if (!isFileOpen())
+            return false;
+        return readImageByIndex("/experiment_info/background", 0, out);
+    }
+
     bool Hdf5Service::readImagesRange(const std::string& datasetPath,
                                       size_t startIndex,
                                       size_t count,
@@ -1716,6 +1753,272 @@ namespace backend::services {
             f.processedImage.release();
         }
         SPDLOG_INFO("readInvalidMetadata: {} entries", frames.size());
+        return true;
+    }
+
+    bool Hdf5Service::saveChartSnapshot(const std::string& datasetPath, const cv::Mat& image)
+    {
+        if (!isFileOpen())
+        {
+            SPDLOG_ERROR("HDF5 file is not open");
+            return false;
+        }
+
+        if (image.empty())
+        {
+            SPDLOG_WARN("Cannot save empty chart snapshot to {}", datasetPath);
+            return false;
+        }
+
+        // Extract parent group path and ensure it exists
+        size_t lastSlash = datasetPath.find_last_of('/');
+        if (lastSlash != std::string::npos && lastSlash > 0)
+        {
+            std::string parentPath = datasetPath.substr(0, lastSlash);
+            htri_t exists = H5Lexists(impl_->fileId_, parentPath.c_str(), H5P_DEFAULT);
+            if (exists <= 0)
+            {
+                // Create parent group (and any intermediate groups)
+                // Split path and create groups recursively
+                std::string currentPath;
+                size_t start = 0;
+                while (start < parentPath.length())
+                {
+                    size_t nextSlash = parentPath.find('/', start);
+                    if (nextSlash == std::string::npos)
+                    {
+                        currentPath = parentPath;
+                        start = parentPath.length();
+                    }
+                    else
+                    {
+                        currentPath = parentPath.substr(0, nextSlash);
+                        start = nextSlash + 1;
+                    }
+                    
+                    if (!currentPath.empty() && currentPath != "/")
+                    {
+                        htri_t groupExists = H5Lexists(impl_->fileId_, currentPath.c_str(), H5P_DEFAULT);
+                        if (groupExists <= 0)
+                        {
+                            hid_t groupId = H5Gcreate2(impl_->fileId_, currentPath.c_str(), H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+                            if (groupId >= 0)
+                            {
+                                H5Gclose(groupId);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        int height = image.rows;
+        int width = image.cols;
+        int channels = image.channels();
+
+        // Create dataspace for single image
+        hsize_t dims[4];
+        int ndims;
+        if (channels == 1)
+        {
+            ndims = 2; // 2D: height, width
+            dims[0] = static_cast<hsize_t>(height);
+            dims[1] = static_cast<hsize_t>(width);
+        }
+        else
+        {
+            ndims = 3; // 3D: height, width, channels
+            dims[0] = static_cast<hsize_t>(height);
+            dims[1] = static_cast<hsize_t>(width);
+            dims[2] = static_cast<hsize_t>(channels);
+        }
+
+        hid_t dataspaceId = H5Screate_simple(ndims, dims, nullptr);
+        if (dataspaceId < 0)
+        {
+            SPDLOG_ERROR("Failed to create dataspace for chart snapshot {}", datasetPath);
+            return false;
+        }
+
+        // Create dataset
+        hid_t datasetId = H5Dcreate2(impl_->fileId_, datasetPath.c_str(), H5T_NATIVE_UINT8, dataspaceId,
+                                     H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        if (datasetId < 0)
+        {
+            H5Sclose(dataspaceId);
+            SPDLOG_ERROR("Failed to create chart snapshot dataset {}", datasetPath);
+            return false;
+        }
+
+        // Prepare data buffer
+        size_t imageSize = height * width * channels;
+        std::vector<uint8_t> buffer(imageSize);
+        
+        if (image.isContinuous())
+        {
+            std::memcpy(buffer.data(), image.data, image.total() * image.elemSize());
+        }
+        else
+        {
+            size_t offset = 0;
+            for (int r = 0; r < image.rows; r++)
+            {
+                std::memcpy(buffer.data() + offset, image.ptr(r), image.cols * image.elemSize());
+                offset += image.cols * image.elemSize();
+            }
+        }
+
+        // Write data
+        herr_t status = H5Dwrite(datasetId, H5T_NATIVE_UINT8, H5S_ALL, H5S_ALL, H5P_DEFAULT, buffer.data());
+        if (status < 0)
+        {
+            SPDLOG_ERROR("Failed to write chart snapshot {}", datasetPath);
+            H5Dclose(datasetId);
+            H5Sclose(dataspaceId);
+            return false;
+        }
+
+        // Add attributes for metadata
+        hid_t scalarSpaceId = H5Screate(H5S_SCALAR);
+        if (scalarSpaceId >= 0)
+        {
+            int32_t widthAttr = static_cast<int32_t>(width);
+            int32_t heightAttr = static_cast<int32_t>(height);
+            int32_t channelsAttr = static_cast<int32_t>(channels);
+
+            hid_t attrW = H5Acreate2(datasetId, "width", H5T_NATIVE_INT32, scalarSpaceId, H5P_DEFAULT, H5P_DEFAULT);
+            if (attrW >= 0)
+            {
+                H5Awrite(attrW, H5T_NATIVE_INT32, &widthAttr);
+                H5Aclose(attrW);
+            }
+
+            hid_t attrH = H5Acreate2(datasetId, "height", H5T_NATIVE_INT32, scalarSpaceId, H5P_DEFAULT, H5P_DEFAULT);
+            if (attrH >= 0)
+            {
+                H5Awrite(attrH, H5T_NATIVE_INT32, &heightAttr);
+                H5Aclose(attrH);
+            }
+
+            hid_t attrC = H5Acreate2(datasetId, "channels", H5T_NATIVE_INT32, scalarSpaceId, H5P_DEFAULT, H5P_DEFAULT);
+            if (attrC >= 0)
+            {
+                H5Awrite(attrC, H5T_NATIVE_INT32, &channelsAttr);
+                H5Aclose(attrC);
+            }
+
+            H5Sclose(scalarSpaceId);
+        }
+
+        H5Dclose(datasetId);
+        H5Sclose(dataspaceId);
+        SPDLOG_DEBUG("Saved chart snapshot to {} ({}x{}x{})", datasetPath, height, width, channels);
+        return true;
+    }
+
+    bool Hdf5Service::readChartSnapshot(const std::string& datasetPath, cv::Mat& outImage) const
+    {
+        outImage.release();
+
+        if (!isFileOpen())
+        {
+            SPDLOG_ERROR("readChartSnapshot: HDF5 file is not open");
+            return false;
+        }
+
+        // Check existence - suppress HDF5 diagnostic errors for non-existent links
+        H5E_auto_t old_func;
+        void* old_client_data;
+        H5Eget_auto(H5E_DEFAULT, &old_func, &old_client_data);
+        H5Eset_auto(H5E_DEFAULT, nullptr, nullptr);
+        
+        htri_t exists = H5Lexists(impl_->fileId_, datasetPath.c_str(), H5P_DEFAULT);
+        
+        // Restore error handling
+        H5Eset_auto(H5E_DEFAULT, old_func, old_client_data);
+        
+        if (exists <= 0)
+        {
+            SPDLOG_DEBUG("readChartSnapshot: dataset {} does not exist", datasetPath);
+            return false;
+        }
+
+        // Open dataset
+        hid_t datasetId = H5Dopen2(impl_->fileId_, datasetPath.c_str(), H5P_DEFAULT);
+        if (datasetId < 0)
+        {
+            SPDLOG_ERROR("readChartSnapshot: failed to open dataset {}", datasetPath);
+            return false;
+        }
+
+        // Get dataspace
+        hid_t dataspaceId = H5Dget_space(datasetId);
+        if (dataspaceId < 0)
+        {
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("readChartSnapshot: failed to get dataspace for {}", datasetPath);
+            return false;
+        }
+
+        // Get dimensions
+        int ndims = H5Sget_simple_extent_ndims(dataspaceId);
+        hsize_t dims[4] = {0, 0, 0, 0};
+        if (H5Sget_simple_extent_dims(dataspaceId, dims, nullptr) < 0)
+        {
+            H5Sclose(dataspaceId);
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("readChartSnapshot: failed to get extent for {}", datasetPath);
+            return false;
+        }
+
+        // Chart snapshots are stored as 2D (H, W) or 3D (H, W, C)
+        int height = 0;
+        int width = 0;
+        int channels = 1;
+
+        if (ndims == 2)
+        {
+            // 2D: (H, W) - grayscale
+            height = static_cast<int>(dims[0]);
+            width = static_cast<int>(dims[1]);
+            channels = 1;
+        }
+        else if (ndims == 3)
+        {
+            // 3D: (H, W, C) - color
+            height = static_cast<int>(dims[0]);
+            width = static_cast<int>(dims[1]);
+            channels = static_cast<int>(dims[2]);
+        }
+        else
+        {
+            H5Sclose(dataspaceId);
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("readChartSnapshot: unsupported ndims={} for {} (expected 2 or 3)", ndims, datasetPath);
+            return false;
+        }
+
+        SPDLOG_DEBUG("readChartSnapshot: reading {}x{}x{} from {}", height, width, channels, datasetPath);
+
+        // Allocate output image
+        int cvType = (channels == 1) ? CV_8UC1 : CV_8UC3;
+        outImage = cv::Mat(height, width, cvType);
+
+        // Read data
+        herr_t status = H5Dread(datasetId, H5T_NATIVE_UINT8, H5S_ALL, H5S_ALL, H5P_DEFAULT, outImage.data);
+        
+        H5Sclose(dataspaceId);
+        H5Dclose(datasetId);
+
+        if (status < 0)
+        {
+            outImage.release();
+            SPDLOG_ERROR("readChartSnapshot: failed to read data from {}", datasetPath);
+            return false;
+        }
+
+        // Note: Charts are saved as BGR (OpenCV format), matToQImage will handle BGR->RGB conversion
+        SPDLOG_DEBUG("readChartSnapshot: successfully read {}x{}x{} from {}", height, width, channels, datasetPath);
         return true;
     }
 

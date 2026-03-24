@@ -40,6 +40,9 @@ struct ProcessingConfig {
     bool enable_area_range_check{true};
     bool require_single_inner_contour{true};
     int empty_frame_pixel_threshold{100};
+    bool auto_background_enabled{false};
+    int auto_background_empty_frames{30};
+    int auto_background_cooldown_frames{1000};
 };
 
 struct FilterResult {
@@ -53,6 +56,10 @@ struct FilterResult {
     double areaRatio{0.0};
     double ringRatio{0.0};
     BrightnessQuantiles brightness;
+    // Contours found during processing (for snapshot/display)
+    // These are in the same coordinate space as the processedImage mask
+    std::vector<std::vector<cv::Point>> allContours;
+    std::vector<cv::Vec4i> hierarchy;
 };
 
 struct ProcessedFrame {
@@ -91,6 +98,10 @@ public:
     void startRealtime(std::shared_ptr<backend::playback::FrameStore> store);
     void stopRealtime();
     void setRealtimeEnabled(bool on);
+    // When enabled, realtime processing will skip intermediate frames and process only the most recent frame.
+    // Note: experiments still process every frame (this mode is ignored while experimentActive_ is true).
+    void setRealtimeDropFrames(bool on);
+    bool getRealtimeDropFrames() const { return rtDropFrames_.load(std::memory_order_relaxed); }
     void setRealtimeRoi(const Roi& roi);
     Roi getRealtimeRoi() const;
     void setRealtimeBackgroundGray(const cv::Mat& bg);
@@ -127,6 +138,10 @@ public:
     void setProcessingConfig(const ProcessingConfig& config);
     ProcessingConfig getProcessingConfig() const;
     
+    // Pixel to micron conversion factor (1 pixel = X micron)
+    void setPixelToMicronFactor(double factor);
+    double getPixelToMicronFactor() const;
+    
     // Realtime throughput metrics (1-second window)
     double getAlgoFps1s() const { return algoFps1s_.load(std::memory_order_relaxed); }
     double getValidFps1s() const { return validFps1s_.load(std::memory_order_relaxed); }
@@ -136,12 +151,15 @@ public:
         validFps1s_.store(0.0, std::memory_order_relaxed);
         invalidFps1s_.store(0.0, std::memory_order_relaxed);
         algoAvgUs1s_.store(0.0, std::memory_order_relaxed);
+        algoAvgUs1sUpdatedUs_.store(0, std::memory_order_relaxed);
     }
     
     // Totals for current experiment
     uint64_t getTotalValidFlushed() const { return totalValidFlushed_.load(std::memory_order_relaxed); }
     // Average algorithm processing time per frame over last 1s window (microseconds)
     double getAlgoAvgUs1s() const { return algoAvgUs1s_.load(std::memory_order_relaxed); }
+    // Monotonic timestamp (microseconds) when algoAvgUs1s_ was last published; 0 if never
+    uint64_t getAlgoAvgUs1sUpdatedUs() const { return algoAvgUs1sUpdatedUs_.load(std::memory_order_relaxed); }
 
     // Helper function to check if a raw frame is empty (for filtering during save)
     // Returns true if frame is empty (pixel count below threshold)
@@ -154,6 +172,10 @@ public:
     using RingRatioCallback = std::function<void(double ringRatio, int64_t timestampNs)>;
     void setRingRatioCallback(RingRatioCallback callback);
 
+    // Background capture callback for auto-capture (called when background is auto-captured)
+    using BackgroundCaptureCallback = std::function<void(const cv::Mat& background, uint64_t frameIndex)>;
+    void setBackgroundCaptureCallback(BackgroundCaptureCallback callback);
+
 private:
     void workerLoop();
     void realtimeLoop();
@@ -161,7 +183,8 @@ private:
                                       const ProcessingConfig& config, const cv::Mat& originalImage);
     BrightnessQuantiles calculateBrightnessQuantiles(const cv::Mat& originalImage, const cv::Mat& mask);
     double calculateRingRatio(const std::vector<cv::Point>& innerContour, const std::vector<cv::Point>& outerContour);
-    std::tuple<std::vector<std::vector<cv::Point>>, bool, std::vector<std::vector<cv::Point>>, std::vector<int>> 
+    std::tuple<std::vector<std::vector<cv::Point>>, bool, std::vector<std::vector<cv::Point>>, std::vector<int>, 
+               std::vector<std::vector<cv::Point>>, std::vector<cv::Vec4i>> 
         findContours(const cv::Mat& processedImage);
 
     std::vector<std::thread> workers_;
@@ -176,10 +199,11 @@ private:
     std::thread realtimeThread_;
     std::atomic<bool> rtRunning_{false};
     std::atomic<bool> rtEnabled_{true};
+    std::atomic<bool> rtDropFrames_{false};
     std::shared_ptr<backend::playback::FrameStore> rtStore_;
     mutable std::mutex rtMutex_;
     Roi rtRoi_{};
-    cv::Mat rtBgGray_; // protected by rtMutex_
+    std::shared_ptr<cv::Mat> rtBgGray_; // shared_ptr to avoid cloning on access
     std::atomic<uint64_t> rtLastProcessed_{0};
 
     std::mutex snapshotMutex_;
@@ -241,7 +265,7 @@ private:
     mutable std::mutex configMutex_;
     
     // Round-robin buffer for periodic flushing
-    std::atomic<size_t> flushInterval_{1000}; // Flush every 1000 frames by default
+    std::atomic<size_t> flushInterval_{100}; // Flush every 100 frames by default
     std::atomic<size_t> framesSinceLastFlush_{0};
     
     // Invalid frame sampling
@@ -252,14 +276,28 @@ private:
     mutable std::mutex ringRatioCallbackMutex_;
     RingRatioCallback ringRatioCallback_;
     
+    // Background capture callback for auto-capture
+    mutable std::mutex backgroundCaptureCallbackMutex_;
+    BackgroundCaptureCallback backgroundCaptureCallback_;
+    
+    // Auto-capture state tracking
+    std::atomic<uint64_t> consecutiveEmptyFrames_{0};
+    std::atomic<uint64_t> lastAutoBackgroundFrame_{0};
+    cv::Mat previousFrameForAutoCapture_; // Store previous frame for frame-to-frame diff when no background
+    std::mutex previousFrameMutex_; // Protect previous frame access
+    
     // Realtime throughput metrics (published once per ~1s window)
     std::atomic<double> algoFps1s_{0.0};
     std::atomic<double> validFps1s_{0.0};
     std::atomic<double> invalidFps1s_{0.0};
     std::atomic<double> algoAvgUs1s_{0.0};
+    std::atomic<uint64_t> algoAvgUs1sUpdatedUs_{0}; // monotonic us when algoAvgUs1s_ was last published
     
     // Experiment totals
     std::atomic<uint64_t> totalValidFlushed_{0};
+    
+    // Pixel to micron conversion factor (default: 0.4886)
+    std::atomic<double> pixelToMicronFactor_{0.4886};
 };
 
 } // namespace backend::services

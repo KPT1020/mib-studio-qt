@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>960</width>
+    <height>600</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>MIB Studio Qt Scaffold</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="verticalLayout">
+    <property name="leftMargin">
+     <number>0</number>
+    </property>
+    <property name="topMargin">
+     <number>0</number>
+    </property>
+    <property name="rightMargin">
+     <number>0</number>
+    </property>
+    <property name="bottomMargin">
+     <number>0</number>
+    </property>
+    <item>
+     <widget class="QTabWidget" name="tabs">
+      <property name="currentIndex">
+       <number>0</number>
+      </property>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>960</width>
+     <height>22</height>
+    </rect>
+   </property>
+   <widget class="QMenu" name="fileMenu">
+    <property name="title">
+     <string>File</string>
+    </property>
+    <addaction name="exitAct"/>
+   </widget>
+   <widget class="QMenu" name="settingsMenu">
+    <property name="title">
+     <string>Settings</string>
+    </property>
+    <addaction name="processingSettingsAct"/>
+    <addaction name="monitoringSettingsAct"/>
+    <addaction name="conversionFactorAct"/>
+   </widget>
+   <widget class="QMenu" name="helpMenu">
+    <property name="title">
+     <string>Help</string>
+    </property>
+    <addaction name="aboutAct"/>
+    <addaction name="checkUpdatesAct"/>
+   </widget>
+   <addaction name="fileMenu"/>
+   <addaction name="settingsMenu"/>
+   <addaction name="helpMenu"/>
+  </widget>
+  <widget class="QStatusBar" name="statusbar"/>
+  <action name="exitAct">
+   <property name="text">
+    <string>Exit</string>
+   </property>
+  </action>
+  <action name="processingSettingsAct">
+   <property name="text">
+    <string>Processing Settings...</string>
+   </property>
+  </action>
+  <action name="monitoringSettingsAct">
+   <property name="text">
+    <string>Monitoring Settings...</string>
+   </property>
+  </action>
+  <action name="conversionFactorAct">
+   <property name="text">
+    <string>Pixel to Micron Conversion...</string>
+   </property>
+  </action>
+  <action name="aboutAct">
+   <property name="text">
+    <string>About</string>
+   </property>
+  </action>
+  <action name="checkUpdatesAct">
+   <property name="text">
+    <string>Check for Updates...</string>
+   </property>
+  </action>
+ </widget>
+ <resources/>
+</ui>

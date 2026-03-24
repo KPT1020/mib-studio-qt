@@ -48,10 +48,14 @@ public:
     bool writeExperimentInfo(uint64_t startTimeNs, uint64_t endTimeNs,
                              size_t totalValidFrames, size_t totalInvalidFrames,
                              const ProcessingConfig& processingConfig,
-                             const ProcessingService::Roi& roi);
+                             const ProcessingService::Roi& roi,
+                             const cv::Mat* background = nullptr);
     bool readExperimentInfo(uint64_t& startTimeNs, uint64_t& endTimeNs,
                              size_t& totalValidFrames, size_t& totalInvalidFrames,
                              ProcessingService::Roi* roi = nullptr);
+
+    // Read background image saved for the run (if present). Returns false if not open, dataset missing, or read fails.
+    bool readBackgroundImage(cv::Mat& out) const;
 
     // Scalable read APIs for review (lazy, on-demand)
     // Retrieve dataset shape information. Returns false if dataset missing or file not open.
@@ -77,6 +81,12 @@ public:
     // Metadata-only reads (do not load image/mask payloads)
     bool readValidMetadata(std::vector<ProcessedFrame>& frames);
     bool readInvalidMetadata(std::vector<ProcessedFrame>& frames);
+
+    // Chart snapshot saving (for saving chart images to HDF5)
+    bool saveChartSnapshot(const std::string& datasetPath, const cv::Mat& image);
+    
+    // Chart snapshot reading (for reading 2D/3D chart images without batch dimension)
+    bool readChartSnapshot(const std::string& datasetPath, cv::Mat& outImage) const;
 
 private:
     struct Impl;

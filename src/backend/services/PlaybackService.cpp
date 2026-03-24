@@ -91,6 +91,11 @@ bool PlaybackService::getAvailableTimestampRange(backend::playback::TimestampRan
     return store_->getAvailableTimestampRange(out);
 }
 
+size_t PlaybackService::estimateMemoryBytesForCapacity(size_t capacity) const {
+    if (!store_) return 0;
+    return store_->estimateMemoryBytesForCapacity(capacity);
+}
+
 } // namespace backend::services
 
 

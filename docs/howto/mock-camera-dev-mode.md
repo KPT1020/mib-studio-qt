@@ -2,18 +2,16 @@
 
 We support running the Qt frontend without camera hardware by swapping the capture pipeline over to a folder-backed mock camera. The mock reuses the same `CaptureService` interface used by the EGrabber implementation, so the frontend and processing services behave exactly as if frames were streaming from the device.
 
-## Quick start: mock preview app
+## Quick start: mock configuration
 
-Run `mock_studio_qt.exe` (Debug or Release). On launch it shows a dialog where you can:
+You can enable mock camera mode in two ways:
 
-- choose a folder containing frame images (`.tiff`, `.png`, `.jpeg`, etc.)
-- set the target frame rate (fps), which drives the mock frame interval (supports sub-millisecond resolution for >=1000 fps)
+1. **Via ConnectTab UI**: Use the "Configure Mock Camera" button in the Connect tab to select a folder containing frame images and set the target frame rate.
+2. **Via environment variables**: Set environment variables before launching `mib_studio_qt.exe` (see below).
 
-After you confirm, the regular studio window opens and you can start capture without any environment variables. The app remembers nothing between runs, so just relaunch to pick a different folder or fps.
+## Enabling the mock via environment variables
 
-## Enabling the mock (legacy env flow)
-
-Set the following environment variables before launching either `mib_studio_qt` or the console test harness:
+Set the following environment variables before launching `mib_studio_qt` or the console test harness:
 
 - `MIB_CAMERA_MODE=mock` &mdash; selects the folder-backed camera. Any other value (or unset) keeps the hardware path.
 - `MIB_MOCK_CAMERA_DIR=<absolute-or-relative-path>` &mdash; directory containing the images to stream. Defaults to `<data>/mock_frames`.
@@ -36,7 +34,7 @@ Images are streamed in lexical order by filename. For deterministic playback, us
 
 To confirm 5000 fps playback:
 
-1. Launch `mock_studio_qt.exe`, select your frame folder, and dial the frame rate to `5000`.
+1. Launch `mib_studio_qt.exe` and use the ConnectTab to configure mock camera with your frame folder and set the frame rate to `5000`, or set `MIB_MOCK_CAMERA_INTERVAL_MS=0.2` (200 microseconds) via environment variables.
 2. Start capture and let it run for a few seconds. The backend log prints `interval=200 us (~5000.0 fps)` for the mock camera.
 3. Open the capture stats panel (or tail the log) — `CaptureService` should report a frame rate close to 5000 fps once steady.
 4. Pause playback; frames remain buffered at the configured rate, so you can scrub without waiting for rendering.

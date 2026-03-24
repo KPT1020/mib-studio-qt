@@ -1,0 +1,288 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MonitoringSettingsDialog</class>
+ <widget class="QDialog" name="MonitoringSettingsDialog">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>400</width>
+    <height>420</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Monitoring Settings</string>
+  </property>
+  <property name="modal">
+   <bool>true</bool>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <layout class="QFormLayout" name="formLayout">
+     <item row="0" column="0">
+      <widget class="QLabel" name="kdeBandwidthLabel">
+       <property name="text">
+        <string>KDE Bandwidth</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="QDoubleSpinBox" name="kdeBandwidthSpin">
+       <property name="minimum">
+        <double>1.000000000000000</double>
+       </property>
+       <property name="maximum">
+        <double>1000.000000000000000</double>
+       </property>
+       <property name="singleStep">
+        <double>10.000000000000000</double>
+       </property>
+       <property name="decimals">
+        <number>1</number>
+       </property>
+       <property name="toolTip">
+        <string>KDE bandwidth parameter (higher = smoother, lower = more detailed)</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="0">
+      <widget class="QLabel" name="kdeGridResolutionLabel">
+       <property name="text">
+        <string>KDE Grid Resolution</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="1">
+      <widget class="QSpinBox" name="kdeGridResolutionSpin">
+       <property name="minimum">
+        <number>10</number>
+       </property>
+       <property name="maximum">
+        <number>200</number>
+       </property>
+       <property name="singleStep">
+        <number>10</number>
+       </property>
+       <property name="toolTip">
+        <string>Grid resolution for KDE heat map (higher = more detailed but slower)</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="scatterGroupBox">
+     <property name="title">
+      <string>Scatter plot axis (Area vs Deformability)</string>
+     </property>
+     <layout class="QFormLayout" name="scatterFormLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="scatterXMinLabel">
+        <property name="text">
+         <string>X (Area) min</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QDoubleSpinBox" name="scatterXMinSpin">
+        <property name="minimum">
+         <double>0.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>100000.000000000000000</double>
+        </property>
+        <property name="decimals">
+         <number>2</number>
+        </property>
+        <property name="toolTip">
+         <string>Fixed scatter plot X-axis minimum (Area μm²)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="scatterXMaxLabel">
+        <property name="text">
+         <string>X (Area) max</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QDoubleSpinBox" name="scatterXMaxSpin">
+        <property name="minimum">
+         <double>0.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>100000.000000000000000</double>
+        </property>
+        <property name="decimals">
+         <number>2</number>
+        </property>
+        <property name="toolTip">
+         <string>Fixed scatter plot X-axis maximum (Area μm²)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="scatterYMinLabel">
+        <property name="text">
+         <string>Y (Deformability) min</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QDoubleSpinBox" name="scatterYMinSpin">
+        <property name="minimum">
+         <double>0.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>10.000000000000000</double>
+        </property>
+        <property name="decimals">
+         <number>3</number>
+        </property>
+        <property name="toolTip">
+         <string>Fixed scatter plot Y-axis minimum</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="scatterYMaxLabel">
+        <property name="text">
+         <string>Y (Deformability) max</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QDoubleSpinBox" name="scatterYMaxSpin">
+        <property name="minimum">
+         <double>0.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>10.000000000000000</double>
+        </property>
+        <property name="decimals">
+         <number>3</number>
+        </property>
+        <property name="toolTip">
+         <string>Fixed scatter plot Y-axis maximum</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="histogramGroupBox">
+     <property name="title">
+      <string>Histogram axis (Ring width distribution)</string>
+     </property>
+     <layout class="QFormLayout" name="histogramFormLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="histogramXMinLabel">
+        <property name="text">
+         <string>X (Ring width) min</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QDoubleSpinBox" name="histogramXMinSpin">
+        <property name="minimum">
+         <double>0.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>100.000000000000000</double>
+        </property>
+        <property name="decimals">
+         <number>2</number>
+        </property>
+        <property name="toolTip">
+         <string>Fixed histogram X-axis minimum</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="histogramXMaxLabel">
+        <property name="text">
+         <string>X (Ring width) max</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QDoubleSpinBox" name="histogramXMaxSpin">
+        <property name="minimum">
+         <double>0.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>100.000000000000000</double>
+        </property>
+        <property name="decimals">
+         <number>2</number>
+        </property>
+        <property name="toolTip">
+         <string>Fixed histogram X-axis maximum</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="histogramYMaxLabel">
+        <property name="text">
+         <string>Y (Frequency) max</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QDoubleSpinBox" name="histogramYMaxSpin">
+        <property name="minimum">
+         <double>1.000000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>1000000.000000000000000</double>
+        </property>
+        <property name="decimals">
+         <number>0</number>
+        </property>
+        <property name="toolTip">
+         <string>Fixed histogram Y-axis maximum (frequency)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="histogramBinWidthLabel">
+        <property name="text">
+         <string>Bin width</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QDoubleSpinBox" name="histogramBinWidthSpin">
+        <property name="minimum">
+         <double>0.010000000000000</double>
+        </property>
+        <property name="maximum">
+         <double>10.000000000000000</double>
+        </property>
+        <property name="decimals">
+         <number>2</number>
+        </property>
+        <property name="singleStep">
+         <double>0.100000000000000</double>
+        </property>
+        <property name="toolTip">
+         <string>Histogram bin width (number of bins = (X max - X min) / bin width)</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QDialogButtonBox" name="buttons">
+     <property name="standardButtons">
+      <set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok|QDialogButtonBox::Apply</set>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+</ui>

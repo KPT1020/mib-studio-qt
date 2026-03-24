@@ -62,6 +62,9 @@ public:
     // Returns false if no frames available
     bool getAvailableTimestampRange(backend::playback::TimestampRange& out) const;
 
+    // Estimate memory in bytes needed for a given capacity
+    size_t estimateMemoryBytesForCapacity(size_t capacity) const;
+
 private:
     std::shared_ptr<backend::playback::FrameStore> store_{};
     bool playing_{true};

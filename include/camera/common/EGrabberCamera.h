@@ -7,6 +7,7 @@
 #include <deque>
 #include <optional>
 #include <memory>
+#include <mutex>
 
 namespace camera::common {
 
@@ -28,6 +29,7 @@ public:
 
     bool grabFrame(Frame& out) override;
     bool pollStats(CameraStats& out) const override;
+    bool checkDeviceHealth() const;
 
 private:
     void replenishPendingFrames();
@@ -47,6 +49,7 @@ private:
     mutable CameraStats lastStats_{};
     std::deque<Frame> pendingFrames_;
     bool running_ = false;
+    mutable std::mutex stateMutex_;
 };
 
 } // namespace camera::common

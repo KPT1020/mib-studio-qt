@@ -2,10 +2,15 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
+#include <cstdlib>
+
 #ifdef _WIN32
 #include <windows.h>
 #include <psapi.h>
 #pragma comment(lib, "Psapi.lib")
+#pragma comment(lib, "Kernel32.lib")
+#pragma comment(lib, "Advapi32.lib")
 #else
 #include <time.h>
 #endif
@@ -66,6 +71,59 @@ double Tools::getPeakProcessMemoryMB() {
     return 0.0;
 #else
     return 0.0;
+#endif
+}
+
+uint64_t Tools::getAvailableSystemRAMBytes() {
+#ifdef _WIN32
+    MEMORYSTATUSEX memStatus{};
+    memStatus.dwLength = sizeof(MEMORYSTATUSEX);
+    if (GlobalMemoryStatusEx(&memStatus)) {
+        return static_cast<uint64_t>(memStatus.ullAvailPhys);
+    }
+    return 0;
+#else
+    return 0;
+#endif
+}
+
+std::vector<int> Tools::availableComPortNumbers() {
+#ifdef _WIN32
+    std::vector<int> ports;
+    HKEY hKey = nullptr;
+    const wchar_t* subkey = L"HARDWARE\\DEVICEMAP\\SERIALCOMM";
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, subkey, 0, KEY_READ, &hKey) != ERROR_SUCCESS) {
+        return ports;
+    }
+    char valueName[256];
+    char valueData[32];
+    DWORD valueNameSize;
+    DWORD valueDataSize;
+    DWORD valueType;
+    for (DWORD i = 0;; ++i) {
+        valueNameSize = static_cast<DWORD>(sizeof(valueName));
+        valueDataSize = static_cast<DWORD>(sizeof(valueData));
+        if (RegEnumValueA(hKey, i, valueName, &valueNameSize, nullptr, &valueType,
+                          reinterpret_cast<LPBYTE>(valueData), &valueDataSize) != ERROR_SUCCESS) {
+            break;
+        }
+        if (valueType != REG_SZ || valueDataSize == 0) {
+            continue;
+        }
+        valueData[sizeof(valueData) - 1] = '\0';
+        if (valueData[0] == 'C' && valueData[1] == 'O' && valueData[2] == 'M') {
+            const int num = std::atoi(valueData + 3);
+            if (num >= 1 && num <= 256) {
+                ports.push_back(num);
+            }
+        }
+    }
+    RegCloseKey(hKey);
+    std::sort(ports.begin(), ports.end());
+    ports.erase(std::unique(ports.begin(), ports.end()), ports.end());
+    return ports;
+#else
+    return {};
 #endif
 }
 

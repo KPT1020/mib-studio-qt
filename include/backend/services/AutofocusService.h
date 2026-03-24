@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <condition_variable>
 #include <deque>
 #include <functional>
@@ -21,6 +22,11 @@ public:
     bool connect(int comPort, int baudRate, unsigned char deviceAddress);
     void disconnect();
     bool isConnected() const { return connected_.load(); }
+    int getComPort() const { return comPort_; }
+
+    // Probe: open port, send XMT read (voltage channel), check plausible response, close.
+    // Returns true only if port responds with a valid voltage (0–250 V). Must not be connected.
+    static bool probeComPort(int comPort, int baudRate, unsigned char deviceAddress);
 
     // Autofocus control
     void setEnabled(bool enabled);
@@ -56,6 +62,10 @@ public:
 
     // Expose running average of ring ratio for UI/status
     double getAverageRingRatio() const { return averageRingRatio_.load(std::memory_order_relaxed); }
+    // Expose median ring ratio (same value used by autofocus control) for UI/status
+    double getMedianRingRatio() const { return medianRingRatio_.load(std::memory_order_relaxed); }
+    // Monotonic timestamp (microseconds) when ring ratio was last updated; 0 if never
+    uint64_t getLastRingRatioUpdateUs() const { return lastRingRatioUpdateUs_.load(std::memory_order_relaxed); }
 
     // Status callbacks for UI
     using StatusCallback = std::function<void(const std::string& message)>;
@@ -88,6 +98,7 @@ private:
     static constexpr size_t MAX_BUFFER_SIZE = 1000;
     std::atomic<uint64_t> ringRatioSequence_{0};
     std::atomic<int64_t> lastRingRatioTimestampNs_{0};
+    std::atomic<uint64_t> lastRingRatioUpdateUs_{0}; // monotonic us when a ring ratio sample was last accepted
 
     // Statistics
     std::atomic<double> medianRingRatio_{0.0};

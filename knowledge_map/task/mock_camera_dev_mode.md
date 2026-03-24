@@ -5,6 +5,6 @@
 - `MockCamera` uses `QImageReader` to load `.png`, `.jpg`, `.jpeg`, `.bmp`, `.tif/.tiff` images, converts them to PFNC Mono8, and mirrors the stats interface used by EGrabber.
 - Performance: mock now preloads frames into an in-memory cache and serves from memory to achieve ≥5k fps; per-frame logs removed in favor of periodic capture stats.
 - `capture_processing_test` now forces mock mode and seeds a minimal PNG in `data/mock_frames` so CI/devs can exercise the display pipeline without hardware.
-- Dedicated mock preview executable (`mock_studio_qt.exe`) prompts for frame folder + fps before showing the main window—no env vars required.
+- Mock camera can be configured via the ConnectTab UI (using `MockConfigDialog`) or via environment variables before launching `mib_studio_qt.exe`.
 - Docs: see `docs/howto/mock-camera-dev-mode.md` for setup instructions.
 

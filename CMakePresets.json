@@ -4,13 +4,12 @@
   "configurePresets": [
     {
       "name": "windows-default",
-      "displayName": "Windows VS2022 x64 (vcpkg manifest)",
+      "displayName": "Windows VS2022 x64 (Conan)",
       "generator": "Visual Studio 17 2022",
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
-        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-        "VCPKG_FEATURE_FLAGS": "manifests",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/conan_toolchain.cmake",
         "CMAKE_POLICY_DEFAULT_CMP0091": "NEW"
       }
     }
