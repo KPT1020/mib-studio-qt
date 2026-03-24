@@ -19,3 +19,9 @@ test_*.json
 # Tools build output (binaries published, not committed)
 tools/dist/
 tools/build/
+
+# Kedro frame detection pipeline
+scripts/kedro_frame_detection/data/
+scripts/kedro_frame_detection/conf/local/
+**/__pycache__/
+**/*.egg-info/

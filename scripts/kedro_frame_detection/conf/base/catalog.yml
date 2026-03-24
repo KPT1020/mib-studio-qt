@@ -1,0 +1,23 @@
+# All inter-node datasets use MemoryDataset (default when not declared).
+# Images are numpy arrays that flow transiently between nodes in a single run.
+# The save_artifacts node handles disk persistence for MLflow upload.
+#
+# Explicitly declared here for documentation purposes.
+
+dataset_bundle:
+  type: MemoryDataset
+
+background:
+  type: MemoryDataset
+
+processing_results:
+  type: MemoryDataset
+
+metrics:
+  type: MemoryDataset
+
+artifact_dir:
+  type: MemoryDataset
+
+mlflow_run_url:
+  type: MemoryDataset
