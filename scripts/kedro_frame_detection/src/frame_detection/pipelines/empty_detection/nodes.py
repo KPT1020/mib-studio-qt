@@ -725,20 +725,36 @@ def _log_with_rest_api(
         run_id: str,
         local_path: Path,
         subdir: str = "",
-    ) -> None:
+    ) -> bool:
+        """Upload a single artifact with retry. Returns True on success."""
         artifact_path = f"{subdir}/{local_path.name}" if subdir else local_path.name
         url = (
             f"{base_url}/api/2.0/mlflow-artifacts/artifacts/"
             f"{experiment_id}/{run_id}/artifacts/{artifact_path}"
         )
-        with open(local_path, "rb") as f:
-            resp = requests.put(
-                url,
-                data=f,
-                headers={"Content-Type": "application/octet-stream"},
-                auth=auth,
-            )
-            resp.raise_for_status()
+        max_retries = 4
+        for attempt in range(max_retries):
+            try:
+                with open(local_path, "rb") as f:
+                    resp = requests.put(
+                        url,
+                        data=f,
+                        headers={"Content-Type": "application/octet-stream"},
+                        auth=auth,
+                    )
+                    resp.raise_for_status()
+                return True
+            except requests.HTTPError as e:
+                if attempt < max_retries - 1:
+                    wait = 2 ** (attempt + 1)
+                    logger.warning(
+                        "Artifact upload failed (%s), retrying in %ds ...",
+                        e, wait,
+                    )
+                    time.sleep(wait)
+                else:
+                    logger.warning("Artifact upload failed after %d retries: %s", max_retries, e)
+                    return False
 
     # Get or create experiment
     try:
@@ -827,39 +843,49 @@ def _log_with_rest_api(
         },
     )
 
-    # Upload artifacts
+    # Upload artifacts (with retry; failures are non-fatal)
     logger.info("Uploading artifacts to MLflow (REST) ...")
+    failed_uploads = 0
 
-    for f in output_dir.iterdir():
-        if f.is_file() and f.suffix in (".md", ".txt"):
-            upload_artifact(experiment_id, run_id, f)
+    try:
+        for f in output_dir.iterdir():
+            if f.is_file() and f.suffix in (".md", ".txt"):
+                if not upload_artifact(experiment_id, run_id, f):
+                    failed_uploads += 1
 
-    annotated_files = sorted(output_dir.glob("*.png"))
-    for i, img_path in enumerate(annotated_files):
-        upload_artifact(experiment_id, run_id, img_path, subdir="annotated_images")
-        if (i + 1) % 20 == 0 or (i + 1) == len(annotated_files):
-            logger.info("  Annotated: %d/%d", i + 1, len(annotated_files))
+        annotated_files = sorted(output_dir.glob("*.png"))
+        for i, img_path in enumerate(annotated_files):
+            if not upload_artifact(experiment_id, run_id, img_path, subdir="annotated_images"):
+                failed_uploads += 1
+            if (i + 1) % 20 == 0 or (i + 1) == len(annotated_files):
+                logger.info("  Annotated: %d/%d", i + 1, len(annotated_files))
 
-    intermediates_dir = output_dir / "intermediates"
-    if intermediates_dir.is_dir():
-        frame_dirs = sorted(
-            d for d in intermediates_dir.iterdir() if d.is_dir()
-        )
-        total = sum(len(list(d.glob("*.png"))) for d in frame_dirs)
-        uploaded = 0
-        for frame_dir in frame_dirs:
-            for img_path in sorted(frame_dir.glob("*.png")):
-                upload_artifact(
-                    experiment_id,
-                    run_id,
-                    img_path,
-                    subdir=f"intermediates/{frame_dir.name}",
-                )
-                uploaded += 1
-                if uploaded % 50 == 0 or uploaded == total:
-                    logger.info("  Intermediates: %d/%d", uploaded, total)
+        intermediates_dir = output_dir / "intermediates"
+        if intermediates_dir.is_dir():
+            frame_dirs = sorted(
+                d for d in intermediates_dir.iterdir() if d.is_dir()
+            )
+            total = sum(len(list(d.glob("*.png"))) for d in frame_dirs)
+            uploaded = 0
+            for frame_dir in frame_dirs:
+                for img_path in sorted(frame_dir.glob("*.png")):
+                    if not upload_artifact(
+                        experiment_id,
+                        run_id,
+                        img_path,
+                        subdir=f"intermediates/{frame_dir.name}",
+                    ):
+                        failed_uploads += 1
+                    uploaded += 1
+                    if uploaded % 50 == 0 or uploaded == total:
+                        logger.info("  Intermediates: %d/%d", uploaded, total)
+    except Exception as exc:
+        logger.warning("Artifact upload interrupted: %s", exc)
 
-    # End run
+    if failed_uploads:
+        logger.warning("%d artifact uploads failed", failed_uploads)
+
+    # End run (always finalize)
     api(
         "post",
         "runs/update",
@@ -874,9 +900,7 @@ def _log_with_rest_api(
     logger.info("MLflow run logged: %s", run_url)
 
     # Verify
-    import requests as req
-
-    resp = req.get(
+    resp = requests.get(
         f"{base_url}/api/2.0/mlflow/artifacts/list",
         params={"run_id": run_id},
         auth=auth,
