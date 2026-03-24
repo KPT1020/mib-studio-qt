@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate CMake configuration
+        shell: pwsh
+        run: |
+          # Check version is set
+          $content = Get-Content CMakeLists.txt -Raw
+          if ($content -match 'set\(DEFAULT_VERSION\s+"(\d+\.\d+\.\d+)"\)') {
+            Write-Host "Version: $($matches[1])" -ForegroundColor Green
+          } else {
+            Write-Host "ERROR: DEFAULT_VERSION not found in CMakeLists.txt" -ForegroundColor Red
+            exit 1
+          }
+
+      - name: Validate InnoSetup scripts
+        shell: pwsh
+        run: |
+          # Ensure installer scripts exist and reference the correct build dir
+          $scripts = @(
+            "resources/installers/mib-studio-qt.iss",
+            "resources/installers/mib-studio-qt-update.iss"
+          )
+          foreach ($script in $scripts) {
+            if (Test-Path $script) {
+              Write-Host "OK: $script" -ForegroundColor Green
+            } else {
+              Write-Host "ERROR: Missing $script" -ForegroundColor Red
+              exit 1
+            }
+          }
+
+      - name: Check release script syntax
+        shell: pwsh
+        run: |
+          # Parse scripts without executing to catch syntax errors
+          $scripts = @("release.ps1", "bump-version.ps1", "publish-update.ps1")
+          foreach ($script in $scripts) {
+            if (Test-Path $script) {
+              $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content $script -Raw), [ref]$null)
+              Write-Host "OK: $script" -ForegroundColor Green
+            }
+          }

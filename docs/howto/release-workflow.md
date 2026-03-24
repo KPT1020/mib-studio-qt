@@ -4,37 +4,76 @@ This guide documents the complete end-to-end process for releasing a new version
 
 ## Overview
 
-The release workflow consists of four main steps:
+The release pipeline builds entirely on your local machine (where all dependencies like eGrabber, Coremor, etc. are available), then publishes via `gh` CLI (GitHub Release) and `publish-update.ps1` (RustFS).
 
-1. **Version Bump** - Increment the version number in `CMakeLists.txt` (and optionally create a git tag)
-2. **Build Release** - Compile the application in Release configuration with all dependencies
-3. **Build Installers** - Create both full installer and update package using InnoSetup
-4. **Publish** - Upload packages to RustFS (S3-compatible) storage for distribution
+### One-Command Release (`release.ps1`)
+
+```powershell
+# PRODUCTION: bump, build, tag, push, create GitHub Release, publish to stable
+.\release.ps1 --patch --push
+
+# TEST: bump, build, tag as v0.2.2-beta.1, push, publish to test channel
+.\release.ps1 --patch --beta --push
+
+# Preview what would happen
+.\release.ps1 --patch --push --dry-run
+```
+
+### Release Channels
+
+| Tag Format | Channel | GitHub Release | RustFS Path | Auto-Update |
+|---|---|---|---|---|
+| `v1.2.3` | `stable` | Full release | `stable/latest.json` | All users |
+| `v1.2.3-beta.1` | `test` | Pre-release | `test/latest.json` | Testers only |
+
+### What `release.ps1 --push` Does
+
+1. Bumps version in `CMakeLists.txt`
+2. Commits the version bump
+3. Creates git tag (`v0.2.2` or `v0.2.2-beta.1`)
+4. Builds Release locally (`cmake --build`)
+5. Builds both InnoSetup installers
+6. Pushes branch and tag to GitHub
+7. Creates GitHub Release with installers and SHA-256 checksums (via `gh` CLI)
+8. Publishes update package to RustFS channel (via `publish-update.ps1`)
+
+Options:
+- `--patch|--minor|--major` — Version bump type (required)
+- `--beta` — Create a test/pre-release (tag: `v0.2.2-beta.1`, channel: `test`)
+- `--push` — Push tag + create GitHub Release + publish to RustFS
+- `--skip-build` — Skip build + publish (tag and push only)
+- `--dry-run` — Show what would happen without making changes
+- `--profile` — AWS CLI profile for RustFS (default: `rustfs`)
+
+## CI (`.github/workflows/ci.yml`)
+
+Lightweight validation on every push to `main`/`develop` and pull requests:
+
+- Validates CMake version configuration
+- Validates InnoSetup scripts exist
+- Checks PowerShell script syntax (release.ps1, bump-version.ps1, publish-update.ps1)
+
+Build and release are handled locally — CI only catches configuration issues early.
 
 ## Prerequisites
 
 Before starting a release, ensure you have:
 
-1. **InnoSetup 6** - Required for building Windows installers
+1. **Complete Development Environment**
+   - CMake 3.21+, C++ compiler (MSVC on Windows), Conan 2.x, Qt6
+   - All proprietary dependencies (eGrabber SDK, Coremor DLL)
+
+2. **InnoSetup 6** - Required for building Windows installers
    - Download from [https://jrsoftware.org/isdl.php](https://jrsoftware.org/isdl.php)
    - Install to default location: `C:\Program Files (x86)\Inno Setup 6\`
 
-2. **AWS CLI** - Required for publishing to RustFS
+3. **GitHub CLI (`gh`)** - Required for creating GitHub Releases
+   - Install from [https://cli.github.com/](https://cli.github.com/)
+   - Authenticate: `gh auth login`
+
+4. **AWS CLI** - Required for publishing to RustFS
    - Install AWS CLI v2 from [https://aws.amazon.com/cli/](https://aws.amazon.com/cli/)
-   - Configure credentials via:
-     - Environment variables: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
-     - AWS CLI profile: `aws configure --profile rustfs`
-     - Or IAM role (if running on AWS infrastructure)
-
-3. **Git** - For version tagging (optional but recommended)
-   - Git must be available on PATH
-   - Repository must be initialized
-
-4. **Complete Development Environment**
-   - CMake 3.21+
-   - C++ compiler (MSVC on Windows)
-   - Conan 2.x for dependency management
-   - Qt6 development libraries
+   - Configure: `aws configure --profile rustfs`
 
 ## Complete Workflow
 
@@ -265,46 +304,69 @@ For detailed information about the publishing process and RustFS setup, see [`au
 
 ```mermaid
 flowchart TD
-    Start([Start Release]) --> BumpVersion[Bump Version<br/>bump-version.ps1]
-    BumpVersion --> BuildRelease[Build Release<br/>cmake --build]
-    BuildRelease --> BuildFullInstaller[Build Full Installer<br/>package_installer]
-    BuildRelease --> BuildUpdatePackage[Build Update Package<br/>package_installer_update]
-    BuildFullInstaller --> PublishUpdate[Publish Update Package<br/>publish-update.ps1]
-    BuildUpdatePackage --> PublishUpdate
-    PublishUpdate --> Verify[Verify Upload<br/>Test URLs]
-    Verify --> End([Release Complete])
-    
-    style BumpVersion fill:#e1f5ff
-    style BuildRelease fill:#e1f5ff
-    style BuildFullInstaller fill:#fff4e1
-    style BuildUpdatePackage fill:#fff4e1
-    style PublishUpdate fill:#e8f5e9
-    style Verify fill:#e8f5e9
+    Start([release.ps1 --patch --push]) --> Bump[1. Bump Version]
+    Bump --> Commit[2. Commit + Tag]
+    Commit --> Build[3. Build Release<br/>Local machine]
+    Build --> Installers[4. Build Installers<br/>InnoSetup]
+    Installers --> Push[5. Push tag to GitHub]
+    Push --> GHRelease[6. Create GitHub Release<br/>gh CLI]
+    GHRelease --> RustFS[7. Publish to RustFS<br/>publish-update.ps1]
+    RustFS --> Done([Release Complete])
+
+    Commit -->|--beta| BetaTag[Tag: v0.2.2-beta.1]
+    BetaTag --> Build
+    RustFS -->|stable| Stable[stable/latest.json]
+    RustFS -->|test| Test[test/latest.json]
+
+    style Bump fill:#e1f5ff
+    style Commit fill:#e1f5ff
+    style Build fill:#e1f5ff
+    style Installers fill:#fff4e1
+    style Push fill:#fff4e1
+    style GHRelease fill:#e8f5e9
+    style RustFS fill:#e8f5e9
 ```
 
 ## Quick Reference
 
-For experienced users, here's the condensed workflow:
+### One-Command Release (Recommended)
+
+```powershell
+# Production release — builds locally, publishes to stable
+.\release.ps1 --patch --push
+
+# Test release — builds locally, publishes to test channel
+.\release.ps1 --patch --beta --push
+```
+
+### Step-by-Step Release
 
 ```powershell
 # 1. Bump version (patch example)
 .\bump-version.ps1 --patch --tag
 
-# 2. Push tag (if created)
-git push origin v0.1.1
-
-# 3. Build Release
+# 2. Build Release
 cmake --build build --config Release --target mib_studio_qt
+
+# 3. Run tests
+ctest --test-dir build --build-config Release --output-on-failure
 
 # 4. Build installers
 cmake --build build --config Release --target package_installer
 cmake --build build --config Release --target package_installer_update
 
-# 5. Publish update package (for auto-updates)
-.\publish-update.ps1 -Installer "build\dist\MIB_Studio_Qt_Update_v0.1.1.exe" -Profile rustfs
+# 5. Push tag
+git push origin main
+git push origin v0.2.2
 
-# 6. Publish full installer (optional)
-.\publish-update.ps1 -Installer "build\dist\MIB_Studio_Qt_Setup_v0.1.1.exe" -Profile rustfs
+# 6. Create GitHub Release
+gh release create v0.2.2 build\dist\MIB_Studio_Qt_Setup_v0.2.2.exe build\dist\MIB_Studio_Qt_Update_v0.2.2.exe
+
+# 7. Publish to RustFS (stable channel)
+.\publish-update.ps1 -Installer "build\dist\MIB_Studio_Qt_Update_v0.2.2.exe" -Profile rustfs
+
+# 8. Publish to RustFS (test channel)
+.\publish-update.ps1 -Installer "build\dist\MIB_Studio_Qt_Update_v0.2.2.exe" -Profile rustfs -Channel test
 ```
 
 ## Verification Steps
