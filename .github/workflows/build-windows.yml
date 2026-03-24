@@ -1,0 +1,198 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Release mode'
+        required: true
+        type: choice
+        options:
+          - beta
+          - release
+      bump:
+        description: 'Version bump type (release mode only)'
+        required: false
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Version ────────────────────────────────────────────────
+      - name: Determine version
+        id: version
+        run: |
+          $content = Get-Content CMakeLists.txt -Raw
+          if ($content -match 'set\(DEFAULT_VERSION\s+"(\d+)\.(\d+)\.(\d+)"\)') {
+            $major = [int]$matches[1]
+            $minor = [int]$matches[2]
+            $patch = [int]$matches[3]
+          } else {
+            Write-Host "ERROR: Could not find DEFAULT_VERSION" -ForegroundColor Red
+            exit 1
+          }
+          $current = "$major.$minor.$patch"
+
+          if ("${{ inputs.mode }}" -eq "release") {
+            # Bump version
+            switch ("${{ inputs.bump }}") {
+              "major" { $major++; $minor = 0; $patch = 0 }
+              "minor" { $minor++; $patch = 0 }
+              "patch" { $patch++ }
+            }
+            $version = "$major.$minor.$patch"
+            $tag = "v$version"
+            $channel = "stable"
+
+            # Update CMakeLists.txt, commit, tag, push
+            $content = $content -replace "set\(DEFAULT_VERSION\s+`"$current`"\)", "set(DEFAULT_VERSION `"$version`")"
+            Set-Content -Path CMakeLists.txt -Value $content -NoNewline
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add CMakeLists.txt
+            git commit -m "chore: bump version to $version"
+            git tag -a $tag -m "Version $version"
+            git push origin HEAD:main --follow-tags
+            Write-Host "Release: $current -> $version"
+          } else {
+            # Beta: use current version + short SHA, no commit
+            $sha = git rev-parse --short HEAD
+            $version = "$current-beta.$sha"
+            $tag = "v$version"
+            $channel = "beta"
+            Write-Host "Beta: $version (no version bump)"
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "channel=$channel" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      # ── Build environment ──────────────────────────────────────
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Conan
+        run: |
+          pip install conan
+          conan profile detect --force
+
+      - name: Cache Conan packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.conan2/p
+          key: conan-${{ runner.os }}-${{ hashFiles('conanfile.txt') }}
+          restore-keys: |
+            conan-${{ runner.os }}-
+
+      - name: Download eGrabber SDK
+        run: |
+          curl -L -o egrabber-sdk.exe "https://console-s3.yofo.bio/rustfs/console/browser/egrabber-sdk-installer/egrabber-win-x86_64-25.10.0.57.exe"
+          Start-Process -FilePath .\egrabber-sdk.exe -ArgumentList '/S' -Wait
+          if (!(Test-Path "C:\Program Files\Euresys\eGrabber\include")) {
+            Write-Host "ERROR: eGrabber SDK headers not found" -ForegroundColor Red
+            exit 1
+          }
+          Write-Host "eGrabber SDK installed"
+          Copy-Item egrabber-sdk.exe resources\installers\egrabber-win-x86_64-25.10.0.57.exe
+        shell: pwsh
+
+      - name: Download VC++ Redistributable
+        run: curl -L -o resources\installers\vc_redist.x64.exe "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+        shell: pwsh
+
+      # ── Build ──────────────────────────────────────────────────
+      - name: Conan install
+        run: conan install . -of build --build=missing -s build_type=Release
+
+      - name: CMake configure
+        run: cmake --preset windows-default
+
+      - name: CMake build
+        run: cmake --build build --config Release --target mib_studio_qt
+
+      - name: Install InnoSetup
+        run: choco install innosetup -y --no-progress
+        shell: pwsh
+
+      - name: Build full installer
+        run: cmake --build build --config Release --target package_installer
+
+      - name: Build update package
+        run: cmake --build build --config Release --target package_installer_update
+
+      # ── Artifacts ──────────────────────────────────────────────
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers-${{ steps.version.outputs.version }}
+          path: build/dist/*.exe
+          if-no-files-found: error
+
+      # ── GitHub Release ─────────────────────────────────────────
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $tag = "${{ steps.version.outputs.tag }}"
+          $channel = "${{ steps.version.outputs.channel }}"
+          $installers = Get-ChildItem "build\dist\*.exe"
+
+          if ($channel -eq "beta") {
+            # Beta: pre-release, create lightweight tag on current commit
+            git tag $tag
+            gh release create $tag $installers --title "v$version" --generate-notes --prerelease
+          } else {
+            # Release: full release (tag already pushed in version step)
+            gh release create $tag $installers --title "v$version" --generate-notes
+          }
+        shell: pwsh
+
+      # ── Publish to rustfs ──────────────────────────────────────
+      - name: Publish update package to rustfs
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $channel = "${{ steps.version.outputs.channel }}"
+          $updateInstaller = Get-ChildItem "build\dist\MIB_Studio_Qt_Update_v*.exe" | Select-Object -First 1
+          if ($updateInstaller) {
+            .\publish-update.ps1 -Installer $updateInstaller.FullName -Version $version -Channel $channel
+          } else {
+            Write-Host "WARNING: Update package not found, skipping" -ForegroundColor Yellow
+          }
+        shell: pwsh
+
+      - name: Publish full installer to rustfs
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $channel = "${{ steps.version.outputs.channel }}"
+          $setupInstaller = Get-ChildItem "build\dist\MIB_Studio_Qt_Setup_v*.exe" | Select-Object -First 1
+          if ($setupInstaller) {
+            .\publish-update.ps1 -Installer $setupInstaller.FullName -Version $version -Channel $channel
+          } else {
+            Write-Host "WARNING: Full installer not found, skipping" -ForegroundColor Yellow
+          }
+        shell: pwsh
