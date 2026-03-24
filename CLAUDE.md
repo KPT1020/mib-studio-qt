@@ -1,72 +1,85 @@
 # CLAUDE.md
 
-## Project Overview
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-MIB Studio Qt is a C++ (Qt/CMake) application for real-time microfluidic image-based (MIB) cell deformability analysis. It captures camera frames, runs an image processing pipeline, and stores results in HDF5 files. Python scripts in `scripts/` handle post-experiment export and reanalysis.
-
-## Build
+## Build Commands
 
 ```bash
-conan install . -of build --build=missing -s build_type=Release
+# Configure (Windows, VS2022 x64, vcpkg manifest mode)
 cmake --preset windows-default
-cmake --build build --config Release
+
+# Build Debug
+cmake --build build --config Debug
+
+# Build Release
+cmake --build build --preset windows-default-build-release
+
+# Deploy (auto-triggered by CMake post-build, but can run manually)
+windeployqt.exe --release build/Release/mib_studio_qt.exe
 ```
 
-## Algorithm Experiment Workflow — MLflow Upload Requirement
+## Running
 
-When running algorithm experiments (reanalysis, parameter sweeps, pipeline comparisons), **all intermediate images and results must be uploaded to MLflow** at `mlflow.yofo.bio`.
+- `mib_studio_qt.exe` — Production app (hardware camera)
+- `mock_studio_qt.exe` — Development app with GUI mock camera selector
+- `capture_processing_test.exe` — Console test harness
 
-### What to upload
+### Mock Camera Environment Variables
 
-- **Intermediate pipeline images**: original, blurred, diff (background-subtracted), thresh (binary threshold), mask (morphology result), overlay (contour rendering)
-- **Metrics CSV**: per-frame deformability, area, area_ratio, ring_ratio, brightness quantiles, validation flags
-- **Processing parameters**: blur size, threshold, morph kernel, area thresholds, ROI — logged as MLflow params
-- **Summary metrics**: valid/invalid frame counts, mean deformability, mean area — logged as MLflow metrics
-- **Experiment metadata**: source HDF5 path, experiment timestamps, config.json snapshot
+- `MIB_CAMERA_MODE=mock` — Use folder-backed mock camera
+- `MIB_MOCK_CAMERA_DIR=<path>` — Folder of TIFF/PNG/JPEG images
+- `MIB_MOCK_CAMERA_INTERVAL_MS=<ms>` — Frame interval (default 33)
+- `MIB_MOCK_CAMERA_LOOP=true|false` — Loop or stop at end
 
-### MLflow server
+## Architecture
 
-- **Tracking URI**: `https://mlflow.yofo.bio`
-- Log artifacts via `mlflow.log_artifact()` or `mlflow.log_artifacts()`
-- Log parameters via `mlflow.log_param()` / `mlflow.log_params()`
-- Log metrics via `mlflow.log_metric()` / `mlflow.log_metrics()`
+C++17 / Qt6 (Widgets + Charts) application for real-time microscopy image capture, processing, and analysis. Uses OpenCV for image processing, HDF5 for experiment data storage, and Euresys EGrabber SDK for hardware camera integration.
 
-### Example integration pattern
+### Layered Design
 
-```python
-import mlflow
+**Frontend** (`src/frontend/`) — Qt widgets. `MainWindow` coordinates tabs: `ConnectTab` (device selection), `PreviewPage` (live display), `PlaybackPanel` (frame playback), `ExperimentMonitoringTab` (live histograms), `HdfReviewTab` (post-experiment review), `ConfigTabs` (nanopositioner config).
 
-mlflow.set_tracking_uri("https://mlflow.yofo.bio")
-mlflow.set_experiment("mib-reanalysis")
+**AppBackend** (`src/backend/AppBackend.cpp`) — Service facade. Owns and wires all backend services. Entry point for all backend operations.
 
-with mlflow.start_run(run_name="experiment_xyz"):
-    # Log processing parameters
-    mlflow.log_params({"blur": 3, "threshold": 8, "morph_kernel": 3})
+**Services** (`src/backend/services/`) — Each service owns a single concern:
+- `CaptureService` — Streams frames from camera into ring buffer on a dedicated thread
+- `ProcessingService` — Image analysis via worker thread pool; classifies frames valid/invalid by deformability, area, brightness
+- `Hdf5Service` — Batched writes to HDF5 files (PIMPL pattern hides HDF5 details)
+- `PlaybackService` — Wraps `FrameStore` ring buffer for UI queries
+- `AutofocusService` — Nanopositioner control via serial COM port; uses ring ratio feedback from processing
+- `CameraControlService` — GenICam parameter application
+- `SqliteService` — Metadata persistence
 
-    # Run pipeline, save intermediates to output_dir ...
+**Camera abstraction** (`src/camera/`) — `ICamera` interface with `EGrabberCamera` (hardware) and `MockCamera` (folder-backed) implementations.
 
-    # Log all intermediate images and results
-    mlflow.log_artifacts(str(output_dir))
+**FrameStore** (`src/backend/playback/FrameStore.cpp`) — Ring buffer (512 capacity) for in-memory frame history.
 
-    # Log summary metrics
-    mlflow.log_metrics({"valid_frames": 1234, "mean_deformability": 0.42})
-```
+### Threading Model
 
-## Key Paths
+- **Main thread**: Qt event loop (UI)
+- **Capture thread**: `CaptureService::run()` blocks on `camera->grabFrame()`
+- **Processing workers**: Thread pool in `ProcessingService` (default = hardware concurrency)
+- **Realtime processing**: Dedicated async loop for low-latency analysis
+- **Autofocus**: Dedicated thread for serial COM communication
 
-| Path | Purpose |
-|------|---------|
-| `src/backend/services/ProcessingService.cpp` | Core image processing pipeline |
-| `src/frontend/controllers/ExperimentController.cpp` | Experiment lifecycle |
-| `src/backend/services/Hdf5Service.cpp` | HDF5 data persistence |
-| `scripts/reanalyse_hdf5.py` | Post-experiment reanalysis with intermediate images |
-| `scripts/export_hdf5.py` | HDF5 → CSV/TIFF export |
-| `resources/defaults/config.json` | Default processing parameters |
+### Data Flow
 
-## Testing
+1. Camera → `CaptureService` → `FrameStore` (ring buffer) + callback to UI
+2. Frames → `ProcessingService::realtimeLoop()` → valid/invalid classification
+3. Ring ratio → `AutofocusService` for nanopositioner feedback
+4. Valid/invalid frames batched → `Hdf5Service::appendFrames()` for persistent storage
 
-Python scripts can be run directly:
-```bash
-python scripts/reanalyse_hdf5.py -i experiment.h5 -o ./reanalysis
-python scripts/export_hdf5.py -i experiment.h5 -o ./export
-```
+## Key Conventions
+
+- Use **spdlog** for logging; never `std::cout` in app code
+- Reference `egrabber-sample-programs` before implementing camera functions; prefer ready-made SDK patterns
+- Review existing `Tools` (`src/backend/Tools.cpp`) before writing new utilities
+- Refresh `StreamModule` counters before stopping capture for accurate shutdown stats
+- Tasks/issues go in `knowledge_map/task/`; docs go in `docs/`
+- Headers mirror source layout under `include/`
+- `include/Coremor/` contains third-party nanopositioner DLL (checked into repo)
+- Runtime data (logs, sqlite, HDF5 files, mock frames) lives under `data/`
+
+## Test Performance Tracking
+
+When running test performances, save all metrics (including intermediates) to MLflow at `mlflow.yofo.bio`. Set credentials via environment variables `MLFLOW_TRACKING_USERNAME` and `MLFLOW_TRACKING_PASSWORD` — do not hardcode them.
