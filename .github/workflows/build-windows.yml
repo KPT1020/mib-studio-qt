@@ -104,7 +104,7 @@ jobs:
 
       - name: Download eGrabber SDK
         run: |
-          curl -L -o egrabber-sdk.exe "https://console-s3.yofo.bio/rustfs/console/browser/egrabber-sdk-installer/egrabber-win-x86_64-25.10.0.57.exe"
+          curl -L -o egrabber-sdk.exe "https://s3.yofo.bio/egrabber-sdk-installer/egrabber-win-x86_64-25.10.0.57.exe"
           Start-Process -FilePath .\egrabber-sdk.exe -ArgumentList '/S' -Wait
           if (!(Test-Path "C:\Program Files\Euresys\eGrabber\include")) {
             Write-Host "ERROR: eGrabber SDK headers not found" -ForegroundColor Red
