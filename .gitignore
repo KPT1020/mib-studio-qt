@@ -1,6 +1,7 @@
 build/
 export/
 data/logs/app.log
+data/empty_detection_results/
 
 # Exclude .exe files in installers directory
 resources/installers/*.exe

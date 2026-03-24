@@ -79,7 +79,11 @@ $bumpArg = if ($Patch) { "--patch" } elseif ($Minor) { "--minor" } else { "--maj
 if ($DryRun) {
     Write-Host "[DRY RUN] Would run: .\bump-version.ps1 $bumpArg --tag" -ForegroundColor Gray
 } else {
-    & "$PSScriptRoot\bump-version.ps1" $bumpArg --tag
+    $bumpParams = @{ Tag = $true }
+    if ($Patch) { $bumpParams.Patch = $true }
+    elseif ($Minor) { $bumpParams.Minor = $true }
+    else { $bumpParams.Major = $true }
+    & "$PSScriptRoot\bump-version.ps1" @bumpParams
     if ($LASTEXITCODE -ne 0) {
         Write-Host "ERROR: Version bump failed" -ForegroundColor Red
         exit 1

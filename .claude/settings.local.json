@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git checkout:*)",
+      "Bash(find /c/Users/gavin/Developer/mib-studio-qt/docs -type f -name *.md)",
+      "Bash(gh pr:*)",
+      "Bash(gh repo:*)",
+      "Bash(gh auth:*)",
+      "Bash(powershell -ExecutionPolicy Bypass -File release.ps1 -Patch -DryRun)",
+      "Bash(powershell -ExecutionPolicy Bypass -File release.ps1 -Patch -Push -SkipBuild)",
+      "Bash(gh run:*)",
+      "Bash(gh api:*)",
+      "Bash(gh workflow:*)",
+      "Bash(git push:*)",
+      "Bash(python:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(grep -r \"empty\\\\|debris\\\\|small\\\\|medium\\\\|large\\\\|blob\" --include=*.md --include=*.py --include=*.json)",
+      "Bash(xargs grep:*)",
+      "Bash(find . -type f \\\\\\(-name *.md -o -name *.txt -o -name *.rst \\\\\\))",
+      "Bash(xargs ls:*)",
+      "Bash(find . -name *.py -path ./scripts/* -o -name *.py -path ./tools/*)",
+      "Bash(ls:*)",
+      "Bash(grep -r \"empty\\\\|debris\\\\|small\\\\|medium\\\\|large\\\\|blob\" ./src --include=*.cpp --include=*.h.)",
+      "Bash(pip install:*)",
+      "Bash(export MLFLOW_TRACKING_USERNAME=gavin)",
+      "Bash(export MLFLOW_TRACKING_PASSWORD='MLflow!229')",
+      "Bash(export MLFLOW_TRACKING_URI='https://mlflow.yofo.bio')",
+      "Bash(PYTHONIOENCODING=utf-8 python -c \":*)",
+      "Bash(PYTHONIOENCODING=utf-8 python scripts/empty_frame_detection.py)",
+      "Bash(PYTHONIOENCODING=utf-8 python -u scripts/empty_frame_detection.py)",
+      "Bash(MLFLOW_TRACKING_USERNAME=gavin MLFLOW_TRACKING_PASSWORD=\"MLflow!229\" MLFLOW_TRACKING_URI=\"https://mlflow.yofo.bio\" PYTHONIOENCODING=utf-8 python -c \"import os; print\\(repr\\(os.environ.get\\('MLFLOW_TRACKING_PASSWORD'\\)\\)\\)\")",
+      "Bash(PYTHONIOENCODING=utf-8 python scripts/empty_frame_detection.py --mlflow-user gavin --mlflow-password 'MLflow!229' 2>&1)",
+      "WebFetch(domain:mlflow.org)",
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "mcp__plugin_context7_context7__query-docs",
+      "Bash(curl:*)"
+    ]
+  }
+}
