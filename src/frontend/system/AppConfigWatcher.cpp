@@ -213,6 +213,10 @@ namespace frontend
 					pcfg.area_threshold_min = ip.value("area_threshold_min").toInt(pcfg.area_threshold_min);
 				if (ip.contains("area_threshold_max"))
 					pcfg.area_threshold_max = ip.value("area_threshold_max").toInt(pcfg.area_threshold_max);
+				if (ip.contains("deformability_threshold_min"))
+					pcfg.deformability_threshold_min = ip.value("deformability_threshold_min").toDouble(pcfg.deformability_threshold_min);
+				if (ip.contains("deformability_threshold_max"))
+					pcfg.deformability_threshold_max = ip.value("deformability_threshold_max").toDouble(pcfg.deformability_threshold_max);
 				if (ip.contains("empty_frame_pixel_threshold"))
 					pcfg.empty_frame_pixel_threshold = ip.value("empty_frame_pixel_threshold").toInt(pcfg.empty_frame_pixel_threshold);
 				if (ip.contains("auto_background_enabled"))
@@ -228,15 +232,19 @@ namespace frontend
 						pcfg.enable_border_check = fl.value("enable_border_check").toBool(pcfg.enable_border_check);
 					if (fl.contains("enable_area_range_check"))
 						pcfg.enable_area_range_check = fl.value("enable_area_range_check").toBool(pcfg.enable_area_range_check);
+					if (fl.contains("enable_deformability_range_check"))
+						pcfg.enable_deformability_range_check = fl.value("enable_deformability_range_check").toBool(pcfg.enable_deformability_range_check);
 					if (fl.contains("require_single_inner_contour"))
 						pcfg.require_single_inner_contour = fl.value("require_single_inner_contour").toBool(pcfg.require_single_inner_contour);
 				}
 			}
 		}
 		backend_.processing().setProcessingConfig(pcfg);
-		SPDLOG_INFO("AppConfigWatcher: applied ProcessingConfig (blur={}, thresh={}, morph={}x{}, area=[{},{}], empty_px={})",
+		SPDLOG_INFO("AppConfigWatcher: applied ProcessingConfig (blur={}, thresh={}, morph={}x{}, area=[{},{}], deform=[{:.2f},{:.2f}] enabled={}, empty_px={})",
 					pcfg.gaussian_blur_size, pcfg.bg_subtract_threshold, pcfg.morph_kernel_size, pcfg.morph_iterations,
-					pcfg.area_threshold_min, pcfg.area_threshold_max, pcfg.empty_frame_pixel_threshold);
+					pcfg.area_threshold_min, pcfg.area_threshold_max,
+					pcfg.deformability_threshold_min, pcfg.deformability_threshold_max, pcfg.enable_deformability_range_check,
+					pcfg.empty_frame_pixel_threshold);
 
 		// 2) Flush interval (buffer threshold)
 		if (root.contains("buffer_threshold"))

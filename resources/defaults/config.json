@@ -3,6 +3,8 @@
     "image_processing": {
         "area_threshold_max": 1200,
         "area_threshold_min": 250,
+        "deformability_threshold_min": 0.0,
+        "deformability_threshold_max": 0.5,
         "bg_subtract_threshold": 8,
         "empty_frame_pixel_threshold": 100,
         "auto_background_enabled": false,
@@ -11,6 +13,7 @@
         "filters": {
             "enable_area_range_check": true,
             "enable_border_check": true,
+            "enable_deformability_range_check": true,
             "enable_multiple_contours_check": true,
             "require_single_inner_contour": true
         },

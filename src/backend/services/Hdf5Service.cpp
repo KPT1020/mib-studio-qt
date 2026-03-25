@@ -879,6 +879,33 @@ namespace backend::services
             H5Aclose(attr12);
         }
 
+        double deformabilityThresholdMin = processingConfig.deformability_threshold_min;
+        hid_t attrDeformMin = H5Acreate2(infoGroupId, "processing_config_deformability_threshold_min", H5T_NATIVE_DOUBLE, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attrDeformMin >= 0)
+        {
+            H5Awrite(attrDeformMin, H5T_NATIVE_DOUBLE, &deformabilityThresholdMin);
+            H5Aclose(attrDeformMin);
+        }
+
+        double deformabilityThresholdMax = processingConfig.deformability_threshold_max;
+        hid_t attrDeformMax = H5Acreate2(infoGroupId, "processing_config_deformability_threshold_max", H5T_NATIVE_DOUBLE, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attrDeformMax >= 0)
+        {
+            H5Awrite(attrDeformMax, H5T_NATIVE_DOUBLE, &deformabilityThresholdMax);
+            H5Aclose(attrDeformMax);
+        }
+
+        uint8_t enableDeformabilityRangeCheck = processingConfig.enable_deformability_range_check ? 1 : 0;
+        hid_t attrDeformCheck = H5Acreate2(infoGroupId, "processing_config_enable_deformability_range_check", H5T_NATIVE_UINT8, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attrDeformCheck >= 0)
+        {
+            H5Awrite(attrDeformCheck, H5T_NATIVE_UINT8, &enableDeformabilityRangeCheck);
+            H5Aclose(attrDeformCheck);
+        }
+
         uint8_t requireSingleInnerContour = processingConfig.require_single_inner_contour ? 1 : 0;
         hid_t attr13 = H5Acreate2(infoGroupId, "processing_config_require_single_inner_contour", H5T_NATIVE_UINT8, scalarSpaceId,
                                  H5P_DEFAULT, H5P_DEFAULT);

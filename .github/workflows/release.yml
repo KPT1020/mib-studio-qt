@@ -48,6 +48,20 @@ jobs:
           pip install conan
           conan profile detect --force
 
+          # Add team Conan remote (Artifactory) as primary
+          if ($env:CONAN_REMOTE_URL) {
+            conan remote add team-conan $env:CONAN_REMOTE_URL --index 0
+            conan remote login team-conan $env:CONAN_REMOTE_USER -p $env:CONAN_REMOTE_PASSWORD
+            Write-Host "Team Conan remote configured"
+          } else {
+            Write-Host "CONAN_REMOTE_URL not set, using ConanCenter only" -ForegroundColor Yellow
+          }
+        shell: pwsh
+        env:
+          CONAN_REMOTE_URL: ${{ secrets.CONAN_REMOTE_URL }}
+          CONAN_REMOTE_USER: ${{ secrets.CONAN_REMOTE_USER }}
+          CONAN_REMOTE_PASSWORD: ${{ secrets.CONAN_REMOTE_PASSWORD }}
+
       - name: Cache Conan packages
         uses: actions/cache@v4
         with:
@@ -59,6 +73,12 @@ jobs:
 
       - name: Install dependencies
         run: conan install . -of build --build=missing -s build_type=Release -s compiler.cppstd=17
+
+      - name: Upload packages to team remote
+        if: always() && env.CONAN_REMOTE_URL != ''
+        run: conan upload "*" -r team-conan -c
+        env:
+          CONAN_REMOTE_URL: ${{ secrets.CONAN_REMOTE_URL }}
 
       - name: Configure CMake
         run: cmake --preset windows-default

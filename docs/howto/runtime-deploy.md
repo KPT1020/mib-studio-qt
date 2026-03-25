@@ -8,6 +8,14 @@ This project uses Qt from Conan. For Release builds we deploy the Qt runtime aut
 - Release builds are deployed automatically after linking; Debug builds are not deployed by default.
 - If you need to run Debug binaries outside the build tree, copy required Qt debug DLLs from the Conan Qt installation directory or install Qt debug runtime.
 
+## Team Conan remote (first time only)
+
+Run `scripts/setup-conan-remote.ps1` to add the team's Artifactory package server as primary Conan remote. This serves cached prebuilt binaries from our server instead of downloading from ConanCenter, dramatically speeding up `conan install`.
+
+```powershell
+.\scripts\setup-conan-remote.ps1
+```
+
 ## Release workflow
 
 1) Create Conan profile (first time only):

@@ -550,8 +550,11 @@ FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedIma
             bool areaInRange = !config.enable_area_range_check ||
                               (hullArea >= config.area_threshold_min && hullArea <= config.area_threshold_max);
             bool ringRatioInRange = (result.ringRatio > 15.0 && result.ringRatio < 25.0);
+            bool deformabilityInRange = !config.enable_deformability_range_check ||
+                              (result.deformability >= config.deformability_threshold_min &&
+                               result.deformability <= config.deformability_threshold_max);
 
-            if (areaInRange && ringRatioInRange) {
+            if (areaInRange && ringRatioInRange && deformabilityInRange) {
                 result.inRange = true;
                 result.isValid = true;
             }
@@ -576,8 +579,12 @@ FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedIma
             result.deformability = 1.0 - circularity;
             result.area = hullArea;
 
-            if (!config.enable_area_range_check ||
-                (hullArea >= config.area_threshold_min && hullArea <= config.area_threshold_max)) {
+            bool areaInRange = !config.enable_area_range_check ||
+                (hullArea >= config.area_threshold_min && hullArea <= config.area_threshold_max);
+            bool deformabilityInRange = !config.enable_deformability_range_check ||
+                (result.deformability >= config.deformability_threshold_min &&
+                 result.deformability <= config.deformability_threshold_max);
+            if (areaInRange && deformabilityInRange) {
                 result.inRange = true;
                 result.isValid = true;
             }
@@ -790,13 +797,10 @@ void ProcessingService::realtimeLoop() {
                 // Always run validation for monitoring (even without experiment)
                 // cvRoi is now relative to full frame, mask is ROI-sized
                 cv::Rect cvRoi(roi.x, roi.y, roi.w, roi.h);
-                // For validation, we need full frame gray - get it only when needed
-                cv::Mat grayFull;
-                if (experimentActive_.load()) {
-                    grayFull = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
-                }
-                FilterResult validation = filterProcessedImage(mask, cvRoi, config, grayFull.empty() ? grayROI : grayFull);
-                
+                // Always use ROI-sized data for validation (avoids O(frame_size) operations
+                // inside the timed section, and prevents size mismatch in calculateBrightnessQuantiles)
+                FilterResult validation = filterProcessedImage(mask, cvRoi, config, grayROI);
+
                 // Extract contours from validation result and adjust coordinates for full-frame snapshot
                 // Contours from filterProcessedImage are in ROI coordinates, need to adjust for full frame
                 std::vector<std::vector<cv::Point>> contours = validation.allContours;
@@ -867,6 +871,9 @@ void ProcessingService::realtimeLoop() {
                              idx, monValidSz, monInvalidSz, backend::Tools::getProcessMemoryMB());
             }
             
+            // Create full frame copy outside algo timing, only when needed for experiment/snapshot
+            cv::Mat grayFull;
+
             // Also accumulate frames for experiment if active
             if (experimentActive_.load()) {
                 // Determine if we should save this frame
@@ -882,14 +889,14 @@ void ProcessingService::realtimeLoop() {
                         shouldSave = true;
                     }
                 }
-                
+
                 if (shouldSave) {
                     // Prepare frame data (clone images before mutex lock to minimize lock time)
                     ProcessedFrame frame;
                     frame.index = idx;
                     frame.timestampNs = f.timestamp;
                     frame.validation = validation;
-                    // For experiment, we need full frames - get full frame if not already loaded
+                    // For experiment, we need full frames - create full frame copy (outside algo timing)
                     if (grayFull.empty()) {
                         grayFull = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
                     }
@@ -928,10 +935,17 @@ void ProcessingService::realtimeLoop() {
                     // Create full-size mask for snapshot display
                     cv::Mat fullMaskSnapshot;
                     if (useROI) {
-                        // Get full frame for snapshot
-                        backend::playback::Frame fFull{};
-                        if (rtStore_->getByWriteIndex(idx, fFull)) {
-                            cv::Mat grayFullSnap = makeGrayCopy(fFull.width, fFull.height, fFull.linePitch, fFull.data.data());
+                        // Reuse existing full frame if already created for experiment storage
+                        cv::Mat grayFullSnap;
+                        if (!grayFull.empty()) {
+                            grayFullSnap = grayFull;
+                        } else {
+                            backend::playback::Frame fFull{};
+                            if (rtStore_->getByWriteIndex(idx, fFull)) {
+                                grayFullSnap = makeGrayCopy(fFull.width, fFull.height, fFull.linePitch, fFull.data.data());
+                            }
+                        }
+                        if (!grayFullSnap.empty()) {
                             fullMaskSnapshot = cv::Mat(grayFullSnap.rows, grayFullSnap.cols, CV_8UC1, cv::Scalar(0));
                             cv::Rect fullCvRoiSnap(roi.x, roi.y, roi.w, roi.h);
                             mask.copyTo(fullMaskSnapshot(fullCvRoiSnap));
@@ -1424,10 +1438,19 @@ void ProcessingService::realtimeLoop() {
                 cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
                 // Always run validation for monitoring (even without experiment)
-                FilterResult validation = filterProcessedImage(mask, cvRoi, config, gray);
-                
+                // Use ROI-only data for validation (avoids O(frame_size) findContours/brightness scan)
+                cv::Mat roiMaskForValidation = mask(cvRoi).clone();
+                FilterResult validation = filterProcessedImage(roiMaskForValidation, cvRoi, config, roiCurr);
+
                 // Extract contours from validation result for snapshot
+                // Contours are in ROI-relative coordinates — adjust to full-frame for snapshot/storage
                 std::vector<std::vector<cv::Point>> contours = validation.allContours;
+                for (auto& contour : contours) {
+                    for (auto& pt : contour) {
+                        pt.x += roi.x;
+                        pt.y += roi.y;
+                    }
+                }
                 const auto algoEnd = clock::now();
                 const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
                 algoMsSinceSummary += algoMs;

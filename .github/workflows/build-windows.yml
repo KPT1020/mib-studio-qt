@@ -106,7 +106,20 @@ jobs:
           "@ | Out-File -FilePath "$env:USERPROFILE\.conan2\profiles\ci" -Encoding UTF8
           Write-Host "CI Conan profile created:"
           conan profile show -pr ci
+
+          # Add team Conan remote (Artifactory) as primary
+          if ($env:CONAN_REMOTE_URL) {
+            conan remote add team-conan $env:CONAN_REMOTE_URL --index 0
+            conan remote login team-conan $env:CONAN_REMOTE_USER -p $env:CONAN_REMOTE_PASSWORD
+            Write-Host "Team Conan remote configured"
+          } else {
+            Write-Host "CONAN_REMOTE_URL not set, using ConanCenter only" -ForegroundColor Yellow
+          }
         shell: pwsh
+        env:
+          CONAN_REMOTE_URL: ${{ secrets.CONAN_REMOTE_URL }}
+          CONAN_REMOTE_USER: ${{ secrets.CONAN_REMOTE_USER }}
+          CONAN_REMOTE_PASSWORD: ${{ secrets.CONAN_REMOTE_PASSWORD }}
 
       - name: Restore Conan cache
         id: conan-cache
@@ -138,6 +151,12 @@ jobs:
       # ── Build ──────────────────────────────────────────────────
       - name: Conan install
         run: conan install . -of build --build=missing -s build_type=Release -pr ci
+
+      - name: Upload packages to team remote
+        if: always() && env.CONAN_REMOTE_URL != ''
+        run: conan upload "*" -r team-conan -c
+        env:
+          CONAN_REMOTE_URL: ${{ secrets.CONAN_REMOTE_URL }}
 
       - name: Save Conan cache
         if: always()

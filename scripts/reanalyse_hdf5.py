@@ -67,6 +67,7 @@ REASON_NO_SINGLE_INNER = "no_single_inner_contour"
 REASON_TOUCHES_BORDER = "touches_border"
 REASON_AREA_OOR = "area_out_of_range"
 REASON_RING_OOR = "ring_ratio_out_of_range"
+REASON_DEFORM_OOR = "deformability_out_of_range"
 
 
 def _int_attr(value: Any) -> Optional[int]:
@@ -315,6 +316,9 @@ def load_processing_config(args: argparse.Namespace) -> dict[str, Any]:
         "enable_border_check": True,
         "enable_area_range_check": True,
         "require_single_inner_contour": True,
+        "deformability_threshold_min": 0.0,
+        "deformability_threshold_max": 1.0,
+        "enable_deformability_range_check": False,
     }
     if args.config:
         path = Path(args.config)
@@ -332,6 +336,9 @@ def load_processing_config(args: argparse.Namespace) -> dict[str, Any]:
             cfg["enable_border_check"] = filters.get("enable_border_check", cfg["enable_border_check"])
             cfg["enable_area_range_check"] = filters.get("enable_area_range_check", cfg["enable_area_range_check"])
             cfg["require_single_inner_contour"] = filters.get("require_single_inner_contour", cfg["require_single_inner_contour"])
+            cfg["deformability_threshold_min"] = ip.get("deformability_threshold_min", cfg["deformability_threshold_min"])
+            cfg["deformability_threshold_max"] = ip.get("deformability_threshold_max", cfg["deformability_threshold_max"])
+            cfg["enable_deformability_range_check"] = filters.get("enable_deformability_range_check", cfg["enable_deformability_range_check"])
     if args.blur is not None:
         cfg["gaussian_blur_size"] = args.blur
     if args.threshold is not None:
@@ -550,9 +557,11 @@ def filter_processed_image(
         result["selectedHullArea"] = float(hull_area)
         area_ok = not config["enable_area_range_check"] or (config["area_threshold_min"] <= hull_area <= config["area_threshold_max"])
         ring_ok = (result["ringRatio"] > RING_RATIO_MIN and result["ringRatio"] < RING_RATIO_MAX)
+        deform_ok = not config["enable_deformability_range_check"] or (config["deformability_threshold_min"] <= result["deformability"] <= config["deformability_threshold_max"])
         result["passAreaCheck"] = bool(area_ok)
         result["passRingCheck"] = bool(ring_ok)
-        if area_ok and ring_ok:
+        result["passDeformabilityCheck"] = bool(deform_ok)
+        if area_ok and ring_ok and deform_ok:
             result["inRange"] = True
             result["isValid"] = True
             result["rejectReason"] = REASON_VALID
@@ -561,9 +570,12 @@ def filter_processed_image(
             if not area_ok:
                 result["rejectReason"] = REASON_AREA_OOR
                 result["failedAt"] = REASON_AREA_OOR
-            else:
+            elif not ring_ok:
                 result["rejectReason"] = REASON_RING_OOR
                 result["failedAt"] = REASON_RING_OOR
+            else:
+                result["rejectReason"] = REASON_DEFORM_OOR
+                result["failedAt"] = REASON_DEFORM_OOR
     elif filtered and not config["require_single_inner_contour"]:
         idx = max(range(len(filtered)), key=lambda i: cv2.contourArea(filtered[i]))
         c = filtered[idx]
@@ -580,17 +592,23 @@ def filter_processed_image(
         result["selectedContourArea"] = float(contour_area)
         result["selectedHullArea"] = float(hull_area)
         area_ok = (not config["enable_area_range_check"]) or (config["area_threshold_min"] <= hull_area <= config["area_threshold_max"])
+        deform_ok = not config["enable_deformability_range_check"] or (config["deformability_threshold_min"] <= result["deformability"] <= config["deformability_threshold_max"])
         result["passAreaCheck"] = bool(area_ok)
         # Ring ratio check not used on this path (keep true to indicate not the cause of rejection)
         result["passRingCheck"] = True
-        if area_ok:
+        result["passDeformabilityCheck"] = bool(deform_ok)
+        if area_ok and deform_ok:
             result["inRange"] = True
             result["isValid"] = True
             result["rejectReason"] = REASON_VALID
             result["failedAt"] = ""
         else:
-            result["rejectReason"] = REASON_AREA_OOR
-            result["failedAt"] = REASON_AREA_OOR
+            if not area_ok:
+                result["rejectReason"] = REASON_AREA_OOR
+                result["failedAt"] = REASON_AREA_OOR
+            else:
+                result["rejectReason"] = REASON_DEFORM_OOR
+                result["failedAt"] = REASON_DEFORM_OOR
     else:
         # No metrics path (e.g., require_single_inner_contour is true, but earlier return handled;
         # or filtered exists but no allowed contour selection). Be explicit.
