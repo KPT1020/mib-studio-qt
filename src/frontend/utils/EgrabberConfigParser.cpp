@@ -195,4 +195,151 @@ namespace frontend
         return true;
     }
 
+    bool EgrabberConfigParser::readRoiSize(const QString &filePath, int &width, int &height)
+    {
+        QSize defaultSize = defaultRoiSize();
+        width = defaultSize.width();
+        height = defaultSize.height();
+
+        QFile file(filePath);
+        if (!file.exists())
+            return false;
+
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        {
+            SPDLOG_WARN("Failed to read egrabberConfig.js for ROI size: {}", filePath.toStdString());
+            return false;
+        }
+
+        QTextStream in(&file);
+        QString content = in.readAll();
+        file.close();
+
+        QRegularExpression reWidth(R"(^\s*g\.RemotePort\.set\("Width",\s*(\d+)\);)", QRegularExpression::MultilineOption);
+        QRegularExpression reHeight(R"(^\s*g\.RemotePort\.set\("Height",\s*(\d+)\);)", QRegularExpression::MultilineOption);
+
+        QStringList contentLines = content.split('\n');
+        QRegularExpressionMatch matchW;
+        QRegularExpressionMatch matchH;
+
+        for (const QString &line : contentLines)
+        {
+            if (line.trimmed().startsWith("//"))
+                continue;
+
+            QRegularExpressionMatch mW = reWidth.match(line);
+            if (mW.hasMatch() && !matchW.hasMatch())
+                matchW = mW;
+
+            QRegularExpressionMatch mH = reHeight.match(line);
+            if (mH.hasMatch() && !matchH.hasMatch())
+                matchH = mH;
+        }
+
+        if (matchW.hasMatch())
+            width = matchW.captured(1).toInt();
+
+        if (matchH.hasMatch())
+            height = matchH.captured(1).toInt();
+
+        // Snap to alignment constraints
+        int snappedW = snapToStep(width, ROI_WIDTH_STEP, 1920);
+        int snappedH = snapToStep(height, ROI_HEIGHT_STEP, 1080);
+        if (snappedW < 64)
+            snappedW = 64;
+        if (snappedH < 16)
+            snappedH = 16;
+
+        if (snappedW != width || snappedH != height)
+        {
+            SPDLOG_WARN("egrabberConfig.js contained invalid ROI size: requested=({},{}) snapped=({},{})",
+                        width, height, snappedW, snappedH);
+            width = snappedW;
+            height = snappedH;
+        }
+
+        return true;
+    }
+
+    bool EgrabberConfigParser::updateRoiSize(const QString &filePath, int requestedW, int requestedH, QString *errorMsg)
+    {
+        QFile file(filePath);
+
+        if (!file.exists())
+        {
+            if (errorMsg)
+                *errorMsg = QString("egrabberConfig.js not found at %1").arg(filePath);
+            return false;
+        }
+
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        {
+            if (errorMsg)
+                *errorMsg = QString("Failed to open egrabberConfig.js for reading: %1").arg(filePath);
+            return false;
+        }
+
+        QTextStream in(&file);
+        QStringList lines = in.readAll().split('\n');
+        file.close();
+
+        // Snap to alignment constraints
+        int width = snapToStep(requestedW, ROI_WIDTH_STEP, 1920);
+        int height = snapToStep(requestedH, ROI_HEIGHT_STEP, 1080);
+        if (width < 64)
+            width = 64;
+        if (height < 16)
+            height = 16;
+
+        QRegularExpression reWidth(R"(^\s*g\.RemotePort\.set\("Width",\s*(\d+)\);)");
+        QRegularExpression reHeight(R"(^\s*g\.RemotePort\.set\("Height",\s*(\d+)\);)");
+
+        for (int i = 0; i < lines.size(); ++i)
+        {
+            QString line = lines[i];
+            if (line.trimmed().startsWith("//"))
+                continue;
+
+            QRegularExpressionMatch matchW = reWidth.match(line);
+            if (matchW.hasMatch())
+                lines[i] = QString("g.RemotePort.set(\"Width\", %1);").arg(width);
+
+            QRegularExpressionMatch matchH = reHeight.match(line);
+            if (matchH.hasMatch())
+                lines[i] = QString("g.RemotePort.set(\"Height\", %1);").arg(height);
+        }
+
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate))
+        {
+            if (errorMsg)
+                *errorMsg = QString("Failed to open egrabberConfig.js for writing: %1").arg(filePath);
+            return false;
+        }
+
+        QTextStream out(&file);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+        out.setCodec("UTF-8");
+#endif
+        for (int i = 0; i < lines.size(); ++i)
+        {
+            out << lines[i];
+            if (i < lines.size() - 1)
+                out << '\n';
+        }
+        file.close();
+
+        if (requestedW != width || requestedH != height)
+        {
+            SPDLOG_INFO("Updated ROI size in egrabberConfig.js at {}: requested=({},{}) snapped=({},{})",
+                        filePath.toStdString(), requestedW, requestedH, width, height);
+        }
+        else
+        {
+            SPDLOG_INFO("Updated ROI size in egrabberConfig.js at {}: Width={}, Height={}",
+                        filePath.toStdString(), width, height);
+        }
+
+        return true;
+    }
+
 } // namespace frontend

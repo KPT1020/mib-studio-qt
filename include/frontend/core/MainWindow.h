@@ -69,6 +69,7 @@ private:
     QPushButton* startExperimentBtn_ = nullptr;
     QPushButton* stopExperimentBtn_ = nullptr;
     QLabel* experimentIndicator_ = nullptr;
+    QLabel* roiLabel_ = nullptr;
     QPushButton* startCameraBtn_ = nullptr;
     QPushButton* stopCameraBtn_ = nullptr;
 };

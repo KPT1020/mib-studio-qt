@@ -31,9 +31,12 @@ namespace frontend
     }
 
     SimpleImageCanvas::SimpleImageCanvas(QImage *image, OverviewTab::FitMode *fitMode,
-                                         bool *roiVisible, QPointF *roiPos, QWidget *parent)
+                                         bool *roiVisible, QPointF *roiPos,
+                                         int *roiWidth, int *roiHeight,
+                                         QWidget *parent)
         : QWidget(parent), image_(image), fitMode_(fitMode),
-          roiVisible_(roiVisible), roiPos_(roiPos)
+          roiVisible_(roiVisible), roiPos_(roiPos),
+          roiWidth_(roiWidth), roiHeight_(roiHeight)
     {
         setMouseTracking(true);
     }
@@ -79,8 +82,8 @@ namespace frontend
         // Draw ROI overlay if visible
         if (roiVisible_ && *roiVisible_ && roiPos_)
         {
-            const int roiW = 512;
-            const int roiH = 96;
+            const int roiW = roiWidth_ ? *roiWidth_ : 512;
+            const int roiH = roiHeight_ ? *roiHeight_ : 96;
 
             // Convert image coordinates to canvas coordinates
             QPointF canvasPos = imageToCanvas(*roiPos_);
@@ -107,8 +110,8 @@ namespace frontend
             QPointF imagePos = canvasToImage(canvasPos);
 
             // Check if click is within ROI rectangle
-            const int roiW = 512;
-            const int roiH = 96;
+            const int roiW = roiWidth_ ? *roiWidth_ : 512;
+            const int roiH = roiHeight_ ? *roiHeight_ : 96;
             QRectF roiRect(roiPos_->x(), roiPos_->y(), roiW, roiH);
 
             if (roiRect.contains(imagePos))
@@ -139,8 +142,8 @@ namespace frontend
 
             const int imgW = image_->width();
             const int imgH = image_->height();
-            const int roiW = 512;
-            const int roiH = 96;
+            const int roiW = roiWidth_ ? *roiWidth_ : 512;
+            const int roiH = roiHeight_ ? *roiHeight_ : 96;
 
             // Constrain to image bounds first
             newRoiPos.setX(std::max(0.0, std::min(double(imgW - roiW), newRoiPos.x())));

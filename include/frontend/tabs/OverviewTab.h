@@ -12,6 +12,7 @@ class QPlainTextEdit;
 class QPushButton;
 class QToolButton;
 class QLabel;
+class QSpinBox;
 class QTimer;
 class QWidget;
 
@@ -38,6 +39,13 @@ namespace frontend
         // Controls whether the ROI overlay is shown on the canvas.
         void setRoiOverlayVisible(bool visible);
 
+        int roiWidth() const { return roiWidth_; }
+        int roiHeight() const { return roiHeight_; }
+        QPointF roiPosition() const { return roiPosition_; }
+
+    signals:
+        void roiChanged(int offsetX, int offsetY, int width, int height);
+
     private slots:
         void onTick();
         void onReloadJs();
@@ -48,6 +56,7 @@ namespace frontend
         void onToggleFit();
         void onToggleRoiOverlay();
         void onRoiPositionChanged(QPointF imagePos);
+        void onRoiSizeChanged();
 
     private:
         QString appDirIncludePath(const QString &fileName) const;
@@ -67,12 +76,15 @@ namespace frontend
         // ROI overlay state
         bool roiOverlayVisible_ = false;
         QPointF roiPosition_; // Position in image coordinates
-        static constexpr int roiWidth_ = 512;
-        static constexpr int roiHeight_ = 96;
+        int roiWidth_ = 512;
+        int roiHeight_ = 96;
+        QSpinBox *roiWidthSpin_ = nullptr;
+        QSpinBox *roiHeightSpin_ = nullptr;
 
         // Helper methods
         QString egrabberConfigPath() const;
         void updateEgrabberConfigFromRect(QPointF imagePos);
+        void updateEgrabberConfigSize();
         void initializeRoiFromConfig();
     };
 

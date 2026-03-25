@@ -65,6 +65,9 @@ public:
     /** Redraw scatter and histogram with current data and axis ranges (e.g. after settings change). */
     void refreshCharts();
 
+public slots:
+    void updateRoiDisplay(int offsetX, int offsetY, int width, int height);
+
     // Chart snapshot capture for HDF5 saving
     bool captureChartSnapshots(cv::Mat& histogramImage, cv::Mat& scatterPlotImage) const;
 
@@ -99,6 +102,7 @@ private:
     Ui::ExperimentMonitoringTab* ui;
     backend::AppBackend& backend_;
     QTimer* updateTimer_ = nullptr;
+    QLabel* roiLabel_ = nullptr;
 
     // Panel 1: Scatterplot
     QChartView* scatterplotView_ = nullptr;

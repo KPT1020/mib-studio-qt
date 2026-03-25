@@ -57,6 +57,10 @@ namespace frontend
     {
         ui->setupUi(this);
 
+        roiLabel_ = new QLabel(tr("ROI: --"), this);
+        roiLabel_->setStyleSheet("font-weight: bold; padding: 0 8px;");
+        ui->topRowLayout->addWidget(roiLabel_);
+
         setupCharts();
 
         // Connect signals
@@ -74,6 +78,11 @@ namespace frontend
         updateTimer_ = new QTimer(this);
         updateTimer_->setInterval(UPDATE_INTERVAL_MS);
         connect(updateTimer_, &QTimer::timeout, this, &ExperimentMonitoringTab::onUpdate);
+    }
+
+    void ExperimentMonitoringTab::updateRoiDisplay(int offsetX, int offsetY, int width, int height) {
+        if (roiLabel_)
+            roiLabel_->setText(tr("ROI: %1 x %2 @ (%3, %4)").arg(width).arg(height).arg(offsetX).arg(offsetY));
     }
 
     ExperimentMonitoringTab::~ExperimentMonitoringTab() {

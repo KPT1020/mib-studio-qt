@@ -106,7 +106,7 @@
              <string>ROI Overlay: Off</string>
             </property>
             <property name="toolTip">
-             <string>Toggle ROI overlay (512x96 rectangle)</string>
+             <string>Toggle ROI overlay rectangle</string>
             </property>
            </widget>
           </item>

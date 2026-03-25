@@ -34,7 +34,21 @@
       "WebFetch(domain:mlflow.org)",
       "mcp__plugin_context7_context7__resolve-library-id",
       "mcp__plugin_context7_context7__query-docs",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(find /d/mib-studio-qt -name *profile* -type f)",
+      "Bash(git config:*)",
+      "Bash(find /d/mib-studio-qt -name *.md -type f -exec grep -l \"conan\\\\|Conan\\\\|CONAN\" {})",
+      "Bash(2)",
+      "Bash(grep -r \"remotes\\\\|conan-center\\\\|artifactory\\\\|conan_server\" /d/mib-studio-qt --include=*.txt --include=*.py --include=*.md)",
+      "Bash(find /d/mib-studio-qt -type f -name *.yml -o -name *.yaml -o -name *.json -o -name *conan* -o -name *.dockerfile -o -name docker-compose*)",
+      "Bash(find /d/mib-studio-qt -name .conan* -o -name conan*)",
+      "Bash(cmake --build build --config Debug)",
+      "Bash(cmake --preset windows-default)",
+      "Bash(conan remote:*)",
+      "Bash(conan install:*)",
+      "Bash(find /d/mib-studio-qt/knowledge_map -type f -name *.md)",
+      "Bash(grep -r \"\\\\.conan2\\\\|conan remote\\\\|settings\\\\.yml\\\\|global\\\\.conf\" /d/mib-studio-qt --include=*.md --include=*.ps1 --include=*.sh --include=*.yml --include=*.yaml)",
+      "Bash(find /d/mib-studio-qt -name *Experiment* -o -name *experiment*)"
     ]
   }
 }

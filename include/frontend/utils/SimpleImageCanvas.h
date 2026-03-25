@@ -16,7 +16,9 @@ namespace frontend
         Q_OBJECT
     public:
         explicit SimpleImageCanvas(QImage *image, OverviewTab::FitMode *fitMode,
-                                   bool *roiVisible, QPointF *roiPos, QWidget *parent = nullptr);
+                                   bool *roiVisible, QPointF *roiPos,
+                                   int *roiWidth = nullptr, int *roiHeight = nullptr,
+                                   QWidget *parent = nullptr);
 
     signals:
         void roiPositionChanged(QPointF imagePos);
@@ -35,6 +37,8 @@ namespace frontend
         OverviewTab::FitMode *fitMode_ = nullptr;
         bool *roiVisible_ = nullptr;
         QPointF *roiPos_ = nullptr;
+        int *roiWidth_ = nullptr;
+        int *roiHeight_ = nullptr;
 
         // Transformation state
         double scale_ = 1.0;
