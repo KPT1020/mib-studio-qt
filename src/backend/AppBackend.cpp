@@ -11,6 +11,7 @@
 #include "camera/mock/MockCamera.h"
 #include "backend/services/CameraControlService.h"
 #include "backend/services/AutofocusService.h"
+#include "backend/services/TriggerService.h"
 #include "backend/services/YoloService.h"
 #include "backend/BackgroundCaptureNotifier.h"
 #include <QImage>
@@ -87,6 +88,7 @@ namespace backend
         playbackService_ = std::make_unique<services::PlaybackService>();
         cameraControlService_ = std::make_unique<services::CameraControlService>();
         autofocusService_ = std::make_unique<services::AutofocusService>();
+        triggerService_ = std::make_unique<services::TriggerService>();
         yoloService_ = std::make_unique<services::YoloService>();
         frameStore_ = std::make_shared<playback::FrameStore>(5000);
 
@@ -111,6 +113,25 @@ namespace backend
             if (autofocusService_) {
                 autofocusService_->onRingRatio(ringRatio, timestampNs);
             } });
+
+        // Wire target group trigger: processing -> trigger service
+        processingService_->setTargetGroupCallback([this](bool isTargetGroup) {
+            if (triggerService_) {
+                triggerService_->onTargetGroupResult(isTargetGroup);
+            }
+        });
+
+        // Wire camera lifecycle to trigger service
+        captureService_->setCameraReadyCallback([this](camera::common::ICamera* cam) {
+            if (triggerService_) {
+                triggerService_->setCamera(cam);
+                if (cam) {
+                    triggerService_->start();
+                } else {
+                    triggerService_->stop();
+                }
+            }
+        });
 
         // Wire background capture callback to emit Qt signal
         processingService_->setBackgroundCaptureCallback([this](const cv::Mat& bg, uint64_t frameIndex) {
@@ -210,6 +231,7 @@ namespace backend
     services::PlaybackService &AppBackend::playback() { return *playbackService_; }
     services::CameraControlService &AppBackend::cameraControl() { return *cameraControlService_; }
     services::AutofocusService &AppBackend::autofocus() { return *autofocusService_; }
+    services::TriggerService &AppBackend::trigger() { return *triggerService_; }
     services::YoloService &AppBackend::yolo() { return *yoloService_; }
 
     void AppBackend::configureMockCamera(const camera::mock::MockCameraOptions &options)

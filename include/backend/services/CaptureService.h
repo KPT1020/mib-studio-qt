@@ -49,6 +49,10 @@ public:
 
     void setCameraFactory(CameraFactory factory);
 
+    // Callback fired when camera starts (with pointer) or stops (with nullptr)
+    using CameraReadyCallback = std::function<void(camera::common::ICamera*)>;
+    void setCameraReadyCallback(CameraReadyCallback cb);
+
     bool start();
     void stop();
     bool isRunning() const;
@@ -63,6 +67,7 @@ private:
     std::shared_ptr<backend::playback::FrameStore> frameStore_{};
 
     CameraFactory cameraFactory_{};
+    CameraReadyCallback cameraReadyCallback_;
     camera::common::ICamera* activeCamera_{nullptr};
     std::mutex cameraMutex_;
 

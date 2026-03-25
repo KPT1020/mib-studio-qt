@@ -241,6 +241,20 @@ namespace frontend
 					if (fl.contains("require_single_inner_contour"))
 						pcfg.require_single_inner_contour = fl.value("require_single_inner_contour").toBool(pcfg.require_single_inner_contour);
 				}
+				if (ip.contains("target_group") && ip.value("target_group").isObject())
+				{
+					const QJsonObject tg = ip.value("target_group").toObject();
+					if (tg.contains("enabled"))
+						pcfg.enable_target_group = tg.value("enabled").toBool(pcfg.enable_target_group);
+					if (tg.contains("area_min"))
+						pcfg.target_group_area_min = tg.value("area_min").toInt(pcfg.target_group_area_min);
+					if (tg.contains("area_max"))
+						pcfg.target_group_area_max = tg.value("area_max").toInt(pcfg.target_group_area_max);
+					if (tg.contains("deformability_min"))
+						pcfg.target_group_deformability_min = tg.value("deformability_min").toDouble(pcfg.target_group_deformability_min);
+					if (tg.contains("deformability_max"))
+						pcfg.target_group_deformability_max = tg.value("deformability_max").toDouble(pcfg.target_group_deformability_max);
+				}
 			}
 		}
 		backend_.processing().setProcessingConfig(pcfg);

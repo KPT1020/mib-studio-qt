@@ -48,6 +48,12 @@ struct ProcessingConfig {
     bool auto_background_enabled{false};
     int auto_background_empty_frames{30};
     int auto_background_cooldown_frames{1000};
+    // Target group sort trigger (second gate within valid frames)
+    bool enable_target_group{false};
+    int target_group_area_min{300};
+    int target_group_area_max{800};
+    double target_group_deformability_min{0.0};
+    double target_group_deformability_max{0.3};
 };
 
 struct FilterResult {
@@ -61,6 +67,7 @@ struct FilterResult {
     double areaRatio{0.0};
     double ringRatio{0.0};
     BrightnessQuantiles brightness;
+    bool isTargetGroup{false}; // True if valid AND matches target group criteria
     // Contours found during processing (for snapshot/display)
     // These are in the same coordinate space as the processedImage mask
     std::vector<std::vector<cv::Point>> allContours;
@@ -177,6 +184,10 @@ public:
     using RingRatioCallback = std::function<void(double ringRatio, int64_t timestampNs)>;
     void setRingRatioCallback(RingRatioCallback callback);
 
+    // Target group trigger callback (called for each valid frame with target group result)
+    using TargetGroupCallback = std::function<void(bool isTargetGroup)>;
+    void setTargetGroupCallback(TargetGroupCallback callback);
+
     // Background capture callback for auto-capture (called when background is auto-captured)
     using BackgroundCaptureCallback = std::function<void(const cv::Mat& background, uint64_t frameIndex)>;
     void setBackgroundCaptureCallback(BackgroundCaptureCallback callback);
@@ -280,7 +291,10 @@ private:
     // Ring ratio callback for autofocus
     mutable std::mutex ringRatioCallbackMutex_;
     RingRatioCallback ringRatioCallback_;
-    
+
+    mutable std::mutex targetGroupCallbackMutex_;
+    TargetGroupCallback targetGroupCallback_;
+
     // Background capture callback for auto-capture
     mutable std::mutex backgroundCaptureCallbackMutex_;
     BackgroundCaptureCallback backgroundCaptureCallback_;

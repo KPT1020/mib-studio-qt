@@ -310,6 +310,26 @@ bool EGrabberCamera::checkDeviceHealth() const {
     }
 }
 
+void EGrabberCamera::configureTriggerOutput(const std::string& lineSelector) {
+    triggerLineSelector_ = lineSelector;
+    triggerConfigured_ = true;
+    SPDLOG_INFO("EGrabberCamera: trigger output configured on {}", lineSelector);
+}
+
+bool EGrabberCamera::setTriggerOutput(bool high) {
+    if (!triggerConfigured_ || !running_ || !grabber_) return false;
+    try {
+        // InterfaceModule operations are thread-safe vs StreamModule (frame grabbing),
+        // so no mutex needed here. This runs on the trigger thread while
+        // grabFrame() runs on the capture thread.
+        grabber_->setString<Euresys::InterfaceModule>("LineSource", high ? "High" : "Low");
+        return true;
+    } catch (const std::exception& ex) {
+        SPDLOG_WARN("EGrabberCamera trigger output failed: {}", ex.what());
+        return false;
+    }
+}
+
 } // namespace camera::common
 
 

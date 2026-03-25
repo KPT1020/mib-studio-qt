@@ -98,6 +98,7 @@ add_library(mib_backend STATIC
     src/backend/services/ProcessingService.cpp
     src/backend/services/PlaybackService.cpp
     src/backend/services/AutofocusService.cpp
+    src/backend/services/TriggerService.cpp
     src/backend/services/YoloService.cpp
     src/backend/playback/FrameStore.cpp
     src/camera/common/EGrabberCamera.cpp

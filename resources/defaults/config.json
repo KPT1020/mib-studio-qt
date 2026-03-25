@@ -21,7 +21,14 @@
         },
         "gaussian_blur_size": 3,
         "morph_iterations": 1,
-        "morph_kernel_size": 3
+        "morph_kernel_size": 3,
+        "target_group": {
+            "enabled": false,
+            "area_min": 300,
+            "area_max": 800,
+            "deformability_min": 0.0,
+            "deformability_max": 0.3
+        }
     },
     "save_directory": "testing",
     "scatter_plot_enabled": true,

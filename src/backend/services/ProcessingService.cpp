@@ -303,6 +303,11 @@ void ProcessingService::setRingRatioCallback(RingRatioCallback callback) {
     ringRatioCallback_ = std::move(callback);
 }
 
+void ProcessingService::setTargetGroupCallback(TargetGroupCallback callback) {
+    std::scoped_lock lk(targetGroupCallbackMutex_);
+    targetGroupCallback_ = std::move(callback);
+}
+
 void ProcessingService::setBackgroundCaptureCallback(BackgroundCaptureCallback callback) {
     std::scoped_lock lk(backgroundCaptureCallbackMutex_);
     backgroundCaptureCallback_ = std::move(callback);
@@ -560,6 +565,13 @@ FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedIma
                 result.inRange = true;
                 result.isValid = true;
             }
+            if (result.isValid && config.enable_target_group) {
+                bool tgArea = (result.area >= config.target_group_area_min &&
+                               result.area <= config.target_group_area_max);
+                bool tgDeform = (result.deformability >= config.target_group_deformability_min &&
+                                 result.deformability <= config.target_group_deformability_max);
+                result.isTargetGroup = tgArea && tgDeform;
+            }
         } else if (!contours.empty() && !config.require_single_inner_contour) {
             size_t largestIdx = 0;
             double largestOuterArea = 0.0;
@@ -591,6 +603,13 @@ FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedIma
             if (areaInRange && deformabilityInRange && areaRatioInRange) {
                 result.inRange = true;
                 result.isValid = true;
+            }
+            if (result.isValid && config.enable_target_group) {
+                bool tgArea = (result.area >= config.target_group_area_min &&
+                               result.area <= config.target_group_area_max);
+                bool tgDeform = (result.deformability >= config.target_group_deformability_min &&
+                                 result.deformability <= config.target_group_deformability_max);
+                result.isTargetGroup = tgArea && tgDeform;
             }
         }
     }
@@ -842,6 +861,13 @@ void ProcessingService::realtimeLoop() {
                         std::scoped_lock callbackLk(ringRatioCallbackMutex_);
                         if (ringRatioCallback_) {
                             ringRatioCallback_(validation.ringRatio, f.timestamp);
+                        }
+                    }
+                    // Notify trigger service of target group classification
+                    {
+                        std::scoped_lock callbackLk(targetGroupCallbackMutex_);
+                        if (targetGroupCallback_) {
+                            targetGroupCallback_(validation.isTargetGroup);
                         }
                     }
                 } else {
@@ -1141,6 +1167,13 @@ void ProcessingService::realtimeLoop() {
                             std::scoped_lock callbackLk(ringRatioCallbackMutex_);
                             if (ringRatioCallback_) {
                                 ringRatioCallback_(validation.ringRatio, f.timestamp);
+                            }
+                        }
+                        // Notify trigger service of target group classification
+                        {
+                            std::scoped_lock callbackLk(targetGroupCallbackMutex_);
+                            if (targetGroupCallback_) {
+                                targetGroupCallback_(validation.isTargetGroup);
                             }
                         }
                     } else {
@@ -1485,6 +1518,13 @@ void ProcessingService::realtimeLoop() {
                             std::scoped_lock callbackLk(ringRatioCallbackMutex_);
                             if (ringRatioCallback_) {
                                 ringRatioCallback_(validation.ringRatio, f.timestamp);
+                            }
+                        }
+                        // Notify trigger service of target group classification
+                        {
+                            std::scoped_lock callbackLk(targetGroupCallbackMutex_);
+                            if (targetGroupCallback_) {
+                                targetGroupCallback_(validation.isTargetGroup);
                             }
                         }
                     } else {
