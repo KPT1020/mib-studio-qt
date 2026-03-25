@@ -303,6 +303,34 @@ namespace backend
         return (selectedIfIndex_ >= 0 && selectedDevIndex_ >= 0) || mockCameraConfigured_;
     }
 
+    void AppBackend::setFrameRecordingFilter(bool enabled) {
+        if (!frameStore_ || !processingService_) return;
+
+        frameRecordingFilterEnabled_ = enabled;
+
+        if (enabled) {
+            // Capture current processing config, ROI, and background for the filter.
+            // The filter uses a lambda that fetches live config each call, so it stays
+            // in sync with user changes to ROI/background/thresholds.
+            auto* procSvc = processingService_.get();
+            frameStore_->setFrameFilter([procSvc](const playback::Frame& frame) -> bool {
+                auto config = procSvc->getProcessingConfig();
+                auto roi = procSvc->getRealtimeRoi();
+                auto bg = procSvc->getRealtimeBackgroundGray();
+                return services::ProcessingService::isFrameEmpty(frame, config, roi, bg);
+            });
+            frameStore_->resetFilteredCount();
+            SPDLOG_INFO("Frame recording filter enabled (skip empty frames)");
+        } else {
+            frameStore_->clearFrameFilter();
+            SPDLOG_INFO("Frame recording filter disabled (store all frames)");
+        }
+    }
+
+    bool AppBackend::isFrameRecordingFilterEnabled() const {
+        return frameRecordingFilterEnabled_;
+    }
+
     BackgroundCaptureNotifier* AppBackend::backgroundCaptureNotifier() const {
         return backgroundCaptureNotifier_.get();
     }

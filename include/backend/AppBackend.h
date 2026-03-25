@@ -70,6 +70,11 @@ namespace backend
         // Check if a camera is configured (either hardware or mock)
         bool isCameraConfigured() const;
 
+        // Frame recording filter: when enabled, empty frames are skipped at the ring buffer level
+        // so only non-empty frames are stored in the FrameStore.
+        void setFrameRecordingFilter(bool enabled);
+        bool isFrameRecordingFilterEnabled() const;
+
         // Get background capture notifier for Qt signal connections
         BackgroundCaptureNotifier* backgroundCaptureNotifier() const;
 
@@ -90,7 +95,8 @@ namespace backend
         int selectedDevIndex_{-1};
         std::string selectedLabel_;
         bool mockCameraConfigured_{false};
-        
+        bool frameRecordingFilterEnabled_{false};
+
         // Background capture notifier for Qt signals
         std::unique_ptr<BackgroundCaptureNotifier> backgroundCaptureNotifier_;
     };
