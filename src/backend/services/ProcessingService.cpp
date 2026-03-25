@@ -553,8 +553,10 @@ FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedIma
             bool deformabilityInRange = !config.enable_deformability_range_check ||
                               (result.deformability >= config.deformability_threshold_min &&
                                result.deformability <= config.deformability_threshold_max);
+            bool areaRatioInRange = !config.enable_area_ratio_check ||
+                              (result.areaRatio <= config.area_ratio_threshold_max);
 
-            if (areaInRange && ringRatioInRange && deformabilityInRange) {
+            if (areaInRange && ringRatioInRange && deformabilityInRange && areaRatioInRange) {
                 result.inRange = true;
                 result.isValid = true;
             }
@@ -584,7 +586,9 @@ FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedIma
             bool deformabilityInRange = !config.enable_deformability_range_check ||
                 (result.deformability >= config.deformability_threshold_min &&
                  result.deformability <= config.deformability_threshold_max);
-            if (areaInRange && deformabilityInRange) {
+            bool areaRatioInRange = !config.enable_area_ratio_check ||
+                (result.areaRatio <= config.area_ratio_threshold_max);
+            if (areaInRange && deformabilityInRange && areaRatioInRange) {
                 result.inRange = true;
                 result.isValid = true;
             }
