@@ -80,6 +80,7 @@ private slots:
     void onUpdate();
     void onToggleOverlay(bool enabled);
     void onClearBuffer();
+    void onAutoTune();
 
 protected:
     void showEvent(QShowEvent* event) override;

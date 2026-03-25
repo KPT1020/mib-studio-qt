@@ -9,6 +9,7 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
+#include <limits>
 #include <tuple>
 #include <cmath>
 
@@ -201,6 +202,117 @@ void ProcessingService::clearMonitoringFrames() {
     std::scoped_lock lk(monitoringFramesMutex_);
     monitoringValidFrames_.clear();
     monitoringInvalidFrames_.clear();
+}
+
+AutoTuneResult ProcessingService::computeAutoTune() const {
+    AutoTuneResult result;
+    result.suggestedConfig = getProcessingConfig();
+
+    // Gather all monitoring frames (valid + invalid)
+    auto validFrames = getMonitoringValidFrames();
+    auto invalidFrames = getMonitoringInvalidFrames();
+
+    // Collect metrics from frames that have contours (area > 0 means contours were found)
+    // Exclude border-touching frames as they are legitimate rejects
+    std::vector<double> areas, deformabilities, ringRatios, areaRatios;
+
+    auto collectMetrics = [&](const std::vector<ProcessedFrame>& frames) {
+        for (const auto& f : frames) {
+            if (f.validation.area <= 0.0) continue;       // No contours found
+            if (f.validation.touchesBorder) continue;      // Legitimate reject
+            areas.push_back(f.validation.area);
+            deformabilities.push_back(f.validation.deformability);
+            if (f.validation.ringRatio > 0.0) {
+                ringRatios.push_back(f.validation.ringRatio);
+            }
+            if (f.validation.areaRatio > 0.0) {
+                areaRatios.push_back(f.validation.areaRatio);
+            }
+        }
+    };
+    collectMetrics(validFrames);
+    collectMetrics(invalidFrames);
+
+    result.framesAnalyzed = areas.size();
+    if (areas.size() < 10) {
+        result.success = false;
+        result.message = "Not enough frames with detected contours (" +
+                         std::to_string(areas.size()) + " found, need at least 10). "
+                         "Let the camera run and accumulate more frames before auto-tuning.";
+        return result;
+    }
+
+    // Helper: compute percentile statistics and IQR-based thresholds
+    auto computeStats = [](std::vector<double>& values) -> AutoTuneResult::MetricStats {
+        AutoTuneResult::MetricStats stats;
+        if (values.empty()) return stats;
+        std::sort(values.begin(), values.end());
+        size_t n = values.size();
+        stats.min = values.front();
+        stats.max = values.back();
+        stats.q1 = values[n / 4];
+        stats.median = values[n / 2];
+        stats.q3 = values[(3 * n) / 4];
+        return stats;
+    };
+
+    // Compute IQR-based range: [Q1 - 1.5*IQR, Q3 + 1.5*IQR]
+    // This captures the main population while excluding outliers
+    auto iqrRange = [](const AutoTuneResult::MetricStats& stats,
+                       double floorMin = 0.0, double ceilMax = std::numeric_limits<double>::max())
+                       -> std::pair<double, double> {
+        double iqr = stats.q3 - stats.q1;
+        double lower = std::max(floorMin, stats.q1 - 1.5 * iqr);
+        double upper = std::min(ceilMax, stats.q3 + 1.5 * iqr);
+        return {lower, upper};
+    };
+
+    // Area
+    result.area = computeStats(areas);
+    auto [areaMin, areaMax] = iqrRange(result.area, 1.0);
+    result.suggestedConfig.area_threshold_min = static_cast<int>(std::floor(areaMin));
+    result.suggestedConfig.area_threshold_max = static_cast<int>(std::ceil(areaMax));
+    result.suggestedConfig.enable_area_range_check = true;
+
+    // Deformability
+    result.deformability = computeStats(deformabilities);
+    auto [deformMin, deformMax] = iqrRange(result.deformability, 0.0, 1.0);
+    result.suggestedConfig.deformability_threshold_min = deformMin;
+    result.suggestedConfig.deformability_threshold_max = deformMax;
+    result.suggestedConfig.enable_deformability_range_check = true;
+
+    // Ring ratio
+    if (ringRatios.size() >= 5) {
+        result.ringRatio = computeStats(ringRatios);
+        auto [rrMin, rrMax] = iqrRange(result.ringRatio, 0.0);
+        result.suggestedConfig.ring_ratio_min = rrMin;
+        result.suggestedConfig.ring_ratio_max = rrMax;
+        result.suggestedConfig.enable_ring_ratio_check = true;
+    }
+
+    // Area ratio
+    if (areaRatios.size() >= 5) {
+        result.areaRatio = computeStats(areaRatios);
+        auto [arMin, arMax] = iqrRange(result.areaRatio, 1.0);
+        (void)arMin; // area ratio only has a max threshold
+        result.suggestedConfig.area_ratio_threshold_max = arMax;
+        result.suggestedConfig.enable_area_ratio_check = true;
+    }
+
+    result.success = true;
+    result.message = "Auto-tune computed from " + std::to_string(result.framesAnalyzed) +
+                     " frames (" + std::to_string(validFrames.size()) + " valid, " +
+                     std::to_string(invalidFrames.size()) + " invalid in buffer).";
+
+    SPDLOG_INFO("AutoTune: {} frames analyzed. Suggested area=[{}, {}], deform=[{:.3f}, {:.3f}], "
+                "ringRatio=[{:.1f}, {:.1f}], areaRatio max={:.2f}",
+                result.framesAnalyzed,
+                result.suggestedConfig.area_threshold_min, result.suggestedConfig.area_threshold_max,
+                result.suggestedConfig.deformability_threshold_min, result.suggestedConfig.deformability_threshold_max,
+                result.suggestedConfig.ring_ratio_min, result.suggestedConfig.ring_ratio_max,
+                result.suggestedConfig.area_ratio_threshold_max);
+
+    return result;
 }
 
 void ProcessingService::setProcessingConfig(const ProcessingConfig& config) {
@@ -554,7 +666,8 @@ FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedIma
 
             bool areaInRange = !config.enable_area_range_check ||
                               (hullArea >= config.area_threshold_min && hullArea <= config.area_threshold_max);
-            bool ringRatioInRange = (result.ringRatio > 15.0 && result.ringRatio < 25.0);
+            bool ringRatioInRange = !config.enable_ring_ratio_check ||
+                              (result.ringRatio > config.ring_ratio_min && result.ringRatio < config.ring_ratio_max);
             bool deformabilityInRange = !config.enable_deformability_range_check ||
                               (result.deformability >= config.deformability_threshold_min &&
                                result.deformability <= config.deformability_threshold_max);

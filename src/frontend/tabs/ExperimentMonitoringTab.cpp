@@ -67,6 +67,7 @@ namespace frontend
         connect(ui->clearBufferBtn, &QPushButton::clicked, this, &ExperimentMonitoringTab::onClearBuffer);
         connect(ui->validOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
         connect(ui->invalidOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
+        connect(ui->autoTuneBtn, &QPushButton::clicked, this, &ExperimentMonitoringTab::onAutoTune);
 
         // Set column stretch to make panels equal size
         ui->gridLayout->setColumnStretch(0, 1);
@@ -652,6 +653,61 @@ namespace frontend
             updateValidFramesGrid(recentValidFrames_);
             updateInvalidFramesGrid(recentInvalidFrames_);
             SPDLOG_INFO("Monitoring buffer cleared");
+        }
+    }
+
+    void ExperimentMonitoringTab::onAutoTune()
+    {
+        auto result = backend_.processing().computeAutoTune();
+        if (!result.success) {
+            QMessageBox::warning(this, tr("Auto Tune"), QString::fromStdString(result.message));
+            return;
+        }
+
+        const auto& cfg = result.suggestedConfig;
+        double pxToUm2 = backend_.processing().getPixelToMicronFactor();
+        double areaFactor = pxToUm2 * pxToUm2; // pixel area to micron^2
+
+        QString details = tr(
+            "Auto Tune analyzed %1 frames.\n\n"
+            "Suggested gating thresholds:\n\n"
+            "  Area: %2 - %3 px  (%4 - %5 um^2)\n"
+            "  Deformability: %6 - %7\n"
+            "  Ring Ratio: %8 - %9\n"
+            "  Area Ratio max: %10\n\n"
+            "Statistics (median [Q1 - Q3]):\n"
+            "  Area: %11 [%12 - %13]\n"
+            "  Deformability: %14 [%15 - %16]\n"
+            "  Ring Ratio: %17 [%18 - %19]\n\n"
+            "Apply these thresholds?")
+            .arg(static_cast<qulonglong>(result.framesAnalyzed))
+            .arg(cfg.area_threshold_min).arg(cfg.area_threshold_max)
+            .arg(cfg.area_threshold_min * areaFactor, 0, 'f', 1)
+            .arg(cfg.area_threshold_max * areaFactor, 0, 'f', 1)
+            .arg(cfg.deformability_threshold_min, 0, 'f', 3)
+            .arg(cfg.deformability_threshold_max, 0, 'f', 3)
+            .arg(cfg.ring_ratio_min, 0, 'f', 1)
+            .arg(cfg.ring_ratio_max, 0, 'f', 1)
+            .arg(cfg.area_ratio_threshold_max, 0, 'f', 2)
+            .arg(result.area.median, 0, 'f', 1)
+            .arg(result.area.q1, 0, 'f', 1).arg(result.area.q3, 0, 'f', 1)
+            .arg(result.deformability.median, 0, 'f', 3)
+            .arg(result.deformability.q1, 0, 'f', 3).arg(result.deformability.q3, 0, 'f', 3)
+            .arg(result.ringRatio.median, 0, 'f', 1)
+            .arg(result.ringRatio.q1, 0, 'f', 1).arg(result.ringRatio.q3, 0, 'f', 1);
+
+        int ret = QMessageBox::question(this, tr("Auto Tune - Confirm"),
+                                        details,
+                                        QMessageBox::Yes | QMessageBox::No,
+                                        QMessageBox::No);
+        if (ret == QMessageBox::Yes) {
+            backend_.processing().setProcessingConfig(cfg);
+            SPDLOG_INFO("Auto Tune applied: area=[{}, {}], deform=[{:.3f}, {:.3f}], "
+                        "ringRatio=[{:.1f}, {:.1f}], areaRatio_max={:.2f}",
+                        cfg.area_threshold_min, cfg.area_threshold_max,
+                        cfg.deformability_threshold_min, cfg.deformability_threshold_max,
+                        cfg.ring_ratio_min, cfg.ring_ratio_max,
+                        cfg.area_ratio_threshold_max);
         }
     }
 

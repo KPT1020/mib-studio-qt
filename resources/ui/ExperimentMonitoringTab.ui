@@ -36,6 +36,16 @@
       </widget>
      </item>
      <item>
+      <widget class="QPushButton" name="autoTuneBtn">
+       <property name="text">
+        <string>Auto Tune Gates</string>
+       </property>
+       <property name="toolTip">
+        <string>Analyze buffered frames to automatically set optimal gating thresholds</string>
+       </property>
+      </widget>
+     </item>
+     <item>
       <spacer name="horizontalSpacer">
        <property name="orientation">
         <enum>Qt::Horizontal</enum>
