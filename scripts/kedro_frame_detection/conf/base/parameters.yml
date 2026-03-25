@@ -1,0 +1,16 @@
+dataset_name: "gavinlouuu/dc_ds"
+
+processing:
+  gaussian_blur_size: 3
+  bg_subtract_threshold: 8
+  morph_kernel_size: 3
+  morph_iterations: 1
+  min_contour_area: 100.0
+  band_fraction: 0.5
+
+output_dir: "data/08_reporting/empty_detection_results"
+
+mlflow:
+  tracking_uri: "https://mlflow.yofo.bio"
+  experiment_name: "empty-frame-detection"
+  run_name: "middle-band-contour-count"
