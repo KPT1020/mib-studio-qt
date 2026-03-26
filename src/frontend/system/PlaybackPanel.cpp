@@ -19,7 +19,12 @@
 #include <QJsonObject>
 #include <QSettings>
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
+#include <QFileDialog>
+#include <QLabel>
+#include <QMessageBox>
+#include <QStandardPaths>
 #include <limits>
 #include <algorithm>
 #include <cmath>
@@ -327,6 +332,13 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     saveBufferBtn_ = new QToolButton(controls);
     saveBufferBtn_->setText("Save Buffer");
     saveBufferBtn_->setToolTip("Save buffer frames to disk and manage buffer size");
+    recordBtn_ = new QToolButton(controls);
+    recordBtn_->setText("Record");
+    recordBtn_->setToolTip("Record non-empty frames to HDF5 (images + metadata only, no contour processing)");
+    recordBtn_->setStyleSheet(""); // Will be updated by updateRecordingUI
+    recordStatusLabel_ = new QLabel(controls);
+    recordStatusLabel_->setText("");
+    recordStatusLabel_->setStyleSheet("color: gray; padding: 0 4px;");
     fitBtn_ = new QToolButton(controls);
     fitBtn_->setText("Fit: Window");
     fitBtn_->setToolTip("Toggle between fit-to-window and 100% zoom");
@@ -335,6 +347,8 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     controlsLayout->addWidget(autoBgCheck_);
     controlsLayout->addWidget(clearRoiBtn_);
     controlsLayout->addWidget(saveBufferBtn_);
+    controlsLayout->addWidget(recordBtn_);
+    controlsLayout->addWidget(recordStatusLabel_);
     controlsLayout->addWidget(fitBtn_);
     controlsLayout->addStretch(1);
     layout->addWidget(controls);
@@ -349,6 +363,7 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     connect(autoBgCheck_, &QCheckBox::toggled, this, &PlaybackPanel::onAutoBackgroundToggled);
     connect(clearRoiBtn_, &QToolButton::clicked, this, &PlaybackPanel::onClearRoi);
     connect(saveBufferBtn_, &QToolButton::clicked, this, &PlaybackPanel::onSaveBuffer);
+    connect(recordBtn_, &QToolButton::clicked, this, &PlaybackPanel::onToggleRecording);
     connect(fitBtn_, &QToolButton::clicked, this, &PlaybackPanel::onToggleFit);
 
     // Space shortcut to start/stop capture
@@ -523,6 +538,11 @@ void PlaybackPanel::onTick()
         resetMetrics(); // Reset metrics when capture stops
     }
     prevCaptureRunning_ = running;
+
+    // Update recording status display periodically
+    if (backend_.isFrameRecording()) {
+        updateRecordingUI();
+    }
 
     // Update slider range from available indices
     uint64_t earliest = 0, latest = 0;
@@ -807,6 +827,63 @@ void PlaybackPanel::onSaveBuffer()
 {
     frontend::BufferSaveDialog dialog(backend_, this);
     dialog.exec();
+}
+
+void PlaybackPanel::onToggleRecording()
+{
+    if (backend_.isFrameRecording()) {
+        backend_.stopFrameRecording();
+        updateRecordingUI();
+        return;
+    }
+
+    // Prompt user for HDF5 file path
+    QString defaultDir;
+    const QString documentsPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (!documentsPath.isEmpty()) {
+        defaultDir = QDir(documentsPath).absoluteFilePath("MIB_Studio_Qt/recordings");
+    } else {
+        defaultDir = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("recordings");
+    }
+    QDir().mkpath(defaultDir);
+
+    // Generate default filename with timestamp
+    const QString timestamp = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
+    const QString defaultFile = QDir(defaultDir).absoluteFilePath(
+        QString("recording_%1.h5").arg(timestamp));
+
+    const QString filePath = QFileDialog::getSaveFileName(
+        this, tr("Save Recording As"), defaultFile,
+        tr("HDF5 Files (*.h5 *.hdf5)"));
+
+    if (filePath.isEmpty()) return;
+
+    const std::string path = filePath.toStdString();
+    if (!backend_.startFrameRecording(path)) {
+        QMessageBox::warning(this, tr("Recording Error"),
+                             tr("Failed to start frame recording. Check that the camera is running."));
+        return;
+    }
+    updateRecordingUI();
+}
+
+void PlaybackPanel::updateRecordingUI()
+{
+    const bool recording = backend_.isFrameRecording();
+    if (recording) {
+        recordBtn_->setText("Stop Rec");
+        recordBtn_->setStyleSheet("color: red; font-weight: bold;");
+        recordBtn_->setToolTip("Stop recording");
+        const uint64_t written = backend_.frameRecordingCount();
+        const uint64_t filtered = backend_.frameRecordingFiltered();
+        recordStatusLabel_->setText(
+            QString("Rec: %1 saved, %2 empty skipped").arg(written).arg(filtered));
+    } else {
+        recordBtn_->setText("Record");
+        recordBtn_->setStyleSheet("");
+        recordBtn_->setToolTip("Record non-empty frames to HDF5 (images + metadata only, no contour processing)");
+        recordStatusLabel_->setText("");
+    }
 }
 
 void PlaybackPanel::onToggleFit()

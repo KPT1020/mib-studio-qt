@@ -2054,4 +2054,204 @@ namespace backend::services {
         return true;
     }
 
+    // --- Frame recording mode implementation ---
+
+    bool Hdf5Service::initializeRecordingDatasets()
+    {
+        if (!isFileOpen())
+        {
+            SPDLOG_ERROR("HDF5 file is not open");
+            return false;
+        }
+
+        // Create /recorded_frames group
+        hid_t groupId = H5Gcreate2(impl_->fileId_, "/recorded_frames", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        if (groupId >= 0)
+            H5Gclose(groupId);
+
+        SPDLOG_DEBUG("HDF5 recording datasets initialized");
+        return true;
+    }
+
+    bool Hdf5Service::appendRecordingFrames(const std::vector<cv::Mat>& images,
+                                            const std::vector<RecordingFrameMeta>& metadata)
+    {
+        if (!isFileOpen() || images.empty())
+            return images.empty(); // empty is success
+
+        if (images.size() != metadata.size())
+        {
+            SPDLOG_ERROR("appendRecordingFrames: images ({}) and metadata ({}) size mismatch",
+                         images.size(), metadata.size());
+            return false;
+        }
+
+        // Track how many recording frames have been written using a simple counter.
+        // We reuse validFramesWritten_ for the recording images dataset since recording
+        // and experiment modes are mutually exclusive in practice.
+        const hsize_t alreadyWritten = impl_->validFramesWritten_;
+
+        // Write/append images
+        if (alreadyWritten == 0)
+        {
+            if (!writeImageDataset(impl_->fileId_, "/recorded_frames/images", images))
+                return false;
+        }
+        else
+        {
+            if (!appendImageDataset(impl_->fileId_, "/recorded_frames/images", images, alreadyWritten))
+                return false;
+        }
+
+        // Write/append metadata (simple compound: index + timestamp + width + height)
+        struct RecMeta
+        {
+            uint64_t index;
+            uint64_t timestampNs;
+            uint64_t width;
+            uint64_t height;
+        };
+
+        hid_t compTypeId = H5Tcreate(H5T_COMPOUND, sizeof(RecMeta));
+        H5Tinsert(compTypeId, "index", HOFFSET(RecMeta, index), H5T_NATIVE_UINT64);
+        H5Tinsert(compTypeId, "timestampNs", HOFFSET(RecMeta, timestampNs), H5T_NATIVE_UINT64);
+        H5Tinsert(compTypeId, "width", HOFFSET(RecMeta, width), H5T_NATIVE_UINT64);
+        H5Tinsert(compTypeId, "height", HOFFSET(RecMeta, height), H5T_NATIVE_UINT64);
+
+        std::vector<RecMeta> metaEntries(metadata.size());
+        for (size_t i = 0; i < metadata.size(); ++i)
+        {
+            metaEntries[i].index = metadata[i].index;
+            metaEntries[i].timestampNs = metadata[i].timestampNs;
+            metaEntries[i].width = metadata[i].width;
+            metaEntries[i].height = metadata[i].height;
+        }
+
+        const std::string metaPath = "/recorded_frames/metadata";
+
+        if (alreadyWritten == 0)
+        {
+            // Create metadata dataset
+            hsize_t dims[1] = {metaEntries.size()};
+            hsize_t maxDims[1] = {H5S_UNLIMITED};
+            hid_t dataspaceId = H5Screate_simple(1, dims, maxDims);
+
+            hid_t propId = H5Pcreate(H5P_DATASET_CREATE);
+            hsize_t chunkDims[1] = {std::min(static_cast<hsize_t>(1000), dims[0])};
+            H5Pset_chunk(propId, 1, chunkDims);
+
+            hid_t datasetId = H5Dcreate2(impl_->fileId_, metaPath.c_str(), compTypeId, dataspaceId,
+                                         H5P_DEFAULT, propId, H5P_DEFAULT);
+            H5Pclose(propId);
+
+            if (datasetId < 0)
+            {
+                H5Sclose(dataspaceId);
+                H5Tclose(compTypeId);
+                SPDLOG_ERROR("Failed to create recording metadata dataset");
+                return false;
+            }
+
+            herr_t status = H5Dwrite(datasetId, compTypeId, H5S_ALL, H5S_ALL, H5P_DEFAULT, metaEntries.data());
+            H5Dclose(datasetId);
+            H5Sclose(dataspaceId);
+
+            if (status < 0)
+            {
+                H5Tclose(compTypeId);
+                SPDLOG_ERROR("Failed to write recording metadata");
+                return false;
+            }
+        }
+        else
+        {
+            // Append to existing metadata dataset
+            hid_t datasetId = H5Dopen2(impl_->fileId_, metaPath.c_str(), H5P_DEFAULT);
+            if (datasetId < 0)
+            {
+                H5Tclose(compTypeId);
+                SPDLOG_ERROR("Failed to open recording metadata dataset for append");
+                return false;
+            }
+
+            hsize_t newSize[1] = {alreadyWritten + metaEntries.size()};
+            H5Dset_extent(datasetId, newSize);
+
+            hid_t filespace = H5Dget_space(datasetId);
+            hsize_t offset[1] = {alreadyWritten};
+            hsize_t count[1] = {metaEntries.size()};
+            H5Sselect_hyperslab(filespace, H5S_SELECT_SET, offset, nullptr, count, nullptr);
+
+            hid_t memspace = H5Screate_simple(1, count, nullptr);
+            herr_t status = H5Dwrite(datasetId, compTypeId, memspace, filespace, H5P_DEFAULT, metaEntries.data());
+
+            H5Sclose(memspace);
+            H5Sclose(filespace);
+            H5Dclose(datasetId);
+
+            if (status < 0)
+            {
+                H5Tclose(compTypeId);
+                SPDLOG_ERROR("Failed to append recording metadata");
+                return false;
+            }
+        }
+
+        H5Tclose(compTypeId);
+
+        impl_->validFramesWritten_ += images.size();
+        SPDLOG_DEBUG("Recording: appended {} frames (total: {})", images.size(), impl_->validFramesWritten_);
+        return true;
+    }
+
+    bool Hdf5Service::writeRecordingInfo(uint64_t startTimeNs, uint64_t endTimeNs,
+                                         uint64_t totalFrames, uint64_t filteredFrames)
+    {
+        if (!isFileOpen())
+            return false;
+
+        hid_t infoGroupId = H5Gcreate2(impl_->fileId_, "/recording_info", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        if (infoGroupId < 0)
+        {
+            SPDLOG_ERROR("Failed to create recording_info group");
+            return false;
+        }
+
+        hid_t scalarSpaceId = H5Screate(H5S_SCALAR);
+
+        auto writeAttr = [&](const char* name, uint64_t value) {
+            hid_t attr = H5Acreate2(infoGroupId, name, H5T_NATIVE_UINT64, scalarSpaceId,
+                                    H5P_DEFAULT, H5P_DEFAULT);
+            if (attr >= 0)
+            {
+                H5Awrite(attr, H5T_NATIVE_UINT64, &value);
+                H5Aclose(attr);
+            }
+        };
+
+        writeAttr("start_time_ns", startTimeNs);
+        writeAttr("end_time_ns", endTimeNs);
+        writeAttr("total_recorded_frames", totalFrames);
+        writeAttr("total_filtered_empty_frames", filteredFrames);
+
+        // Mark recording mode
+        const char* mode = "frame_recording";
+        hid_t strType = H5Tcopy(H5T_C_S1);
+        H5Tset_size(strType, std::strlen(mode) + 1);
+        hid_t modeAttr = H5Acreate2(infoGroupId, "mode", strType, scalarSpaceId,
+                                     H5P_DEFAULT, H5P_DEFAULT);
+        if (modeAttr >= 0)
+        {
+            H5Awrite(modeAttr, strType, mode);
+            H5Aclose(modeAttr);
+        }
+        H5Tclose(strType);
+
+        H5Sclose(scalarSpaceId);
+        H5Gclose(infoGroupId);
+
+        SPDLOG_INFO("Recording info written: recorded={}, filtered={}", totalFrames, filteredFrames);
+        return true;
+    }
+
 } // namespace backend::services

@@ -1,7 +1,9 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <string>
+#include <thread>
 
 namespace backend { class BackgroundCaptureNotifier; }
 
@@ -70,6 +72,14 @@ namespace backend
         // Check if a camera is configured (either hardware or mock)
         bool isCameraConfigured() const;
 
+        // Frame recording mode: record non-empty frames directly to HDF5 (images + metadata only, no contour processing)
+        // Returns false if recording cannot start (e.g., capture not running, file error)
+        bool startFrameRecording(const std::string& hdf5FilePath);
+        void stopFrameRecording();
+        bool isFrameRecording() const;
+        uint64_t frameRecordingCount() const;     // Frames written so far
+        uint64_t frameRecordingFiltered() const;   // Empty frames skipped
+
         // Get background capture notifier for Qt signal connections
         BackgroundCaptureNotifier* backgroundCaptureNotifier() const;
 
@@ -90,7 +100,14 @@ namespace backend
         int selectedDevIndex_{-1};
         std::string selectedLabel_;
         bool mockCameraConfigured_{false};
-        
+
+        // Frame recording state
+        std::unique_ptr<std::thread> frameRecordingThread_;
+        std::atomic<bool> frameRecordingRunning_{false};
+        std::atomic<uint64_t> frameRecordingWritten_{0};
+        std::atomic<uint64_t> frameRecordingFiltered_{0};
+        std::string frameRecordingPath_;
+
         // Background capture notifier for Qt signals
         std::unique_ptr<BackgroundCaptureNotifier> backgroundCaptureNotifier_;
     };

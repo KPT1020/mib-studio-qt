@@ -17,6 +17,7 @@ class QSlider;
 class QWidget;
 class QToolButton;
 class QCheckBox;
+class QLabel;
 
 class PlaybackPanel : public QWidget {
     Q_OBJECT
@@ -58,6 +59,8 @@ private slots:
     void onLogMetrics();
     void onToggleFit();
     void onAutoBackgroundToggled(bool enabled);
+    void onToggleRecording();
+    void updateRecordingUI();
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -82,6 +85,8 @@ private:
     QCheckBox* autoBgCheck_ = nullptr;
     QToolButton* clearRoiBtn_ = nullptr;
     QToolButton* saveBufferBtn_ = nullptr;
+    QToolButton* recordBtn_ = nullptr;
+    QLabel* recordStatusLabel_ = nullptr;
     QToolButton* fitBtn_ = nullptr;
     bool scrubbing_ = false;
     bool followLive_ = true;           // auto-follow latest when true

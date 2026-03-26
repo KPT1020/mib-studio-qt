@@ -88,6 +88,27 @@ public:
     // Chart snapshot reading (for reading 2D/3D chart images without batch dimension)
     bool readChartSnapshot(const std::string& datasetPath, cv::Mat& outImage) const;
 
+    // --- Frame recording mode (images + basic metadata, no contour processing) ---
+
+    // Simple metadata for frame recording (no contour metrics)
+    struct RecordingFrameMeta {
+        uint64_t index{0};
+        uint64_t timestampNs{0};
+        uint64_t width{0};
+        uint64_t height{0};
+    };
+
+    // Initialize recording datasets (creates /recorded_frames group)
+    bool initializeRecordingDatasets();
+
+    // Append raw frames for recording mode (images + basic metadata only)
+    bool appendRecordingFrames(const std::vector<cv::Mat>& images,
+                               const std::vector<RecordingFrameMeta>& metadata);
+
+    // Write recording info attributes
+    bool writeRecordingInfo(uint64_t startTimeNs, uint64_t endTimeNs,
+                            uint64_t totalFrames, uint64_t filteredFrames);
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
