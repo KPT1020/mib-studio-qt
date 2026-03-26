@@ -13,6 +13,7 @@
 #include "backend/services/AutofocusService.h"
 #include "backend/services/TriggerService.h"
 #include "backend/services/YoloService.h"
+#include "backend/services/SyringePumpService.h"
 #include "backend/BackgroundCaptureNotifier.h"
 #include <QImage>
 #include <QTimer>
@@ -92,6 +93,7 @@ namespace backend
         autofocusService_ = std::make_unique<services::AutofocusService>();
         triggerService_ = std::make_unique<services::TriggerService>();
         yoloService_ = std::make_unique<services::YoloService>();
+        syringePumpService_ = std::make_unique<services::SyringePumpService>();
         frameStore_ = std::make_shared<playback::FrameStore>(5000);
 
         sqliteService_->initialize((std::filesystem::path(dataDir) / "app.sqlite3").string());
@@ -241,6 +243,7 @@ namespace backend
     services::AutofocusService &AppBackend::autofocus() { return *autofocusService_; }
     services::TriggerService &AppBackend::trigger() { return *triggerService_; }
     services::YoloService &AppBackend::yolo() { return *yoloService_; }
+    services::SyringePumpService &AppBackend::syringePump() { return *syringePumpService_; }
 
     void AppBackend::configureMockCamera(const camera::mock::MockCameraOptions &options)
     {

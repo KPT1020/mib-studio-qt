@@ -13,6 +13,7 @@ CMakeToolchain
 [options]
 qt/*:shared=True
 qt/*:qtcharts=True
+qt/*:qtserialport=True
 qt/*:with_imageformats=True
 opencv/*:shared=True
 opencv/*:with_openexr=False

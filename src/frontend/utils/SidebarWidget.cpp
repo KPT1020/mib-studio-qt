@@ -11,6 +11,7 @@
 #include "frontend/utils/StatisticsPanel.h"
 #include "frontend/utils/BackgroundPreviewWidget.h"
 #include "frontend/tabs/NanopositionerTab.h"
+#include "frontend/tabs/SyringePumpTab.h"
 
 namespace frontend
 {
@@ -61,6 +62,16 @@ namespace frontend
         // Nanopositioner tab
         nanopositionerTab_ = new NanopositionerTab(backend_, contentWidget_);
         contentLayout_->addWidget(nanopositionerTab_);
+
+        // Separator
+        auto* pumpSeparator = new QFrame(contentWidget_);
+        pumpSeparator->setFrameShape(QFrame::HLine);
+        pumpSeparator->setFrameShadow(QFrame::Sunken);
+        contentLayout_->addWidget(pumpSeparator);
+
+        // Syringe pump tab
+        syringePumpTab_ = new SyringePumpTab(backend_, contentWidget_);
+        contentLayout_->addWidget(syringePumpTab_);
 
         contentLayout_->addStretch();
 

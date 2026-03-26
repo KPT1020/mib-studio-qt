@@ -18,6 +18,7 @@ namespace backend::services
     class AutofocusService;
     class TriggerService;
     class YoloService;
+    class SyringePumpService;
 }
 
 namespace backend
@@ -52,6 +53,7 @@ namespace backend
         services::AutofocusService &autofocus();
         services::TriggerService &trigger();
         services::YoloService &yolo();
+        services::SyringePumpService &syringePump();
         
         // Get frame store for service lifecycle management
         std::shared_ptr<playback::FrameStore> getFrameStore() const { return frameStore_; }
@@ -93,6 +95,7 @@ namespace backend
         std::unique_ptr<services::AutofocusService> autofocusService_;
         std::unique_ptr<services::TriggerService> triggerService_;
         std::unique_ptr<services::YoloService> yoloService_;
+        std::unique_ptr<services::SyringePumpService> syringePumpService_;
         std::shared_ptr<playback::FrameStore> frameStore_;
 
         // Last selected hardware device (for script apply)
