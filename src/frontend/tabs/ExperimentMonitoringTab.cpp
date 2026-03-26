@@ -49,6 +49,80 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
 
+namespace {
+
+struct InvalidReason {
+    QString shortText;
+    QString longText;
+};
+
+std::vector<InvalidReason> getInvalidReasons(
+    const backend::services::FilterResult& result,
+    const backend::services::ProcessingConfig& config)
+{
+    std::vector<InvalidReason> reasons;
+
+    // Check early-exit conditions first (metrics not computed in these cases)
+    if (config.require_single_inner_contour && result.innerContourCount == 0) {
+        reasons.push_back({"No contour", "No inner contour found"});
+        return reasons;
+    }
+
+    if (config.enable_border_check && result.touchesBorder) {
+        reasons.push_back({"Border", "Contour touches ROI border"});
+        // When border check fails, metrics are not computed — don't check them
+        return reasons;
+    }
+
+    // Metrics were computed — check which range checks failed
+    if (config.enable_area_range_check) {
+        if (result.area < config.area_threshold_min || result.area > config.area_threshold_max) {
+            reasons.push_back({
+                "Area",
+                QString("Area: %1 (range: %2-%3)")
+                    .arg(result.area, 0, 'f', 0)
+                    .arg(config.area_threshold_min)
+                    .arg(config.area_threshold_max)
+            });
+        }
+    }
+
+    if (result.ringRatio <= 15.0 || result.ringRatio >= 25.0) {
+        reasons.push_back({
+            "Ring",
+            QString("Ring ratio: %1 (range: 15-25)").arg(result.ringRatio, 0, 'f', 1)
+        });
+    }
+
+    if (config.enable_deformability_range_check) {
+        if (result.deformability < config.deformability_threshold_min ||
+            result.deformability > config.deformability_threshold_max) {
+            reasons.push_back({
+                "Deform",
+                QString("Deformability: %1 (range: %2-%3)")
+                    .arg(result.deformability, 0, 'f', 3)
+                    .arg(config.deformability_threshold_min, 0, 'f', 3)
+                    .arg(config.deformability_threshold_max, 0, 'f', 3)
+            });
+        }
+    }
+
+    if (config.enable_area_ratio_check) {
+        if (result.areaRatio > config.area_ratio_threshold_max) {
+            reasons.push_back({
+                "Ratio",
+                QString("Area ratio: %1 (max: %2)")
+                    .arg(result.areaRatio, 0, 'f', 2)
+                    .arg(config.area_ratio_threshold_max, 0, 'f', 2)
+            });
+        }
+    }
+
+    return reasons;
+}
+
+} // anonymous namespace
+
 namespace frontend
 {
 
@@ -480,6 +554,9 @@ namespace frontend
             return;
         }
 
+        // Fetch config once for reason derivation
+        auto config = backend_.processing().getProcessingConfig();
+
         // Get last MAX_FRAMES_TO_SHOW invalid frames
         size_t startIdx = invalidFrames.size() > MAX_FRAMES_TO_SHOW
                               ? invalidFrames.size() - MAX_FRAMES_TO_SHOW
@@ -517,6 +594,31 @@ namespace frontend
                     THUMBNAIL_SIZE, THUMBNAIL_SIZE,
                     Qt::KeepAspectRatio, Qt::SmoothTransformation));
 
+                // Paint rejection reason overlay on thumbnail
+                auto reasons = getInvalidReasons(frame.validation, config);
+                QString tooltipText;
+                if (!reasons.empty())
+                {
+                    QPainter painter(&pixmap);
+                    int bannerHeight = 18;
+                    QRect bannerRect(0, pixmap.height() - bannerHeight, pixmap.width(), bannerHeight);
+                    painter.fillRect(bannerRect, QColor(0, 0, 0, 160));
+                    painter.setPen(Qt::white);
+                    QFont font = painter.font();
+                    font.setPixelSize(10);
+                    painter.setFont(font);
+                    QStringList shortReasons;
+                    QStringList tooltipLines;
+                    for (const auto &r : reasons)
+                    {
+                        shortReasons << r.shortText;
+                        tooltipLines << r.longText;
+                    }
+                    painter.drawText(bannerRect, Qt::AlignCenter, shortReasons.join(" | "));
+                    painter.end();
+                    tooltipText = tooltipLines.join("\n");
+                }
+
                 QLabel *label = new QLabel(ui->invalidFramesWidget);
                 label->setPixmap(pixmap);
                 label->setAlignment(Qt::AlignCenter);
@@ -526,6 +628,8 @@ namespace frontend
                 label->setMinimumSize(THUMBNAIL_SIZE, THUMBNAIL_SIZE);
                 label->setMaximumSize(THUMBNAIL_SIZE, THUMBNAIL_SIZE);
                 label->setScaledContents(false);
+                if (!tooltipText.isEmpty())
+                    label->setToolTip(tooltipText);
 
                 ui->invalidFramesGrid->addWidget(label, row, col);
 
