@@ -101,7 +101,11 @@ private:
     bool hasBackground_ = false;
     QImage backgroundGray_;            // stored as grayscale QImage
     QImage overlayImage_;              // RGBA overlay (mask)
-    QList<QPolygon> overlayContours_;  // image-space contours for drawing
+    struct ColoredContour {
+        QPolygon polygon;
+        QColor color;
+    };
+    QList<ColoredContour> overlayContours_;  // image-space contours with classification color
 
     // Last overlay computation timing (ms)
     double lastOverlayComputeMs_ = 0.0;

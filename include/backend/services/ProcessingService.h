@@ -100,6 +100,7 @@ public:
         uint64_t index{0};
         std::vector<std::vector<cv::Point>> contours;
         cv::Mat mask;
+        FilterResult validation;
     };
 
     ProcessingService();

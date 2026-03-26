@@ -50,16 +50,23 @@ static cv::Mat toRgb(const cv::Mat& original) {
     return rgb;
 }
 
-/** Apply green tint to overlay where mask is non-zero (in-place on rgb). */
-static void applyMaskTint(cv::Mat& rgb, const cv::Mat& mask) {
+/** Map FilterResult classification to an RGB color: blue=target, green=valid, red=invalid. */
+static cv::Vec3b classificationColor(const backend::services::FilterResult* v) {
+    if (v && v->isTargetGroup) return {0, 120, 255};   // Blue
+    if (v && v->isValid)       return {0, 255, 0};     // Green
+    return {255, 0, 0};                                 // Red
+}
+
+/** Apply colored tint to overlay where mask is non-zero (in-place on rgb). */
+static void applyMaskTint(cv::Mat& rgb, const cv::Mat& mask, const cv::Vec3b& tint) {
     if (rgb.empty() || mask.empty()) return;
     for (int y = 0; y < rgb.rows && y < mask.rows; ++y) {
         for (int x = 0; x < rgb.cols && x < mask.cols; ++x) {
             if (mask.at<uchar>(y, x) > 0) {
                 cv::Vec3b& pixel = rgb.at<cv::Vec3b>(y, x);
-                pixel[0] = static_cast<uchar>(pixel[0] * 0.7);
-                pixel[1] = static_cast<uchar>(std::min(255.0, pixel[1] * 0.7 + 255.0 * 0.3));
-                pixel[2] = static_cast<uchar>(pixel[2] * 0.7);
+                pixel[0] = static_cast<uchar>(std::min(255.0, pixel[0] * 0.7 + tint[0] * 0.3));
+                pixel[1] = static_cast<uchar>(std::min(255.0, pixel[1] * 0.7 + tint[1] * 0.3));
+                pixel[2] = static_cast<uchar>(std::min(255.0, pixel[2] * 0.7 + tint[2] * 0.3));
             }
         }
     }
@@ -82,7 +89,7 @@ QImage createProcessingOverlay(const cv::Mat& original,
 
     if (mode == OverlayMode::AllMask) {
         if (mask.empty()) return matToQImage(original);
-        applyMaskTint(rgb, mask);
+        applyMaskTint(rgb, mask, classificationColor(validation));
         QImage img(rgb.data, rgb.cols, rgb.rows, static_cast<int>(rgb.step), QImage::Format_RGB888);
         return img.copy();
     }
@@ -104,15 +111,19 @@ QImage createProcessingOverlay(const cv::Mat& original,
     const bool hasHierarchy = !hierarchyMat.empty() && hierarchyMat.rows == 1 && hierarchyMat.cols == n;
 
     if (mode == OverlayMode::AllContour) {
-        cv::drawContours(rgb, contours, -1, cv::Scalar(0, 255, 0), 2);
+        const cv::Vec3b c = classificationColor(validation);
+        cv::drawContours(rgb, contours, -1, cv::Scalar(c[0], c[1], c[2]), 2);
         QImage img(rgb.data, rgb.cols, rgb.rows, static_cast<int>(rgb.step), QImage::Format_RGB888);
         return img.copy();
     }
 
     if (mode == OverlayMode::OuterInnerColorCoded && hasHierarchy) {
-        const bool valid = validation && validation->isValid;
-        const cv::Scalar outerColor = valid ? cv::Scalar(0, 165, 255)   : cv::Scalar(0, 0, 255);   // orange / red
-        const cv::Scalar innerColor = valid ? cv::Scalar(255, 255, 0)   : cv::Scalar(255, 0, 255); // cyan / magenta
+        const cv::Vec3b c = classificationColor(validation);
+        const cv::Scalar outerColor(c[0], c[1], c[2]);
+        // Lighter shade for inner contours
+        const cv::Scalar innerColor(std::min(255, c[0] + 80),
+                                    std::min(255, c[1] + 80),
+                                    std::min(255, c[2] + 80));
         for (int i = 0; i < n; ++i) {
             const int parent = hierarchyMat.at<cv::Vec4i>(0, i)[3];
             if (parent < 0) {
@@ -158,7 +169,7 @@ QImage createProcessingOverlay(const cv::Mat& original,
                     cv::drawContours(filteredMask, contours, c, cv::Scalar(0), -1);
                 }
             }
-            applyMaskTint(rgb, filteredMask);
+            applyMaskTint(rgb, filteredMask, classificationColor(validation));
         }
         QImage img(rgb.data, rgb.cols, rgb.rows, static_cast<int>(rgb.step), QImage::Format_RGB888);
         return img.copy();

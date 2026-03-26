@@ -79,7 +79,7 @@ namespace
         explicit ImageCanvas(QImage *image,
                              QImage *overlay,
                              QRect *imageRoi,
-                             QList<QPolygon> *contours,
+                             QList<PlaybackPanel::ColoredContour> *contours,
                              PlaybackPanel::FitMode *fitMode,
                              QWidget *parent = nullptr)
             : QWidget(parent),
@@ -133,19 +133,19 @@ namespace
                 p.drawImage(topLeft.toPoint(), scaledOverlay);
             }
 
-            // Contours
+            // Contours (per-contour classification color)
             if (contours_)
             {
-                QPen pen(QColor(0, 255, 0));
-                pen.setWidth(2);
-                p.setPen(pen);
-                for (const QPolygon &poly : *contours_)
+                for (const auto &cc : *contours_)
                 {
-                    if (poly.isEmpty())
+                    if (cc.polygon.isEmpty())
                         continue;
+                    QPen pen(cc.color);
+                    pen.setWidth(2);
+                    p.setPen(pen);
                     QPolygon scaledPoly;
-                    scaledPoly.reserve(poly.size());
-                    for (const QPoint &pt : poly)
+                    scaledPoly.reserve(cc.polygon.size());
+                    for (const QPoint &pt : cc.polygon)
                     {
                         QPointF q = QPointF(pt) * scale + topLeft;
                         scaledPoly << q.toPoint();
@@ -283,7 +283,7 @@ namespace
         QImage *image_ = nullptr;
         QImage *overlay_ = nullptr;
         QRect *imageRoi_ = nullptr;
-        QList<QPolygon> *contours_ = nullptr;
+        QList<PlaybackPanel::ColoredContour> *contours_ = nullptr;
         PlaybackPanel::FitMode *fitMode_ = nullptr;
         bool dragging_ = false;
         QPoint dragStartWidgetPos_;
@@ -1029,10 +1029,23 @@ void PlaybackPanel::computeProcessedOverlay()
     cv::morphologyEx(thresh, dstR, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
     cv::morphologyEx(dstR, dstR, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
+    // Determine overlay color from processing classification
+    QColor overlayColor(0, 255, 0); // default green
+    backend::services::ProcessingService::RealtimeSnapshot snapshot;
+    if (backend_.processing().getLatestSnapshot(snapshot)) {
+        if (snapshot.validation.isTargetGroup) {
+            overlayColor = QColor(0, 120, 255);  // Blue
+        } else if (snapshot.validation.isValid) {
+            overlayColor = QColor(0, 255, 0);    // Green
+        } else {
+            overlayColor = QColor(255, 0, 0);    // Red
+        }
+    }
+
     // Build overlay image
     if (overlayMode_ == OverlayMode::Mask || overlayMode_ == OverlayMode::Both)
     {
-        overlayImage_ = maskToTintedOverlay(mask, QColor(0, 255, 0), 90);
+        overlayImage_ = maskToTintedOverlay(mask, overlayColor, 90);
     }
 
     // Build contours
@@ -1051,7 +1064,7 @@ void PlaybackPanel::computeProcessedOverlay()
             {
                 poly << QPoint(pt.x, pt.y);
             }
-            overlayContours_.append(poly);
+            overlayContours_.append({poly, overlayColor});
         }
     }
 

@@ -143,6 +143,7 @@ bool ProcessingService::getLatestSnapshot(RealtimeSnapshot& out) {
     out.index = latestSnapshot_.index;
     out.mask = latestSnapshot_.mask.clone();
     out.contours = latestSnapshot_.contours;
+    out.validation = latestSnapshot_.validation;
     return true;
 }
 
@@ -1012,6 +1013,7 @@ void ProcessingService::realtimeLoop() {
                     }
                     latestSnapshot_.mask = fullMaskSnapshot;
                     latestSnapshot_.contours = std::move(contours);
+                    latestSnapshot_.validation = validation;
                 }
 
                 rtLastProcessed_.store(idx);
@@ -1277,6 +1279,7 @@ void ProcessingService::realtimeLoop() {
                     latestSnapshot_.index = idx;
                     latestSnapshot_.mask = mask.clone();
                     latestSnapshot_.contours = std::move(contours);
+                    latestSnapshot_.validation = validation;
                 }
 
                 rtLastProcessed_.store(idx);
@@ -1638,6 +1641,7 @@ void ProcessingService::realtimeLoop() {
                     latestSnapshot_.mask = mask; // shallow copy ok; mask will be destroyed after leaving scope, so clone
                     latestSnapshot_.mask = latestSnapshot_.mask.clone();
                     latestSnapshot_.contours = std::move(contours);
+                    latestSnapshot_.validation = validation;
                 }
 
                 rtLastProcessed_.store(idx);
