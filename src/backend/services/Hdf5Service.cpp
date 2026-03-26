@@ -249,6 +249,7 @@ namespace backend::services
             double brightness_q2;
             double brightness_q3;
             double brightness_q4;
+            double youngsModulus;
         };
 
         // Create compound type
@@ -268,6 +269,7 @@ namespace backend::services
         H5Tinsert(compTypeId, "brightness_q2", HOFFSET(FrameMetadata, brightness_q2), H5T_NATIVE_DOUBLE);
         H5Tinsert(compTypeId, "brightness_q3", HOFFSET(FrameMetadata, brightness_q3), H5T_NATIVE_DOUBLE);
         H5Tinsert(compTypeId, "brightness_q4", HOFFSET(FrameMetadata, brightness_q4), H5T_NATIVE_DOUBLE);
+        H5Tinsert(compTypeId, "youngsModulus", HOFFSET(FrameMetadata, youngsModulus), H5T_NATIVE_DOUBLE);
 
         // Create dataspace with unlimited first dimension for extensibility
         hsize_t dims[1] = {frames.size()};
@@ -318,6 +320,7 @@ namespace backend::services
             md.brightness_q2 = frame.validation.brightness.q2;
             md.brightness_q3 = frame.validation.brightness.q3;
             md.brightness_q4 = frame.validation.brightness.q4;
+            md.youngsModulus = frame.validation.youngsModulus;
             metadata.push_back(md);
         }
 
@@ -541,6 +544,7 @@ namespace backend::services
             double brightness_q2;
             double brightness_q3;
             double brightness_q4;
+            double youngsModulus;
         };
 
         // Open existing dataset
@@ -596,6 +600,7 @@ namespace backend::services
             md.brightness_q2 = frame.validation.brightness.q2;
             md.brightness_q3 = frame.validation.brightness.q3;
             md.brightness_q4 = frame.validation.brightness.q4;
+            md.youngsModulus = frame.validation.youngsModulus;
 
             filespaceId = H5Dget_space(datasetId);
             hsize_t start[1] = {currentDims[0] + static_cast<hsize_t>(i)};

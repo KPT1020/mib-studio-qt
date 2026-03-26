@@ -104,6 +104,12 @@ namespace backend
             SPDLOG_WARN("YOLO model not loaded - segmentation features will not be available");
         }
 
+        // Load Young's modulus LUT for emodulus gating
+        std::filesystem::path lutPath = exeDir / "resources" / "isoelastic_curve" / "scaled_isoelastic_data_LUT_6.16-4.24.txt";
+        if (!processingService_->loadEModulusLut(lutPath.string())) {
+            SPDLOG_WARN("Young's modulus LUT not loaded - emodulus gating will not be available");
+        }
+
         processingService_->start();
         // Note: startRealtime() is now called when Experiment tab becomes active, not during initialization
 

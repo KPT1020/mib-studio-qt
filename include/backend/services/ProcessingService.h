@@ -12,6 +12,7 @@
 #include <opencv2/core.hpp>
 #include <deque>
 #include <cmath>
+#include "backend/EModulusLut.h"
 
 namespace backend { namespace playback { class FrameStore; struct Frame; } }
 
@@ -54,6 +55,10 @@ struct ProcessingConfig {
     int target_group_area_max{800};
     double target_group_deformability_min{0.0};
     double target_group_deformability_max{0.3};
+    // Young's modulus gating (uses LUT lookup from area + deformability)
+    bool enable_target_group_emodulus{false};
+    double target_group_emodulus_min{0.0};
+    double target_group_emodulus_max{10.0};
 };
 
 struct FilterResult {
@@ -66,6 +71,7 @@ struct FilterResult {
     double area{0.0};
     double areaRatio{0.0};
     double ringRatio{0.0};
+    double youngsModulus{0.0}; // Young's modulus (kPa) from LUT lookup
     BrightnessQuantiles brightness;
     bool isTargetGroup{false}; // True if valid AND matches target group criteria
     // Contours found during processing (for snapshot/display)
@@ -187,6 +193,9 @@ public:
     // Target group trigger callback (called for each valid frame with target group result)
     using TargetGroupCallback = std::function<void(bool isTargetGroup)>;
     void setTargetGroupCallback(TargetGroupCallback callback);
+
+    // Young's modulus LUT loading
+    bool loadEModulusLut(const std::string& path);
 
     // Background capture callback for auto-capture (called when background is auto-captured)
     using BackgroundCaptureCallback = std::function<void(const cv::Mat& background, uint64_t frameIndex)>;
@@ -317,6 +326,9 @@ private:
     
     // Pixel to micron conversion factor (default: 0.4886)
     std::atomic<double> pixelToMicronFactor_{0.4886};
+
+    // Young's modulus LUT (read-only after loading, thread-safe)
+    EModulusLut eModulusLut_;
 };
 
 } // namespace backend::services
