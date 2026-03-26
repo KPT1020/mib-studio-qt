@@ -959,9 +959,9 @@ static QImage maskToTintedOverlay(const cv::Mat &mask, const QColor &color, int 
             const bool on = mrow[x] > 0;
             if (on)
             {
-                orow[4 * x + 0] = b;
+                orow[4 * x + 0] = r;
                 orow[4 * x + 1] = g;
-                orow[4 * x + 2] = r;
+                orow[4 * x + 2] = b;
                 orow[4 * x + 3] = a;
             }
             else
