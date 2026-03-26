@@ -108,6 +108,19 @@
       </widget>
      </item>
      <item>
+      <widget class="QLabel" name="overlayLegendLabel">
+       <property name="text">
+        <string>&lt;span style='color:#0078FF;'&gt;■&lt;/span&gt; Target &lt;span style='color:#00FF00;'&gt;■&lt;/span&gt; Valid &lt;span style='color:#FF0000;'&gt;■&lt;/span&gt; Invalid</string>
+       </property>
+       <property name="textFormat">
+        <enum>Qt::RichText</enum>
+       </property>
+       <property name="toolTip">
+        <string>Blue = target group, Green = valid, Red = invalid</string>
+       </property>
+      </widget>
+     </item>
+     <item>
       <widget class="QCheckBox" name="roiOverlayCheck">
        <property name="text">
         <string>Show ROI</string>

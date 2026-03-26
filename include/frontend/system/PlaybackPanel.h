@@ -81,6 +81,7 @@ private:
     QWidget* canvas_ = nullptr;
     QSlider* slider_ = nullptr;
     QToolButton* overlayBtn_ = nullptr;
+    QLabel* overlayLegend_ = nullptr;
     QToolButton* setBgBtn_ = nullptr;
     QCheckBox* autoBgCheck_ = nullptr;
     QToolButton* clearRoiBtn_ = nullptr;

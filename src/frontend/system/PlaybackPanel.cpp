@@ -318,6 +318,13 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     overlayBtn_ = new QToolButton(controls);
     overlayBtn_->setText("Overlay: Off");
     overlayBtn_->setToolTip("Toggle overlay (Off → Mask → Contours → Both)");
+    overlayLegend_ = new QLabel(controls);
+    overlayLegend_->setText(
+        "<span style='color:#0078FF;'>&#9632;</span> Target "
+        "<span style='color:#00FF00;'>&#9632;</span> Valid "
+        "<span style='color:#FF0000;'>&#9632;</span> Invalid");
+    overlayLegend_->setToolTip("Blue = target group, Green = valid, Red = invalid");
+    overlayLegend_->setVisible(false);
     setBgBtn_ = new QToolButton(controls);
     setBgBtn_->setText("Set Background");
     setBgBtn_->setToolTip("Capture current frame as background (when paused)");
@@ -343,6 +350,7 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     fitBtn_->setText("Fit: Window");
     fitBtn_->setToolTip("Toggle between fit-to-window and 100% zoom");
     controlsLayout->addWidget(overlayBtn_);
+    controlsLayout->addWidget(overlayLegend_);
     controlsLayout->addWidget(setBgBtn_);
     controlsLayout->addWidget(autoBgCheck_);
     controlsLayout->addWidget(clearRoiBtn_);
@@ -1106,6 +1114,8 @@ void PlaybackPanel::updateOverlayButtonUi()
     }
     overlayBtn_->setText(label);
     overlayBtn_->setToolTip("Toggle overlay (Off → Mask → Contours → Both)");
+    if (overlayLegend_)
+        overlayLegend_->setVisible(overlayMode_ != OverlayMode::Off);
 }
 
 bool PlaybackPanel::eventFilter(QObject *watched, QEvent *event)
