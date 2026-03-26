@@ -89,6 +89,7 @@ add_library(mib_backend STATIC
     src/backend/BackgroundCaptureNotifier.cpp
     include/backend/BackgroundCaptureNotifier.h
     src/backend/Tools.cpp
+    src/backend/EModulusLut.cpp
     src/backend/services/Logger.cpp
     src/backend/services/SqliteService.cpp
     src/backend/services/CameraControlService.cpp

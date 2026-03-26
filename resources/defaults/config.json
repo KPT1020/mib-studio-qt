@@ -27,7 +27,10 @@
             "area_min": 300,
             "area_max": 800,
             "deformability_min": 0.0,
-            "deformability_max": 0.3
+            "deformability_max": 0.3,
+            "emodulus_enabled": false,
+            "emodulus_min": 0.0,
+            "emodulus_max": 10.0
         }
     },
     "save_directory": "testing",

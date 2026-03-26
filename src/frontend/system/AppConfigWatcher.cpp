@@ -254,6 +254,12 @@ namespace frontend
 						pcfg.target_group_deformability_min = tg.value("deformability_min").toDouble(pcfg.target_group_deformability_min);
 					if (tg.contains("deformability_max"))
 						pcfg.target_group_deformability_max = tg.value("deformability_max").toDouble(pcfg.target_group_deformability_max);
+					if (tg.contains("emodulus_enabled"))
+						pcfg.enable_target_group_emodulus = tg.value("emodulus_enabled").toBool(pcfg.enable_target_group_emodulus);
+					if (tg.contains("emodulus_min"))
+						pcfg.target_group_emodulus_min = tg.value("emodulus_min").toDouble(pcfg.target_group_emodulus_min);
+					if (tg.contains("emodulus_max"))
+						pcfg.target_group_emodulus_max = tg.value("emodulus_max").toDouble(pcfg.target_group_emodulus_max);
 				}
 			}
 		}

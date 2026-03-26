@@ -221,6 +221,10 @@ double ProcessingService::getPixelToMicronFactor() const {
     return pixelToMicronFactor_.load(std::memory_order_relaxed);
 }
 
+bool ProcessingService::loadEModulusLut(const std::string& path) {
+    return eModulusLut_.loadFromFile(path);
+}
+
 static inline cv::Mat makeGrayCopy(uint64_t width, uint64_t height, size_t linePitch, const uint8_t* data) {
     const int w = static_cast<int>(width);
     const int h = static_cast<int>(height);
@@ -565,12 +569,22 @@ FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedIma
                 result.inRange = true;
                 result.isValid = true;
             }
+            // Compute Young's modulus from LUT if available
+            if (eModulusLut_.isLoaded()) {
+                double factor = pixelToMicronFactor_.load(std::memory_order_relaxed);
+                double areaUm = result.area * factor * factor;
+                result.youngsModulus = eModulusLut_.lookup(areaUm, result.deformability);
+            }
             if (result.isValid && config.enable_target_group) {
                 bool tgArea = (result.area >= config.target_group_area_min &&
                                result.area <= config.target_group_area_max);
                 bool tgDeform = (result.deformability >= config.target_group_deformability_min &&
                                  result.deformability <= config.target_group_deformability_max);
-                result.isTargetGroup = tgArea && tgDeform;
+                bool tgEmod = !config.enable_target_group_emodulus ||
+                              (!std::isnan(result.youngsModulus) &&
+                               result.youngsModulus >= config.target_group_emodulus_min &&
+                               result.youngsModulus <= config.target_group_emodulus_max);
+                result.isTargetGroup = tgArea && tgDeform && tgEmod;
             }
         } else if (!contours.empty() && !config.require_single_inner_contour) {
             size_t largestIdx = 0;
@@ -604,12 +618,22 @@ FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedIma
                 result.inRange = true;
                 result.isValid = true;
             }
+            // Compute Young's modulus from LUT if available
+            if (eModulusLut_.isLoaded()) {
+                double factor = pixelToMicronFactor_.load(std::memory_order_relaxed);
+                double areaUm = result.area * factor * factor;
+                result.youngsModulus = eModulusLut_.lookup(areaUm, result.deformability);
+            }
             if (result.isValid && config.enable_target_group) {
                 bool tgArea = (result.area >= config.target_group_area_min &&
                                result.area <= config.target_group_area_max);
                 bool tgDeform = (result.deformability >= config.target_group_deformability_min &&
                                  result.deformability <= config.target_group_deformability_max);
-                result.isTargetGroup = tgArea && tgDeform;
+                bool tgEmod = !config.enable_target_group_emodulus ||
+                              (!std::isnan(result.youngsModulus) &&
+                               result.youngsModulus >= config.target_group_emodulus_min &&
+                               result.youngsModulus <= config.target_group_emodulus_max);
+                result.isTargetGroup = tgArea && tgDeform && tgEmod;
             }
         }
     }
