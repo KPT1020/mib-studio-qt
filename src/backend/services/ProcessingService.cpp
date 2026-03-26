@@ -403,11 +403,13 @@ ProcessingService::findContours(const cv::Mat& processedImage) {
     const double minNoiseArea = 10.0;
     std::vector<std::vector<cv::Point>> filteredContours;
     std::vector<cv::Vec4i> filteredHierarchy;
+    std::vector<size_t> originalIndices; // maps filtered index → original index
 
     for (size_t i = 0; i < contours.size(); i++) {
         double area = cv::contourArea(contours[i]);
         if (area >= minNoiseArea) {
             filteredContours.push_back(contours[i]);
+            originalIndices.push_back(i);
             if (i < hierarchy.size()) {
                 filteredHierarchy.push_back(hierarchy[i]);
             }
@@ -418,14 +420,15 @@ ProcessingService::findContours(const cv::Mat& processedImage) {
     std::vector<std::vector<cv::Point>> innerContours;
     std::vector<int> parentIndices;
 
-    for (size_t i = 0; i < filteredHierarchy.size(); i++) {
-        if (filteredHierarchy[i][3] > -1) {
+    for (size_t i = 0; i < originalIndices.size(); i++) {
+        size_t origIdx = originalIndices[i];
+        if (origIdx < hierarchy.size() && hierarchy[origIdx][3] > -1) {
             hasNestedContours = true;
             innerContours.push_back(filteredContours[i]);
-            int parentIdx = filteredHierarchy[i][3];
+            int parentOrigIdx = hierarchy[origIdx][3];
             int filteredParentIdx = -1;
-            for (size_t j = 0; j < filteredContours.size(); j++) {
-                if (j == static_cast<size_t>(parentIdx)) {
+            for (size_t j = 0; j < originalIndices.size(); j++) {
+                if (originalIndices[j] == static_cast<size_t>(parentOrigIdx)) {
                     filteredParentIdx = static_cast<int>(j);
                     break;
                 }
@@ -818,11 +821,9 @@ void ProcessingService::realtimeLoop() {
                 cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
                 // Always run validation for monitoring (even without experiment)
-                // cvRoi is now relative to full frame, mask is ROI-sized
-                cv::Rect cvRoi(roi.x, roi.y, roi.w, roi.h);
-                // Always use ROI-sized data for validation (avoids O(frame_size) operations
-                // inside the timed section, and prevents size mismatch in calculateBrightnessQuantiles)
-                FilterResult validation = filterProcessedImage(mask, cvRoi, config, grayROI);
+                // mask is ROI-sized so contour coords are 0-based; use local roi for border check
+                cv::Rect localRoi(0, 0, roi.w, roi.h);
+                FilterResult validation = filterProcessedImage(mask, localRoi, config, grayROI);
 
                 // Extract contours from validation result and adjust coordinates for full-frame snapshot
                 // Contours from filterProcessedImage are in ROI coordinates, need to adjust for full frame
@@ -1476,8 +1477,10 @@ void ProcessingService::realtimeLoop() {
 
                 // Always run validation for monitoring (even without experiment)
                 // Use ROI-only data for validation (avoids O(frame_size) findContours/brightness scan)
+                // mask is ROI-sized so contour coords are 0-based; use local roi for border check
                 cv::Mat roiMaskForValidation = mask(cvRoi).clone();
-                FilterResult validation = filterProcessedImage(roiMaskForValidation, cvRoi, config, roiCurr);
+                cv::Rect localRoi(0, 0, cvRoi.width, cvRoi.height);
+                FilterResult validation = filterProcessedImage(roiMaskForValidation, localRoi, config, roiCurr);
 
                 // Extract contours from validation result for snapshot
                 // Contours are in ROI-relative coordinates — adjust to full-frame for snapshot/storage
