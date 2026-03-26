@@ -445,7 +445,9 @@ namespace backend
 
             hdf5Service_->writeRecordingInfo(startTimeNs, endTimeNs,
                                              frameRecordingWritten_.load(),
-                                             frameRecordingFiltered_.load());
+                                             frameRecordingFiltered_.load(),
+                                             processingService_->getProcessingConfig(),
+                                             processingService_->getRealtimeRoi());
             hdf5Service_->closeFile();
 
             SPDLOG_INFO("Frame recording stopped: {} frames recorded, {} empty filtered, file: {}",

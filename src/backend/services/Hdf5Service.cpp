@@ -25,6 +25,7 @@ namespace backend::services
         bool datasetsInitialized_{false};
         hsize_t validFramesWritten_{0};
         hsize_t invalidFramesWritten_{0};
+        hsize_t recordingFramesWritten_{0};
 
         ~Impl()
         {
@@ -2069,6 +2070,7 @@ namespace backend::services {
         if (groupId >= 0)
             H5Gclose(groupId);
 
+        impl_->recordingFramesWritten_ = 0;
         SPDLOG_DEBUG("HDF5 recording datasets initialized");
         return true;
     }
@@ -2086,10 +2088,7 @@ namespace backend::services {
             return false;
         }
 
-        // Track how many recording frames have been written using a simple counter.
-        // We reuse validFramesWritten_ for the recording images dataset since recording
-        // and experiment modes are mutually exclusive in practice.
-        const hsize_t alreadyWritten = impl_->validFramesWritten_;
+        const hsize_t alreadyWritten = impl_->recordingFramesWritten_;
 
         // Write/append images
         if (alreadyWritten == 0)
@@ -2199,13 +2198,15 @@ namespace backend::services {
 
         H5Tclose(compTypeId);
 
-        impl_->validFramesWritten_ += images.size();
-        SPDLOG_DEBUG("Recording: appended {} frames (total: {})", images.size(), impl_->validFramesWritten_);
+        impl_->recordingFramesWritten_ += images.size();
+        SPDLOG_DEBUG("Recording: appended {} frames (total: {})", images.size(), impl_->recordingFramesWritten_);
         return true;
     }
 
     bool Hdf5Service::writeRecordingInfo(uint64_t startTimeNs, uint64_t endTimeNs,
-                                         uint64_t totalFrames, uint64_t filteredFrames)
+                                         uint64_t totalFrames, uint64_t filteredFrames,
+                                         const ProcessingConfig& config,
+                                         const ProcessingService::Roi& roi)
     {
         if (!isFileOpen())
             return false;
@@ -2219,7 +2220,7 @@ namespace backend::services {
 
         hid_t scalarSpaceId = H5Screate(H5S_SCALAR);
 
-        auto writeAttr = [&](const char* name, uint64_t value) {
+        auto writeUint64 = [&](const char* name, uint64_t value) {
             hid_t attr = H5Acreate2(infoGroupId, name, H5T_NATIVE_UINT64, scalarSpaceId,
                                     H5P_DEFAULT, H5P_DEFAULT);
             if (attr >= 0)
@@ -2229,10 +2230,21 @@ namespace backend::services {
             }
         };
 
-        writeAttr("start_time_ns", startTimeNs);
-        writeAttr("end_time_ns", endTimeNs);
-        writeAttr("total_recorded_frames", totalFrames);
-        writeAttr("total_filtered_empty_frames", filteredFrames);
+        auto writeInt32 = [&](const char* name, int32_t value) {
+            hid_t attr = H5Acreate2(infoGroupId, name, H5T_NATIVE_INT32, scalarSpaceId,
+                                    H5P_DEFAULT, H5P_DEFAULT);
+            if (attr >= 0)
+            {
+                H5Awrite(attr, H5T_NATIVE_INT32, &value);
+                H5Aclose(attr);
+            }
+        };
+
+        // Timing and counts
+        writeUint64("start_time_ns", startTimeNs);
+        writeUint64("end_time_ns", endTimeNs);
+        writeUint64("total_recorded_frames", totalFrames);
+        writeUint64("total_filtered_empty_frames", filteredFrames);
 
         // Mark recording mode
         const char* mode = "frame_recording";
@@ -2246,6 +2258,17 @@ namespace backend::services {
             H5Aclose(modeAttr);
         }
         H5Tclose(strType);
+
+        // Empty detection config (so the file is self-describing)
+        writeInt32("empty_frame_pixel_threshold", static_cast<int32_t>(config.empty_frame_pixel_threshold));
+        writeInt32("bg_subtract_threshold", static_cast<int32_t>(config.bg_subtract_threshold));
+        writeInt32("gaussian_blur_size", static_cast<int32_t>(config.gaussian_blur_size));
+
+        // ROI used during recording
+        writeInt32("roi_x", static_cast<int32_t>(roi.x));
+        writeInt32("roi_y", static_cast<int32_t>(roi.y));
+        writeInt32("roi_w", static_cast<int32_t>(roi.w));
+        writeInt32("roi_h", static_cast<int32_t>(roi.h));
 
         H5Sclose(scalarSpaceId);
         H5Gclose(infoGroupId);
