@@ -36,26 +36,6 @@
       </widget>
      </item>
      <item>
-      <widget class="QCheckBox" name="skipEmptyFramesCheck">
-       <property name="text">
-        <string>Skip Empty Frames (Recording Mode)</string>
-       </property>
-       <property name="toolTip">
-        <string>When enabled, empty frames are filtered out from the ring buffer so only frames with detected content are stored</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QLabel" name="filteredFramesLabel">
-       <property name="text">
-        <string>Filtered: 0</string>
-       </property>
-       <property name="styleSheet">
-        <string>color: gray; padding: 0 4px;</string>
-       </property>
-      </widget>
-     </item>
-     <item>
       <spacer name="horizontalSpacer">
        <property name="orientation">
         <enum>Qt::Horizontal</enum>

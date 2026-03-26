@@ -42,7 +42,6 @@
 #include <QFileDialog>
 
 #include "backend/AppBackend.h"
-#include "backend/playback/FrameStore.h"
 #include "backend/services/ProcessingService.h"
 
 #include <spdlog/spdlog.h>
@@ -68,16 +67,6 @@ namespace frontend
         connect(ui->clearBufferBtn, &QPushButton::clicked, this, &ExperimentMonitoringTab::onClearBuffer);
         connect(ui->validOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
         connect(ui->invalidOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
-
-        // Frame recording mode: skip empty frames at the ring buffer level
-        connect(ui->skipEmptyFramesCheck, &QCheckBox::toggled, this, [this](bool checked) {
-            backend_.setFrameRecordingFilter(checked);
-            if (!checked) {
-                ui->filteredFramesLabel->setText(tr("Filtered: 0"));
-            }
-        });
-        // Initialize checkbox from current state
-        ui->skipEmptyFramesCheck->setChecked(backend_.isFrameRecordingFilterEnabled());
 
         // Set column stretch to make panels equal size
         ui->gridLayout->setColumnStretch(0, 1);
@@ -250,15 +239,6 @@ namespace frontend
         updateHistogram(recentValidFrames_);
         updateValidFramesGrid(recentValidFrames_);
         updateInvalidFramesGrid(recentInvalidFrames_);
-
-        // Update filtered frame count display
-        if (ui->skipEmptyFramesCheck->isChecked()) {
-            auto frameStore = backend_.getFrameStore();
-            if (frameStore) {
-                uint64_t filtered = frameStore->totalFiltered();
-                ui->filteredFramesLabel->setText(tr("Filtered: %1").arg(filtered));
-            }
-        }
     }
 
     void ExperimentMonitoringTab::showEvent(QShowEvent *event)
