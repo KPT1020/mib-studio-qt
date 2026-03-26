@@ -105,9 +105,11 @@ public:
     bool appendRecordingFrames(const std::vector<cv::Mat>& images,
                                const std::vector<RecordingFrameMeta>& metadata);
 
-    // Write recording info attributes
+    // Write recording info attributes (includes processing config used for empty detection)
     bool writeRecordingInfo(uint64_t startTimeNs, uint64_t endTimeNs,
-                            uint64_t totalFrames, uint64_t filteredFrames);
+                            uint64_t totalFrames, uint64_t filteredFrames,
+                            const ProcessingConfig& config = ProcessingConfig{},
+                            const ProcessingService::Roi& roi = ProcessingService::Roi{});
 
 private:
     struct Impl;
