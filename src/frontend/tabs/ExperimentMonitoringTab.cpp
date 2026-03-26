@@ -179,7 +179,14 @@ namespace frontend
         scatterSeries_ = new QScatterSeries();
         scatterSeries_->setMarkerSize(6.0);
         scatterSeries_->setName("Valid Frames");
+        scatterSeries_->setColor(QColor(0, 200, 0));
         scatterplotChart_->addSeries(scatterSeries_);
+
+        targetGroupSeries_ = new QScatterSeries();
+        targetGroupSeries_->setMarkerSize(6.0);
+        targetGroupSeries_->setName("Target Group");
+        targetGroupSeries_->setColor(QColor(0, 120, 255));
+        scatterplotChart_->addSeries(targetGroupSeries_);
         scatterplotChart_->setTitle("Deformability vs Area (μm²)");
         scatterplotChart_->legend()->setVisible(false);
 
@@ -191,6 +198,8 @@ namespace frontend
         scatterplotChart_->addAxis(scatterYAxis_, Qt::AlignLeft);
         scatterSeries_->attachAxis(scatterXAxis_);
         scatterSeries_->attachAxis(scatterYAxis_);
+        targetGroupSeries_->attachAxis(scatterXAxis_);
+        targetGroupSeries_->attachAxis(scatterYAxis_);
         scatterXAxis_->setRange(scatterXMin_, scatterXMax_);
         scatterYAxis_->setRange(scatterYMin_, scatterYMax_);
 
@@ -338,6 +347,7 @@ namespace frontend
     void ExperimentMonitoringTab::updateScatterplot(const std::vector<backend::services::ProcessedFrame> &validFrames)
     {
         scatterSeries_->clear();
+        targetGroupSeries_->clear();
 
         const double conversionFactor = backend_.processing().getPixelToMicronFactor();
         const double areaConversionFactor = conversionFactor * conversionFactor;
@@ -348,7 +358,11 @@ namespace frontend
             {
                 double areaMicrons = frame.validation.area * areaConversionFactor;
                 double deform = frame.validation.deformability;
-                scatterSeries_->append(areaMicrons, deform);
+                if (frame.validation.isTargetGroup) {
+                    targetGroupSeries_->append(areaMicrons, deform);
+                } else {
+                    scatterSeries_->append(areaMicrons, deform);
+                }
             }
         }
 

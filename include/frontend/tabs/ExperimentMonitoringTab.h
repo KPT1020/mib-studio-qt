@@ -108,6 +108,7 @@ private:
     QChartView* scatterplotView_ = nullptr;
     QChart* scatterplotChart_ = nullptr;
     QScatterSeries* scatterSeries_ = nullptr;
+    QScatterSeries* targetGroupSeries_ = nullptr;
     QValueAxis* scatterXAxis_ = nullptr;
     QValueAxis* scatterYAxis_ = nullptr;
     std::vector<QLineSeries*> isoelasticCurves_;
