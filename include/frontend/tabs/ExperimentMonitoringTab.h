@@ -83,7 +83,6 @@ private slots:
     void onUpdate();
     void onToggleOverlay(bool enabled);
     void onClearBuffer();
-    void onToggleTunePanel();
     void onApplyParams();
 
 protected:
@@ -169,7 +168,6 @@ private:
     static constexpr int UPDATE_INTERVAL_MS = 500;
 
     // Tune params panel
-    QPushButton* tunePanelToggleBtn_ = nullptr;
     QWidget* tunePanelContent_ = nullptr;
 
     // Filter thresholds

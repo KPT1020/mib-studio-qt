@@ -107,33 +107,28 @@ namespace frontend
 
     void ExperimentMonitoringTab::setupTuneParamsPanel()
     {
-        // Replace the placeholder widget with a scrollable parameter panel
         auto* placeholder = ui->tuneParamsPlaceholder;
+        placeholder->setMinimumWidth(220);
+        placeholder->setMaximumWidth(280);
 
-        // Create the outer container with toggle button + scrollable content
         auto* outerLayout = new QVBoxLayout(placeholder);
         outerLayout->setContentsMargins(0, 0, 0, 0);
-        outerLayout->setSpacing(4);
+        outerLayout->setSpacing(0);
 
-        tunePanelToggleBtn_ = new QPushButton(tr("Tune Params >>"), placeholder);
-        tunePanelToggleBtn_->setCheckable(true);
-        tunePanelToggleBtn_->setChecked(false);
-        tunePanelToggleBtn_->setFixedHeight(28);
-        connect(tunePanelToggleBtn_, &QPushButton::clicked, this, &ExperimentMonitoringTab::onToggleTunePanel);
-        outerLayout->addWidget(tunePanelToggleBtn_);
-
-        // Scrollable content area
+        // Scrollable content area (always visible)
         auto* scrollArea = new QScrollArea(placeholder);
         scrollArea->setWidgetResizable(true);
         scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         scrollArea->setFrameShape(QFrame::NoFrame);
 
         tunePanelContent_ = new QWidget();
-        tunePanelContent_->setMinimumWidth(220);
-        tunePanelContent_->setMaximumWidth(280);
         auto* contentLayout = new QVBoxLayout(tunePanelContent_);
         contentLayout->setContentsMargins(4, 4, 4, 4);
         contentLayout->setSpacing(6);
+
+        // --- Title ---
+        auto* titleLabel = new QLabel(tr("<b>Tune Params</b>"), tunePanelContent_);
+        contentLayout->addWidget(titleLabel);
 
         // --- Filter Thresholds ---
         auto* threshGroup = new QGroupBox(tr("Filter Thresholds"), tunePanelContent_);
@@ -214,11 +209,6 @@ namespace frontend
         scrollArea->setWidget(tunePanelContent_);
         outerLayout->addWidget(scrollArea, 1);
 
-        // Start collapsed
-        scrollArea->setVisible(false);
-        tunePanelContent_->setVisible(false);
-        placeholder->setMaximumWidth(tunePanelToggleBtn_->sizeHint().width() + 8);
-
         // Load current config values into widgets
         loadCurrentConfig();
     }
@@ -245,30 +235,6 @@ namespace frontend
         targetAreaMaxSpin_->setValue(cfg.target_group_area_max);
         targetDeformMinSpin_->setValue(cfg.target_group_deformability_min);
         targetDeformMaxSpin_->setValue(cfg.target_group_deformability_max);
-    }
-
-    void ExperimentMonitoringTab::onToggleTunePanel()
-    {
-        bool show = tunePanelToggleBtn_->isChecked();
-        // The scroll area is the second item in the placeholder's layout
-        auto* placeholder = ui->tuneParamsPlaceholder;
-        auto* outerLayout = placeholder->layout();
-        if (outerLayout && outerLayout->count() >= 2) {
-            auto* scrollArea = qobject_cast<QScrollArea*>(outerLayout->itemAt(1)->widget());
-            if (scrollArea) {
-                scrollArea->setVisible(show);
-                tunePanelContent_->setVisible(show);
-            }
-        }
-        if (show) {
-            tunePanelToggleBtn_->setText(tr("Tune Params <<"));
-            placeholder->setMaximumWidth(280);
-            // Refresh values from backend
-            loadCurrentConfig();
-        } else {
-            tunePanelToggleBtn_->setText(tr("Tune Params >>"));
-            placeholder->setMaximumWidth(tunePanelToggleBtn_->sizeHint().width() + 8);
-        }
     }
 
     void ExperimentMonitoringTab::onApplyParams()
@@ -459,10 +425,7 @@ namespace frontend
             updateTimer_->start();
         }
         // Refresh tune panel with current config when tab becomes visible
-        if (tunePanelToggleBtn_ && tunePanelToggleBtn_->isChecked())
-        {
-            loadCurrentConfig();
-        }
+        loadCurrentConfig();
     }
 
     void ExperimentMonitoringTab::hideEvent(QHideEvent *event)
