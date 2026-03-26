@@ -25,6 +25,7 @@
 #include <QBarCategoryAxis>
 #endif
 #include <QFrame>
+#include <QVBoxLayout>
 #include <QMessageBox>
 #include <QShowEvent>
 #include <QHideEvent>
@@ -594,19 +595,27 @@ namespace frontend
                     THUMBNAIL_SIZE, THUMBNAIL_SIZE,
                     Qt::KeepAspectRatio, Qt::SmoothTransformation));
 
-                // Paint rejection reason overlay on thumbnail
+                // Derive rejection reasons
                 auto reasons = getInvalidReasons(frame.validation, config);
-                QString tooltipText;
+
+                // Container widget: image on top, reason text below
+                QWidget *container = new QWidget(ui->invalidFramesWidget);
+                QVBoxLayout *vbox = new QVBoxLayout(container);
+                vbox->setContentsMargins(0, 0, 0, 0);
+                vbox->setSpacing(2);
+
+                QLabel *imageLabel = new QLabel(container);
+                imageLabel->setPixmap(pixmap);
+                imageLabel->setAlignment(Qt::AlignCenter);
+                imageLabel->setFrameStyle(QFrame::Box);
+                imageLabel->setLineWidth(1);
+                imageLabel->setStyleSheet("QLabel { border: 1px solid gray; }");
+                imageLabel->setFixedSize(THUMBNAIL_SIZE, THUMBNAIL_SIZE);
+                imageLabel->setScaledContents(false);
+                vbox->addWidget(imageLabel, 0, Qt::AlignCenter);
+
                 if (!reasons.empty())
                 {
-                    QPainter painter(&pixmap);
-                    int bannerHeight = 18;
-                    QRect bannerRect(0, pixmap.height() - bannerHeight, pixmap.width(), bannerHeight);
-                    painter.fillRect(bannerRect, QColor(0, 0, 0, 160));
-                    painter.setPen(Qt::white);
-                    QFont font = painter.font();
-                    font.setPixelSize(10);
-                    painter.setFont(font);
                     QStringList shortReasons;
                     QStringList tooltipLines;
                     for (const auto &r : reasons)
@@ -614,24 +623,18 @@ namespace frontend
                         shortReasons << r.shortText;
                         tooltipLines << r.longText;
                     }
-                    painter.drawText(bannerRect, Qt::AlignCenter, shortReasons.join(" | "));
-                    painter.end();
-                    tooltipText = tooltipLines.join("\n");
+
+                    QLabel *reasonLabel = new QLabel(shortReasons.join(" | "), container);
+                    reasonLabel->setAlignment(Qt::AlignCenter);
+                    reasonLabel->setWordWrap(true);
+                    reasonLabel->setStyleSheet("QLabel { font-size: 9px; color: #cc0000; }");
+                    reasonLabel->setFixedWidth(THUMBNAIL_SIZE);
+                    vbox->addWidget(reasonLabel, 0, Qt::AlignCenter);
+
+                    container->setToolTip(tooltipLines.join("\n"));
                 }
 
-                QLabel *label = new QLabel(ui->invalidFramesWidget);
-                label->setPixmap(pixmap);
-                label->setAlignment(Qt::AlignCenter);
-                label->setFrameStyle(QFrame::Box);
-                label->setLineWidth(1);
-                label->setStyleSheet("QLabel { border: 1px solid gray; }");
-                label->setMinimumSize(THUMBNAIL_SIZE, THUMBNAIL_SIZE);
-                label->setMaximumSize(THUMBNAIL_SIZE, THUMBNAIL_SIZE);
-                label->setScaledContents(false);
-                if (!tooltipText.isEmpty())
-                    label->setToolTip(tooltipText);
-
-                ui->invalidFramesGrid->addWidget(label, row, col);
+                ui->invalidFramesGrid->addWidget(container, row, col);
 
                 col++;
                 if (col >= GRID_COLUMNS)
