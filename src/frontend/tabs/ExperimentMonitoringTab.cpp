@@ -501,7 +501,7 @@ namespace frontend
                 bool alreadyRoi = (frame.originalImage.cols == roi.w && frame.originalImage.rows == roi.h);
                 cv::Mat roiOriginal = alreadyRoi ? frame.originalImage : frame.originalImage(cv::Rect(roi.x, roi.y, roi.w, roi.h));
                 cv::Mat roiMask = alreadyRoi ? frame.processedImage : frame.processedImage(cv::Rect(roi.x, roi.y, roi.w, roi.h));
-                roiImage = createOverlayImage(roiOriginal, roiMask);
+                roiImage = createOverlayImage(roiOriginal, roiMask, &frame.validation);
             }
             else
             {
@@ -575,7 +575,7 @@ namespace frontend
                 bool alreadyRoi = (frame.originalImage.cols == roi.w && frame.originalImage.rows == roi.h);
                 cv::Mat roiOriginal = alreadyRoi ? frame.originalImage : frame.originalImage(cv::Rect(roi.x, roi.y, roi.w, roi.h));
                 cv::Mat roiMask = alreadyRoi ? frame.processedImage : frame.processedImage(cv::Rect(roi.x, roi.y, roi.w, roi.h));
-                roiImage = createOverlayImage(roiOriginal, roiMask);
+                roiImage = createOverlayImage(roiOriginal, roiMask, &frame.validation);
             }
             else
             {
@@ -762,11 +762,20 @@ namespace frontend
         }
     }
 
-    QImage ExperimentMonitoringTab::createOverlayImage(const cv::Mat &original, const cv::Mat &mask) const
+    QImage ExperimentMonitoringTab::createOverlayImage(const cv::Mat &original, const cv::Mat &mask,
+                                                       const backend::services::FilterResult *validation) const
     {
         if (original.empty() || mask.empty())
         {
             return QImage();
+        }
+
+        // Classification color: blue=target, green=valid, red=invalid
+        cv::Vec3b tint(0, 255, 0); // default green
+        if (validation) {
+            if (validation->isTargetGroup)      tint = {0, 120, 255};  // Blue
+            else if (validation->isValid)       tint = {0, 255, 0};    // Green
+            else                                tint = {255, 0, 0};    // Red
         }
 
         // Convert original to RGB if needed
@@ -784,7 +793,7 @@ namespace frontend
             }
         }
 
-        // Create overlay: green tint where mask is non-zero
+        // Create overlay: colored tint where mask is non-zero
         cv::Mat overlay = rgb.clone();
         for (int y = 0; y < overlay.rows && y < mask.rows; ++y)
         {
@@ -793,10 +802,9 @@ namespace frontend
                 if (mask.at<uchar>(y, x) > 0)
                 {
                     cv::Vec3b &pixel = overlay.at<cv::Vec3b>(y, x);
-                    // Blend with green (0, 255, 0) at 30% opacity
-                    pixel[0] = static_cast<uchar>(pixel[0] * 0.7);                                // R
-                    pixel[1] = static_cast<uchar>(std::min(255.0, pixel[1] * 0.7 + 255.0 * 0.3)); // G
-                    pixel[2] = static_cast<uchar>(pixel[2] * 0.7);                                // B
+                    pixel[0] = static_cast<uchar>(std::min(255.0, pixel[0] * 0.7 + tint[0] * 0.3));
+                    pixel[1] = static_cast<uchar>(std::min(255.0, pixel[1] * 0.7 + tint[1] * 0.3));
+                    pixel[2] = static_cast<uchar>(std::min(255.0, pixel[2] * 0.7 + tint[2] * 0.3));
                 }
             }
         }

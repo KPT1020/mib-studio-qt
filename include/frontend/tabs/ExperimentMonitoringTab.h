@@ -7,7 +7,7 @@
 
 namespace cv { class Mat; }
 namespace backend { class AppBackend; }
-namespace backend::services { struct ProcessedFrame; }
+namespace backend::services { struct ProcessedFrame; struct FilterResult; }
 
 class QTimer;
 class QChartView;
@@ -95,7 +95,7 @@ private:
     QImage extractRoiImage(const cv::Mat& image, int x, int y, int w, int h) const;
     QImage matToQImage(const cv::Mat& mat) const;
     void clearGrid(QGridLayout* grid);
-    QImage createOverlayImage(const cv::Mat& original, const cv::Mat& mask) const;
+    QImage createOverlayImage(const cv::Mat& original, const cv::Mat& mask, const backend::services::FilterResult* validation = nullptr) const;
     std::vector<std::vector<double>> computeKDE(const std::vector<std::pair<double, double>>& points, 
                                                  int gridX, int gridY, double bandwidth) const;
 
