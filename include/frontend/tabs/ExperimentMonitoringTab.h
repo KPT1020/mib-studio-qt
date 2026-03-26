@@ -11,6 +11,7 @@ namespace backend::services { struct ProcessedFrame; }
 
 class QTimer;
 class QChartView;
+namespace frontend { class ZoomableChartView; }
 class QScatterSeries;
 class QLineSeries;
 class QBarSeries;
@@ -105,7 +106,7 @@ private:
     QLabel* roiLabel_ = nullptr;
 
     // Panel 1: Scatterplot
-    QChartView* scatterplotView_ = nullptr;
+    ZoomableChartView* scatterplotView_ = nullptr;
     QChart* scatterplotChart_ = nullptr;
     QScatterSeries* scatterSeries_ = nullptr;
     QValueAxis* scatterXAxis_ = nullptr;
@@ -113,7 +114,7 @@ private:
     std::vector<QLineSeries*> isoelasticCurves_;
 
     // Panel 2: Histogram
-    QChartView* histogramView_ = nullptr;
+    ZoomableChartView* histogramView_ = nullptr;
     QChart* histogramChart_ = nullptr;
 #ifndef MIB_HAS_QHISTOGRAMSERIES
 #if __has_include(<QHistogramSeries>)
