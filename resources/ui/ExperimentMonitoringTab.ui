@@ -36,6 +36,16 @@
       </widget>
      </item>
      <item>
+      <widget class="QPushButton" name="sortTriggerBtn">
+       <property name="text">
+        <string>Sort Trigger</string>
+       </property>
+       <property name="toolTip">
+        <string>Manually fire a sort trigger pulse for testing</string>
+       </property>
+      </widget>
+     </item>
+     <item>
       <spacer name="horizontalSpacer">
        <property name="orientation">
         <enum>Qt::Horizontal</enum>
