@@ -2099,7 +2099,7 @@ namespace backend::services {
         }
         else
         {
-            if (!appendImageDataset(impl_->fileId_, "/recorded_frames/images", images, alreadyWritten))
+            if (!appendImageDataset(impl_->fileId_, "/recorded_frames/images", images, impl_->validFramesWritten_))
                 return false;
         }
 
@@ -2199,7 +2199,8 @@ namespace backend::services {
 
         H5Tclose(compTypeId);
 
-        impl_->validFramesWritten_ += images.size();
+        if (alreadyWritten == 0)
+            impl_->validFramesWritten_ = images.size();
         SPDLOG_DEBUG("Recording: appended {} frames (total: {})", images.size(), impl_->validFramesWritten_);
         return true;
     }

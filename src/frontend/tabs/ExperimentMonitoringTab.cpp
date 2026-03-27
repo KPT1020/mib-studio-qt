@@ -142,6 +142,9 @@ namespace frontend
         // Connect signals
         connect(ui->clearBufferBtn, &QPushButton::clicked, this, &ExperimentMonitoringTab::onClearBuffer);
         connect(ui->sortTriggerBtn, &QPushButton::clicked, this, &ExperimentMonitoringTab::onSortTrigger);
+        connect(ui->triggerDurationSpin, qOverload<int>(&QSpinBox::valueChanged), this, [this](int us) {
+            backend_.trigger().setPulseDurationUs(us);
+        });
         connect(ui->validOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
         connect(ui->invalidOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
 

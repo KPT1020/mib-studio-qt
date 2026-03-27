@@ -46,6 +46,25 @@
       </widget>
      </item>
      <item>
+      <widget class="QSpinBox" name="triggerDurationSpin">
+       <property name="suffix">
+        <string> us</string>
+       </property>
+       <property name="minimum">
+        <number>1</number>
+       </property>
+       <property name="maximum">
+        <number>1000000</number>
+       </property>
+       <property name="value">
+        <number>1</number>
+       </property>
+       <property name="toolTip">
+        <string>Trigger pulse duration in microseconds</string>
+       </property>
+      </widget>
+     </item>
+     <item>
       <spacer name="horizontalSpacer">
        <property name="orientation">
         <enum>Qt::Horizontal</enum>
