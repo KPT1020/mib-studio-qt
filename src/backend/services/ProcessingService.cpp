@@ -779,7 +779,7 @@ void ProcessingService::realtimeLoop() {
                 // Check for empty frame: count non-zero pixels after binary threshold
                 int pixelCount = cv::countNonZero(thresh);
                 if (pixelCount < config.empty_frame_pixel_threshold) {
-                    SPDLOG_DEBUG("Empty frame detected (idx={}, pixel_count={}, threshold={}), skipping further processing", 
+                    SPDLOG_TRACE("Empty frame detected (idx={}, pixel_count={}, threshold={}), skipping further processing",
                                 idx, pixelCount, config.empty_frame_pixel_threshold);
                     
                     // Auto-capture logic (only when experiment is NOT running)
@@ -901,7 +901,7 @@ void ProcessingService::realtimeLoop() {
                 }
 
                 // Throttled DEBUG: accumulation sizes and process memory
-                if ((idx % 500ULL) == 0ULL) {
+                if ((idx % 5000ULL) == 0ULL) {
                     size_t vSz = 0;
                     size_t iSz = 0;
                     {
@@ -909,13 +909,13 @@ void ProcessingService::realtimeLoop() {
                         vSz = validFrames_.size();
                         iSz = invalidFrames_.size();
                     }
-                    SPDLOG_DEBUG("Accumulated frames (idx={}): valid={}, invalid={}, flush_interval={}, since_last_flush={}, mem_mb={:.1f}",
+                    SPDLOG_TRACE("Accumulated frames (idx={}): valid={}, invalid={}, flush_interval={}, since_last_flush={}, mem_mb={:.1f}",
                                  idx, vSz, iSz, flushInterval_.load(), framesSinceLastFlush_.load(), backend::Tools::getProcessMemoryMB());
                 }
             }
 
             // Throttled DEBUG: monitoring buffer sizes and process memory
-            if ((idx % 500ULL) == 0ULL) {
+            if ((idx % 5000ULL) == 0ULL) {
                 size_t monValidSz = 0;
                 size_t monInvalidSz = 0;
                 {
@@ -923,7 +923,7 @@ void ProcessingService::realtimeLoop() {
                     monValidSz = monitoringValidFrames_.size();
                     monInvalidSz = monitoringInvalidFrames_.size();
                 }
-                SPDLOG_DEBUG("Realtime monitoring sizes (idx={}): mon_valid={}, mon_invalid={}, mem_mb={:.1f}",
+                SPDLOG_TRACE("Realtime monitoring sizes (idx={}): mon_valid={}, mon_invalid={}, mem_mb={:.1f}",
                              idx, monValidSz, monInvalidSz, backend::Tools::getProcessMemoryMB());
             }
             
@@ -1087,7 +1087,7 @@ void ProcessingService::realtimeLoop() {
                 // Check for empty frame: count non-zero pixels after binary threshold
                 int pixelCount = cv::countNonZero(thresh);
                 if (pixelCount < config.empty_frame_pixel_threshold) {
-                    SPDLOG_DEBUG("Empty frame detected (idx={}, pixel_count={}, threshold={}), skipping further processing", 
+                    SPDLOG_TRACE("Empty frame detected (idx={}, pixel_count={}, threshold={}), skipping further processing",
                                 idx, pixelCount, config.empty_frame_pixel_threshold);
                     
                     // Auto-capture logic (only when experiment is NOT running)
@@ -1288,7 +1288,7 @@ void ProcessingService::realtimeLoop() {
             // Per-frame timing
             const auto frameEnd = clock::now();
             const double ms = std::chrono::duration<double, std::milli>(frameEnd - frameStart).count();
-            SPDLOG_DEBUG("Realtime processing: idx={} time_ms={:.3f} roi={}x{}", idx, ms, roi.w, roi.h);
+            SPDLOG_TRACE("Realtime processing: idx={} time_ms={:.3f} roi={}x{}", idx, ms, roi.w, roi.h);
 
             // Periodic summary
             framesSinceSummary += 1;
@@ -1307,8 +1307,8 @@ void ProcessingService::realtimeLoop() {
                 const double algoAvgUs = algoAvgMs * 1000.0;
                 algoAvgUs1s_.store(algoAvgUs, std::memory_order_relaxed);
                 algoAvgUs1sUpdatedUs_.store(backend::Tools::getTimestamp(), std::memory_order_relaxed);
-                SPDLOG_INFO("Realtime processing summary: processed={} skipped={} window_ms={:.0f} avg_ms={:.3f} algo_avg_ms={:.3f} ~fps={:.1f}",
-                            framesSinceSummary, framesSkippedSinceSummary, windowMs, avgMs, algoAvgMs, fps);
+                SPDLOG_DEBUG("Realtime processing summary: processed={} skipped={} window_ms={:.0f} avg_ms={:.3f} algo_avg_ms={:.3f} ~fps={:.1f}",
+                             framesSinceSummary, framesSkippedSinceSummary, windowMs, avgMs, algoAvgMs, fps);
 
                 // Extended summary: buffers, ROI, background, and process memory
                 size_t vSz = 0, iSz = 0, monValidSz = 0, monInvalidSz = 0;
@@ -1333,8 +1333,8 @@ void ProcessingService::realtimeLoop() {
                 const size_t sinceFlush = framesSinceLastFlush_.load();
                 const double memMB = backend::Tools::getProcessMemoryMB();
                 const double peakMB = backend::Tools::getPeakProcessMemoryMB();
-                SPDLOG_INFO("Realtime buffers: acc_valid={} acc_invalid={} mon_valid={} mon_invalid={} flush_interval={} since_last_flush={} roi={}x{} bg={} mem_mb={:.1f} peak_mb={:.1f}",
-                            vSz, iSz, monValidSz, monInvalidSz, flushInt, sinceFlush, roi.w, roi.h, hasBg ? 1 : 0, memMB, peakMB);
+                SPDLOG_DEBUG("Realtime buffers: acc_valid={} acc_invalid={} mon_valid={} mon_invalid={} flush_interval={} since_last_flush={} roi={}x{} bg={} mem_mb={:.1f} peak_mb={:.1f}",
+                             vSz, iSz, monValidSz, monInvalidSz, flushInt, sinceFlush, roi.w, roi.h, hasBg ? 1 : 0, memMB, peakMB);
                 lastSummaryTs = now;
                 framesSinceSummary = 0;
                 framesSkippedSinceSummary = 0;
@@ -1429,7 +1429,7 @@ void ProcessingService::realtimeLoop() {
                 // Check for empty frame: count non-zero pixels after binary threshold
                 int pixelCount = cv::countNonZero(thresh);
                 if (pixelCount < config.empty_frame_pixel_threshold) {
-                    SPDLOG_DEBUG("Empty frame detected (idx={}, pixel_count={}, threshold={}), skipping further processing",
+                    SPDLOG_TRACE("Empty frame detected (idx={}, pixel_count={}, threshold={}), skipping further processing",
                                 idx, pixelCount, config.empty_frame_pixel_threshold);
                     
                     // Auto-capture logic (only when experiment is NOT running)
@@ -1561,8 +1561,8 @@ void ProcessingService::realtimeLoop() {
                         monitoringInvalidFrames_.push_back(std::move(monitoringFrame));
                     }
 
-                    // Throttled DEBUG: accumulation sizes and process memory
-                    if ((idx % 500ULL) == 0ULL) {
+                    // Throttled TRACE: accumulation sizes and process memory
+                    if ((idx % 5000ULL) == 0ULL) {
                         size_t vSz = 0;
                         size_t iSz = 0;
                         {
@@ -1570,13 +1570,13 @@ void ProcessingService::realtimeLoop() {
                             vSz = validFrames_.size();
                             iSz = invalidFrames_.size();
                         }
-                        SPDLOG_DEBUG("Accumulated frames (idx={}): valid={}, invalid={}, flush_interval={}, since_last_flush={}, mem_mb={:.1f}",
-                                    idx, vSz, iSz, flushInterval_.load(), framesSinceLastFlush_.load(), backend::Tools::getProcessMemoryMB());
+                        SPDLOG_TRACE("Accumulated frames (idx={}): valid={}, invalid={}, flush_interval={}, since_last_flush={}, mem_mb={:.1f}",
+                                     idx, vSz, iSz, flushInterval_.load(), framesSinceLastFlush_.load(), backend::Tools::getProcessMemoryMB());
                     }
                 }
 
-                // Throttled DEBUG: monitoring buffer sizes and process memory
-                if ((idx % 500ULL) == 0ULL) {
+                // Throttled TRACE: monitoring buffer sizes and process memory
+                if ((idx % 5000ULL) == 0ULL) {
                     size_t monValidSz = 0;
                     size_t monInvalidSz = 0;
                     {
@@ -1584,8 +1584,8 @@ void ProcessingService::realtimeLoop() {
                         monValidSz = monitoringValidFrames_.size();
                         monInvalidSz = monitoringInvalidFrames_.size();
                     }
-                    SPDLOG_DEBUG("Realtime monitoring sizes (idx={}): mon_valid={}, mon_invalid={}, mem_mb={:.1f}",
-                                idx, monValidSz, monInvalidSz, backend::Tools::getProcessMemoryMB());
+                    SPDLOG_TRACE("Realtime monitoring sizes (idx={}): mon_valid={}, mon_invalid={}, mem_mb={:.1f}",
+                                 idx, monValidSz, monInvalidSz, backend::Tools::getProcessMemoryMB());
                 }
 
                 // Also accumulate frames for experiment if active
@@ -1649,7 +1649,7 @@ void ProcessingService::realtimeLoop() {
                 // Per-frame timing
                 const auto frameEnd = clock::now();
                 const double ms = std::chrono::duration<double, std::milli>(frameEnd - frameStart).count();
-                SPDLOG_DEBUG("Realtime processing: idx={} time_ms={:.3f} roi={}x{}", idx, ms, roi.w, roi.h);
+                SPDLOG_TRACE("Realtime processing: idx={} time_ms={:.3f} roi={}x{}", idx, ms, roi.w, roi.h);
 
                 // Periodic summary
                 framesSinceSummary += 1;
@@ -1668,8 +1668,8 @@ void ProcessingService::realtimeLoop() {
                     const double algoAvgUs = algoAvgMs * 1000.0;
                     algoAvgUs1s_.store(algoAvgUs, std::memory_order_relaxed);
                     algoAvgUs1sUpdatedUs_.store(backend::Tools::getTimestamp(), std::memory_order_relaxed);
-                    SPDLOG_INFO("Realtime processing summary: processed={} skipped={} window_ms={:.0f} avg_ms={:.3f} algo_avg_ms={:.3f} ~fps={:.1f}",
-                                framesSinceSummary, framesSkippedSinceSummary, windowMs, avgMs, algoAvgMs, fps);
+                    SPDLOG_DEBUG("Realtime processing summary: processed={} skipped={} window_ms={:.0f} avg_ms={:.3f} algo_avg_ms={:.3f} ~fps={:.1f}",
+                                 framesSinceSummary, framesSkippedSinceSummary, windowMs, avgMs, algoAvgMs, fps);
 
                     // Extended summary: buffers, ROI, background, and process memory
                     size_t vSz = 0, iSz = 0, monValidSz = 0, monInvalidSz = 0;
@@ -1694,8 +1694,8 @@ void ProcessingService::realtimeLoop() {
                     const size_t sinceFlush = framesSinceLastFlush_.load();
                     const double memMB = backend::Tools::getProcessMemoryMB();
                     const double peakMB = backend::Tools::getPeakProcessMemoryMB();
-                    SPDLOG_INFO("Realtime buffers: acc_valid={} acc_invalid={} mon_valid={} mon_invalid={} flush_interval={} since_last_flush={} roi={}x{} bg={} mem_mb={:.1f} peak_mb={:.1f}",
-                                vSz, iSz, monValidSz, monInvalidSz, flushInt, sinceFlush, roi.w, roi.h, hasBg ? 1 : 0, memMB, peakMB);
+                    SPDLOG_DEBUG("Realtime buffers: acc_valid={} acc_invalid={} mon_valid={} mon_invalid={} flush_interval={} since_last_flush={} roi={}x{} bg={} mem_mb={:.1f} peak_mb={:.1f}",
+                                 vSz, iSz, monValidSz, monInvalidSz, flushInt, sinceFlush, roi.w, roi.h, hasBg ? 1 : 0, memMB, peakMB);
                     lastSummaryTs = now;
                     framesSinceSummary = 0;
                     framesSkippedSinceSummary = 0;

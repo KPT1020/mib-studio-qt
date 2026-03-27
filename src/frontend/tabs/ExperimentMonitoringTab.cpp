@@ -44,6 +44,7 @@
 
 #include "backend/AppBackend.h"
 #include "backend/services/ProcessingService.h"
+#include "backend/services/TriggerService.h"
 
 #include <spdlog/spdlog.h>
 #include <opencv2/core.hpp>
@@ -140,6 +141,10 @@ namespace frontend
 
         // Connect signals
         connect(ui->clearBufferBtn, &QPushButton::clicked, this, &ExperimentMonitoringTab::onClearBuffer);
+        connect(ui->sortTriggerBtn, &QPushButton::clicked, this, &ExperimentMonitoringTab::onSortTrigger);
+        connect(ui->triggerDurationSpin, qOverload<int>(&QSpinBox::valueChanged), this, [this](int us) {
+            backend_.trigger().setPulseDurationUs(us);
+        });
         connect(ui->validOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
         connect(ui->invalidOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
 
@@ -774,6 +779,12 @@ namespace frontend
             updateInvalidFramesGrid(recentInvalidFrames_);
             SPDLOG_INFO("Monitoring buffer cleared");
         }
+    }
+
+    void ExperimentMonitoringTab::onSortTrigger()
+    {
+        backend_.trigger().onTargetGroupResult(true);
+        SPDLOG_INFO("Manual sort trigger fired");
     }
 
     QImage ExperimentMonitoringTab::createOverlayImage(const cv::Mat &original, const cv::Mat &mask,
