@@ -250,6 +250,7 @@ namespace backend::services
             double brightness_q3;
             double brightness_q4;
             double youngsModulus;
+            uint8_t isTargetGroup;
         };
 
         // Create compound type
@@ -270,6 +271,7 @@ namespace backend::services
         H5Tinsert(compTypeId, "brightness_q3", HOFFSET(FrameMetadata, brightness_q3), H5T_NATIVE_DOUBLE);
         H5Tinsert(compTypeId, "brightness_q4", HOFFSET(FrameMetadata, brightness_q4), H5T_NATIVE_DOUBLE);
         H5Tinsert(compTypeId, "youngsModulus", HOFFSET(FrameMetadata, youngsModulus), H5T_NATIVE_DOUBLE);
+        H5Tinsert(compTypeId, "isTargetGroup", HOFFSET(FrameMetadata, isTargetGroup), H5T_NATIVE_UINT8);
 
         // Create dataspace with unlimited first dimension for extensibility
         hsize_t dims[1] = {frames.size()};
@@ -321,6 +323,7 @@ namespace backend::services
             md.brightness_q3 = frame.validation.brightness.q3;
             md.brightness_q4 = frame.validation.brightness.q4;
             md.youngsModulus = frame.validation.youngsModulus;
+            md.isTargetGroup = frame.validation.isTargetGroup ? 1 : 0;
             metadata.push_back(md);
         }
 
@@ -545,6 +548,7 @@ namespace backend::services
             double brightness_q3;
             double brightness_q4;
             double youngsModulus;
+            uint8_t isTargetGroup;
         };
 
         // Open existing dataset
@@ -601,6 +605,7 @@ namespace backend::services
             md.brightness_q3 = frame.validation.brightness.q3;
             md.brightness_q4 = frame.validation.brightness.q4;
             md.youngsModulus = frame.validation.youngsModulus;
+            md.isTargetGroup = frame.validation.isTargetGroup ? 1 : 0;
 
             filespaceId = H5Dget_space(datasetId);
             hsize_t start[1] = {currentDims[0] + static_cast<hsize_t>(i)};
@@ -1158,6 +1163,7 @@ namespace backend::services
             double brightness_q3;
             double brightness_q4;
             double youngsModulus;
+            uint8_t isTargetGroup;
         };
 
         // Read metadata
@@ -1194,6 +1200,7 @@ namespace backend::services
             frame.validation.brightness.q3 = md.brightness_q3;
             frame.validation.brightness.q4 = md.brightness_q4;
             frame.validation.youngsModulus = md.youngsModulus;
+            frame.validation.isTargetGroup = (md.isTargetGroup != 0);
             frames.push_back(frame);
         }
 
