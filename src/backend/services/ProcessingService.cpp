@@ -331,7 +331,7 @@ size_t ProcessingService::flushBufferedFrames(class Hdf5Service& hdf5) {
         using clock = std::chrono::steady_clock;
         const size_t validCount = validToFlush.size();
         const size_t invalidCount = invalidToFlush.size();
-        SPDLOG_INFO("HDF5 flush start: valid={}, invalid={}, mem_mb_before={:.1f}", validCount, invalidCount, memBeforeMB);
+        SPDLOG_DEBUG("HDF5 flush start: valid={}, invalid={}, mem_mb_before={:.1f}", validCount, invalidCount, memBeforeMB);
         const auto t0 = clock::now();
         const bool ok = hdf5.appendFrames(validToFlush, invalidToFlush);
         const auto t1 = clock::now();
@@ -344,7 +344,7 @@ size_t ProcessingService::flushBufferedFrames(class Hdf5Service& hdf5) {
             if (validCount > 0) {
                 totalValidFlushed_.fetch_add(static_cast<uint64_t>(validCount), std::memory_order_relaxed);
             }
-            SPDLOG_INFO("HDF5 flush end: flushed={} (valid={}, invalid={}) duration_ms={:.3f} mem_mb_after={:.1f}",
+            SPDLOG_DEBUG("HDF5 flush end: flushed={} (valid={}, invalid={}) duration_ms={:.3f} mem_mb_after={:.1f}",
                         flushed, validCount, invalidCount, ms, memAfterMB);
             return flushed;
         } else {
@@ -1228,7 +1228,7 @@ void ProcessingService::realtimeLoop() {
                 const double algoAvgUs = algoAvgMs * 1000.0;
                 algoAvgUs1s_.store(algoAvgUs, std::memory_order_relaxed);
                 algoAvgUs1sUpdatedUs_.store(backend::Tools::getTimestamp(), std::memory_order_relaxed);
-                SPDLOG_INFO("Realtime processing summary: processed={} skipped={} window_ms={:.0f} avg_ms={:.3f} algo_avg_ms={:.3f} ~fps={:.1f}",
+                SPDLOG_DEBUG("Realtime processing summary: processed={} skipped={} window_ms={:.0f} avg_ms={:.3f} algo_avg_ms={:.3f} ~fps={:.1f}",
                             framesSinceSummary, framesSkippedSinceSummary, windowMs, avgMs, algoAvgMs, fps);
 
                 // Extended summary: buffers, ROI, background, and process memory
@@ -1254,7 +1254,7 @@ void ProcessingService::realtimeLoop() {
                 const size_t sinceFlush = framesSinceLastFlush_.load();
                 const double memMB = backend::Tools::getProcessMemoryMB();
                 const double peakMB = backend::Tools::getPeakProcessMemoryMB();
-                SPDLOG_INFO("Realtime buffers: acc_valid={} acc_invalid={} mon_valid={} mon_invalid={} flush_interval={} since_last_flush={} roi={}x{} bg={} mem_mb={:.1f} peak_mb={:.1f}",
+                SPDLOG_DEBUG("Realtime buffers: acc_valid={} acc_invalid={} mon_valid={} mon_invalid={} flush_interval={} since_last_flush={} roi={}x{} bg={} mem_mb={:.1f} peak_mb={:.1f}",
                             vSz, iSz, monValidSz, monInvalidSz, flushInt, sinceFlush, roi.w, roi.h, hasBg ? 1 : 0, memMB, peakMB);
                 lastSummaryTs = now;
                 framesSinceSummary = 0;
@@ -1596,7 +1596,7 @@ void ProcessingService::realtimeLoop() {
                     const size_t sinceFlush = framesSinceLastFlush_.load();
                     const double memMB = backend::Tools::getProcessMemoryMB();
                     const double peakMB = backend::Tools::getPeakProcessMemoryMB();
-                    SPDLOG_INFO("Realtime buffers: acc_valid={} acc_invalid={} mon_valid={} mon_invalid={} flush_interval={} since_last_flush={} roi={}x{} bg={} mem_mb={:.1f} peak_mb={:.1f}",
+                    SPDLOG_DEBUG("Realtime buffers: acc_valid={} acc_invalid={} mon_valid={} mon_invalid={} flush_interval={} since_last_flush={} roi={}x{} bg={} mem_mb={:.1f} peak_mb={:.1f}",
                                 vSz, iSz, monValidSz, monInvalidSz, flushInt, sinceFlush, roi.w, roi.h, hasBg ? 1 : 0, memMB, peakMB);
                     lastSummaryTs = now;
                     framesSinceSummary = 0;

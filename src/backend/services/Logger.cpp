@@ -1,5 +1,6 @@
 #include "backend/services/Logger.h"
 
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <vector>
@@ -27,8 +28,12 @@ void Logger::init(const std::string& logFilePath) {
         s_logger = std::make_shared<spdlog::logger>("app", sinks.begin(), sinks.end());
 
         s_logger->set_level(spdlog::level::info);
+        const char* envLevel = std::getenv("MIB_LOG_LEVEL");
+        if (envLevel) {
+            s_logger->set_level(spdlog::level::from_str(envLevel));
+        }
         spdlog::set_default_logger(s_logger);
-        
+
         // Flush on every log level to ensure logs are written immediately
         spdlog::flush_on(spdlog::level::trace);
         
@@ -42,6 +47,9 @@ void Logger::init(const std::string& logFilePath) {
         auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
         s_logger = std::make_shared<spdlog::logger>("app", console_sink);
         s_logger->set_level(spdlog::level::info);
+        if (envLevel) {
+            s_logger->set_level(spdlog::level::from_str(envLevel));
+        }
         spdlog::set_default_logger(s_logger);
         SPDLOG_ERROR("Failed to initialize file logger ({}), using console only: {}", logFilePath, e.what());
     } catch (...) {
@@ -49,6 +57,10 @@ void Logger::init(const std::string& logFilePath) {
         auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
         s_logger = std::make_shared<spdlog::logger>("app", console_sink);
         s_logger->set_level(spdlog::level::info);
+        const char* envLevel = std::getenv("MIB_LOG_LEVEL");
+        if (envLevel) {
+            s_logger->set_level(spdlog::level::from_str(envLevel));
+        }
         spdlog::set_default_logger(s_logger);
         std::cerr << "ERROR: Failed to initialize logger for: " << logFilePath << std::endl;
     }

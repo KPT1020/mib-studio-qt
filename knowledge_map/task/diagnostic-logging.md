@@ -4,20 +4,23 @@ This build adds throttled instrumentation to investigate performance degradation
 
 ## Enabling verbose logs
 
+- Set environment variable `MIB_LOG_LEVEL=debug` before launching to see all diagnostic stats logs. Accepted values: trace, debug, info, warn, err, critical, off.
 - At runtime (dev): call `spdlog::set_level(spdlog::level::debug);` early in startup to see DEBUG lines. INFO is enabled by default.
 - Optionally set a pattern and sinks per your environment.
 
 ## What gets logged
 
-- ProcessingService (INFO, ~1 Hz):
+- CaptureService (DEBUG, ~1 Hz):
+  - `Capture stats`: fps, MB/s
+- ProcessingService (DEBUG, ~1 Hz):
   - `Realtime processing summary`: per-second averages (algo and total ms, fps)
   - `Realtime buffers`: accumulated valid/invalid, monitoring sizes, flush interval, since_last_flush, ROI size, background present, memory MB and peak MB
 - ProcessingService (DEBUG, every 500 frames):
   - `Realtime monitoring sizes`: monitoringValid/Invalid sizes and process memory
   - `Accumulated frames`: valid/invalid sizes, flush interval, since_last_flush, process memory
-- ProcessingService flush (INFO/ERROR, per flush):
+- ProcessingService flush (DEBUG/ERROR, per flush):
   - `HDF5 flush start/end`: counts, duration, memory before/after
-  - On failure: frames restored + memory
+  - On failure (ERROR): frames restored + memory
 - PlaybackPanel (INFO, ~1 Hz via existing metrics timer):
   - `Playback metrics`: display_fps, avg_latency_ms, total/window drops, overlay_ms, roi_area, image size, overlay size, overlay mode
 - MainWindow (INFO, ~1 Hz during experiment):
