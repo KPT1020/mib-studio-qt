@@ -51,27 +51,47 @@ void ZoomableChartView::wheelEvent(QWheelEvent* event)
 
     // Map cursor position to chart value coordinates
     const QPointF cursorPos = event->position();
-    // We need a series to map coordinates; use chart's first series if available
     QAbstractSeries* series = nullptr;
     if (!chart()->series().isEmpty())
         series = chart()->series().first();
 
     const QPointF chartVal = chart()->mapToValue(cursorPos, series);
+    const QRectF plotArea = chart()->plotArea();
 
-    // Zoom each QValueAxis around the cursor position
+    // Determine which axes to zoom based on cursor position and modifier keys:
+    //   Ctrl held  → X axis only
+    //   Shift held → Y axis only
+    //   Cursor left of plot area (Y axis region) → Y only
+    //   Cursor below plot area (X axis region)   → X only
+    //   Cursor inside plot area (no modifier)    → both axes
+    bool zoomX = true;
+    bool zoomY = true;
+
+    if (event->modifiers() & Qt::ControlModifier) {
+        zoomY = false;
+    } else if (event->modifiers() & Qt::ShiftModifier) {
+        zoomX = false;
+    } else if (cursorPos.x() < plotArea.left()) {
+        zoomX = false;   // hovering over Y axis labels
+    } else if (cursorPos.y() > plotArea.bottom()) {
+        zoomY = false;   // hovering over X axis labels
+    }
+
+    // Zoom selected axes around the cursor position
     for (auto* axis : chart()->axes()) {
         auto* valueAxis = qobject_cast<QValueAxis*>(axis);
         if (!valueAxis)
             continue;
 
+        bool isHorizontal = (axis->alignment() == Qt::AlignBottom || axis->alignment() == Qt::AlignTop);
+        if (isHorizontal && !zoomX)
+            continue;
+        if (!isHorizontal && !zoomY)
+            continue;
+
         double oldMin = valueAxis->min();
         double oldMax = valueAxis->max();
-        double cursorVal;
-
-        if (axis->alignment() == Qt::AlignBottom || axis->alignment() == Qt::AlignTop)
-            cursorVal = chartVal.x();
-        else
-            cursorVal = chartVal.y();
+        double cursorVal = isHorizontal ? chartVal.x() : chartVal.y();
 
         double newMin = cursorVal - (cursorVal - oldMin) / factor;
         double newMax = cursorVal + (oldMax - cursorVal) / factor;
