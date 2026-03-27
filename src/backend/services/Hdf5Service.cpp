@@ -1157,6 +1157,7 @@ namespace backend::services
             double brightness_q2;
             double brightness_q3;
             double brightness_q4;
+            double youngsModulus;
         };
 
         // Read metadata
@@ -1192,6 +1193,7 @@ namespace backend::services
             frame.validation.brightness.q2 = md.brightness_q2;
             frame.validation.brightness.q3 = md.brightness_q3;
             frame.validation.brightness.q4 = md.brightness_q4;
+            frame.validation.youngsModulus = md.youngsModulus;
             frames.push_back(frame);
         }
 
