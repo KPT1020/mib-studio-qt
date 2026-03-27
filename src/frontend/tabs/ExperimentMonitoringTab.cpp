@@ -42,6 +42,7 @@
 #include <QPixmap>
 #include <QFileDialog>
 
+#include "frontend/widgets/ZoomableChartView.h"
 #include "backend/AppBackend.h"
 #include "backend/services/ProcessingService.h"
 #include "backend/services/TriggerService.h"
@@ -208,8 +209,10 @@ namespace frontend
         scatterXAxis_->setRange(scatterXMin_, scatterXMax_);
         scatterYAxis_->setRange(scatterYMin_, scatterYMax_);
 
-        scatterplotView_ = new QChartView(scatterplotChart_);
+        scatterplotView_ = new ZoomableChartView(scatterplotChart_);
         scatterplotView_->setRenderHint(QPainter::Antialiasing);
+        scatterplotView_->setDefaultRange(scatterXAxis_, scatterXMin_, scatterXMax_);
+        scatterplotView_->setDefaultRange(scatterYAxis_, scatterYMin_, scatterYMax_);
         // Replace placeholder with actual chart view
         ui->gridLayout->removeWidget(ui->scatterplotViewPlaceholder);
         delete ui->scatterplotViewPlaceholder;
@@ -260,8 +263,11 @@ namespace frontend
             histogramXAxis_->setRange(histogramXMin_, histogramXMax_);
         histogramYAxis_->setRange(0, std::max(1.0, histogramYMax_));
 
-        histogramView_ = new QChartView(histogramChart_);
+        histogramView_ = new ZoomableChartView(histogramChart_);
         histogramView_->setRenderHint(QPainter::Antialiasing);
+        if (histogramXAxis_)
+            histogramView_->setDefaultRange(histogramXAxis_, histogramXMin_, histogramXMax_);
+        histogramView_->setDefaultRange(histogramYAxis_, 0, std::max(1.0, histogramYMax_));
         // Replace placeholder with actual chart view
         ui->gridLayout->removeWidget(ui->histogramViewPlaceholder);
         delete ui->histogramViewPlaceholder;
@@ -371,8 +377,10 @@ namespace frontend
             }
         }
 
-        scatterXAxis_->setRange(scatterXMin_, scatterXMax_);
-        scatterYAxis_->setRange(scatterYMin_, scatterYMax_);
+        if (!scatterplotView_->isUserZoomed()) {
+            scatterXAxis_->setRange(scatterXMin_, scatterXMax_);
+            scatterYAxis_->setRange(scatterYMin_, scatterYMax_);
+        }
     }
 
     void ExperimentMonitoringTab::updateHistogram(const std::vector<backend::services::ProcessedFrame> &validFrames)
@@ -390,10 +398,12 @@ namespace frontend
         const double binWidth = histogramBinWidth_;
         const int histogramBins = std::max(1, static_cast<int>(std::round((maxVal - minVal) / binWidth)));
 
-        if (histogramXAxis_)
-        {
-            histogramXAxis_->setRange(minVal, maxVal);
-            histogramXAxis_->setTickCount(6);
+        if (!histogramView_->isUserZoomed()) {
+            if (histogramXAxis_)
+            {
+                histogramXAxis_->setRange(minVal, maxVal);
+                histogramXAxis_->setTickCount(6);
+            }
         }
 
         std::vector<double> ringRatios;
@@ -408,8 +418,10 @@ namespace frontend
             }
         }
 
-        const double yMax = std::max(1.0, histogramYMax_);
-        histogramYAxis_->setRange(0, yMax);
+        if (!histogramView_->isUserZoomed()) {
+            const double yMax = std::max(1.0, histogramYMax_);
+            histogramYAxis_->setRange(0, yMax);
+        }
 
         if (ringRatios.empty())
         {
@@ -926,6 +938,10 @@ namespace frontend
             return;
         scatterXMin_ = minVal;
         scatterXMax_ = maxVal;
+        if (scatterplotView_) {
+            scatterplotView_->setDefaultRange(scatterXAxis_, minVal, maxVal);
+            scatterplotView_->resetZoom();
+        }
     }
 
     void ExperimentMonitoringTab::setScatterYRange(double minVal, double maxVal)
@@ -934,6 +950,10 @@ namespace frontend
             return;
         scatterYMin_ = minVal;
         scatterYMax_ = maxVal;
+        if (scatterplotView_) {
+            scatterplotView_->setDefaultRange(scatterYAxis_, minVal, maxVal);
+            scatterplotView_->resetZoom();
+        }
     }
 
     void ExperimentMonitoringTab::setHistogramXRange(double minVal, double maxVal)
@@ -942,6 +962,10 @@ namespace frontend
             return;
         histogramXMin_ = minVal;
         histogramXMax_ = maxVal;
+        if (histogramView_ && histogramXAxis_) {
+            histogramView_->setDefaultRange(histogramXAxis_, minVal, maxVal);
+            histogramView_->resetZoom();
+        }
     }
 
     void ExperimentMonitoringTab::setHistogramYMax(double maxVal)
@@ -949,6 +973,10 @@ namespace frontend
         if (maxVal <= 0)
             return;
         histogramYMax_ = maxVal;
+        if (histogramView_) {
+            histogramView_->setDefaultRange(histogramYAxis_, 0, std::max(1.0, maxVal));
+            histogramView_->resetZoom();
+        }
     }
 
     void ExperimentMonitoringTab::setHistogramBinWidth(double width)
