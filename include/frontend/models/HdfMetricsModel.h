@@ -13,6 +13,7 @@ public:
     explicit HdfMetricsModel(QObject* parent = nullptr);
 
     void setSource(const std::vector<backend::services::ProcessedFrame>* framesPtr);
+    void setPixelToMicronFactor(double factor);
 
     int rowCount(const QModelIndex& parent = QModelIndex()) const override;
     int columnCount(const QModelIndex& parent = QModelIndex()) const override;
@@ -22,6 +23,7 @@ public:
 
 private:
     const std::vector<backend::services::ProcessedFrame>* frames_{nullptr};
+    double pixelToMicronFactor_{1.0};
 };
 
 } // namespace frontend

@@ -35,8 +35,8 @@ struct ProcessingConfig {
     int bg_subtract_threshold{8};
     int morph_kernel_size{3};
     int morph_iterations{1};
-    int area_threshold_min{250};
-    int area_threshold_max{1000};
+    int area_threshold_min{60};    // μm²
+    int area_threshold_max{290};   // μm²
     double deformability_threshold_min{0.0};
     double deformability_threshold_max{1.0};
     bool enable_border_check{true};
@@ -51,8 +51,8 @@ struct ProcessingConfig {
     int auto_background_cooldown_frames{1000};
     // Target group sort trigger (second gate within valid frames)
     bool enable_target_group{false};
-    int target_group_area_min{300};
-    int target_group_area_max{800};
+    int target_group_area_min{72};   // μm²
+    int target_group_area_max{191};  // μm²
     double target_group_deformability_min{0.0};
     double target_group_deformability_max{0.3};
     // Young's modulus gating (uses LUT lookup from area + deformability)

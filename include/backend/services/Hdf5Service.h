@@ -54,6 +54,10 @@ public:
                              size_t& totalValidFrames, size_t& totalInvalidFrames,
                              ProcessingService::Roi* roi = nullptr);
 
+    // Save raw config JSON as a string attribute on /experiment_info.
+    // Precondition: writeExperimentInfo() must have been called first.
+    bool writeConfigJson(const std::string& jsonContent);
+
     // Read background image saved for the run (if present). Returns false if not open, dataset missing, or read fails.
     bool readBackgroundImage(cv::Mat& out) const;
 

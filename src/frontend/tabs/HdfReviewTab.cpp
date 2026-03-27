@@ -130,14 +130,16 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
             this, &HdfReviewTab::onScrollValueChanged);
     ui->validMetricsTable->horizontalHeader()->setStretchLastSection(true);
     validMetricsModel_ = new HdfMetricsModel(ui->validMetricsTable);
+    validMetricsModel_->setPixelToMicronFactor(backend_.processing().getPixelToMicronFactor());
     validMetricsModel_->setSource(&validFrames_);
     ui->validMetricsTable->setModel(validMetricsModel_);
-    
+
     // Setup invalid frames tab widgets
     connect(ui->invalidImageScroll->verticalScrollBar(), &QScrollBar::valueChanged,
             this, &HdfReviewTab::onScrollValueChanged);
     ui->invalidMetricsTable->horizontalHeader()->setStretchLastSection(true);
     invalidMetricsModel_ = new HdfMetricsModel(ui->invalidMetricsTable);
+    invalidMetricsModel_->setPixelToMicronFactor(backend_.processing().getPixelToMicronFactor());
     invalidMetricsModel_->setSource(&invalidFrames_);
     ui->invalidMetricsTable->setModel(invalidMetricsModel_);
 

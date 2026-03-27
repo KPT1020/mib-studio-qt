@@ -1005,6 +1005,56 @@ namespace backend::services
         return true;
     }
 
+    bool Hdf5Service::writeConfigJson(const std::string& jsonContent)
+    {
+        if (!isFileOpen())
+        {
+            SPDLOG_ERROR("HDF5 file is not open");
+            return false;
+        }
+
+        // Open the experiment_info group (must already exist from writeExperimentInfo)
+        htri_t exists = H5Lexists(impl_->fileId_, "/experiment_info", H5P_DEFAULT);
+        if (exists <= 0)
+        {
+            SPDLOG_WARN("Cannot write config JSON: /experiment_info group does not exist");
+            return false;
+        }
+
+        hid_t groupId = H5Gopen2(impl_->fileId_, "/experiment_info", H5P_DEFAULT);
+        if (groupId < 0)
+        {
+            SPDLOG_ERROR("Failed to open /experiment_info group for config JSON");
+            return false;
+        }
+
+        // Create variable-length string type
+        hid_t strType = H5Tcopy(H5T_C_S1);
+        H5Tset_size(strType, H5T_VARIABLE);
+        H5Tset_cset(strType, H5T_CSET_UTF8);
+
+        hid_t scalarSpace = H5Screate(H5S_SCALAR);
+        hid_t attr = H5Acreate2(groupId, "config_json", strType, scalarSpace,
+                                H5P_DEFAULT, H5P_DEFAULT);
+        bool ok = false;
+        if (attr >= 0)
+        {
+            const char* ptr = jsonContent.c_str();
+            ok = (H5Awrite(attr, strType, &ptr) >= 0);
+            H5Aclose(attr);
+        }
+
+        H5Sclose(scalarSpace);
+        H5Tclose(strType);
+        H5Gclose(groupId);
+
+        if (ok)
+            SPDLOG_DEBUG("Wrote config JSON ({} bytes) to HDF5 metadata", jsonContent.size());
+        else
+            SPDLOG_WARN("Failed to write config JSON attribute");
+        return ok;
+    }
+
     bool Hdf5Service::loadFile(const std::string& filePath)
     {
         if (impl_->isOpen_)

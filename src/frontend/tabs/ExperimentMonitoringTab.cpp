@@ -61,7 +61,8 @@ struct InvalidReason {
 
 std::vector<InvalidReason> getInvalidReasons(
     const backend::services::FilterResult& result,
-    const backend::services::ProcessingConfig& config)
+    const backend::services::ProcessingConfig& config,
+    double pixelToMicronFactor = 1.0)
 {
     std::vector<InvalidReason> reasons;
 
@@ -77,13 +78,16 @@ std::vector<InvalidReason> getInvalidReasons(
         return reasons;
     }
 
+    // Convert pixel area to μm² to match config threshold units
+    double areaUm = result.area * pixelToMicronFactor * pixelToMicronFactor;
+
     // Metrics were computed — check which range checks failed
     if (config.enable_area_range_check) {
-        if (result.area < config.area_threshold_min || result.area > config.area_threshold_max) {
+        if (areaUm < config.area_threshold_min || areaUm > config.area_threshold_max) {
             reasons.push_back({
                 "Area",
-                QString("Area: %1 (range: %2-%3)")
-                    .arg(result.area, 0, 'f', 0)
+                QString("Area: %1 μm² (range: %2-%3)")
+                    .arg(areaUm, 0, 'f', 0)
                     .arg(config.area_threshold_min)
                     .arg(config.area_threshold_max)
             });
@@ -627,7 +631,8 @@ namespace frontend
                     Qt::KeepAspectRatio, Qt::SmoothTransformation));
 
                 // Derive rejection reasons
-                auto reasons = getInvalidReasons(frame.validation, config);
+                auto reasons = getInvalidReasons(frame.validation, config,
+                    backend_.processing().getPixelToMicronFactor());
 
                 // Container widget: image on top, reason text below
                 QWidget *container = new QWidget(ui->invalidFramesWidget);

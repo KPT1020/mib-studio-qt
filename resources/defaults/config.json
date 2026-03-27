@@ -1,8 +1,8 @@
 {
     "buffer_threshold": 1000,
     "image_processing": {
-        "area_threshold_max": 1200,
-        "area_threshold_min": 250,
+        "area_threshold_max": 290,
+        "area_threshold_min": 60,
         "deformability_threshold_min": 0.0,
         "deformability_threshold_max": 0.5,
         "area_ratio_threshold_max": 1.5,
@@ -24,8 +24,8 @@
         "morph_kernel_size": 3,
         "target_group": {
             "enabled": false,
-            "area_min": 300,
-            "area_max": 800,
+            "area_min": 72,
+            "area_max": 191,
             "deformability_min": 0.0,
             "deformability_max": 0.3,
             "emodulus_enabled": false,

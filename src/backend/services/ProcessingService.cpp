@@ -560,8 +560,12 @@ FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedIma
                 }
             }
 
+            // Convert pixel area to μm² so config thresholds match scatter plot units
+            double pxToUm = pixelToMicronFactor_.load(std::memory_order_relaxed);
+            double areaUm = hullArea * pxToUm * pxToUm;
+
             bool areaInRange = !config.enable_area_range_check ||
-                              (hullArea >= config.area_threshold_min && hullArea <= config.area_threshold_max);
+                              (areaUm >= config.area_threshold_min && areaUm <= config.area_threshold_max);
             bool ringRatioInRange = (result.ringRatio > 15.0 && result.ringRatio < 25.0);
             bool deformabilityInRange = !config.enable_deformability_range_check ||
                               (result.deformability >= config.deformability_threshold_min &&
@@ -575,13 +579,11 @@ FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedIma
             }
             // Compute Young's modulus from LUT if available
             if (eModulusLut_.isLoaded()) {
-                double factor = pixelToMicronFactor_.load(std::memory_order_relaxed);
-                double areaUm = result.area * factor * factor;
                 result.youngsModulus = eModulusLut_.lookup(areaUm, result.deformability);
             }
             if (result.isValid && config.enable_target_group) {
-                bool tgArea = (result.area >= config.target_group_area_min &&
-                               result.area <= config.target_group_area_max);
+                bool tgArea = (areaUm >= config.target_group_area_min &&
+                               areaUm <= config.target_group_area_max);
                 bool tgDeform = (result.deformability >= config.target_group_deformability_min &&
                                  result.deformability <= config.target_group_deformability_max);
                 bool tgEmod = !config.enable_target_group_emodulus ||
@@ -611,8 +613,12 @@ FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedIma
             result.deformability = 1.0 - circularity;
             result.area = hullArea;
 
+            // Convert pixel area to μm² so config thresholds match scatter plot units
+            double pxToUm = pixelToMicronFactor_.load(std::memory_order_relaxed);
+            double areaUm = hullArea * pxToUm * pxToUm;
+
             bool areaInRange = !config.enable_area_range_check ||
-                (hullArea >= config.area_threshold_min && hullArea <= config.area_threshold_max);
+                (areaUm >= config.area_threshold_min && areaUm <= config.area_threshold_max);
             bool deformabilityInRange = !config.enable_deformability_range_check ||
                 (result.deformability >= config.deformability_threshold_min &&
                  result.deformability <= config.deformability_threshold_max);
@@ -624,13 +630,11 @@ FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedIma
             }
             // Compute Young's modulus from LUT if available
             if (eModulusLut_.isLoaded()) {
-                double factor = pixelToMicronFactor_.load(std::memory_order_relaxed);
-                double areaUm = result.area * factor * factor;
                 result.youngsModulus = eModulusLut_.lookup(areaUm, result.deformability);
             }
             if (result.isValid && config.enable_target_group) {
-                bool tgArea = (result.area >= config.target_group_area_min &&
-                               result.area <= config.target_group_area_max);
+                bool tgArea = (areaUm >= config.target_group_area_min &&
+                               areaUm <= config.target_group_area_max);
                 bool tgDeform = (result.deformability >= config.target_group_deformability_min &&
                                  result.deformability <= config.target_group_deformability_max);
                 bool tgEmod = !config.enable_target_group_emodulus ||

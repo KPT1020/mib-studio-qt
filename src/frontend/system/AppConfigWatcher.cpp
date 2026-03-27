@@ -185,6 +185,9 @@ namespace frontend
 			return;
 		}
 		const QByteArray data = f.readAll();
+		// Store raw JSON for HDF5 metadata persistence
+		backend_.setLastConfigJson(data.toStdString());
+
 		const QJsonDocument doc = QJsonDocument::fromJson(data);
 		if (!doc.isObject())
 		{
@@ -264,12 +267,16 @@ namespace frontend
 			}
 		}
 		backend_.processing().setProcessingConfig(pcfg);
-		SPDLOG_INFO("AppConfigWatcher: applied ProcessingConfig (blur={}, thresh={}, morph={}x{}, area=[{},{}], deform=[{:.2f},{:.2f}] enabled={}, areaRatio_max={:.2f} enabled={}, empty_px={})",
+		SPDLOG_INFO("AppConfigWatcher: applied ProcessingConfig (blur={}, thresh={}, morph={}x{}, area=[{},{} um2], deform=[{:.2f},{:.2f}] enabled={}, areaRatio_max={:.2f} enabled={}, empty_px={})",
 					pcfg.gaussian_blur_size, pcfg.bg_subtract_threshold, pcfg.morph_kernel_size, pcfg.morph_iterations,
 					pcfg.area_threshold_min, pcfg.area_threshold_max,
 					pcfg.deformability_threshold_min, pcfg.deformability_threshold_max, pcfg.enable_deformability_range_check,
 					pcfg.area_ratio_threshold_max, pcfg.enable_area_ratio_check,
 					pcfg.empty_frame_pixel_threshold);
+		SPDLOG_INFO("AppConfigWatcher: target_group enabled={}, area=[{},{} um2], deform=[{:.2f},{:.2f}], emod_enabled={}, emod=[{:.1f},{:.1f}]",
+					pcfg.enable_target_group, pcfg.target_group_area_min, pcfg.target_group_area_max,
+					pcfg.target_group_deformability_min, pcfg.target_group_deformability_max,
+					pcfg.enable_target_group_emodulus, pcfg.target_group_emodulus_min, pcfg.target_group_emodulus_max);
 
 		// 2) Flush interval (buffer threshold)
 		if (root.contains("buffer_threshold"))
