@@ -57,7 +57,7 @@ void FrameStore::pushFrame(const uint8_t* src,
     std::copy_n(src, size, f.data.begin());
 
     // Periodic stats
-    if ((w % 1000ULL) == 0ULL) {
+    if ((w % 5000ULL) == 0ULL) {
         const size_t avail = availableCount();
         const uint64_t filtered = totalFiltered_.load(std::memory_order_relaxed);
         SPDLOG_DEBUG("FrameStore: totalWritten={} available={} capacity={} filtered={}",
