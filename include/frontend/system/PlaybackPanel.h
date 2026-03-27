@@ -27,6 +27,10 @@ public:
 
     enum class OverlayMode { Off, Mask, Contours, Both };
     enum class FitMode { FitToWindow, Zoom100 };
+    struct ColoredContour {
+        QPolygon polygon;
+        QColor color;
+    };
 
     // ROI management
     void setRoi(const QRect& roi, bool saveToConfig = true);
@@ -102,10 +106,6 @@ private:
     bool hasBackground_ = false;
     QImage backgroundGray_;            // stored as grayscale QImage
     QImage overlayImage_;              // RGBA overlay (mask)
-    struct ColoredContour {
-        QPolygon polygon;
-        QColor color;
-    };
     QList<ColoredContour> overlayContours_;  // image-space contours with classification color
 
     // Last overlay computation timing (ms)

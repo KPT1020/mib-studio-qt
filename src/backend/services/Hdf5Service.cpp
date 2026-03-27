@@ -2089,7 +2089,7 @@ namespace backend::services {
         // Track how many recording frames have been written using a simple counter.
         // We reuse validFramesWritten_ for the recording images dataset since recording
         // and experiment modes are mutually exclusive in practice.
-        const hsize_t alreadyWritten = impl_->validFramesWritten_;
+        hsize_t alreadyWritten = impl_->validFramesWritten_;
 
         // Write/append images
         if (alreadyWritten == 0)
