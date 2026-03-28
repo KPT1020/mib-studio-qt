@@ -31,6 +31,10 @@
             "emodulus_enabled": false,
             "emodulus_min": 0.0,
             "emodulus_max": 10.0
+        },
+        "multi_image": {
+            "enabled": false,
+            "count": 1
         }
     },
     "save_directory": "testing",
