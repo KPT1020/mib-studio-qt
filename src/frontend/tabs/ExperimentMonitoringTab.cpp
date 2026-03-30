@@ -284,6 +284,19 @@ namespace frontend
         addDblSpinRow(targetLayout, tr("Deform Max"), targetDeformMaxSpin_, 0.0, 1.0, 0.01, 2, 0.3);
         contentLayout->addWidget(targetGroup);
 
+        // --- Advanced (OpenCV Processing) ---
+        advancedGroup_ = new QGroupBox(tr("Advanced"), tunePanelContent_);
+        advancedGroup_->setCheckable(true);
+        advancedGroup_->setChecked(false);
+        auto* advLayout = new QVBoxLayout(advancedGroup_);
+        advLayout->setSpacing(4);
+
+        addSpinRow(advLayout, tr("BG Threshold"), bgSubtractThreshSpin_, 0, 255, 1, 8);
+        addSpinRow(advLayout, tr("Blur Size"), gaussianBlurSpin_, 1, 31, 2, 3);
+        addSpinRow(advLayout, tr("Morph Kernel"), morphKernelSpin_, 1, 31, 2, 3);
+        addSpinRow(advLayout, tr("Morph Iters"), morphIterSpin_, 0, 10, 1, 1);
+        contentLayout->addWidget(advancedGroup_);
+
         // --- Apply Button ---
         auto* applyBtn = new QPushButton(tr("Apply"), tunePanelContent_);
         connect(applyBtn, &QPushButton::clicked, this, &ExperimentMonitoringTab::onApplyParams);
@@ -320,6 +333,11 @@ namespace frontend
         targetAreaMaxSpin_->setValue(cfg.target_group_area_max);
         targetDeformMinSpin_->setValue(cfg.target_group_deformability_min);
         targetDeformMaxSpin_->setValue(cfg.target_group_deformability_max);
+
+        bgSubtractThreshSpin_->setValue(cfg.bg_subtract_threshold);
+        gaussianBlurSpin_->setValue(cfg.gaussian_blur_size);
+        morphKernelSpin_->setValue(cfg.morph_kernel_size);
+        morphIterSpin_->setValue(cfg.morph_iterations);
     }
 
     void ExperimentMonitoringTab::onApplyParams()
@@ -347,16 +365,24 @@ namespace frontend
         cfg.target_group_deformability_min = targetDeformMinSpin_->value();
         cfg.target_group_deformability_max = targetDeformMaxSpin_->value();
 
+        // Advanced (OpenCV processing)
+        cfg.bg_subtract_threshold = bgSubtractThreshSpin_->value();
+        cfg.gaussian_blur_size = gaussianBlurSpin_->value();
+        cfg.morph_kernel_size = morphKernelSpin_->value();
+        cfg.morph_iterations = morphIterSpin_->value();
+
         backend_.processing().setProcessingConfig(cfg);
 
         SPDLOG_INFO("Tune panel: applied config (area=[{},{}], deform=[{:.2f},{:.2f}], "
                      "border={}, areaRange={}, deformRange={}, areaRatio={}, singleInner={}, "
-                     "targetGroup={})",
+                     "targetGroup={}, bgThresh={}, blur={}, morphK={}, morphI={})",
                      cfg.area_threshold_min, cfg.area_threshold_max,
                      cfg.deformability_threshold_min, cfg.deformability_threshold_max,
                      cfg.enable_border_check, cfg.enable_area_range_check,
                      cfg.enable_deformability_range_check, cfg.enable_area_ratio_check,
-                     cfg.require_single_inner_contour, cfg.enable_target_group);
+                     cfg.require_single_inner_contour, cfg.enable_target_group,
+                     cfg.bg_subtract_threshold, cfg.gaussian_blur_size,
+                     cfg.morph_kernel_size, cfg.morph_iterations);
     }
 
     void ExperimentMonitoringTab::setupCharts() {

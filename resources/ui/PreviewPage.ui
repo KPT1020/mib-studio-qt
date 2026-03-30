@@ -27,47 +27,19 @@
     <number>0</number>
    </property>
    <item>
-    <widget class="QSplitter" name="splitter">
-     <property name="orientation">
-      <enum>Qt::Vertical</enum>
+    <widget class="QWidget" name="overlayContainer" native="true">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+       <horstretch>0</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
      </property>
-     <property name="childrenCollapsible">
-      <bool>false</bool>
+     <property name="minimumSize">
+      <size>
+       <width>0</width>
+       <height>100</height>
+      </size>
      </property>
-     <property name="handleWidth">
-      <number>10</number>
-     </property>
-     <property name="opaqueResize">
-      <bool>true</bool>
-     </property>
-     <widget class="QWidget" name="overlayContainer" native="true">
-      <property name="sizePolicy">
-       <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-        <horstretch>0</horstretch>
-        <verstretch>0</verstretch>
-       </sizepolicy>
-      </property>
-      <property name="minimumSize">
-       <size>
-        <width>0</width>
-        <height>100</height>
-       </size>
-      </property>
-     </widget>
-     <widget class="QWidget" name="configTabsPlaceholder" native="true">
-      <property name="sizePolicy">
-       <sizepolicy hsizetype="Expanding" vsizetype="Ignored">
-        <horstretch>0</horstretch>
-        <verstretch>0</verstretch>
-       </sizepolicy>
-      </property>
-      <property name="minimumSize">
-       <size>
-        <width>0</width>
-        <height>0</height>
-       </size>
-      </property>
-     </widget>
     </widget>
    </item>
   </layout>

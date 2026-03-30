@@ -34,6 +34,7 @@
 #include "frontend/tabs/ConfigTabs.h"
 #include "frontend/system/AutoUpdater.h"
 #include "frontend/system/DeviceInitManager.h"
+#include "frontend/system/AppConfigWatcher.h"
 #include "frontend/utils/SidebarWidget.h"
 #include "frontend/utils/StatisticsPanel.h"
 #include <spdlog/spdlog.h>
@@ -51,6 +52,7 @@
 #include "frontend/dialogs/ConversionFactorDialog.h"
 #include "backend/Tools.h"
 #include <QCloseEvent>
+#include <QDialog>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -98,6 +100,27 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         SPDLOG_INFO("Opening Pixel to Micron Conversion dialog");
         ConversionFactorDialog dlg(backend_, this);
         dlg.exec(); });
+    connect(ui->appConfigAct, &QAction::triggered, this, [this]() {
+        SPDLOG_INFO("Opening App Config dialog");
+        if (configDialog_) {
+            configDialog_->raise();
+            configDialog_->activateWindow();
+            return;
+        }
+        configDialog_ = new QDialog(this);
+        configDialog_->setWindowTitle(tr("App Config"));
+        configDialog_->setAttribute(Qt::WA_DeleteOnClose);
+        configDialog_->resize(900, 600);
+        auto* dlgLayout = new QVBoxLayout(configDialog_);
+        dlgLayout->setContentsMargins(0, 0, 0, 0);
+        // Reparent configTabs_ into the dialog temporarily
+        dlgLayout->addWidget(configTabs_);
+        configTabs_->show();
+        connect(configDialog_, &QDialog::destroyed, this, [this]() {
+            configDialog_ = nullptr;
+        });
+        configDialog_->show();
+    });
     connect(ui->aboutAct, &QAction::triggered, this, [this]()
             {
         const QString v = QCoreApplication::applicationVersion();
@@ -159,7 +182,18 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     auto *monitoringTab = new frontend::ExperimentMonitoringTab(backend_, experimentTabs_);
     experimentTabs_->addTab(previewPage, tr("Preview"));
     experimentTabs_->addTab(monitoringTab, tr("Monitoring"));
-    
+
+    // Config editor and watcher (owned by MainWindow, shown via Settings > App Config dialog)
+    configTabs_ = new frontend::ConfigTabs(backend_, this);
+    configTabs_->hide();
+    PlaybackPanel* previewPlayback = previewPage->getPlaybackPanel();
+    configWatcher_ = new frontend::AppConfigWatcher(backend_, previewPlayback, this);
+    connect(configTabs_, &frontend::ConfigTabs::appConfigPathChanged,
+            configWatcher_, &frontend::AppConfigWatcher::setWatchedPath);
+    connect(configWatcher_, &frontend::AppConfigWatcher::configFileChanged,
+            configTabs_, &frontend::ConfigTabs::onExternalConfigFileChanged);
+    configWatcher_->start();
+
     // Connect PlaybackPanel background signal to SidebarWidget
     if (sidebarWidget_ && previewPage) {
         PlaybackPanel* playbackPanel = previewPage->getPlaybackPanel();
@@ -902,23 +936,12 @@ void MainWindow::onTabChanged(int index)
         }
         scriptPath = overviewTab_->currentJsPath();
     } else if (index == 2) {
-        // Experiment tab
-        if (!experimentTabs_) {
-            SPDLOG_WARN("MainWindow::onTabChanged: experimentTabs_ is null");
-            return;
-        }
-        // Get PreviewPage from Experiment tab (index 0)
-        auto* previewPage = qobject_cast<frontend::PreviewPage*>(experimentTabs_->widget(0));
-        if (!previewPage) {
-            SPDLOG_WARN("MainWindow::onTabChanged: PreviewPage is null");
-            return;
-        }
-        auto* configTabs = previewPage->getConfigTabs();
-        if (!configTabs) {
+        // Experiment tab - get script path from MainWindow-owned ConfigTabs
+        if (!configTabs_) {
             SPDLOG_WARN("MainWindow::onTabChanged: ConfigTabs is null");
             return;
         }
-        scriptPath = configTabs->currentJsPath();
+        scriptPath = configTabs_->currentJsPath();
     }
 
     // Verify the script file exists

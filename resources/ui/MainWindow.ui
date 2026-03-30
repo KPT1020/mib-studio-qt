@@ -55,6 +55,7 @@
     <property name="title">
      <string>Settings</string>
     </property>
+    <addaction name="appConfigAct"/>
     <addaction name="processingSettingsAct"/>
     <addaction name="monitoringSettingsAct"/>
     <addaction name="conversionFactorAct"/>
@@ -74,6 +75,11 @@
   <action name="exitAct">
    <property name="text">
     <string>Exit</string>
+   </property>
+  </action>
+  <action name="appConfigAct">
+   <property name="text">
+    <string>App Config...</string>
    </property>
   </action>
   <action name="processingSettingsAct">

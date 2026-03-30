@@ -19,7 +19,10 @@ namespace frontend { class ConnectTab; }
 namespace frontend { class AutoUpdater; }
 namespace frontend { class SidebarWidget; }
 namespace frontend { class DeviceInitManager; }
+namespace frontend { class ConfigTabs; }
+namespace frontend { class AppConfigWatcher; }
 namespace Ui { class MainWindow; }
+class QDialog;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -72,4 +75,7 @@ private:
     QLabel* roiLabel_ = nullptr;
     QPushButton* startCameraBtn_ = nullptr;
     QPushButton* stopCameraBtn_ = nullptr;
+    frontend::ConfigTabs* configTabs_ = nullptr;
+    frontend::AppConfigWatcher* configWatcher_ = nullptr;
+    QDialog* configDialog_ = nullptr;
 };

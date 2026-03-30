@@ -193,6 +193,13 @@ private:
     QSpinBox* targetAreaMaxSpin_ = nullptr;
     QDoubleSpinBox* targetDeformMinSpin_ = nullptr;
     QDoubleSpinBox* targetDeformMaxSpin_ = nullptr;
+
+    // Advanced (OpenCV processing)
+    QGroupBox* advancedGroup_ = nullptr;
+    QSpinBox* bgSubtractThreshSpin_ = nullptr;
+    QSpinBox* gaussianBlurSpin_ = nullptr;
+    QSpinBox* morphKernelSpin_ = nullptr;
+    QSpinBox* morphIterSpin_ = nullptr;
 };
 
 } // namespace frontend

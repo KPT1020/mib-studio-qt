@@ -1,23 +1,16 @@
 #include "frontend/tabs/PreviewPage.h"
 #include "ui_PreviewPage.h"
 
-#include <QCoreApplication>
-#include <QDir>
-#include <QFile>
 #include <QHBoxLayout>
 #include <QStackedLayout>
-#include <QTextStream>
 #include <QTimer>
 #include <QToolButton>
-#include <QSettings>
 
 #include <spdlog/spdlog.h>
 
 #include "backend/AppBackend.h"
 #include "backend/services/CaptureService.h"
 #include "frontend/system/PlaybackPanel.h"
-#include "frontend/tabs/ConfigTabs.h"
-#include "frontend/system/AppConfigWatcher.h"
 
 namespace frontend
 {
@@ -26,38 +19,7 @@ namespace frontend
         : QWidget(parent), ui(new Ui::PreviewPage), backend_(backend)
     {
         ui->setupUi(this);
-
         setupOverlayWidget();
-
-        // Bottom: configuration tabs
-        configTabs_ = new ConfigTabs(backend_, this);
-        // Allow the splitter to shrink this area aggressively (Qt layouts otherwise enforce a large minimum)
-        configTabs_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
-        configTabs_->setMinimumHeight(0);
-        
-        // Replace placeholder with actual ConfigTabs widget
-        ui->splitter->replaceWidget(1, configTabs_);
-        
-        // Set initial proportions (50/50 ratio)
-        ui->splitter->setStretchFactor(0, 1);
-        ui->splitter->setStretchFactor(1, 1);
-        
-        // Set explicit sizes for 50/50 split after widget is shown
-        QTimer::singleShot(0, this, [this]() {
-            int height = ui->splitter->height();
-            if (height > 0) {
-                int half = height / 2;
-                ui->splitter->setSizes({half, half});
-            }
-        });
-
-        // Live config watcher: watch current path and apply changes to services and playback
-        configWatcher_ = new AppConfigWatcher(backend_, playback_, this);
-        connect(configTabs_, &ConfigTabs::appConfigPathChanged, configWatcher_, &AppConfigWatcher::setWatchedPath);
-        // Connect file change signal to ConfigTabs to refresh JSON editor and table
-        connect(configWatcher_, &AppConfigWatcher::configFileChanged, configTabs_, &ConfigTabs::onExternalConfigFileChanged);
-        configWatcher_->start();
-
         onUpdateOverlay();
     }
 
@@ -66,7 +28,7 @@ namespace frontend
     }
 
     void PreviewPage::setupOverlayWidget() {
-        // Top: Playback panel with centered Play/Stop overlay
+        // PlaybackPanel with centered Play/Stop overlay
         auto *stacked = new QStackedLayout(ui->overlayContainer);
         stacked->setStackingMode(QStackedLayout::StackAll);
 
