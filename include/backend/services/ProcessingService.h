@@ -59,6 +59,10 @@ struct ProcessingConfig {
     bool enable_target_group_emodulus{false};
     double target_group_emodulus_min{0.0};
     double target_group_emodulus_max{10.0};
+    // Multi-image recording: capture a series of N consecutive frames per valid detection
+    // Metrics are computed only from the first (trigger) frame
+    bool multi_image_enabled{false};
+    int multi_image_count{1}; // Number of images per series (1 = disabled, >1 = series)
 };
 
 struct FilterResult {
@@ -86,6 +90,10 @@ struct ProcessedFrame {
     cv::Mat originalImage;
     cv::Mat processedImage; // mask
     FilterResult validation;
+    // Multi-image series: additional images captured after the trigger frame.
+    // seriesImages[0] is the trigger image (same as originalImage), followed by subsequent frames.
+    // Empty when multi-image mode is disabled.
+    std::vector<cv::Mat> seriesImages;
 };
 
 class ProcessingService {

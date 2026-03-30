@@ -1243,8 +1243,16 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
             SPDLOG_TRACE("HdfReviewTab: viewer loaded mask {}[{}] ({}x{}x{})",
                          maskPath, frameIndex, mask.cols, mask.rows, mask.channels());
         }
+        // Load multi-image series data if available (valid frames only)
+        if (isShowingValid_) {
+            std::vector<cv::Mat> seriesImages;
+            if (hdfReader_->readSeriesImagesByIndex(static_cast<size_t>(frameIndex), seriesImages) && !seriesImages.empty()) {
+                initialFrame.seriesImages = std::move(seriesImages);
+                SPDLOG_DEBUG("HdfReviewTab: loaded {} series images for frame {}", initialFrame.seriesImages.size(), frameIndex);
+            }
+        }
     }
-    
+
     // Create dialog with current overlay mode and ROI overlay state
     auto* dialog = new FrameViewerDialog(initialFrame, roi_, overlayMode_, showRoiOverlay_, this);
     
@@ -1258,7 +1266,17 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
     auto* navState = new NavigationState{frameIndex, &framesMeta, isShowingValid_};
     
     // Connect navigation signals
-    connect(dialog, &FrameViewerDialog::requestPreviousFrame, this, [this, dialog, navState]() {
+    // Helper lambda to load series images for a frame
+    auto loadSeriesImages = [this, navState](backend::services::ProcessedFrame& pf, int idx) {
+        if (navState->isValidSet && hdfReader_) {
+            std::vector<cv::Mat> seriesImages;
+            if (hdfReader_->readSeriesImagesByIndex(static_cast<size_t>(idx), seriesImages) && !seriesImages.empty()) {
+                pf.seriesImages = std::move(seriesImages);
+            }
+        }
+    };
+
+    connect(dialog, &FrameViewerDialog::requestPreviousFrame, this, [this, dialog, navState, loadSeriesImages]() {
         navState->currentIndex = navState->currentIndex - 1;
         if (navState->currentIndex < 0) {
             navState->currentIndex = static_cast<int>(navState->framesPtr->size()) - 1; // Wrap to last
@@ -1277,13 +1295,14 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
                     pf.processedImage = mask2;
                 }
             }
+            loadSeriesImages(pf, navState->currentIndex);
             dialog->setFrame(pf);
             // Update selected frame in main view
             setSelectedFrame(navState->currentIndex);
         }
     });
-    
-    connect(dialog, &FrameViewerDialog::requestNextFrame, this, [this, dialog, navState]() {
+
+    connect(dialog, &FrameViewerDialog::requestNextFrame, this, [this, dialog, navState, loadSeriesImages]() {
         navState->currentIndex = navState->currentIndex + 1;
         if (navState->currentIndex >= static_cast<int>(navState->framesPtr->size())) {
             navState->currentIndex = 0; // Wrap to first
@@ -1301,6 +1320,7 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
                     pf.processedImage = mask2;
                 }
             }
+            loadSeriesImages(pf, navState->currentIndex);
             dialog->setFrame(pf);
             // Update selected frame in main view
             setSelectedFrame(navState->currentIndex);
@@ -1419,7 +1439,13 @@ void HdfReviewTab::exportAllImagesToTiff(const QString& baseDir) {
     }
 
     int exportedCount = 0;
+    int seriesExportedCount = 0;
     int totalCount = static_cast<int>(validFrames_.size() + invalidFrames_.size());
+
+    // Check if series images are available
+    size_t seriesCount = 0, seriesRecords = 0;
+    int seriesH = 0, seriesW = 0;
+    bool hasSeriesImages = hdfReader_->getSeriesImageInfo(seriesRecords, seriesCount, seriesH, seriesW);
 
     // Export valid frames
     for (size_t i = 0; i < validFrames_.size(); ++i) {
@@ -1431,6 +1457,22 @@ void HdfReviewTab::exportAllImagesToTiff(const QString& baseDir) {
             // Export without compression
             if (cv::imwrite(filePath.toStdString(), image)) {
                 exportedCount++;
+            }
+        }
+
+        // Export series images if available
+        if (hasSeriesImages && i < seriesRecords) {
+            std::vector<cv::Mat> seriesImages;
+            if (hdfReader_->readSeriesImagesByIndex(i, seriesImages)) {
+                for (size_t s = 0; s < seriesImages.size(); ++s) {
+                    QString seriesFileName = QString("valid_frame_%1_series_%2.tiff")
+                        .arg(validFrames_[i].index, 6, 10, QChar('0'))
+                        .arg(s, 2, 10, QChar('0'));
+                    QString seriesFilePath = dir.filePath(seriesFileName);
+                    if (cv::imwrite(seriesFilePath.toStdString(), seriesImages[s])) {
+                        seriesExportedCount++;
+                    }
+                }
             }
         }
     }
@@ -1449,12 +1491,13 @@ void HdfReviewTab::exportAllImagesToTiff(const QString& baseDir) {
         }
     }
 
-    QMessageBox::information(this, tr("Export Complete"),
-                            tr("Exported %1 of %2 images to:\n%3")
-                            .arg(exportedCount)
-                            .arg(totalCount)
-                            .arg(baseDir));
-    SPDLOG_INFO("Exported {} of {} images to {}", exportedCount, totalCount, baseDir.toStdString());
+    QString message = tr("Exported %1 of %2 images to:\n%3")
+        .arg(exportedCount).arg(totalCount).arg(baseDir);
+    if (seriesExportedCount > 0) {
+        message += tr("\n+ %1 series images").arg(seriesExportedCount);
+    }
+    QMessageBox::information(this, tr("Export Complete"), message);
+    SPDLOG_INFO("Exported {} of {} images + {} series images to {}", exportedCount, totalCount, seriesExportedCount, baseDir.toStdString());
 }
 
 bool HdfReviewTab::exportChartFromHdf5(const std::string& datasetPath, const QString& filePath) {

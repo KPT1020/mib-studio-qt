@@ -264,6 +264,15 @@ namespace frontend
 					if (tg.contains("emodulus_max"))
 						pcfg.target_group_emodulus_max = tg.value("emodulus_max").toDouble(pcfg.target_group_emodulus_max);
 				}
+				// Multi-image recording mode
+				if (ip.contains("multi_image") && ip.value("multi_image").isObject())
+				{
+					const QJsonObject mi = ip.value("multi_image").toObject();
+					if (mi.contains("enabled"))
+						pcfg.multi_image_enabled = mi.value("enabled").toBool(pcfg.multi_image_enabled);
+					if (mi.contains("count"))
+						pcfg.multi_image_count = std::max(1, mi.value("count").toInt(pcfg.multi_image_count));
+				}
 			}
 		}
 		backend_.processing().setProcessingConfig(pcfg);
@@ -277,6 +286,9 @@ namespace frontend
 					pcfg.enable_target_group, pcfg.target_group_area_min, pcfg.target_group_area_max,
 					pcfg.target_group_deformability_min, pcfg.target_group_deformability_max,
 					pcfg.enable_target_group_emodulus, pcfg.target_group_emodulus_min, pcfg.target_group_emodulus_max);
+		if (pcfg.multi_image_enabled) {
+			SPDLOG_INFO("AppConfigWatcher: multi_image enabled, count={}", pcfg.multi_image_count);
+		}
 
 		// 2) Flush interval (buffer threshold)
 		if (root.contains("buffer_threshold"))

@@ -660,6 +660,11 @@ void ProcessingService::realtimeLoop() {
     uint64_t validSinceSummary = 0;
     uint64_t invalidSinceSummary = 0;
 
+    // Multi-image series state (persists across loop iterations, single-threaded access)
+    ProcessedFrame pendingMultiImageFrame;
+    size_t multiImageRemaining = 0; // frames still needed to complete current series
+    bool multiImagePending = false;
+
     while (rtRunning_.load()) {
         if (!rtStore_) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -936,55 +941,107 @@ void ProcessingService::realtimeLoop() {
 
             // Also accumulate frames for experiment if active
             if (experimentActive_.load()) {
-                // Determine if we should save this frame
-                // Always save valid frames, but sample invalid frames to reduce file size and improve performance
-                bool shouldSave = false;
-                if (validation.isValid) {
-                    shouldSave = true; // Always save valid frames
-                } else {
-                    // Sample invalid frames: save every Nth invalid frame
-                    size_t counter = invalidFrameCounter_.fetch_add(1, std::memory_order_relaxed);
-                    size_t rate = invalidFrameSamplingRate_.load(std::memory_order_relaxed);
-                    if (rate > 0 && (counter % rate) == 0) {
-                        shouldSave = true;
-                    }
-                }
+                const bool multiImageMode = config.multi_image_enabled && config.multi_image_count > 1;
 
-                if (shouldSave) {
-                    // Prepare frame data (clone images before mutex lock to minimize lock time)
-                    ProcessedFrame frame;
-                    frame.index = idx;
-                    frame.timestampNs = f.timestamp;
-                    frame.validation = validation;
-                    // For experiment, we need full frames - create full frame copy (outside algo timing)
+                // Helper: create full frame from ROI path data
+                auto makeFullGray = [&]() -> cv::Mat {
                     if (grayFull.empty()) {
                         grayFull = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
                     }
-                    // Create full-size mask for experiment frames
-                    cv::Mat fullMask(grayFull.rows, grayFull.cols, CV_8UC1, cv::Scalar(0));
-                    cv::Rect fullCvRoi(roi.x, roi.y, roi.w, roi.h);
-                    mask.copyTo(fullMask(fullCvRoi));
-                    // Clone images - expensive but necessary to preserve data for experiment
-                    frame.originalImage = grayFull.clone();
-                    frame.processedImage = fullMask.clone();
-                    
-                    {
-                        std::scoped_lock framesLk(framesMutex_);
-                        // Use emplace_back with move to avoid extra copy
-                        if (validation.isValid) {
-                            validFrames_.emplace_back(std::move(frame));
-                        } else {
-                            invalidFrames_.emplace_back(std::move(frame));
-                        }
-                        
-                        // Check if we should flush to disk (round-robin buffer)
-                        size_t totalFrames = validFrames_.size() + invalidFrames_.size();
-                        size_t interval = flushInterval_.load(std::memory_order_relaxed);
-                        if (interval > 0 && totalFrames >= interval) {
-                            // Signal that flush is needed (will be handled by MainWindow timer)
-                            framesSinceLastFlush_.store(totalFrames, std::memory_order_relaxed);
+                    return grayFull.clone();
+                };
+
+                if (multiImagePending) {
+                    // Collecting series images for pending multi-image trigger
+                    pendingMultiImageFrame.seriesImages.push_back(makeFullGray());
+                    --multiImageRemaining;
+                    SPDLOG_TRACE("Multi-image series (ROI path): captured frame {} (remaining={})", idx, multiImageRemaining);
+
+                    if (multiImageRemaining == 0) {
+                        multiImagePending = false;
+                        SPDLOG_DEBUG("Multi-image series complete (ROI path): trigger_idx={}, series_size={}",
+                                    pendingMultiImageFrame.index, pendingMultiImageFrame.seriesImages.size());
+                        {
+                            std::scoped_lock framesLk(framesMutex_);
+                            validFrames_.emplace_back(std::move(pendingMultiImageFrame));
+                            pendingMultiImageFrame = ProcessedFrame{};
+
+                            size_t totalFrames = validFrames_.size() + invalidFrames_.size();
+                            size_t interval = flushInterval_.load(std::memory_order_relaxed);
+                            if (interval > 0 && totalFrames >= interval) {
+                                framesSinceLastFlush_.store(totalFrames, std::memory_order_relaxed);
+                            }
                         }
                     }
+                } else {
+                    bool shouldSave = false;
+                    if (validation.isValid) {
+                        if (multiImageMode) {
+                            // Start new multi-image series
+                            cv::Mat fullGray = makeFullGray();
+                            cv::Mat fullMask(fullGray.rows, fullGray.cols, CV_8UC1, cv::Scalar(0));
+                            cv::Rect fullCvRoi(roi.x, roi.y, roi.w, roi.h);
+                            mask.copyTo(fullMask(fullCvRoi));
+
+                            pendingMultiImageFrame = ProcessedFrame{};
+                            pendingMultiImageFrame.index = idx;
+                            pendingMultiImageFrame.timestampNs = f.timestamp;
+                            pendingMultiImageFrame.validation = validation;
+                            pendingMultiImageFrame.originalImage = fullGray.clone();
+                            pendingMultiImageFrame.processedImage = fullMask.clone();
+                            pendingMultiImageFrame.seriesImages.push_back(std::move(fullGray));
+                            multiImageRemaining = static_cast<size_t>(config.multi_image_count - 1);
+                            multiImagePending = true;
+                            SPDLOG_DEBUG("Multi-image series started (ROI path): trigger_idx={}, count={}", idx, config.multi_image_count);
+                        } else {
+                            shouldSave = true;
+                        }
+                    } else {
+                        size_t counter = invalidFrameCounter_.fetch_add(1, std::memory_order_relaxed);
+                        size_t rate = invalidFrameSamplingRate_.load(std::memory_order_relaxed);
+                        if (rate > 0 && (counter % rate) == 0) {
+                            shouldSave = true;
+                        }
+                    }
+
+                    if (shouldSave) {
+                        ProcessedFrame frame;
+                        frame.index = idx;
+                        frame.timestampNs = f.timestamp;
+                        frame.validation = validation;
+                        cv::Mat fullGray = makeFullGray();
+                        cv::Mat fullMask(fullGray.rows, fullGray.cols, CV_8UC1, cv::Scalar(0));
+                        cv::Rect fullCvRoi(roi.x, roi.y, roi.w, roi.h);
+                        mask.copyTo(fullMask(fullCvRoi));
+                        frame.originalImage = fullGray.clone();
+                        frame.processedImage = fullMask.clone();
+
+                        {
+                            std::scoped_lock framesLk(framesMutex_);
+                            if (validation.isValid) {
+                                validFrames_.emplace_back(std::move(frame));
+                            } else {
+                                invalidFrames_.emplace_back(std::move(frame));
+                            }
+
+                            size_t totalFrames = validFrames_.size() + invalidFrames_.size();
+                            size_t interval = flushInterval_.load(std::memory_order_relaxed);
+                            if (interval > 0 && totalFrames >= interval) {
+                                framesSinceLastFlush_.store(totalFrames, std::memory_order_relaxed);
+                            }
+                        }
+                    }
+                }
+            } else if (multiImagePending) {
+                // Experiment ended while collecting series — save partial
+                SPDLOG_WARN("Multi-image series incomplete (ROI path, experiment ended): trigger_idx={}, collected={}",
+                            pendingMultiImageFrame.index, pendingMultiImageFrame.seriesImages.size());
+                multiImagePending = false;
+                multiImageRemaining = 0;
+                {
+                    std::scoped_lock framesLk(framesMutex_);
+                    validFrames_.emplace_back(std::move(pendingMultiImageFrame));
+                    pendingMultiImageFrame = ProcessedFrame{};
                 }
             }
 
@@ -1478,24 +1535,47 @@ void ProcessingService::realtimeLoop() {
                         }
                     }
                     
+                    // Even on empty frames, capture series images if multi-image collection is active
+                    if (multiImagePending && experimentActive_.load()) {
+                        pendingMultiImageFrame.seriesImages.push_back(gray.clone());
+                        --multiImageRemaining;
+                        SPDLOG_TRACE("Multi-image series: captured empty frame {} (remaining={})", idx, multiImageRemaining);
+                        if (multiImageRemaining == 0) {
+                            multiImagePending = false;
+                            SPDLOG_DEBUG("Multi-image series complete (with empty frames): trigger_idx={}, series_size={}",
+                                        pendingMultiImageFrame.index, pendingMultiImageFrame.seriesImages.size());
+                            {
+                                std::scoped_lock framesLk(framesMutex_);
+                                validFrames_.emplace_back(std::move(pendingMultiImageFrame));
+                                pendingMultiImageFrame = ProcessedFrame{};
+
+                                size_t totalFrames = validFrames_.size() + invalidFrames_.size();
+                                size_t interval = flushInterval_.load(std::memory_order_relaxed);
+                                if (interval > 0 && totalFrames >= interval) {
+                                    framesSinceLastFlush_.store(totalFrames, std::memory_order_relaxed);
+                                }
+                            }
+                        }
+                    }
+
                     rtLastProcessed_.store(idx);
                     continue; // Skip morphology, contours, validation, and frame accumulation
                 }
-                
+
                 // Reset counter on non-empty frames
                 if (config.auto_background_enabled && !experimentActive_.load()) {
                     consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
                 }
-                
+
                 // Update previous frame for frame-to-frame comparison (always when auto-capture enabled)
                 if (config.auto_background_enabled && !experimentActive_.load()) {
                     std::scoped_lock prevFrameLk(previousFrameMutex_);
                     previousFrameForAutoCapture_ = blurredCurr.clone();
                 }
-                
+
                 // Use background subtraction diff for actual processing (morphology, contours, etc.)
                 cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
-                
+
                 // Update previous frame for frame-to-frame comparison (when no background and auto-capture enabled)
                 if (!hasBackground && config.auto_background_enabled && !experimentActive_.load()) {
                     std::scoped_lock prevFrameLk(previousFrameMutex_);
@@ -1594,47 +1674,96 @@ void ProcessingService::realtimeLoop() {
 
                 // Also accumulate frames for experiment if active
                 if (experimentActive_.load()) {
-                    // Determine if we should save this frame
-                    // Always save valid frames, but sample invalid frames to reduce file size and improve performance
-                    bool shouldSave = false;
-                    if (validation.isValid) {
-                        shouldSave = true; // Always save valid frames
+                    const bool multiImageMode = config.multi_image_enabled && config.multi_image_count > 1;
+
+                    if (multiImagePending) {
+                        // We're collecting series images for a pending multi-image trigger frame
+                        pendingMultiImageFrame.seriesImages.push_back(gray.clone());
+                        --multiImageRemaining;
+                        SPDLOG_TRACE("Multi-image series: captured frame {} for series (remaining={})", idx, multiImageRemaining);
+
+                        if (multiImageRemaining == 0) {
+                            // Series complete — push to validFrames
+                            multiImagePending = false;
+                            SPDLOG_DEBUG("Multi-image series complete: trigger_idx={}, series_size={}",
+                                        pendingMultiImageFrame.index, pendingMultiImageFrame.seriesImages.size());
+                            {
+                                std::scoped_lock framesLk(framesMutex_);
+                                validFrames_.emplace_back(std::move(pendingMultiImageFrame));
+                                pendingMultiImageFrame = ProcessedFrame{}; // reset
+
+                                size_t totalFrames = validFrames_.size() + invalidFrames_.size();
+                                size_t interval = flushInterval_.load(std::memory_order_relaxed);
+                                if (interval > 0 && totalFrames >= interval) {
+                                    framesSinceLastFlush_.store(totalFrames, std::memory_order_relaxed);
+                                }
+                            }
+                        }
+                        // Skip normal valid/invalid save for this frame — it's part of the series
                     } else {
-                        // Sample invalid frames: save every Nth invalid frame
-                        size_t counter = invalidFrameCounter_.fetch_add(1, std::memory_order_relaxed);
-                        size_t rate = invalidFrameSamplingRate_.load(std::memory_order_relaxed);
-                        if (rate > 0 && (counter % rate) == 0) {
-                            shouldSave = true;
+                        // Normal experiment accumulation (or start of new multi-image series)
+                        bool shouldSave = false;
+                        if (validation.isValid) {
+                            if (multiImageMode) {
+                                // Start a new multi-image series
+                                pendingMultiImageFrame = ProcessedFrame{};
+                                pendingMultiImageFrame.index = idx;
+                                pendingMultiImageFrame.timestampNs = f.timestamp;
+                                pendingMultiImageFrame.validation = validation;
+                                pendingMultiImageFrame.originalImage = gray.clone();
+                                pendingMultiImageFrame.processedImage = mask.clone();
+                                pendingMultiImageFrame.seriesImages.push_back(gray.clone());
+                                multiImageRemaining = static_cast<size_t>(config.multi_image_count - 1);
+                                multiImagePending = true;
+                                SPDLOG_DEBUG("Multi-image series started: trigger_idx={}, count={}", idx, config.multi_image_count);
+                                // Don't save yet — wait for series to complete
+                            } else {
+                                shouldSave = true; // Normal single-image mode
+                            }
+                        } else {
+                            // Sample invalid frames: save every Nth invalid frame
+                            size_t counter = invalidFrameCounter_.fetch_add(1, std::memory_order_relaxed);
+                            size_t rate = invalidFrameSamplingRate_.load(std::memory_order_relaxed);
+                            if (rate > 0 && (counter % rate) == 0) {
+                                shouldSave = true;
+                            }
+                        }
+
+                        if (shouldSave) {
+                            ProcessedFrame frame;
+                            frame.index = idx;
+                            frame.timestampNs = f.timestamp;
+                            frame.validation = validation;
+                            frame.originalImage = gray.clone();
+                            frame.processedImage = mask.clone();
+
+                            {
+                                std::scoped_lock framesLk(framesMutex_);
+                                if (validation.isValid) {
+                                    validFrames_.emplace_back(std::move(frame));
+                                } else {
+                                    invalidFrames_.emplace_back(std::move(frame));
+                                }
+
+                                size_t totalFrames = validFrames_.size() + invalidFrames_.size();
+                                size_t interval = flushInterval_.load(std::memory_order_relaxed);
+                                if (interval > 0 && totalFrames >= interval) {
+                                    framesSinceLastFlush_.store(totalFrames, std::memory_order_relaxed);
+                                }
+                            }
                         }
                     }
-
-                    if (shouldSave) {
-                        // Prepare frame data (clone images before mutex lock to minimize lock time)
-                        ProcessedFrame frame;
-                        frame.index = idx;
-                        frame.timestampNs = f.timestamp;
-                        frame.validation = validation;
-                        // Clone images - expensive but necessary to preserve data
-                        frame.originalImage = gray.clone();
-                        frame.processedImage = mask.clone();
-
-                        {
-                            std::scoped_lock framesLk(framesMutex_);
-                            // Use emplace_back with move to avoid extra copy
-                            if (validation.isValid) {
-                                validFrames_.emplace_back(std::move(frame));
-                            } else {
-                                invalidFrames_.emplace_back(std::move(frame));
-                            }
-
-                            // Check if we should flush to disk (round-robin buffer)
-                            size_t totalFrames = validFrames_.size() + invalidFrames_.size();
-                            size_t interval = flushInterval_.load(std::memory_order_relaxed);
-                            if (interval > 0 && totalFrames >= interval) {
-                                // Signal that flush is needed (will be handled by MainWindow timer)
-                                framesSinceLastFlush_.store(totalFrames, std::memory_order_relaxed);
-                            }
-                        }
+                } else if (multiImagePending) {
+                    // Experiment ended while collecting a multi-image series — save partial series
+                    SPDLOG_WARN("Multi-image series incomplete (experiment ended): trigger_idx={}, collected={}/{}",
+                                pendingMultiImageFrame.index, pendingMultiImageFrame.seriesImages.size(),
+                                pendingMultiImageFrame.seriesImages.size() + multiImageRemaining);
+                    multiImagePending = false;
+                    multiImageRemaining = 0;
+                    {
+                        std::scoped_lock framesLk(framesMutex_);
+                        validFrames_.emplace_back(std::move(pendingMultiImageFrame));
+                        pendingMultiImageFrame = ProcessedFrame{};
                     }
                 }
 
