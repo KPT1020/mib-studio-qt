@@ -25,6 +25,11 @@
 #include <QBarCategoryAxis>
 #endif
 #include <QFrame>
+#include <QGroupBox>
+#include <QSpinBox>
+#include <QDoubleSpinBox>
+#include <QCheckBox>
+#include <QScrollArea>
 #include <QVBoxLayout>
 #include <QMessageBox>
 #include <QShowEvent>
@@ -143,6 +148,7 @@ namespace frontend
         ui->topRowLayout->addWidget(roiLabel_);
 
         setupCharts();
+        setupTuneParamsPanel();
 
         // Connect signals
         connect(ui->clearBufferBtn, &QPushButton::clicked, this, &ExperimentMonitoringTab::onClearBuffer);
@@ -156,6 +162,7 @@ namespace frontend
         // Set column stretch to make panels equal size
         ui->gridLayout->setColumnStretch(0, 1);
         ui->gridLayout->setColumnStretch(1, 1);
+        ui->gridLayout->setColumnStretch(2, 0); // Tune panel: minimum width
         ui->gridLayout->setRowStretch(1, 1); // Charts row
         ui->gridLayout->setRowStretch(2, 1); // Frame grids row
 
@@ -181,6 +188,175 @@ namespace frontend
         }
         isoelasticCurves_.clear();
         delete ui;
+    }
+
+    void ExperimentMonitoringTab::setupTuneParamsPanel()
+    {
+        auto* placeholder = ui->tuneParamsPlaceholder;
+        placeholder->setMinimumWidth(220);
+        placeholder->setMaximumWidth(280);
+
+        auto* outerLayout = new QVBoxLayout(placeholder);
+        outerLayout->setContentsMargins(0, 0, 0, 0);
+        outerLayout->setSpacing(0);
+
+        // Scrollable content area (always visible)
+        auto* scrollArea = new QScrollArea(placeholder);
+        scrollArea->setWidgetResizable(true);
+        scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        scrollArea->setFrameShape(QFrame::NoFrame);
+
+        tunePanelContent_ = new QWidget();
+        auto* contentLayout = new QVBoxLayout(tunePanelContent_);
+        contentLayout->setContentsMargins(4, 4, 4, 4);
+        contentLayout->setSpacing(6);
+
+        // --- Title ---
+        auto* titleLabel = new QLabel(tr("<b>Tune Params</b>"), tunePanelContent_);
+        contentLayout->addWidget(titleLabel);
+
+        // --- Filter Thresholds ---
+        auto* threshGroup = new QGroupBox(tr("Filter Thresholds"), tunePanelContent_);
+        auto* threshLayout = new QVBoxLayout(threshGroup);
+        threshLayout->setSpacing(4);
+
+        auto addSpinRow = [](QVBoxLayout* layout, const QString& label, QSpinBox*& spin,
+                             int min, int max, int step, int val) {
+            auto* row = new QHBoxLayout();
+            row->addWidget(new QLabel(label));
+            spin = new QSpinBox();
+            spin->setRange(min, max);
+            spin->setSingleStep(step);
+            spin->setValue(val);
+            row->addWidget(spin);
+            layout->addLayout(row);
+        };
+
+        auto addDblSpinRow = [](QVBoxLayout* layout, const QString& label, QDoubleSpinBox*& spin,
+                                double min, double max, double step, int decimals, double val) {
+            auto* row = new QHBoxLayout();
+            row->addWidget(new QLabel(label));
+            spin = new QDoubleSpinBox();
+            spin->setRange(min, max);
+            spin->setSingleStep(step);
+            spin->setDecimals(decimals);
+            spin->setValue(val);
+            row->addWidget(spin);
+            layout->addLayout(row);
+        };
+
+        addSpinRow(threshLayout, tr("Area Min"), areaMinSpin_, 0, 100000, 10, 250);
+        addSpinRow(threshLayout, tr("Area Max"), areaMaxSpin_, 0, 100000, 10, 1000);
+        addDblSpinRow(threshLayout, tr("Deform Min"), deformMinSpin_, 0.0, 1.0, 0.01, 2, 0.0);
+        addDblSpinRow(threshLayout, tr("Deform Max"), deformMaxSpin_, 0.0, 1.0, 0.01, 2, 1.0);
+        addDblSpinRow(threshLayout, tr("Area Ratio Max"), areaRatioMaxSpin_, 0.0, 10.0, 0.1, 2, 1.5);
+        contentLayout->addWidget(threshGroup);
+
+        // --- Filter Enables ---
+        auto* enableGroup = new QGroupBox(tr("Filter Enables"), tunePanelContent_);
+        auto* enableLayout = new QVBoxLayout(enableGroup);
+        enableLayout->setSpacing(2);
+
+        borderCheckBox_ = new QCheckBox(tr("Border Check"));
+        areaRangeCheckBox_ = new QCheckBox(tr("Area Range"));
+        deformRangeCheckBox_ = new QCheckBox(tr("Deformability Range"));
+        areaRatioCheckBox_ = new QCheckBox(tr("Area Ratio"));
+        singleInnerCheckBox_ = new QCheckBox(tr("Single Inner Contour"));
+
+        enableLayout->addWidget(borderCheckBox_);
+        enableLayout->addWidget(areaRangeCheckBox_);
+        enableLayout->addWidget(deformRangeCheckBox_);
+        enableLayout->addWidget(areaRatioCheckBox_);
+        enableLayout->addWidget(singleInnerCheckBox_);
+        contentLayout->addWidget(enableGroup);
+
+        // --- Target Group ---
+        auto* targetGroup = new QGroupBox(tr("Target Group"), tunePanelContent_);
+        auto* targetLayout = new QVBoxLayout(targetGroup);
+        targetLayout->setSpacing(4);
+
+        targetGroupEnableBox_ = new QCheckBox(tr("Enable"));
+        targetLayout->addWidget(targetGroupEnableBox_);
+
+        addSpinRow(targetLayout, tr("Area Min"), targetAreaMinSpin_, 0, 100000, 10, 300);
+        addSpinRow(targetLayout, tr("Area Max"), targetAreaMaxSpin_, 0, 100000, 10, 800);
+        addDblSpinRow(targetLayout, tr("Deform Min"), targetDeformMinSpin_, 0.0, 1.0, 0.01, 2, 0.0);
+        addDblSpinRow(targetLayout, tr("Deform Max"), targetDeformMaxSpin_, 0.0, 1.0, 0.01, 2, 0.3);
+        contentLayout->addWidget(targetGroup);
+
+        // --- Apply Button ---
+        auto* applyBtn = new QPushButton(tr("Apply"), tunePanelContent_);
+        connect(applyBtn, &QPushButton::clicked, this, &ExperimentMonitoringTab::onApplyParams);
+        contentLayout->addWidget(applyBtn);
+
+        contentLayout->addStretch(1);
+
+        scrollArea->setWidget(tunePanelContent_);
+        outerLayout->addWidget(scrollArea, 1);
+
+        // Load current config values into widgets
+        loadCurrentConfig();
+    }
+
+    void ExperimentMonitoringTab::loadCurrentConfig()
+    {
+        auto cfg = backend_.processing().getProcessingConfig();
+
+        // Block signals to avoid triggering anything during load
+        areaMinSpin_->setValue(cfg.area_threshold_min);
+        areaMaxSpin_->setValue(cfg.area_threshold_max);
+        deformMinSpin_->setValue(cfg.deformability_threshold_min);
+        deformMaxSpin_->setValue(cfg.deformability_threshold_max);
+        areaRatioMaxSpin_->setValue(cfg.area_ratio_threshold_max);
+
+        borderCheckBox_->setChecked(cfg.enable_border_check);
+        areaRangeCheckBox_->setChecked(cfg.enable_area_range_check);
+        deformRangeCheckBox_->setChecked(cfg.enable_deformability_range_check);
+        areaRatioCheckBox_->setChecked(cfg.enable_area_ratio_check);
+        singleInnerCheckBox_->setChecked(cfg.require_single_inner_contour);
+
+        targetGroupEnableBox_->setChecked(cfg.enable_target_group);
+        targetAreaMinSpin_->setValue(cfg.target_group_area_min);
+        targetAreaMaxSpin_->setValue(cfg.target_group_area_max);
+        targetDeformMinSpin_->setValue(cfg.target_group_deformability_min);
+        targetDeformMaxSpin_->setValue(cfg.target_group_deformability_max);
+    }
+
+    void ExperimentMonitoringTab::onApplyParams()
+    {
+        auto cfg = backend_.processing().getProcessingConfig();
+
+        // Filter thresholds
+        cfg.area_threshold_min = areaMinSpin_->value();
+        cfg.area_threshold_max = areaMaxSpin_->value();
+        cfg.deformability_threshold_min = deformMinSpin_->value();
+        cfg.deformability_threshold_max = deformMaxSpin_->value();
+        cfg.area_ratio_threshold_max = areaRatioMaxSpin_->value();
+
+        // Filter enables
+        cfg.enable_border_check = borderCheckBox_->isChecked();
+        cfg.enable_area_range_check = areaRangeCheckBox_->isChecked();
+        cfg.enable_deformability_range_check = deformRangeCheckBox_->isChecked();
+        cfg.enable_area_ratio_check = areaRatioCheckBox_->isChecked();
+        cfg.require_single_inner_contour = singleInnerCheckBox_->isChecked();
+
+        // Target group
+        cfg.enable_target_group = targetGroupEnableBox_->isChecked();
+        cfg.target_group_area_min = targetAreaMinSpin_->value();
+        cfg.target_group_area_max = targetAreaMaxSpin_->value();
+        cfg.target_group_deformability_min = targetDeformMinSpin_->value();
+        cfg.target_group_deformability_max = targetDeformMaxSpin_->value();
+
+        backend_.processing().setProcessingConfig(cfg);
+
+        SPDLOG_INFO("Tune panel: applied config (area=[{},{}], deform=[{:.2f},{:.2f}], "
+                     "border={}, areaRange={}, deformRange={}, areaRatio={}, singleInner={}, "
+                     "targetGroup={})",
+                     cfg.area_threshold_min, cfg.area_threshold_max,
+                     cfg.deformability_threshold_min, cfg.deformability_threshold_max,
+                     cfg.enable_border_check, cfg.enable_area_range_check,
+                     cfg.enable_deformability_range_check, cfg.enable_area_ratio_check,
+                     cfg.require_single_inner_contour, cfg.enable_target_group);
     }
 
     void ExperimentMonitoringTab::setupCharts() {
@@ -347,6 +523,8 @@ namespace frontend
         {
             updateTimer_->start();
         }
+        // Refresh tune panel with current config when tab becomes visible
+        loadCurrentConfig();
     }
 
     void ExperimentMonitoringTab::hideEvent(QHideEvent *event)

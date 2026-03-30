@@ -30,6 +30,9 @@ class QHBoxLayout;
 class QVBoxLayout;
 class QShowEvent;
 class QHideEvent;
+class QSpinBox;
+class QDoubleSpinBox;
+class QGroupBox;
 
 namespace Ui { class ExperimentMonitoringTab; }
 
@@ -81,6 +84,7 @@ private slots:
     void onUpdate();
     void onToggleOverlay(bool enabled);
     void onClearBuffer();
+    void onApplyParams();
     void onSortTrigger();
 
 protected:
@@ -89,6 +93,8 @@ protected:
 
 private:
     void setupCharts();
+    void setupTuneParamsPanel();
+    void loadCurrentConfig();
     void loadIsoelasticCurves();
     void updateScatterplot(const std::vector<backend::services::ProcessedFrame>& validFrames);
     void updateHistogram(const std::vector<backend::services::ProcessedFrame>& validFrames);
@@ -98,7 +104,7 @@ private:
     QImage matToQImage(const cv::Mat& mat) const;
     void clearGrid(QGridLayout* grid);
     QImage createOverlayImage(const cv::Mat& original, const cv::Mat& mask, const backend::services::FilterResult* validation = nullptr) const;
-    std::vector<std::vector<double>> computeKDE(const std::vector<std::pair<double, double>>& points, 
+    std::vector<std::vector<double>> computeKDE(const std::vector<std::pair<double, double>>& points,
                                                  int gridX, int gridY, double bandwidth) const;
 
     Ui::ExperimentMonitoringTab* ui;
@@ -163,6 +169,30 @@ private:
     static constexpr int MAX_FRAMES_TO_SHOW = 25;
     static constexpr int MAX_RECENT_FRAMES = 1000; // Keep more frames for scatterplot/histogram
     static constexpr int UPDATE_INTERVAL_MS = 500;
+
+    // Tune params panel
+    QWidget* tunePanelContent_ = nullptr;
+
+    // Filter thresholds
+    QSpinBox* areaMinSpin_ = nullptr;
+    QSpinBox* areaMaxSpin_ = nullptr;
+    QDoubleSpinBox* deformMinSpin_ = nullptr;
+    QDoubleSpinBox* deformMaxSpin_ = nullptr;
+    QDoubleSpinBox* areaRatioMaxSpin_ = nullptr;
+
+    // Filter enables
+    QCheckBox* borderCheckBox_ = nullptr;
+    QCheckBox* areaRangeCheckBox_ = nullptr;
+    QCheckBox* deformRangeCheckBox_ = nullptr;
+    QCheckBox* areaRatioCheckBox_ = nullptr;
+    QCheckBox* singleInnerCheckBox_ = nullptr;
+
+    // Target group
+    QCheckBox* targetGroupEnableBox_ = nullptr;
+    QSpinBox* targetAreaMinSpin_ = nullptr;
+    QSpinBox* targetAreaMaxSpin_ = nullptr;
+    QDoubleSpinBox* targetDeformMinSpin_ = nullptr;
+    QDoubleSpinBox* targetDeformMaxSpin_ = nullptr;
 };
 
 } // namespace frontend
