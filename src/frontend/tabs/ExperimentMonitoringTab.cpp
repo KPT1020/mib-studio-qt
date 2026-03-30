@@ -835,13 +835,31 @@ namespace frontend
             }
         }
 
-        // Create overlay: colored tint where mask is non-zero
+        // Extract contours with hierarchy to isolate nested (inner) contours.
+        // Inner contours (used for metrics) have a parent in the hierarchy.
+        std::vector<std::vector<cv::Point>> contours;
+        std::vector<cv::Vec4i> hierarchy;
+        cv::findContours(mask.clone(), contours, hierarchy, cv::RETR_CCOMP, cv::CHAIN_APPROX_SIMPLE);
+
+        // Build a mask containing only the inner (nested) contour regions
+        cv::Mat innerMask = cv::Mat::zeros(mask.rows, mask.cols, CV_8UC1);
+        bool hasInner = false;
+        for (int i = 0; i < static_cast<int>(contours.size()); ++i) {
+            if (hierarchy[i][3] >= 0) { // has parent → inner contour
+                cv::drawContours(innerMask, contours, i, cv::Scalar(255), -1);
+                hasInner = true;
+            }
+        }
+        // Fallback: if no nested contour found, use the full mask
+        const cv::Mat &tintMask = hasInner ? innerMask : mask;
+
+        // Create overlay: colored tint where tintMask is non-zero (inner contour only)
         cv::Mat overlay = rgb.clone();
-        for (int y = 0; y < overlay.rows && y < mask.rows; ++y)
+        for (int y = 0; y < overlay.rows && y < tintMask.rows; ++y)
         {
-            for (int x = 0; x < overlay.cols && x < mask.cols; ++x)
+            for (int x = 0; x < overlay.cols && x < tintMask.cols; ++x)
             {
-                if (mask.at<uchar>(y, x) > 0)
+                if (tintMask.at<uchar>(y, x) > 0)
                 {
                     cv::Vec3b &pixel = overlay.at<cv::Vec3b>(y, x);
                     pixel[0] = static_cast<uchar>(std::min(255.0, pixel[0] * 0.7 + tint[0] * 0.3));
@@ -850,6 +868,10 @@ namespace frontend
                 }
             }
         }
+
+        // Draw contour outlines for both outer and inner contours
+        const cv::Scalar contourColor(tint[0], tint[1], tint[2]);
+        cv::drawContours(overlay, contours, -1, contourColor, 1);
 
         QImage img(overlay.data, overlay.cols, overlay.rows, static_cast<int>(overlay.step), QImage::Format_RGB888);
         return img.copy();

@@ -1050,18 +1050,36 @@ void PlaybackPanel::computeProcessedOverlay()
         }
     }
 
-    // Build overlay image
+    // Extract contours with hierarchy so we can isolate nested (inner) contours.
+    // Inner contours (hierarchy[i][3] >= 0, i.e. has a parent) are the ones used
+    // for metrics calculation in ProcessingService.
+    std::vector<std::vector<cv::Point>> contours;
+    std::vector<cv::Vec4i> hierarchy;
+    cv::findContours(mask.clone(), contours, hierarchy, cv::RETR_CCOMP, cv::CHAIN_APPROX_SIMPLE);
+
+    // Build overlay image (mask tint) — only for nested contour region
     if (overlayMode_ == OverlayMode::Mask || overlayMode_ == OverlayMode::Both)
     {
-        overlayImage_ = maskToTintedOverlay(mask, overlayColor, 90);
+        // Create a filtered mask containing only the inner (nested) contour regions
+        cv::Mat innerMask = cv::Mat::zeros(mask.rows, mask.cols, CV_8UC1);
+        bool hasInner = false;
+        for (int i = 0; i < static_cast<int>(contours.size()); ++i) {
+            if (hierarchy[i][3] >= 0) { // has parent → inner contour
+                cv::drawContours(innerMask, contours, i, cv::Scalar(255), -1);
+                hasInner = true;
+            }
+        }
+        if (hasInner) {
+            overlayImage_ = maskToTintedOverlay(innerMask, overlayColor, 90);
+        } else {
+            // Fallback: no nested contour found, show full mask
+            overlayImage_ = maskToTintedOverlay(mask, overlayColor, 90);
+        }
     }
 
-    // Build contours
+    // Build contour outlines — draw both outer and inner contours
     if (overlayMode_ == OverlayMode::Contours || overlayMode_ == OverlayMode::Both)
     {
-        std::vector<std::vector<cv::Point>> contours;
-        std::vector<cv::Vec4i> hierarchy;
-        cv::findContours(mask, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
         overlayContours_.clear();
         overlayContours_.reserve(static_cast<int>(contours.size()));
         for (const auto &c : contours)
