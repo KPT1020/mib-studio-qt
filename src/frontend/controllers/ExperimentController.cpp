@@ -142,6 +142,12 @@ namespace frontend
                                      validFrames, invalidFrames, processingConfig, roi,
                                      bg.empty() ? nullptr : &bg);
 
+            // Save full config.json content for backtracking
+            std::string configJson = backend_.getLastConfigJson();
+            if (!configJson.empty()) {
+                hdf5.writeConfigJson(configJson);
+            }
+
             hdf5.closeFile();
         }
         else

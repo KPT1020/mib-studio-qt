@@ -92,8 +92,8 @@ namespace frontend
                 backend_.playback().queryRange(earliest, latest, count);
                 const double memMB = backend::Tools::getProcessMemoryMB();
                 size_t flushNeeded = proc.getFlushInterval();
-                SPDLOG_INFO("MainWindow stats: buffer_fetch_ms={:.3f}, valid={}, invalid={}, total={}, playback_range=[{},{}] count={}, flush_interval={}, flushing={}, mem_mb={:.1f}",
-                            lastFetchTimeMs_, validFrames.size(), invalidFrames.size(), totalBuffered, earliest, latest, count, flushNeeded, flushInProgress ? 1 : 0, memMB);
+                SPDLOG_DEBUG("MainWindow stats: buffer_fetch_ms={:.3f}, valid={}, invalid={}, total={}, playback_range=[{},{}] count={}, flush_interval={}, flushing={}, mem_mb={:.1f}",
+                             lastFetchTimeMs_, validFrames.size(), invalidFrames.size(), totalBuffered, earliest, latest, count, flushNeeded, flushInProgress ? 1 : 0, memMB);
                 lastDiagLogUs = nowUs;
             }
         }

@@ -322,6 +322,7 @@ bool EGrabberCamera::setTriggerOutput(bool high) {
         // InterfaceModule operations are thread-safe vs StreamModule (frame grabbing),
         // so no mutex needed here. This runs on the trigger thread while
         // grabFrame() runs on the capture thread.
+        grabber_->setString<Euresys::InterfaceModule>("LineSelector", triggerLineSelector_);
         grabber_->setString<Euresys::InterfaceModule>("LineSource", high ? "High" : "Low");
         return true;
     } catch (const std::exception& ex) {

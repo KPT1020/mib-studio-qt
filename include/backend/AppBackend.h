@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -82,6 +83,10 @@ namespace backend
         uint64_t frameRecordingCount() const;     // Frames written so far
         uint64_t frameRecordingFiltered() const;   // Empty frames skipped
 
+        // Raw config JSON storage (set by config watcher, read at experiment save)
+        void setLastConfigJson(const std::string& json);
+        std::string getLastConfigJson() const;
+
         // Get background capture notifier for Qt signal connections
         BackgroundCaptureNotifier* backgroundCaptureNotifier() const;
 
@@ -113,6 +118,10 @@ namespace backend
 
         // Background capture notifier for Qt signals
         std::unique_ptr<BackgroundCaptureNotifier> backgroundCaptureNotifier_;
+
+        // Raw config JSON for HDF5 metadata persistence
+        mutable std::mutex configJsonMutex_;
+        std::string lastConfigJson_;
     };
 
 } // namespace backend
