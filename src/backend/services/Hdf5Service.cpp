@@ -25,6 +25,7 @@ namespace backend::services
         bool datasetsInitialized_{false};
         hsize_t validFramesWritten_{0};
         hsize_t invalidFramesWritten_{0};
+        hsize_t seriesImagesWritten_{0}; // tracks /valid_frames/series_images row count
 
         ~Impl()
         {
@@ -72,6 +73,7 @@ namespace backend::services
         impl_->datasetsInitialized_ = false;
         impl_->validFramesWritten_ = 0;
         impl_->invalidFramesWritten_ = 0;
+        impl_->seriesImagesWritten_ = 0;
         SPDLOG_INFO("HDF5 file opened: {}", filePath);
         return true;
     }
@@ -249,6 +251,8 @@ namespace backend::services
             double brightness_q2;
             double brightness_q3;
             double brightness_q4;
+            double youngsModulus;
+            uint8_t isTargetGroup;
         };
 
         // Create compound type
@@ -268,6 +272,8 @@ namespace backend::services
         H5Tinsert(compTypeId, "brightness_q2", HOFFSET(FrameMetadata, brightness_q2), H5T_NATIVE_DOUBLE);
         H5Tinsert(compTypeId, "brightness_q3", HOFFSET(FrameMetadata, brightness_q3), H5T_NATIVE_DOUBLE);
         H5Tinsert(compTypeId, "brightness_q4", HOFFSET(FrameMetadata, brightness_q4), H5T_NATIVE_DOUBLE);
+        H5Tinsert(compTypeId, "youngsModulus", HOFFSET(FrameMetadata, youngsModulus), H5T_NATIVE_DOUBLE);
+        H5Tinsert(compTypeId, "isTargetGroup", HOFFSET(FrameMetadata, isTargetGroup), H5T_NATIVE_UINT8);
 
         // Create dataspace with unlimited first dimension for extensibility
         hsize_t dims[1] = {frames.size()};
@@ -318,6 +324,8 @@ namespace backend::services
             md.brightness_q2 = frame.validation.brightness.q2;
             md.brightness_q3 = frame.validation.brightness.q3;
             md.brightness_q4 = frame.validation.brightness.q4;
+            md.youngsModulus = frame.validation.youngsModulus;
+            md.isTargetGroup = frame.validation.isTargetGroup ? 1 : 0;
             metadata.push_back(md);
         }
 
@@ -541,6 +549,8 @@ namespace backend::services
             double brightness_q2;
             double brightness_q3;
             double brightness_q4;
+            double youngsModulus;
+            uint8_t isTargetGroup;
         };
 
         // Open existing dataset
@@ -596,6 +606,8 @@ namespace backend::services
             md.brightness_q2 = frame.validation.brightness.q2;
             md.brightness_q3 = frame.validation.brightness.q3;
             md.brightness_q4 = frame.validation.brightness.q4;
+            md.youngsModulus = frame.validation.youngsModulus;
+            md.isTargetGroup = frame.validation.isTargetGroup ? 1 : 0;
 
             filespaceId = H5Dget_space(datasetId);
             hsize_t start[1] = {currentDims[0] + static_cast<hsize_t>(i)};
@@ -620,6 +632,171 @@ namespace backend::services
 
         // Update tracked size to match actual dataset extent after successful write
         currentSize = currentDims[0] + frames.size();
+        return true;
+    }
+
+    // Write a new 4D series_images dataset (N, seriesCount, H, W)
+    static bool writeSeriesImageDataset(hid_t fileId, const std::string &datasetPath,
+                                        const std::vector<ProcessedFrame> &frames)
+    {
+        // Collect only frames that have series images
+        std::vector<const ProcessedFrame *> seriesFrames;
+        for (const auto &f : frames) {
+            if (!f.seriesImages.empty()) seriesFrames.push_back(&f);
+        }
+        if (seriesFrames.empty()) return true;
+
+        const size_t seriesCount = seriesFrames[0]->seriesImages.size();
+        const int height = seriesFrames[0]->seriesImages[0].rows;
+        const int width = seriesFrames[0]->seriesImages[0].cols;
+
+        // 4D: (N, seriesCount, H, W)
+        hsize_t dims[4] = {seriesFrames.size(), seriesCount,
+                           static_cast<hsize_t>(height), static_cast<hsize_t>(width)};
+        hsize_t maxDims[4] = {H5S_UNLIMITED, seriesCount,
+                              static_cast<hsize_t>(height), static_cast<hsize_t>(width)};
+
+        hid_t dataspaceId = H5Screate_simple(4, dims, maxDims);
+        if (dataspaceId < 0) {
+            SPDLOG_ERROR("Failed to create dataspace for {}", datasetPath);
+            return false;
+        }
+
+        hid_t propId = H5Pcreate(H5P_DATASET_CREATE);
+        hsize_t chunkDims[4] = {std::min(static_cast<hsize_t>(10), dims[0]),
+                                seriesCount,
+                                static_cast<hsize_t>(height),
+                                static_cast<hsize_t>(width)};
+        H5Pset_chunk(propId, 4, chunkDims);
+
+        hid_t datasetId = H5Dcreate2(fileId, datasetPath.c_str(), H5T_NATIVE_UINT8, dataspaceId,
+                                      H5P_DEFAULT, propId, H5P_DEFAULT);
+        H5Pclose(propId);
+        if (datasetId < 0) {
+            H5Sclose(dataspaceId);
+            SPDLOG_ERROR("Failed to create dataset {}", datasetPath);
+            return false;
+        }
+
+        // Write each record's series as a hyperslab
+        const size_t seriesFrameBytes = static_cast<size_t>(height) * width;
+        std::vector<uint8_t> scratch;
+
+        for (size_t n = 0; n < seriesFrames.size(); ++n) {
+            const auto &frame = *seriesFrames[n];
+            for (size_t s = 0; s < seriesCount && s < frame.seriesImages.size(); ++s) {
+                const cv::Mat &img = frame.seriesImages[s];
+                hid_t fileSpace = H5Dget_space(datasetId);
+                hsize_t start[4] = {static_cast<hsize_t>(n), static_cast<hsize_t>(s), 0, 0};
+                hsize_t count[4] = {1, 1, static_cast<hsize_t>(height), static_cast<hsize_t>(width)};
+                H5Sselect_hyperslab(fileSpace, H5S_SELECT_SET, start, nullptr, count, nullptr);
+                hid_t memSpace = H5Screate_simple(4, count, nullptr);
+
+                const void *srcPtr = nullptr;
+                if (img.isContinuous()) {
+                    srcPtr = img.data;
+                } else {
+                    if (scratch.size() < seriesFrameBytes) scratch.resize(seriesFrameBytes);
+                    size_t off = 0;
+                    for (int r = 0; r < img.rows; ++r) {
+                        std::memcpy(scratch.data() + off, img.ptr(r), img.cols);
+                        off += img.cols;
+                    }
+                    srcPtr = scratch.data();
+                }
+
+                herr_t status = H5Dwrite(datasetId, H5T_NATIVE_UINT8, memSpace, fileSpace, H5P_DEFAULT, srcPtr);
+                H5Sclose(memSpace);
+                H5Sclose(fileSpace);
+                if (status < 0) {
+                    SPDLOG_ERROR("Failed to write series image [{},{}] to {}", n, s, datasetPath);
+                    H5Dclose(datasetId);
+                    H5Sclose(dataspaceId);
+                    return false;
+                }
+            }
+        }
+
+        H5Dclose(datasetId);
+        H5Sclose(dataspaceId);
+        SPDLOG_DEBUG("Wrote {} series records ({}x{}x{}) to {}", seriesFrames.size(), seriesCount, height, width, datasetPath);
+        return true;
+    }
+
+    // Append to existing 4D series_images dataset
+    static bool appendSeriesImageDataset(hid_t fileId, const std::string &datasetPath,
+                                         const std::vector<ProcessedFrame> &frames, hsize_t &currentSize)
+    {
+        std::vector<const ProcessedFrame *> seriesFrames;
+        for (const auto &f : frames) {
+            if (!f.seriesImages.empty()) seriesFrames.push_back(&f);
+        }
+        if (seriesFrames.empty()) return true;
+
+        const size_t seriesCount = seriesFrames[0]->seriesImages.size();
+        const int height = seriesFrames[0]->seriesImages[0].rows;
+        const int width = seriesFrames[0]->seriesImages[0].cols;
+
+        hid_t datasetId = H5Dopen2(fileId, datasetPath.c_str(), H5P_DEFAULT);
+        if (datasetId < 0) {
+            SPDLOG_ERROR("Failed to open series dataset {} for appending", datasetPath);
+            return false;
+        }
+
+        // Get current extent
+        hid_t fileSpace = H5Dget_space(datasetId);
+        hsize_t currentDims[4];
+        H5Sget_simple_extent_dims(fileSpace, currentDims, nullptr);
+        H5Sclose(fileSpace);
+
+        // Extend first dimension
+        hsize_t newDims[4] = {currentDims[0] + seriesFrames.size(), currentDims[1], currentDims[2], currentDims[3]};
+        herr_t status = H5Dset_extent(datasetId, newDims);
+        if (status < 0) {
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("Failed to extend series dataset {}", datasetPath);
+            return false;
+        }
+
+        std::vector<uint8_t> scratch;
+        const size_t seriesFrameBytes = static_cast<size_t>(height) * width;
+
+        for (size_t n = 0; n < seriesFrames.size(); ++n) {
+            const auto &frame = *seriesFrames[n];
+            for (size_t s = 0; s < seriesCount && s < frame.seriesImages.size(); ++s) {
+                const cv::Mat &img = frame.seriesImages[s];
+                fileSpace = H5Dget_space(datasetId);
+                hsize_t start[4] = {currentDims[0] + static_cast<hsize_t>(n), static_cast<hsize_t>(s), 0, 0};
+                hsize_t count[4] = {1, 1, static_cast<hsize_t>(height), static_cast<hsize_t>(width)};
+                H5Sselect_hyperslab(fileSpace, H5S_SELECT_SET, start, nullptr, count, nullptr);
+                hid_t memSpace = H5Screate_simple(4, count, nullptr);
+
+                const void *srcPtr = nullptr;
+                if (img.isContinuous()) {
+                    srcPtr = img.data;
+                } else {
+                    if (scratch.size() < seriesFrameBytes) scratch.resize(seriesFrameBytes);
+                    size_t off = 0;
+                    for (int r = 0; r < img.rows; ++r) {
+                        std::memcpy(scratch.data() + off, img.ptr(r), img.cols);
+                        off += img.cols;
+                    }
+                    srcPtr = scratch.data();
+                }
+
+                status = H5Dwrite(datasetId, H5T_NATIVE_UINT8, memSpace, fileSpace, H5P_DEFAULT, srcPtr);
+                H5Sclose(memSpace);
+                H5Sclose(fileSpace);
+                if (status < 0) {
+                    SPDLOG_ERROR("Failed to append series image [{},{}] to {}", n, s, datasetPath);
+                    H5Dclose(datasetId);
+                    return false;
+                }
+            }
+        }
+
+        H5Dclose(datasetId);
+        currentSize = currentDims[0] + seriesFrames.size();
         return true;
     }
 
@@ -700,6 +877,28 @@ namespace backend::services
                     return false;
                 if (!appendMetadataDataset(impl_->fileId_, "/valid_frames/metadata", validFrames, impl_->validFramesWritten_))
                     return false;
+            }
+
+            // Write multi-image series data if any frames have series images
+            bool hasSeriesImages = false;
+            for (const auto &frame : validFrames) {
+                if (!frame.seriesImages.empty()) { hasSeriesImages = true; break; }
+            }
+            if (hasSeriesImages) {
+                if (impl_->seriesImagesWritten_ == 0) {
+                    if (!writeSeriesImageDataset(impl_->fileId_, "/valid_frames/series_images", validFrames)) {
+                        SPDLOG_WARN("Failed to write series_images dataset (non-fatal)");
+                    } else {
+                        // Count how many frames had series data
+                        for (const auto &f : validFrames) {
+                            if (!f.seriesImages.empty()) ++impl_->seriesImagesWritten_;
+                        }
+                    }
+                } else {
+                    if (!appendSeriesImageDataset(impl_->fileId_, "/valid_frames/series_images", validFrames, impl_->seriesImagesWritten_)) {
+                        SPDLOG_WARN("Failed to append series_images dataset (non-fatal)");
+                    }
+                }
             }
         }
 
@@ -961,6 +1160,23 @@ namespace backend::services
             H5Aclose(attr17);
         }
 
+        // Multi-image recording mode attributes
+        uint8_t multiImageEnabled = processingConfig.multi_image_enabled ? 1 : 0;
+        hid_t attrMI1 = H5Acreate2(infoGroupId, "multi_image_enabled", H5T_NATIVE_UINT8, scalarSpaceId,
+                                    H5P_DEFAULT, H5P_DEFAULT);
+        if (attrMI1 >= 0) {
+            H5Awrite(attrMI1, H5T_NATIVE_UINT8, &multiImageEnabled);
+            H5Aclose(attrMI1);
+        }
+
+        int32_t multiImageCount = static_cast<int32_t>(processingConfig.multi_image_count);
+        hid_t attrMI2 = H5Acreate2(infoGroupId, "multi_image_count", H5T_NATIVE_INT32, scalarSpaceId,
+                                    H5P_DEFAULT, H5P_DEFAULT);
+        if (attrMI2 >= 0) {
+            H5Awrite(attrMI2, H5T_NATIVE_INT32, &multiImageCount);
+            H5Aclose(attrMI2);
+        }
+
         H5Sclose(scalarSpaceId);
         H5Gclose(infoGroupId);
 
@@ -993,6 +1209,56 @@ namespace backend::services
 
         SPDLOG_DEBUG("Wrote experiment info, processing config, and ROI to HDF5");
         return true;
+    }
+
+    bool Hdf5Service::writeConfigJson(const std::string& jsonContent)
+    {
+        if (!isFileOpen())
+        {
+            SPDLOG_ERROR("HDF5 file is not open");
+            return false;
+        }
+
+        // Open the experiment_info group (must already exist from writeExperimentInfo)
+        htri_t exists = H5Lexists(impl_->fileId_, "/experiment_info", H5P_DEFAULT);
+        if (exists <= 0)
+        {
+            SPDLOG_WARN("Cannot write config JSON: /experiment_info group does not exist");
+            return false;
+        }
+
+        hid_t groupId = H5Gopen2(impl_->fileId_, "/experiment_info", H5P_DEFAULT);
+        if (groupId < 0)
+        {
+            SPDLOG_ERROR("Failed to open /experiment_info group for config JSON");
+            return false;
+        }
+
+        // Create variable-length string type
+        hid_t strType = H5Tcopy(H5T_C_S1);
+        H5Tset_size(strType, H5T_VARIABLE);
+        H5Tset_cset(strType, H5T_CSET_UTF8);
+
+        hid_t scalarSpace = H5Screate(H5S_SCALAR);
+        hid_t attr = H5Acreate2(groupId, "config_json", strType, scalarSpace,
+                                H5P_DEFAULT, H5P_DEFAULT);
+        bool ok = false;
+        if (attr >= 0)
+        {
+            const char* ptr = jsonContent.c_str();
+            ok = (H5Awrite(attr, strType, &ptr) >= 0);
+            H5Aclose(attr);
+        }
+
+        H5Sclose(scalarSpace);
+        H5Tclose(strType);
+        H5Gclose(groupId);
+
+        if (ok)
+            SPDLOG_DEBUG("Wrote config JSON ({} bytes) to HDF5 metadata", jsonContent.size());
+        else
+            SPDLOG_WARN("Failed to write config JSON attribute");
+        return ok;
     }
 
     bool Hdf5Service::loadFile(const std::string& filePath)
@@ -1152,6 +1418,8 @@ namespace backend::services
             double brightness_q2;
             double brightness_q3;
             double brightness_q4;
+            double youngsModulus;
+            uint8_t isTargetGroup;
         };
 
         // Read metadata
@@ -1187,6 +1455,8 @@ namespace backend::services
             frame.validation.brightness.q2 = md.brightness_q2;
             frame.validation.brightness.q3 = md.brightness_q3;
             frame.validation.brightness.q4 = md.brightness_q4;
+            frame.validation.youngsModulus = md.youngsModulus;
+            frame.validation.isTargetGroup = (md.isTargetGroup != 0);
             frames.push_back(frame);
         }
 
@@ -2046,6 +2316,284 @@ namespace backend::services {
 
         // Note: Charts are saved as BGR (OpenCV format), matToQImage will handle BGR->RGB conversion
         SPDLOG_DEBUG("readChartSnapshot: successfully read {}x{}x{} from {}", height, width, channels, datasetPath);
+        return true;
+    }
+
+    // --- Multi-image series read support ---
+
+    bool Hdf5Service::getSeriesImageInfo(size_t& outCount, size_t& outSeriesCount,
+                                          int& outHeight, int& outWidth) const
+    {
+        if (!isFileOpen()) return false;
+
+        hid_t dsId = H5Dopen2(impl_->fileId_, "/valid_frames/series_images", H5P_DEFAULT);
+        if (dsId < 0) return false;
+
+        hid_t spaceId = H5Dget_space(dsId);
+        int ndims = H5Sget_simple_extent_ndims(spaceId);
+        if (ndims != 4) {
+            H5Sclose(spaceId);
+            H5Dclose(dsId);
+            return false;
+        }
+        hsize_t dims[4];
+        H5Sget_simple_extent_dims(spaceId, dims, nullptr);
+        H5Sclose(spaceId);
+        H5Dclose(dsId);
+
+        outCount = static_cast<size_t>(dims[0]);
+        outSeriesCount = static_cast<size_t>(dims[1]);
+        outHeight = static_cast<int>(dims[2]);
+        outWidth = static_cast<int>(dims[3]);
+        return true;
+    }
+
+    bool Hdf5Service::readSeriesImagesByIndex(size_t index, std::vector<cv::Mat>& outImages) const
+    {
+        if (!isFileOpen()) return false;
+
+        hid_t dsId = H5Dopen2(impl_->fileId_, "/valid_frames/series_images", H5P_DEFAULT);
+        if (dsId < 0) return false;
+
+        hid_t spaceId = H5Dget_space(dsId);
+        hsize_t dims[4];
+        H5Sget_simple_extent_dims(spaceId, dims, nullptr);
+
+        if (static_cast<hsize_t>(index) >= dims[0]) {
+            H5Sclose(spaceId);
+            H5Dclose(dsId);
+            return false;
+        }
+
+        const size_t seriesCount = static_cast<size_t>(dims[1]);
+        const int height = static_cast<int>(dims[2]);
+        const int width = static_cast<int>(dims[3]);
+
+        outImages.clear();
+        outImages.reserve(seriesCount);
+
+        for (size_t s = 0; s < seriesCount; ++s) {
+            hsize_t start[4] = {static_cast<hsize_t>(index), static_cast<hsize_t>(s), 0, 0};
+            hsize_t count[4] = {1, 1, static_cast<hsize_t>(height), static_cast<hsize_t>(width)};
+            hid_t fileSpace = H5Dget_space(dsId);
+            H5Sselect_hyperslab(fileSpace, H5S_SELECT_SET, start, nullptr, count, nullptr);
+            hid_t memSpace = H5Screate_simple(4, count, nullptr);
+
+            cv::Mat img(height, width, CV_8UC1);
+            herr_t status = H5Dread(dsId, H5T_NATIVE_UINT8, memSpace, fileSpace, H5P_DEFAULT, img.data);
+            H5Sclose(memSpace);
+            H5Sclose(fileSpace);
+            if (status < 0) {
+                H5Sclose(spaceId);
+                H5Dclose(dsId);
+                return false;
+            }
+            outImages.push_back(std::move(img));
+        }
+
+        H5Sclose(spaceId);
+        H5Dclose(dsId);
+        return true;
+    }
+
+    // --- Frame recording mode implementation ---
+
+    bool Hdf5Service::initializeRecordingDatasets()
+    {
+        if (!isFileOpen())
+        {
+            SPDLOG_ERROR("HDF5 file is not open");
+            return false;
+        }
+
+        // Create /recorded_frames group
+        hid_t groupId = H5Gcreate2(impl_->fileId_, "/recorded_frames", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        if (groupId >= 0)
+            H5Gclose(groupId);
+
+        SPDLOG_DEBUG("HDF5 recording datasets initialized");
+        return true;
+    }
+
+    bool Hdf5Service::appendRecordingFrames(const std::vector<cv::Mat>& images,
+                                            const std::vector<RecordingFrameMeta>& metadata)
+    {
+        if (!isFileOpen() || images.empty())
+            return images.empty(); // empty is success
+
+        if (images.size() != metadata.size())
+        {
+            SPDLOG_ERROR("appendRecordingFrames: images ({}) and metadata ({}) size mismatch",
+                         images.size(), metadata.size());
+            return false;
+        }
+
+        // Track how many recording frames have been written using a simple counter.
+        // We reuse validFramesWritten_ for the recording images dataset since recording
+        // and experiment modes are mutually exclusive in practice.
+        hsize_t alreadyWritten = impl_->validFramesWritten_;
+
+        // Write/append images
+        if (alreadyWritten == 0)
+        {
+            if (!writeImageDataset(impl_->fileId_, "/recorded_frames/images", images))
+                return false;
+        }
+        else
+        {
+            if (!appendImageDataset(impl_->fileId_, "/recorded_frames/images", images, impl_->validFramesWritten_))
+                return false;
+        }
+
+        // Write/append metadata (simple compound: index + timestamp + width + height)
+        struct RecMeta
+        {
+            uint64_t index;
+            uint64_t timestampNs;
+            uint64_t width;
+            uint64_t height;
+        };
+
+        hid_t compTypeId = H5Tcreate(H5T_COMPOUND, sizeof(RecMeta));
+        H5Tinsert(compTypeId, "index", HOFFSET(RecMeta, index), H5T_NATIVE_UINT64);
+        H5Tinsert(compTypeId, "timestampNs", HOFFSET(RecMeta, timestampNs), H5T_NATIVE_UINT64);
+        H5Tinsert(compTypeId, "width", HOFFSET(RecMeta, width), H5T_NATIVE_UINT64);
+        H5Tinsert(compTypeId, "height", HOFFSET(RecMeta, height), H5T_NATIVE_UINT64);
+
+        std::vector<RecMeta> metaEntries(metadata.size());
+        for (size_t i = 0; i < metadata.size(); ++i)
+        {
+            metaEntries[i].index = metadata[i].index;
+            metaEntries[i].timestampNs = metadata[i].timestampNs;
+            metaEntries[i].width = metadata[i].width;
+            metaEntries[i].height = metadata[i].height;
+        }
+
+        const std::string metaPath = "/recorded_frames/metadata";
+
+        if (alreadyWritten == 0)
+        {
+            // Create metadata dataset
+            hsize_t dims[1] = {metaEntries.size()};
+            hsize_t maxDims[1] = {H5S_UNLIMITED};
+            hid_t dataspaceId = H5Screate_simple(1, dims, maxDims);
+
+            hid_t propId = H5Pcreate(H5P_DATASET_CREATE);
+            hsize_t chunkDims[1] = {std::min(static_cast<hsize_t>(1000), dims[0])};
+            H5Pset_chunk(propId, 1, chunkDims);
+
+            hid_t datasetId = H5Dcreate2(impl_->fileId_, metaPath.c_str(), compTypeId, dataspaceId,
+                                         H5P_DEFAULT, propId, H5P_DEFAULT);
+            H5Pclose(propId);
+
+            if (datasetId < 0)
+            {
+                H5Sclose(dataspaceId);
+                H5Tclose(compTypeId);
+                SPDLOG_ERROR("Failed to create recording metadata dataset");
+                return false;
+            }
+
+            herr_t status = H5Dwrite(datasetId, compTypeId, H5S_ALL, H5S_ALL, H5P_DEFAULT, metaEntries.data());
+            H5Dclose(datasetId);
+            H5Sclose(dataspaceId);
+
+            if (status < 0)
+            {
+                H5Tclose(compTypeId);
+                SPDLOG_ERROR("Failed to write recording metadata");
+                return false;
+            }
+        }
+        else
+        {
+            // Append to existing metadata dataset
+            hid_t datasetId = H5Dopen2(impl_->fileId_, metaPath.c_str(), H5P_DEFAULT);
+            if (datasetId < 0)
+            {
+                H5Tclose(compTypeId);
+                SPDLOG_ERROR("Failed to open recording metadata dataset for append");
+                return false;
+            }
+
+            hsize_t newSize[1] = {alreadyWritten + metaEntries.size()};
+            H5Dset_extent(datasetId, newSize);
+
+            hid_t filespace = H5Dget_space(datasetId);
+            hsize_t offset[1] = {alreadyWritten};
+            hsize_t count[1] = {metaEntries.size()};
+            H5Sselect_hyperslab(filespace, H5S_SELECT_SET, offset, nullptr, count, nullptr);
+
+            hid_t memspace = H5Screate_simple(1, count, nullptr);
+            herr_t status = H5Dwrite(datasetId, compTypeId, memspace, filespace, H5P_DEFAULT, metaEntries.data());
+
+            H5Sclose(memspace);
+            H5Sclose(filespace);
+            H5Dclose(datasetId);
+
+            if (status < 0)
+            {
+                H5Tclose(compTypeId);
+                SPDLOG_ERROR("Failed to append recording metadata");
+                return false;
+            }
+        }
+
+        H5Tclose(compTypeId);
+
+        if (alreadyWritten == 0)
+            impl_->validFramesWritten_ = images.size();
+        SPDLOG_DEBUG("Recording: appended {} frames (total: {})", images.size(), impl_->validFramesWritten_);
+        return true;
+    }
+
+    bool Hdf5Service::writeRecordingInfo(uint64_t startTimeNs, uint64_t endTimeNs,
+                                         uint64_t totalFrames, uint64_t filteredFrames)
+    {
+        if (!isFileOpen())
+            return false;
+
+        hid_t infoGroupId = H5Gcreate2(impl_->fileId_, "/recording_info", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        if (infoGroupId < 0)
+        {
+            SPDLOG_ERROR("Failed to create recording_info group");
+            return false;
+        }
+
+        hid_t scalarSpaceId = H5Screate(H5S_SCALAR);
+
+        auto writeAttr = [&](const char* name, uint64_t value) {
+            hid_t attr = H5Acreate2(infoGroupId, name, H5T_NATIVE_UINT64, scalarSpaceId,
+                                    H5P_DEFAULT, H5P_DEFAULT);
+            if (attr >= 0)
+            {
+                H5Awrite(attr, H5T_NATIVE_UINT64, &value);
+                H5Aclose(attr);
+            }
+        };
+
+        writeAttr("start_time_ns", startTimeNs);
+        writeAttr("end_time_ns", endTimeNs);
+        writeAttr("total_recorded_frames", totalFrames);
+        writeAttr("total_filtered_empty_frames", filteredFrames);
+
+        // Mark recording mode
+        const char* mode = "frame_recording";
+        hid_t strType = H5Tcopy(H5T_C_S1);
+        H5Tset_size(strType, std::strlen(mode) + 1);
+        hid_t modeAttr = H5Acreate2(infoGroupId, "mode", strType, scalarSpaceId,
+                                     H5P_DEFAULT, H5P_DEFAULT);
+        if (modeAttr >= 0)
+        {
+            H5Awrite(modeAttr, strType, mode);
+            H5Aclose(modeAttr);
+        }
+        H5Tclose(strType);
+
+        H5Sclose(scalarSpaceId);
+        H5Gclose(infoGroupId);
+
+        SPDLOG_INFO("Recording info written: recorded={}, filtered={}", totalFrames, filteredFrames);
         return true;
     }
 

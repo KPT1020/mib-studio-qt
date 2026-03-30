@@ -104,11 +104,27 @@ namespace backend::playback
         // Uses average frame size from existing frames if available, otherwise uses conservative default
         size_t estimateMemoryBytesForCapacity(size_t capacity) const;
 
+        // Frame filter for recording mode
+        // When set, pushFrame() will call this filter before storing.
+        // The filter receives a temporary Frame reference and returns true if the frame should be SKIPPED (filtered out).
+        using FrameFilter = std::function<bool(const Frame&)>;
+        void setFrameFilter(FrameFilter filter);
+        void clearFrameFilter();
+        bool hasFrameFilter() const;
+
+        // Number of frames filtered (skipped) since start or last reset
+        uint64_t totalFiltered() const { return totalFiltered_.load(); }
+        void resetFilteredCount() { totalFiltered_.store(0); }
+
     private:
         size_t capacity_;
         mutable std::mutex mutex_;
         std::vector<Frame> ring_;
         std::atomic<uint64_t> totalWritten_{0};
+        std::atomic<uint64_t> totalFiltered_{0};
+
+        // Frame filter (protected by mutex_)
+        FrameFilter frameFilter_;
 
         // Internal helper to save a single frame as TIFF
         bool saveFrameAsTiff(const Frame& frame, const std::string& filepath) const;

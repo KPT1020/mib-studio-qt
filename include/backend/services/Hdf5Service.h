@@ -54,6 +54,10 @@ public:
                              size_t& totalValidFrames, size_t& totalInvalidFrames,
                              ProcessingService::Roi* roi = nullptr);
 
+    // Save raw config JSON as a string attribute on /experiment_info.
+    // Precondition: writeExperimentInfo() must have been called first.
+    bool writeConfigJson(const std::string& jsonContent);
+
     // Read background image saved for the run (if present). Returns false if not open, dataset missing, or read fails.
     bool readBackgroundImage(cv::Mat& out) const;
 
@@ -87,6 +91,35 @@ public:
     
     // Chart snapshot reading (for reading 2D/3D chart images without batch dimension)
     bool readChartSnapshot(const std::string& datasetPath, cv::Mat& outImage) const;
+
+    // --- Multi-image series support ---
+    // Read the series_images 4D dataset shape: (N, seriesCount, H, W)
+    bool getSeriesImageInfo(size_t& outCount, size_t& outSeriesCount,
+                            int& outHeight, int& outWidth) const;
+
+    // Read a single series record at index (returns seriesCount images)
+    bool readSeriesImagesByIndex(size_t index, std::vector<cv::Mat>& outImages) const;
+
+    // --- Frame recording mode (images + basic metadata, no contour processing) ---
+
+    // Simple metadata for frame recording (no contour metrics)
+    struct RecordingFrameMeta {
+        uint64_t index{0};
+        uint64_t timestampNs{0};
+        uint64_t width{0};
+        uint64_t height{0};
+    };
+
+    // Initialize recording datasets (creates /recorded_frames group)
+    bool initializeRecordingDatasets();
+
+    // Append raw frames for recording mode (images + basic metadata only)
+    bool appendRecordingFrames(const std::vector<cv::Mat>& images,
+                               const std::vector<RecordingFrameMeta>& metadata);
+
+    // Write recording info attributes
+    bool writeRecordingInfo(uint64_t startTimeNs, uint64_t endTimeNs,
+                            uint64_t totalFrames, uint64_t filteredFrames);
 
 private:
     struct Impl;

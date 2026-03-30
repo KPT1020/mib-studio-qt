@@ -238,13 +238,13 @@ def export_images_to_tiff(
 ) -> int:
     """
     Export images to TIFF files.
-    
+
     Args:
         images: Image array with shape (num_frames, height, width, channels)
         metadata: Metadata array with index field
         output_dir: Output directory
         frame_type_prefix: Prefix for filenames ("valid" or "invalid")
-        
+
     Returns:
         Number of images exported
     """
@@ -252,53 +252,105 @@ def export_images_to_tiff(
         print("ERROR: opencv-python (cv2) is required for image export.", file=sys.stderr)
         print("Install with: pip install opencv-python", file=sys.stderr)
         return 0
-    
+
     exported_count = 0
-    
+
     for i, image in enumerate(images):
         # Get frame index from metadata
         frame_index = metadata[i]['index']
-        
+
         # Generate filename: valid_frame_XXXXXX.tiff or invalid_frame_XXXXXX.tiff
         filename = f"{frame_type_prefix}_frame_{frame_index:06d}.tiff"
         filepath = output_dir / filename
-        
-        # Ensure image is in correct format (uint8, BGR for OpenCV)
-        if image.dtype != np.uint8:
-            # Normalize to uint8 if needed
-            if image.max() > 255:
-                image = (image / image.max() * 255).astype(np.uint8)
-            else:
-                image = image.astype(np.uint8)
-        
-        # Handle grayscale vs color
-        if len(image.shape) == 2:
-            # Grayscale
-            image_bgr = image
-        elif len(image.shape) == 3:
-            if image.shape[2] == 1:
-                # Single channel, convert to 2D
-                image_bgr = image[:, :, 0]
-            elif image.shape[2] == 3:
-                # Already BGR/RGB (OpenCV expects BGR)
-                image_bgr = image
-            elif image.shape[2] == 4:
-                # RGBA, convert to BGR
-                image_bgr = cv2.cvtColor(image, cv2.COLOR_RGBA2BGR)
-            else:
-                print(f"WARNING: Unexpected image shape {image.shape} at index {i}, skipping", file=sys.stderr)
-                continue
-        else:
-            print(f"WARNING: Unexpected image shape {image.shape} at index {i}, skipping", file=sys.stderr)
+
+        image_bgr = _prepare_image_for_tiff(image, i)
+        if image_bgr is None:
             continue
-        
+
         # Write TIFF without compression (matching C++ behavior)
         if cv2.imwrite(str(filepath), image_bgr):
             exported_count += 1
         else:
             print(f"WARNING: Failed to write image {filepath}", file=sys.stderr)
-    
+
     return exported_count
+
+
+def export_series_images_to_tiff(
+    h5_file: h5py.File,
+    metadata: np.ndarray,
+    output_dir: Path
+) -> int:
+    """
+    Export multi-image series data from /valid_frames/series_images.
+
+    The series_images dataset is 4D: (N, seriesCount, H, W).
+    Each record produces seriesCount TIFF files.
+
+    Args:
+        h5_file: Open HDF5 file handle
+        metadata: Valid frames metadata array
+        output_dir: Output directory
+
+    Returns:
+        Number of series images exported
+    """
+    if not HAS_CV2:
+        return 0
+
+    dataset_path = "/valid_frames/series_images"
+    if dataset_path not in h5_file:
+        return 0
+
+    series_ds = h5_file[dataset_path]
+    if len(series_ds.shape) != 4:
+        print(f"WARNING: series_images has unexpected shape {series_ds.shape}", file=sys.stderr)
+        return 0
+
+    n_records, series_count, height, width = series_ds.shape
+    print(f"Found series_images: {n_records} records x {series_count} images ({height}x{width})")
+
+    exported_count = 0
+    for i in range(min(n_records, len(metadata))):
+        frame_index = metadata[i]['index']
+        series_data = series_ds[i]  # shape: (seriesCount, H, W)
+
+        for s in range(series_count):
+            image = series_data[s]
+            filename = f"valid_frame_{frame_index:06d}_series_{s:02d}.tiff"
+            filepath = output_dir / filename
+
+            image_out = _prepare_image_for_tiff(image, i)
+            if image_out is not None and cv2.imwrite(str(filepath), image_out):
+                exported_count += 1
+
+    return exported_count
+
+
+def _prepare_image_for_tiff(image: np.ndarray, index: int) -> Optional[np.ndarray]:
+    """Convert an image array to a format suitable for cv2.imwrite."""
+    # Ensure image is in correct format (uint8, BGR for OpenCV)
+    if image.dtype != np.uint8:
+        if image.max() > 255:
+            image = (image / image.max() * 255).astype(np.uint8)
+        else:
+            image = image.astype(np.uint8)
+
+    if len(image.shape) == 2:
+        return image
+    elif len(image.shape) == 3:
+        if image.shape[2] == 1:
+            return image[:, :, 0]
+        elif image.shape[2] == 3:
+            return image
+        elif image.shape[2] == 4:
+            return cv2.cvtColor(image, cv2.COLOR_RGBA2BGR)
+        else:
+            print(f"WARNING: Unexpected image shape {image.shape} at index {index}, skipping", file=sys.stderr)
+            return None
+    else:
+        print(f"WARNING: Unexpected image shape {image.shape} at index {index}, skipping", file=sys.stderr)
+        return None
 
 
 def export_hdf5(
@@ -399,6 +451,14 @@ def export_hdf5(
                         print(f"Exported {exported} valid frame images")
                     else:
                         print("WARNING: /valid_frames/images dataset not found", file=sys.stderr)
+
+                    # Export multi-image series if present
+                    series_exported = export_series_images_to_tiff(
+                        h5_file, metadata_valid, output_dir
+                    )
+                    if series_exported > 0:
+                        total_exported += series_exported
+                        print(f"Exported {series_exported} series images")
                 
                 # Export invalid frames
                 if frame_type in ("invalid", "both") and metadata_invalid is not None:

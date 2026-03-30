@@ -89,6 +89,7 @@ add_library(mib_backend STATIC
     src/backend/BackgroundCaptureNotifier.cpp
     include/backend/BackgroundCaptureNotifier.h
     src/backend/Tools.cpp
+    src/backend/EModulusLut.cpp
     src/backend/services/Logger.cpp
     src/backend/services/SqliteService.cpp
     src/backend/services/CameraControlService.cpp
@@ -203,6 +204,8 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/tabs/ConfigTabs.h
     src/frontend/tabs/ExperimentMonitoringTab.cpp
     include/frontend/tabs/ExperimentMonitoringTab.h
+    src/frontend/widgets/ZoomableChartView.cpp
+    include/frontend/widgets/ZoomableChartView.h
     resources/ui/ExperimentMonitoringTab.ui
     src/frontend/tabs/HdfReviewTab.cpp
     include/frontend/tabs/HdfReviewTab.h

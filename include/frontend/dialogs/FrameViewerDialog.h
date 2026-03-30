@@ -33,7 +33,7 @@ public:
                               bool showRoiOverlay,
                               QWidget* parent = nullptr);
     ~FrameViewerDialog();
-    
+
     void setFrame(const backend::services::ProcessedFrame& frame);
     void setRoi(const backend::services::ProcessingService::Roi& roi);
     void setOverlayMode(OverlayMode mode);
@@ -44,6 +44,8 @@ private slots:
     void onToggleRoiOverlay(bool enabled);
     void onPreviousFrame();
     void onNextFrame();
+    void onPreviousSeriesImage();
+    void onNextSeriesImage();
     void onZoomIn();
     void onZoomOut();
     void onFitToWindow();
@@ -61,15 +63,22 @@ private:
     void updateImage();
     QImage matToQImage(const cv::Mat& mat) const;
     void updateFrameInfo();
+    void updateSeriesControls();
 
     const backend::services::ProcessedFrame* frame_;
     backend::services::ProcessingService::Roi roi_;
     OverlayMode overlayMode_;
     bool showRoiOverlay_;
-    
+
     QImage displayImage_;
     double zoomFactor_;
-    
+    int seriesImageIndex_; // 0 = trigger image, 1..N-1 = subsequent series images
+
+    // Series navigation widgets (created programmatically)
+    QLabel* seriesLabel_;
+    QPushButton* seriesPrevBtn_;
+    QPushButton* seriesNextBtn_;
+
     Ui::FrameViewerDialog* ui;
 };
 

@@ -17,6 +17,7 @@ class QSlider;
 class QWidget;
 class QToolButton;
 class QCheckBox;
+class QLabel;
 
 class PlaybackPanel : public QWidget {
     Q_OBJECT
@@ -26,6 +27,10 @@ public:
 
     enum class OverlayMode { Off, Mask, Contours, Both };
     enum class FitMode { FitToWindow, Zoom100 };
+    struct ColoredContour {
+        QPolygon polygon;
+        QColor color;
+    };
 
     // ROI management
     void setRoi(const QRect& roi, bool saveToConfig = true);
@@ -58,6 +63,8 @@ private slots:
     void onLogMetrics();
     void onToggleFit();
     void onAutoBackgroundToggled(bool enabled);
+    void onToggleRecording();
+    void updateRecordingUI();
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -78,10 +85,13 @@ private:
     QWidget* canvas_ = nullptr;
     QSlider* slider_ = nullptr;
     QToolButton* overlayBtn_ = nullptr;
+    QLabel* overlayLegend_ = nullptr;
     QToolButton* setBgBtn_ = nullptr;
     QCheckBox* autoBgCheck_ = nullptr;
     QToolButton* clearRoiBtn_ = nullptr;
     QToolButton* saveBufferBtn_ = nullptr;
+    QToolButton* recordBtn_ = nullptr;
+    QLabel* recordStatusLabel_ = nullptr;
     QToolButton* fitBtn_ = nullptr;
     bool scrubbing_ = false;
     bool followLive_ = true;           // auto-follow latest when true
@@ -96,7 +106,7 @@ private:
     bool hasBackground_ = false;
     QImage backgroundGray_;            // stored as grayscale QImage
     QImage overlayImage_;              // RGBA overlay (mask)
-    QList<QPolygon> overlayContours_;  // image-space contours for drawing
+    QList<ColoredContour> overlayContours_;  // image-space contours with classification color
 
     // Last overlay computation timing (ms)
     double lastOverlayComputeMs_ = 0.0;

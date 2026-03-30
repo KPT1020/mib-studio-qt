@@ -58,9 +58,10 @@ void TriggerService::triggerLoop() {
             if (!cam->setTriggerOutput(true)) continue;
             auto onset = std::chrono::high_resolution_clock::now();
 
-            // Busy-wait for approximately 1 microsecond
+            // Busy-wait for the configured pulse duration
+            auto pulseUs = std::chrono::microseconds(pulseDurationUs_.load(std::memory_order_relaxed));
             while (running_.load() &&
-                   std::chrono::high_resolution_clock::now() - onset < std::chrono::microseconds(1)) {
+                   std::chrono::high_resolution_clock::now() - onset < pulseUs) {
                 // Busy-wait
             }
 

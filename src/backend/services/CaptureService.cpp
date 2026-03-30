@@ -154,7 +154,7 @@ void CaptureService::run() {
                 if (camera->pollStats(cameraStats)) {
                     stats_.lastFrameRate.store(cameraStats.frameRate, std::memory_order_relaxed);
                     stats_.lastDataRateMBps.store(cameraStats.dataRateMBps, std::memory_order_relaxed);
-                    SPDLOG_INFO("Capture stats: {} fps, {} MB/s", cameraStats.frameRate, cameraStats.dataRateMBps);
+                    SPDLOG_DEBUG("Capture stats: {} fps, {} MB/s", cameraStats.frameRate, cameraStats.dataRateMBps);
                 }
                 nextStatsPoll = now + kStatsInterval;
             }

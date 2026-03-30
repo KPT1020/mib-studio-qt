@@ -7,10 +7,11 @@
 
 namespace cv { class Mat; }
 namespace backend { class AppBackend; }
-namespace backend::services { struct ProcessedFrame; }
+namespace backend::services { struct ProcessedFrame; struct FilterResult; }
 
 class QTimer;
 class QChartView;
+namespace frontend { class ZoomableChartView; }
 class QScatterSeries;
 class QLineSeries;
 class QBarSeries;
@@ -84,6 +85,7 @@ private slots:
     void onToggleOverlay(bool enabled);
     void onClearBuffer();
     void onApplyParams();
+    void onSortTrigger();
 
 protected:
     void showEvent(QShowEvent* event) override;
@@ -101,7 +103,7 @@ private:
     QImage extractRoiImage(const cv::Mat& image, int x, int y, int w, int h) const;
     QImage matToQImage(const cv::Mat& mat) const;
     void clearGrid(QGridLayout* grid);
-    QImage createOverlayImage(const cv::Mat& original, const cv::Mat& mask) const;
+    QImage createOverlayImage(const cv::Mat& original, const cv::Mat& mask, const backend::services::FilterResult* validation = nullptr) const;
     std::vector<std::vector<double>> computeKDE(const std::vector<std::pair<double, double>>& points,
                                                  int gridX, int gridY, double bandwidth) const;
 
@@ -111,15 +113,16 @@ private:
     QLabel* roiLabel_ = nullptr;
 
     // Panel 1: Scatterplot
-    QChartView* scatterplotView_ = nullptr;
+    ZoomableChartView* scatterplotView_ = nullptr;
     QChart* scatterplotChart_ = nullptr;
     QScatterSeries* scatterSeries_ = nullptr;
+    QScatterSeries* targetGroupSeries_ = nullptr;
     QValueAxis* scatterXAxis_ = nullptr;
     QValueAxis* scatterYAxis_ = nullptr;
     std::vector<QLineSeries*> isoelasticCurves_;
 
     // Panel 2: Histogram
-    QChartView* histogramView_ = nullptr;
+    ZoomableChartView* histogramView_ = nullptr;
     QChart* histogramChart_ = nullptr;
 #ifndef MIB_HAS_QHISTOGRAMSERIES
 #if __has_include(<QHistogramSeries>)

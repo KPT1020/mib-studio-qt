@@ -12,6 +12,7 @@
 #include <opencv2/core.hpp>
 #include <deque>
 #include <cmath>
+#include "backend/EModulusLut.h"
 
 namespace backend { namespace playback { class FrameStore; struct Frame; } }
 
@@ -34,8 +35,8 @@ struct ProcessingConfig {
     int bg_subtract_threshold{8};
     int morph_kernel_size{3};
     int morph_iterations{1};
-    int area_threshold_min{250};
-    int area_threshold_max{1000};
+    int area_threshold_min{60};    // μm²
+    int area_threshold_max{290};   // μm²
     double deformability_threshold_min{0.0};
     double deformability_threshold_max{1.0};
     bool enable_border_check{true};
@@ -50,10 +51,18 @@ struct ProcessingConfig {
     int auto_background_cooldown_frames{1000};
     // Target group sort trigger (second gate within valid frames)
     bool enable_target_group{false};
-    int target_group_area_min{300};
-    int target_group_area_max{800};
+    int target_group_area_min{72};   // μm²
+    int target_group_area_max{191};  // μm²
     double target_group_deformability_min{0.0};
     double target_group_deformability_max{0.3};
+    // Young's modulus gating (uses LUT lookup from area + deformability)
+    bool enable_target_group_emodulus{false};
+    double target_group_emodulus_min{0.0};
+    double target_group_emodulus_max{10.0};
+    // Multi-image recording: capture a series of N consecutive frames per valid detection
+    // Metrics are computed only from the first (trigger) frame
+    bool multi_image_enabled{false};
+    int multi_image_count{1}; // Number of images per series (1 = disabled, >1 = series)
 };
 
 struct FilterResult {
@@ -66,6 +75,7 @@ struct FilterResult {
     double area{0.0};
     double areaRatio{0.0};
     double ringRatio{0.0};
+    double youngsModulus{0.0}; // Young's modulus (kPa) from LUT lookup
     BrightnessQuantiles brightness;
     bool isTargetGroup{false}; // True if valid AND matches target group criteria
     // Contours found during processing (for snapshot/display)
@@ -80,6 +90,10 @@ struct ProcessedFrame {
     cv::Mat originalImage;
     cv::Mat processedImage; // mask
     FilterResult validation;
+    // Multi-image series: additional images captured after the trigger frame.
+    // seriesImages[0] is the trigger image (same as originalImage), followed by subsequent frames.
+    // Empty when multi-image mode is disabled.
+    std::vector<cv::Mat> seriesImages;
 };
 
 class ProcessingService {
@@ -94,6 +108,7 @@ public:
         uint64_t index{0};
         std::vector<std::vector<cv::Point>> contours;
         cv::Mat mask;
+        FilterResult validation;
     };
 
     ProcessingService();
@@ -187,6 +202,9 @@ public:
     // Target group trigger callback (called for each valid frame with target group result)
     using TargetGroupCallback = std::function<void(bool isTargetGroup)>;
     void setTargetGroupCallback(TargetGroupCallback callback);
+
+    // Young's modulus LUT loading
+    bool loadEModulusLut(const std::string& path);
 
     // Background capture callback for auto-capture (called when background is auto-captured)
     using BackgroundCaptureCallback = std::function<void(const cv::Mat& background, uint64_t frameIndex)>;
@@ -317,6 +335,9 @@ private:
     
     // Pixel to micron conversion factor (default: 0.4886)
     std::atomic<double> pixelToMicronFactor_{0.4886};
+
+    // Young's modulus LUT (read-only after loading, thread-safe)
+    EModulusLut eModulusLut_;
 };
 
 } // namespace backend::services

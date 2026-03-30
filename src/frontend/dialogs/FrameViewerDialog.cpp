@@ -8,6 +8,9 @@
 #include <QEvent>
 #include <QFileDialog>
 #include <QComboBox>
+#include <QLabel>
+#include <QPushButton>
+#include <QHBoxLayout>
 
 #include "backend/services/ProcessingService.h"
 #include "frontend/utils/OverlayRenderer.h"
@@ -29,17 +32,21 @@ FrameViewerDialog::FrameViewerDialog(const backend::services::ProcessedFrame& fr
       roi_(roi),
       overlayMode_(overlayMode),
       showRoiOverlay_(showRoiOverlay),
-      zoomFactor_(1.0)
+      zoomFactor_(1.0),
+      seriesImageIndex_(0),
+      seriesLabel_(nullptr),
+      seriesPrevBtn_(nullptr),
+      seriesNextBtn_(nullptr)
 {
     ui->setupUi(this);
     setWindowTitle(tr("Frame Viewer - Frame %1").arg(frame.index));
-    
+
     zoomFactor_ = 1.0;
 
     ui->imageScrollArea->setBackgroundRole(QPalette::Dark);
     ui->imageScrollArea->installEventFilter(this);
     ui->imageLabel->setBackgroundRole(QPalette::Base);
-    
+
     ui->overlayModeCombo->setCurrentIndex(static_cast<int>(overlayMode_));
     ui->roiOverlayCheck->setChecked(showRoiOverlay_);
 
@@ -54,7 +61,20 @@ FrameViewerDialog::FrameViewerDialog(const backend::services::ProcessedFrame& fr
     connect(ui->exportButton, &QPushButton::clicked, this, &FrameViewerDialog::onExportFrame);
     connect(ui->closeButton, &QPushButton::clicked, this, &QDialog::accept);
 
+    // Add series navigation controls to the controls layout (before the spacer before zoom)
+    seriesPrevBtn_ = new QPushButton(tr("< Series Prev"), this);
+    seriesLabel_ = new QLabel(this);
+    seriesNextBtn_ = new QPushButton(tr("Series Next >"), this);
+    connect(seriesPrevBtn_, &QPushButton::clicked, this, &FrameViewerDialog::onPreviousSeriesImage);
+    connect(seriesNextBtn_, &QPushButton::clicked, this, &FrameViewerDialog::onNextSeriesImage);
+    // Insert after nextButton in the controls layout
+    auto* controlsLayout = ui->controlsLayout;
+    controlsLayout->insertWidget(2, seriesPrevBtn_);
+    controlsLayout->insertWidget(3, seriesLabel_);
+    controlsLayout->insertWidget(4, seriesNextBtn_);
+
     // Update display
+    updateSeriesControls();
     updateImage();
     updateFrameInfo();
 }
@@ -65,7 +85,9 @@ FrameViewerDialog::~FrameViewerDialog() {
 
 void FrameViewerDialog::setFrame(const backend::services::ProcessedFrame& frame) {
     frame_ = &frame;
+    seriesImageIndex_ = 0; // Reset to trigger image when switching frames
     setWindowTitle(tr("Frame Viewer - Frame %1").arg(frame.index));
+    updateSeriesControls();
     updateImage();
     updateFrameInfo();
 }
@@ -121,6 +143,41 @@ void FrameViewerDialog::onFitToWindow() {
     updateImage();
 }
 
+void FrameViewerDialog::onPreviousSeriesImage() {
+    if (!frame_ || frame_->seriesImages.empty()) return;
+    if (seriesImageIndex_ > 0) {
+        --seriesImageIndex_;
+        updateSeriesControls();
+        updateImage();
+        updateFrameInfo();
+    }
+}
+
+void FrameViewerDialog::onNextSeriesImage() {
+    if (!frame_ || frame_->seriesImages.empty()) return;
+    if (seriesImageIndex_ < static_cast<int>(frame_->seriesImages.size()) - 1) {
+        ++seriesImageIndex_;
+        updateSeriesControls();
+        updateImage();
+        updateFrameInfo();
+    }
+}
+
+void FrameViewerDialog::updateSeriesControls() {
+    bool hasSeries = frame_ && frame_->seriesImages.size() > 1;
+    seriesPrevBtn_->setVisible(hasSeries);
+    seriesLabel_->setVisible(hasSeries);
+    seriesNextBtn_->setVisible(hasSeries);
+
+    if (hasSeries) {
+        seriesLabel_->setText(tr("Series %1/%2")
+            .arg(seriesImageIndex_ + 1)
+            .arg(frame_->seriesImages.size()));
+        seriesPrevBtn_->setEnabled(seriesImageIndex_ > 0);
+        seriesNextBtn_->setEnabled(seriesImageIndex_ < static_cast<int>(frame_->seriesImages.size()) - 1);
+    }
+}
+
 bool FrameViewerDialog::eventFilter(QObject* obj, QEvent* event) {
     if (obj == ui->imageScrollArea && event->type() == QEvent::Wheel) {
         QWheelEvent* wheelEvent = static_cast<QWheelEvent*>(event);
@@ -158,12 +215,22 @@ void FrameViewerDialog::updateImage() {
         return;
     }
 
+    // Determine which image to display: series image or trigger image
+    bool showingSeriesImage = (seriesImageIndex_ > 0 && !frame_->seriesImages.empty()
+                               && seriesImageIndex_ < static_cast<int>(frame_->seriesImages.size()));
+
     QImage baseImage;
-    if (overlayMode_ != OverlayMode::None && !frame_->processedImage.empty()) {
-        baseImage = createProcessingOverlay(frame_->originalImage, frame_->processedImage,
+    if (showingSeriesImage) {
+        // Non-trigger series images: display raw (no overlay — metrics only apply to trigger)
+        baseImage = matToQImage(frame_->seriesImages[seriesImageIndex_]);
+    } else if (overlayMode_ != OverlayMode::None && !frame_->processedImage.empty()) {
+        // Trigger image with overlay
+        const cv::Mat& img = (!frame_->seriesImages.empty()) ? frame_->seriesImages[0] : frame_->originalImage;
+        baseImage = createProcessingOverlay(img, frame_->processedImage,
                                            &frame_->validation, overlayMode_);
     } else {
-        baseImage = matToQImage(frame_->originalImage);
+        const cv::Mat& img = (!frame_->seriesImages.empty()) ? frame_->seriesImages[0] : frame_->originalImage;
+        baseImage = matToQImage(img);
     }
 
     // Apply ROI rectangle overlay if enabled
@@ -256,6 +323,16 @@ void FrameViewerDialog::updateFrameInfo() {
     .arg(val.isValid ? "Yes" : "No")
     .arg(val.innerContourCount);
 
+    // Add series indicator
+    if (!frame_->seriesImages.empty() && frame_->seriesImages.size() > 1) {
+        if (seriesImageIndex_ == 0) {
+            info += tr(" | <b>Series:</b> Trigger image (1/%1)").arg(frame_->seriesImages.size());
+        } else {
+            info += tr(" | <b>Series:</b> Image %1/%2 (metrics from trigger only)")
+                .arg(seriesImageIndex_ + 1).arg(frame_->seriesImages.size());
+        }
+    }
+
     ui->frameInfoLabel->setText(info);
 }
 
@@ -266,8 +343,16 @@ void FrameViewerDialog::onExportFrame() {
         return;
     }
 
+    // Default filename includes series index if viewing a series
+    QString defaultName;
+    if (!frame_->seriesImages.empty() && frame_->seriesImages.size() > 1) {
+        defaultName = QString("frame_%1_series_%2.tiff").arg(frame_->index).arg(seriesImageIndex_);
+    } else {
+        defaultName = QString("frame_%1.tiff").arg(frame_->index);
+    }
+
     QString filePath = QFileDialog::getSaveFileName(this, tr("Export Frame as TIFF"),
-                                                   QString("frame_%1.tiff").arg(frame_->index),
+                                                   defaultName,
                                                    tr("TIFF Files (*.tiff *.tif);;All Files (*)"));
     if (filePath.isEmpty()) {
         return;

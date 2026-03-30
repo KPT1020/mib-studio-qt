@@ -24,6 +24,10 @@ public:
     // Called by ProcessingService callback when a valid frame is classified
     void onTargetGroupResult(bool isTargetGroup);
 
+    // Pulse duration (microseconds)
+    void setPulseDurationUs(int us) { pulseDurationUs_.store(us, std::memory_order_relaxed); }
+    int getPulseDurationUs() const { return pulseDurationUs_.load(std::memory_order_relaxed); }
+
     // Metrics
     uint64_t getTriggerCount() const { return triggerCount_.load(std::memory_order_relaxed); }
     double getLastOnsetUs() const { return lastOnsetUs_.load(std::memory_order_relaxed); }
@@ -46,6 +50,9 @@ private:
 
     // Camera reference (non-owning)
     std::atomic<camera::common::ICamera*> camera_{nullptr};
+
+    // Pulse duration
+    std::atomic<int> pulseDurationUs_{1};
 
     // Metrics
     std::atomic<uint64_t> triggerCount_{0};

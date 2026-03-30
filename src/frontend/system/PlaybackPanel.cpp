@@ -19,7 +19,12 @@
 #include <QJsonObject>
 #include <QSettings>
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
+#include <QFileDialog>
+#include <QLabel>
+#include <QMessageBox>
+#include <QStandardPaths>
 #include <limits>
 #include <algorithm>
 #include <cmath>
@@ -74,7 +79,7 @@ namespace
         explicit ImageCanvas(QImage *image,
                              QImage *overlay,
                              QRect *imageRoi,
-                             QList<QPolygon> *contours,
+                             QList<PlaybackPanel::ColoredContour> *contours,
                              PlaybackPanel::FitMode *fitMode,
                              QWidget *parent = nullptr)
             : QWidget(parent),
@@ -128,19 +133,19 @@ namespace
                 p.drawImage(topLeft.toPoint(), scaledOverlay);
             }
 
-            // Contours
+            // Contours (per-contour classification color)
             if (contours_)
             {
-                QPen pen(QColor(0, 255, 0));
-                pen.setWidth(2);
-                p.setPen(pen);
-                for (const QPolygon &poly : *contours_)
+                for (const auto &cc : *contours_)
                 {
-                    if (poly.isEmpty())
+                    if (cc.polygon.isEmpty())
                         continue;
+                    QPen pen(cc.color);
+                    pen.setWidth(2);
+                    p.setPen(pen);
                     QPolygon scaledPoly;
-                    scaledPoly.reserve(poly.size());
-                    for (const QPoint &pt : poly)
+                    scaledPoly.reserve(cc.polygon.size());
+                    for (const QPoint &pt : cc.polygon)
                     {
                         QPointF q = QPointF(pt) * scale + topLeft;
                         scaledPoly << q.toPoint();
@@ -278,7 +283,7 @@ namespace
         QImage *image_ = nullptr;
         QImage *overlay_ = nullptr;
         QRect *imageRoi_ = nullptr;
-        QList<QPolygon> *contours_ = nullptr;
+        QList<PlaybackPanel::ColoredContour> *contours_ = nullptr;
         PlaybackPanel::FitMode *fitMode_ = nullptr;
         bool dragging_ = false;
         QPoint dragStartWidgetPos_;
@@ -313,6 +318,13 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     overlayBtn_ = new QToolButton(controls);
     overlayBtn_->setText("Overlay: Off");
     overlayBtn_->setToolTip("Toggle overlay (Off → Mask → Contours → Both)");
+    overlayLegend_ = new QLabel(controls);
+    overlayLegend_->setText(
+        "<span style='color:#0078FF;'>&#9632;</span> Target "
+        "<span style='color:#00FF00;'>&#9632;</span> Valid "
+        "<span style='color:#FF0000;'>&#9632;</span> Invalid");
+    overlayLegend_->setToolTip("Blue = target group, Green = valid, Red = invalid");
+    overlayLegend_->setVisible(false);
     setBgBtn_ = new QToolButton(controls);
     setBgBtn_->setText("Set Background");
     setBgBtn_->setToolTip("Capture current frame as background (when paused)");
@@ -327,14 +339,24 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     saveBufferBtn_ = new QToolButton(controls);
     saveBufferBtn_->setText("Save Buffer");
     saveBufferBtn_->setToolTip("Save buffer frames to disk and manage buffer size");
+    recordBtn_ = new QToolButton(controls);
+    recordBtn_->setText("Record");
+    recordBtn_->setToolTip("Record non-empty frames to HDF5 (images + metadata only, no contour processing)");
+    recordBtn_->setStyleSheet(""); // Will be updated by updateRecordingUI
+    recordStatusLabel_ = new QLabel(controls);
+    recordStatusLabel_->setText("");
+    recordStatusLabel_->setStyleSheet("color: gray; padding: 0 4px;");
     fitBtn_ = new QToolButton(controls);
     fitBtn_->setText("Fit: Window");
     fitBtn_->setToolTip("Toggle between fit-to-window and 100% zoom");
     controlsLayout->addWidget(overlayBtn_);
+    controlsLayout->addWidget(overlayLegend_);
     controlsLayout->addWidget(setBgBtn_);
     controlsLayout->addWidget(autoBgCheck_);
     controlsLayout->addWidget(clearRoiBtn_);
     controlsLayout->addWidget(saveBufferBtn_);
+    controlsLayout->addWidget(recordBtn_);
+    controlsLayout->addWidget(recordStatusLabel_);
     controlsLayout->addWidget(fitBtn_);
     controlsLayout->addStretch(1);
     layout->addWidget(controls);
@@ -349,6 +371,7 @@ PlaybackPanel::PlaybackPanel(backend::AppBackend &backend, QWidget *parent)
     connect(autoBgCheck_, &QCheckBox::toggled, this, &PlaybackPanel::onAutoBackgroundToggled);
     connect(clearRoiBtn_, &QToolButton::clicked, this, &PlaybackPanel::onClearRoi);
     connect(saveBufferBtn_, &QToolButton::clicked, this, &PlaybackPanel::onSaveBuffer);
+    connect(recordBtn_, &QToolButton::clicked, this, &PlaybackPanel::onToggleRecording);
     connect(fitBtn_, &QToolButton::clicked, this, &PlaybackPanel::onToggleFit);
 
     // Space shortcut to start/stop capture
@@ -523,6 +546,11 @@ void PlaybackPanel::onTick()
         resetMetrics(); // Reset metrics when capture stops
     }
     prevCaptureRunning_ = running;
+
+    // Update recording status display periodically
+    if (backend_.isFrameRecording()) {
+        updateRecordingUI();
+    }
 
     // Update slider range from available indices
     uint64_t earliest = 0, latest = 0;
@@ -809,6 +837,63 @@ void PlaybackPanel::onSaveBuffer()
     dialog.exec();
 }
 
+void PlaybackPanel::onToggleRecording()
+{
+    if (backend_.isFrameRecording()) {
+        backend_.stopFrameRecording();
+        updateRecordingUI();
+        return;
+    }
+
+    // Prompt user for HDF5 file path
+    QString defaultDir;
+    const QString documentsPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (!documentsPath.isEmpty()) {
+        defaultDir = QDir(documentsPath).absoluteFilePath("MIB_Studio_Qt/recordings");
+    } else {
+        defaultDir = QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("recordings");
+    }
+    QDir().mkpath(defaultDir);
+
+    // Generate default filename with timestamp
+    const QString timestamp = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
+    const QString defaultFile = QDir(defaultDir).absoluteFilePath(
+        QString("recording_%1.h5").arg(timestamp));
+
+    const QString filePath = QFileDialog::getSaveFileName(
+        this, tr("Save Recording As"), defaultFile,
+        tr("HDF5 Files (*.h5 *.hdf5)"));
+
+    if (filePath.isEmpty()) return;
+
+    const std::string path = filePath.toStdString();
+    if (!backend_.startFrameRecording(path)) {
+        QMessageBox::warning(this, tr("Recording Error"),
+                             tr("Failed to start frame recording. Check that the camera is running."));
+        return;
+    }
+    updateRecordingUI();
+}
+
+void PlaybackPanel::updateRecordingUI()
+{
+    const bool recording = backend_.isFrameRecording();
+    if (recording) {
+        recordBtn_->setText("Stop Rec");
+        recordBtn_->setStyleSheet("color: red; font-weight: bold;");
+        recordBtn_->setToolTip("Stop recording");
+        const uint64_t written = backend_.frameRecordingCount();
+        const uint64_t filtered = backend_.frameRecordingFiltered();
+        recordStatusLabel_->setText(
+            QString("Rec: %1 saved, %2 empty skipped").arg(written).arg(filtered));
+    } else {
+        recordBtn_->setText("Record");
+        recordBtn_->setStyleSheet("");
+        recordBtn_->setToolTip("Record non-empty frames to HDF5 (images + metadata only, no contour processing)");
+        recordStatusLabel_->setText("");
+    }
+}
+
 void PlaybackPanel::onToggleFit()
 {
     if (fitMode_ == FitMode::FitToWindow)
@@ -874,9 +959,9 @@ static QImage maskToTintedOverlay(const cv::Mat &mask, const QColor &color, int 
             const bool on = mrow[x] > 0;
             if (on)
             {
-                orow[4 * x + 0] = b;
+                orow[4 * x + 0] = r;
                 orow[4 * x + 1] = g;
-                orow[4 * x + 2] = r;
+                orow[4 * x + 2] = b;
                 orow[4 * x + 3] = a;
             }
             else
@@ -952,18 +1037,49 @@ void PlaybackPanel::computeProcessedOverlay()
     cv::morphologyEx(thresh, dstR, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
     cv::morphologyEx(dstR, dstR, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
-    // Build overlay image
-    if (overlayMode_ == OverlayMode::Mask || overlayMode_ == OverlayMode::Both)
-    {
-        overlayImage_ = maskToTintedOverlay(mask, QColor(0, 255, 0), 90);
+    // Determine overlay color from processing classification
+    QColor overlayColor(0, 255, 0); // default green
+    backend::services::ProcessingService::RealtimeSnapshot snapshot;
+    if (backend_.processing().getLatestSnapshot(snapshot)) {
+        if (snapshot.validation.isTargetGroup) {
+            overlayColor = QColor(0, 120, 255);  // Blue
+        } else if (snapshot.validation.isValid) {
+            overlayColor = QColor(0, 255, 0);    // Green
+        } else {
+            overlayColor = QColor(255, 0, 0);    // Red
+        }
     }
 
-    // Build contours
+    // Extract contours with hierarchy so we can isolate nested (inner) contours.
+    // Inner contours (hierarchy[i][3] >= 0, i.e. has a parent) are the ones used
+    // for metrics calculation in ProcessingService.
+    std::vector<std::vector<cv::Point>> contours;
+    std::vector<cv::Vec4i> hierarchy;
+    cv::findContours(mask.clone(), contours, hierarchy, cv::RETR_CCOMP, cv::CHAIN_APPROX_SIMPLE);
+
+    // Build overlay image (mask tint) — only for nested contour region
+    if (overlayMode_ == OverlayMode::Mask || overlayMode_ == OverlayMode::Both)
+    {
+        // Create a filtered mask containing only the inner (nested) contour regions
+        cv::Mat innerMask = cv::Mat::zeros(mask.rows, mask.cols, CV_8UC1);
+        bool hasInner = false;
+        for (int i = 0; i < static_cast<int>(contours.size()); ++i) {
+            if (hierarchy[i][3] >= 0) { // has parent → inner contour
+                cv::drawContours(innerMask, contours, i, cv::Scalar(255), -1);
+                hasInner = true;
+            }
+        }
+        if (hasInner) {
+            overlayImage_ = maskToTintedOverlay(innerMask, overlayColor, 90);
+        } else {
+            // Fallback: no nested contour found, show full mask
+            overlayImage_ = maskToTintedOverlay(mask, overlayColor, 90);
+        }
+    }
+
+    // Build contour outlines — draw both outer and inner contours
     if (overlayMode_ == OverlayMode::Contours || overlayMode_ == OverlayMode::Both)
     {
-        std::vector<std::vector<cv::Point>> contours;
-        std::vector<cv::Vec4i> hierarchy;
-        cv::findContours(mask, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
         overlayContours_.clear();
         overlayContours_.reserve(static_cast<int>(contours.size()));
         for (const auto &c : contours)
@@ -974,7 +1090,7 @@ void PlaybackPanel::computeProcessedOverlay()
             {
                 poly << QPoint(pt.x, pt.y);
             }
-            overlayContours_.append(poly);
+            overlayContours_.append({poly, overlayColor});
         }
     }
 
@@ -1016,6 +1132,8 @@ void PlaybackPanel::updateOverlayButtonUi()
     }
     overlayBtn_->setText(label);
     overlayBtn_->setToolTip("Toggle overlay (Off → Mask → Contours → Both)");
+    if (overlayLegend_)
+        overlayLegend_->setVisible(overlayMode_ != OverlayMode::Off);
 }
 
 bool PlaybackPanel::eventFilter(QObject *watched, QEvent *event)
