@@ -485,4 +485,14 @@ namespace backend
         return backgroundCaptureNotifier_.get();
     }
 
+    void AppBackend::setLastConfigJson(const std::string& json) {
+        std::lock_guard<std::mutex> lk(configJsonMutex_);
+        lastConfigJson_ = json;
+    }
+
+    std::string AppBackend::getLastConfigJson() const {
+        std::lock_guard<std::mutex> lk(configJsonMutex_);
+        return lastConfigJson_;
+    }
+
 } // namespace backend

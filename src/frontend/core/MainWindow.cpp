@@ -580,6 +580,12 @@ void MainWindow::onStopExperiment()
                                  totalValid, totalInvalid, processingConfig, roi,
                                  bg.empty() ? nullptr : &bg);
 
+        // Save full config.json content for backtracking
+        std::string configJson = backend_.getLastConfigJson();
+        if (!configJson.empty()) {
+            hdf5.writeConfigJson(configJson);
+        }
+
         // Note: Chart snapshots are no longer saved during experiment stop.
         // Charts are now generated on-demand from HDF5 data in the Review tab.
 

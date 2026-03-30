@@ -54,6 +54,10 @@ public:
                              size_t& totalValidFrames, size_t& totalInvalidFrames,
                              ProcessingService::Roi* roi = nullptr);
 
+    // Save raw config JSON as a string attribute on /experiment_info.
+    // Precondition: writeExperimentInfo() must have been called first.
+    bool writeConfigJson(const std::string& jsonContent);
+
     // Read background image saved for the run (if present). Returns false if not open, dataset missing, or read fails.
     bool readBackgroundImage(cv::Mat& out) const;
 
@@ -87,6 +91,14 @@ public:
     
     // Chart snapshot reading (for reading 2D/3D chart images without batch dimension)
     bool readChartSnapshot(const std::string& datasetPath, cv::Mat& outImage) const;
+
+    // --- Multi-image series support ---
+    // Read the series_images 4D dataset shape: (N, seriesCount, H, W)
+    bool getSeriesImageInfo(size_t& outCount, size_t& outSeriesCount,
+                            int& outHeight, int& outWidth) const;
+
+    // Read a single series record at index (returns seriesCount images)
+    bool readSeriesImagesByIndex(size_t index, std::vector<cv::Mat>& outImages) const;
 
     // --- Frame recording mode (images + basic metadata, no contour processing) ---
 

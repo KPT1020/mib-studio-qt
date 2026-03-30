@@ -27,6 +27,10 @@ public:
 
     enum class OverlayMode { Off, Mask, Contours, Both };
     enum class FitMode { FitToWindow, Zoom100 };
+    struct ColoredContour {
+        QPolygon polygon;
+        QColor color;
+    };
 
     // ROI management
     void setRoi(const QRect& roi, bool saveToConfig = true);
@@ -81,6 +85,7 @@ private:
     QWidget* canvas_ = nullptr;
     QSlider* slider_ = nullptr;
     QToolButton* overlayBtn_ = nullptr;
+    QLabel* overlayLegend_ = nullptr;
     QToolButton* setBgBtn_ = nullptr;
     QCheckBox* autoBgCheck_ = nullptr;
     QToolButton* clearRoiBtn_ = nullptr;
@@ -101,7 +106,7 @@ private:
     bool hasBackground_ = false;
     QImage backgroundGray_;            // stored as grayscale QImage
     QImage overlayImage_;              // RGBA overlay (mask)
-    QList<QPolygon> overlayContours_;  // image-space contours for drawing
+    QList<ColoredContour> overlayContours_;  // image-space contours with classification color
 
     // Last overlay computation timing (ms)
     double lastOverlayComputeMs_ = 0.0;
