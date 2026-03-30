@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+class QByteArray;
 class QSerialPort;
 
 namespace backend::services {
@@ -31,7 +32,7 @@ public:
 
     struct PumpConfig {
         int comPort{-1};
-        int baudRate{9600};
+        int baudRate{115200};
         uint8_t modbusAddress{1};
         double flowRate{0.0};
         uint16_t flowRateUnit{99};       // 99 = mL/min
@@ -47,7 +48,6 @@ public:
         double accumulatedVolume{0.0};
         double minFlowRate{0.0};
         double maxFlowRate{0.0};
-        uint16_t deviceModel{0};
     };
 
     SyringePumpService();

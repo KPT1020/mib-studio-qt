@@ -52,7 +52,21 @@
       "Bash(find /d/mib-studio-qt/src -type f \\\\\\(-name *.cpp -o -name *.h \\\\\\))",
       "Bash(find /d/mib-studio-qt/include -type f -name *.h)",
       "Bash(grep:*)",
-      "Bash(cmake --build build --config Release)"
+      "Bash(cmake --build build --config Release)",
+      "Bash(ssh:*)",
+      "Bash(CONAN_REMOTE_PASSWORD=Conan1229 powershell.exe -Command '$env:CONAN_REMOTE_PASSWORD=\"Conan1229\"; .\\\\scripts\\\\seed-conan-remote.ps1 -BuildType Release' 2>&1)",
+      "Bash(find /c/Users/gavin/Developer/mib-studio-qt -type f \\\\\\(-name *.profile -o -path */profiles/* -o -name *conan* \\\\\\))",
+      "Bash(conan profile:*)",
+      "Bash(find /c/Users/gavin/Developer/mib-studio-qt/build -type f \\\\\\(-name *.log -o -name conan.lock \\\\\\))",
+      "Bash(CONAN_REMOTE_PASSWORD=Conan1229 powershell.exe -Command '$env:CONAN_REMOTE_PASSWORD=\"Conan1229\"; .\\\\scripts\\\\seed-conan-remote.ps1 -BuildType Debug' 2>&1)",
+      "Bash(find /c/Users/gavin/Developer/mib-studio-qt/build -name conaninfo* -o -name *graph*)",
+      "Bash(powershell.exe -Command \"conan search '*' -r team-conan 2>&1 | Select-Object -First 30\")",
+      "Bash(find /c/Users/gavin/.conan2/p/b/qtd632f7a3c80dc/p/conaninfo.txt -o -path *qt*/conaninfo.txt)",
+      "Bash(xargs cat:*)",
+      "Bash(for dir:*)",
+      "Bash(do echo:*)",
+      "Read(//c/Users/gavin/Developer/mib-studio-qt/**)",
+      "Bash(done)"
     ]
   }
 }

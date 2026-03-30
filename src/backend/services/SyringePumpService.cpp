@@ -11,18 +11,14 @@ namespace backend::services {
 
 namespace {
     // Modbus RTU register addresses (from dLSP 501X manual Appendix B)
-    constexpr uint16_t REG_DEVICE_MODEL      = 0x0001;
-    constexpr uint16_t REG_RUN_STATUS        = 0x0005;
+    constexpr uint16_t REG_CHANNEL_ENABLE    = 0x0000;  // 0=disable, 1=enable (must be 1 to allow start)
+    constexpr uint16_t REG_RUN_COMMAND       = 0x0001;  // 0=stop, 1=start
     constexpr uint16_t REG_CURRENT_STATUS    = 0x0015;
     constexpr uint16_t REG_MIN_FLOW_RATE     = 0x004A;  // float32, 2 regs
     constexpr uint16_t REG_MAX_FLOW_RATE     = 0x004C;  // float32, 2 regs
+    constexpr uint16_t REG_MODE              = 0x0060;  // 0=infuse, 1=withdraw, 2=infuse+withdraw, 3=withdraw+infuse
     constexpr uint16_t REG_FLOW_RATE_VALUE   = 0x0077;  // float32, 2 regs
     constexpr uint16_t REG_FLOW_RATE_UNIT    = 0x0079;
-    constexpr uint16_t REG_TARGET_VOLUME     = 0x007B;  // float32, 2 regs
-    constexpr uint16_t REG_SYRINGE_MFG       = 0x0091;
-    constexpr uint16_t REG_SYRINGE_SPEC      = 0x0092;
-    constexpr uint16_t REG_DIRECTION         = 0x0101;
-    constexpr uint16_t REG_RUN_COMMAND       = 0x0131;
     constexpr uint16_t REG_ACCUM_VOLUME      = 0x00C7;  // float32, 2 regs
 
     // Modbus function codes
@@ -33,7 +29,7 @@ namespace {
     // Serial timeout in milliseconds
     constexpr int SERIAL_TIMEOUT_MS = 1000;
 
-    // Inter-frame silence for Modbus RTU at 9600 baud (~4ms for 3.5 char times)
+    // Inter-frame silence for Modbus RTU (3.5 char times: ~0.3ms at 115200, ~4ms at 9600)
     constexpr int INTER_FRAME_DELAY_MS = 5;
 
     const char* pumpName(SyringePumpService::PumpId id) {
@@ -155,6 +151,9 @@ bool SyringePumpService::sendRequest(int pumpIdx, const QByteArray& request, QBy
     // Small inter-frame delay (Modbus RTU requires 3.5 char silence between frames)
     std::this_thread::sleep_for(std::chrono::milliseconds(INTER_FRAME_DELAY_MS));
 
+    SPDLOG_DEBUG("SyringePumpService: TX pump {} [{}]: {}",
+                pumpIdx, request.size(), request.toHex(' ').constData());
+
     // Write request
     qint64 written = pump.serial->write(request);
     if (written != request.size()) {
@@ -166,19 +165,29 @@ bool SyringePumpService::sendRequest(int pumpIdx, const QByteArray& request, QBy
         return false;
     }
 
-    // Read response
+    // Read response — exception frames are always 5 bytes (addr + func|0x80 + code + crc16)
     response.clear();
     int remaining = expectedBytes;
     while (remaining > 0) {
         if (!pump.serial->waitForReadyRead(SERIAL_TIMEOUT_MS)) {
-            SPDLOG_ERROR("SyringePumpService: Read timeout for pump {} (got {}/{} bytes)",
-                        pumpIdx, response.size(), expectedBytes);
+            SPDLOG_ERROR("SyringePumpService: Read timeout for pump {} (got {}/{} bytes): {}",
+                        pumpIdx, response.size(), expectedBytes, response.toHex(' ').constData());
             return false;
         }
         QByteArray chunk = pump.serial->readAll();
         response.append(chunk);
+
+        // Detect Modbus exception early (always 5 bytes)
+        if (response.size() >= 5 && (static_cast<uint8_t>(response[1]) & 0x80)) {
+            response.truncate(5);
+            break;
+        }
+
         remaining = expectedBytes - response.size();
     }
+
+    SPDLOG_DEBUG("SyringePumpService: RX pump {} [{}]: {}",
+                pumpIdx, response.size(), response.toHex(' ').constData());
 
     // Verify CRC
     if (response.size() < 4) {
@@ -199,7 +208,8 @@ bool SyringePumpService::sendRequest(int pumpIdx, const QByteArray& request, QBy
     // Check for Modbus exception response
     if (static_cast<uint8_t>(response[1]) & 0x80) {
         uint8_t exceptionCode = static_cast<uint8_t>(response[2]);
-        SPDLOG_ERROR("SyringePumpService: Modbus exception 0x{:02X} from pump {}", exceptionCode, pumpIdx);
+        SPDLOG_ERROR("SyringePumpService: Modbus exception 0x{:02X} from pump {} (func=0x{:02X})",
+                    exceptionCode, pumpIdx, static_cast<uint8_t>(response[1]) & 0x7F);
         return false;
     }
 
@@ -289,15 +299,9 @@ bool SyringePumpService::connect(PumpId id, int comPort, int baudRate, uint8_t m
     SPDLOG_INFO("SyringePumpService: COM{} opened for {} pump (baud={}, addr={})",
                 comPort, pumpName(id), baudRate, modbusAddress);
 
-    // Validate connection by reading device model register
-    QByteArray data;
-    if (readHoldingRegisters(idx, REG_DEVICE_MODEL, 1, data)) {
-        pump.status.deviceModel = static_cast<uint16_t>(
-            (static_cast<uint8_t>(data[0]) << 8) | static_cast<uint8_t>(data[1]));
-        SPDLOG_INFO("SyringePumpService: {} pump device model: {}", pumpName(id), pump.status.deviceModel);
-    } else {
-        SPDLOG_WARN("SyringePumpService: Could not read device model from {} pump (pump may still work)",
-                    pumpName(id));
+    // Ensure channel is enabled (required for start/stop commands)
+    if (!writeSingleRegister(idx, REG_CHANNEL_ENABLE, 1)) {
+        SPDLOG_WARN("SyringePumpService: Could not enable channel for {} pump", pumpName(id));
     }
 
     // Read min/max flow rates
@@ -386,7 +390,7 @@ bool SyringePumpService::setDirection(PumpId id, Direction dir) {
 
     if (!pump.status.connected) return false;
 
-    if (!writeSingleRegister(idx, REG_DIRECTION, static_cast<uint16_t>(dir))) {
+    if (!writeSingleRegister(idx, REG_MODE, static_cast<uint16_t>(dir))) {
         SPDLOG_ERROR("SyringePumpService: Failed to set direction for {} pump", pumpName(id));
         return false;
     }
@@ -403,6 +407,11 @@ bool SyringePumpService::start(PumpId id) {
     std::scoped_lock lock(pump.mutex);
 
     if (!pump.status.connected) return false;
+
+    // Ensure channel is enabled before starting
+    if (!writeSingleRegister(idx, REG_CHANNEL_ENABLE, 1)) {
+        SPDLOG_WARN("SyringePumpService: Could not enable channel for {} pump", pumpName(id));
+    }
 
     if (!writeSingleRegister(idx, REG_RUN_COMMAND, 1)) {
         SPDLOG_ERROR("SyringePumpService: Failed to start {} pump", pumpName(id));
@@ -430,25 +439,10 @@ bool SyringePumpService::stop(PumpId id) {
 }
 
 bool SyringePumpService::setSyringe(PumpId id, uint16_t manufacturer, uint16_t specification) {
-    int idx = static_cast<int>(id);
-    auto& pump = pumps_[static_cast<size_t>(idx)];
-    std::scoped_lock lock(pump.mutex);
-
-    if (!pump.status.connected) return false;
-
-    if (!writeSingleRegister(idx, REG_SYRINGE_MFG, manufacturer)) {
-        SPDLOG_ERROR("SyringePumpService: Failed to set syringe manufacturer for {} pump", pumpName(id));
-        return false;
-    }
-    if (!writeSingleRegister(idx, REG_SYRINGE_SPEC, specification)) {
-        SPDLOG_ERROR("SyringePumpService: Failed to set syringe specification for {} pump", pumpName(id));
-        return false;
-    }
-
-    pump.config.syringeMfg = manufacturer;
-    pump.config.syringeSpec = specification;
-    SPDLOG_INFO("SyringePumpService: {} pump syringe set (mfg={}, spec={})",
-                pumpName(id), manufacturer, specification);
+    // dLSP 501X does not have manufacturer/specification registers.
+    // Pump uses syringe diameter (0x0061) instead — not yet implemented.
+    SPDLOG_WARN("SyringePumpService: setSyringe not supported on dLSP 501X (mfg={}, spec={})",
+                manufacturer, specification);
     return true;
 }
 

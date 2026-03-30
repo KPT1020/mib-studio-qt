@@ -109,6 +109,9 @@ add_library(mib_backend STATIC
 
 # Explicitly enable AUTOMOC for this target to ensure MOC files are generated
 set_target_properties(mib_backend PROPERTIES AUTOMOC ON)
+target_compile_definitions(mib_backend PUBLIC
+    $<$<CONFIG:Debug>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG>
+)
 
 target_include_directories(mib_backend PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include

@@ -126,7 +126,7 @@ SyringePumpTab::SyringePumpTab(backend::AppBackend& backend, QWidget* parent)
         combo->setItemData(2, 38400);
         combo->setItemData(3, 57600);
         combo->setItemData(4, 115200);
-        combo->setCurrentIndex(0); // Default 9600
+        combo->setCurrentIndex(4); // Default 115200 (pump factory default)
     };
     setupBaudCombo(ui->sampleBaudCombo);
     setupBaudCombo(ui->sheathBaudCombo);
@@ -247,10 +247,6 @@ void SyringePumpTab::onConnectSample() {
 
     bool ok = backend_.syringePump().connect(PumpId::Sample, comPort, baudRate, addr);
     if (ok) {
-        // Apply syringe settings
-        uint16_t mfg = static_cast<uint16_t>(ui->sampleMfgCombo->currentData().toUInt());
-        uint16_t spec = static_cast<uint16_t>(ui->sampleSpecCombo->currentData().toUInt());
-        backend_.syringePump().setSyringe(PumpId::Sample, mfg, spec);
         saveConfig();
     } else {
         QMessageBox::warning(this, tr("Connection Failed"),
@@ -273,9 +269,6 @@ void SyringePumpTab::onConnectSheath() {
 
     bool ok = backend_.syringePump().connect(PumpId::Sheath, comPort, baudRate, addr);
     if (ok) {
-        uint16_t mfg = static_cast<uint16_t>(ui->sheathMfgCombo->currentData().toUInt());
-        uint16_t spec = static_cast<uint16_t>(ui->sheathSpecCombo->currentData().toUInt());
-        backend_.syringePump().setSyringe(PumpId::Sheath, mfg, spec);
         saveConfig();
     } else {
         QMessageBox::warning(this, tr("Connection Failed"),

@@ -10,11 +10,22 @@ This project uses Qt from Conan. For Release builds we deploy the Qt runtime aut
 
 ## Team Conan remote (first time only)
 
-Run `scripts/setup-conan-remote.ps1` to add the team's Artifactory package server as primary Conan remote. This serves cached prebuilt binaries from our server instead of downloading from ConanCenter, dramatically speeding up `conan install`.
+Run `scripts/setup-conan-remote.ps1` to add the team's Conan package server as primary remote. This serves cached prebuilt binaries from our server instead of downloading from ConanCenter, dramatically speeding up `conan install`.
 
 ```powershell
 .\scripts\setup-conan-remote.ps1
+conan remote login team-conan <username>
 ```
+
+### Seeding packages (maintainers)
+
+When dependencies are added or bumped in `conanfile.txt`, pre-built binaries must be uploaded to Artifactory so CI doesn't build from source. Run this once from a dev machine with a matching profile (msvc 194, C++17, dynamic runtime):
+
+```powershell
+.\scripts\seed-conan-remote.ps1
+```
+
+This builds any missing packages locally and uploads everything to the team remote. CI will then pull pre-built binaries in ~3-5 minutes instead of building for 60-90+ minutes.
 
 ## Release workflow
 

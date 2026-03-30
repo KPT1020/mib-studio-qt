@@ -1,0 +1,29 @@
+# Self-hosted Conan 2.x package server
+# Deployed on the same host as s3.yofo.bio, routed via Cloudflare tunnel.
+#
+# Quick start:
+#   docker compose up -d --build
+#
+# The server listens on port 9300. Cloudflare tunnel routes
+# conan.yofo.bio -> conan-server:9300 via the rustfs_default network.
+
+services:
+  conan-server:
+    build: .
+    container_name: conan-server
+    restart: unless-stopped
+    ports:
+      - "9300:9300"
+    volumes:
+      - conan-data:/root/.conan_server/data
+      - ./server.conf:/root/.conan_server/server.conf:ro
+    networks:
+      - default
+      - rustfs_default
+
+volumes:
+  conan-data:
+
+networks:
+  rustfs_default:
+    external: true

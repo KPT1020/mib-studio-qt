@@ -7,6 +7,7 @@ namespace frontend { class StatisticsPanel; }
 namespace frontend { class NanopositionerTab; }
 namespace frontend { class SyringePumpTab; }
 namespace frontend { class BackgroundPreviewWidget; }
+class QScrollArea;
 class QSplitter;
 class QToolButton;
 class QVBoxLayout;
@@ -53,6 +54,7 @@ namespace frontend
         NanopositionerTab* nanopositionerTab_ = nullptr;
         SyringePumpTab* syringePumpTab_ = nullptr;
         QToolButton* toggleButton_ = nullptr;
+        QScrollArea* scrollArea_ = nullptr;
         QWidget* contentWidget_ = nullptr;
         QVBoxLayout* contentLayout_ = nullptr;
         bool collapsed_ = false;
