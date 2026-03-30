@@ -1077,17 +1077,13 @@ void PlaybackPanel::computeProcessedOverlay()
         }
     }
 
-    // Build contour outlines — only nested (inner) contours
+    // Build contour outlines — draw both outer and inner contours
     if (overlayMode_ == OverlayMode::Contours || overlayMode_ == OverlayMode::Both)
     {
         overlayContours_.clear();
         overlayContours_.reserve(static_cast<int>(contours.size()));
-        bool hasInner = false;
-        for (int i = 0; i < static_cast<int>(contours.size()); ++i)
+        for (const auto &c : contours)
         {
-            if (hierarchy[i][3] < 0) continue; // skip outer contours
-            hasInner = true;
-            const auto &c = contours[i];
             QPolygon poly;
             poly.reserve(static_cast<int>(c.size()));
             for (const auto &pt : c)
@@ -1095,19 +1091,6 @@ void PlaybackPanel::computeProcessedOverlay()
                 poly << QPoint(pt.x, pt.y);
             }
             overlayContours_.append({poly, overlayColor});
-        }
-        // Fallback: if no nested contours found, draw all contours
-        if (!hasInner) {
-            for (const auto &c : contours)
-            {
-                QPolygon poly;
-                poly.reserve(static_cast<int>(c.size()));
-                for (const auto &pt : c)
-                {
-                    poly << QPoint(pt.x, pt.y);
-                }
-                overlayContours_.append({poly, overlayColor});
-            }
         }
     }
 

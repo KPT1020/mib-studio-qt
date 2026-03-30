@@ -825,7 +825,7 @@ namespace frontend
         // Fallback: if no nested contour found, use the full mask
         const cv::Mat &tintMask = hasInner ? innerMask : mask;
 
-        // Create overlay: colored tint where tintMask is non-zero
+        // Create overlay: colored tint where tintMask is non-zero (inner contour only)
         cv::Mat overlay = rgb.clone();
         for (int y = 0; y < overlay.rows && y < tintMask.rows; ++y)
         {
@@ -840,6 +840,10 @@ namespace frontend
                 }
             }
         }
+
+        // Draw contour outlines for both outer and inner contours
+        const cv::Scalar contourColor(tint[0], tint[1], tint[2]);
+        cv::drawContours(overlay, contours, -1, contourColor, 1);
 
         QImage img(overlay.data, overlay.cols, overlay.rows, static_cast<int>(overlay.step), QImage::Format_RGB888);
         return img.copy();
