@@ -25,6 +25,12 @@
 #include <QBarCategoryAxis>
 #endif
 #include <QFrame>
+#include <QGroupBox>
+#include <QSpinBox>
+#include <QDoubleSpinBox>
+#include <QCheckBox>
+#include <QScrollArea>
+#include <QVBoxLayout>
 #include <QMessageBox>
 #include <QShowEvent>
 #include <QHideEvent>
@@ -41,13 +47,93 @@
 #include <QPixmap>
 #include <QFileDialog>
 
+#include "frontend/widgets/ZoomableChartView.h"
 #include "backend/AppBackend.h"
 #include "backend/services/ProcessingService.h"
+#include "backend/services/TriggerService.h"
 
 #include <spdlog/spdlog.h>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
+
+namespace {
+
+struct InvalidReason {
+    QString shortText;
+    QString longText;
+};
+
+std::vector<InvalidReason> getInvalidReasons(
+    const backend::services::FilterResult& result,
+    const backend::services::ProcessingConfig& config,
+    double pixelToMicronFactor = 1.0)
+{
+    std::vector<InvalidReason> reasons;
+
+    // Check early-exit conditions first (metrics not computed in these cases)
+    if (config.require_single_inner_contour && result.innerContourCount == 0) {
+        reasons.push_back({"No contour", "No inner contour found"});
+        return reasons;
+    }
+
+    if (config.enable_border_check && result.touchesBorder) {
+        reasons.push_back({"Border", "Contour touches ROI border"});
+        // When border check fails, metrics are not computed — don't check them
+        return reasons;
+    }
+
+    // Convert pixel area to μm² to match config threshold units
+    double areaUm = result.area * pixelToMicronFactor * pixelToMicronFactor;
+
+    // Metrics were computed — check which range checks failed
+    if (config.enable_area_range_check) {
+        if (areaUm < config.area_threshold_min || areaUm > config.area_threshold_max) {
+            reasons.push_back({
+                "Area",
+                QString("Area: %1 μm² (range: %2-%3)")
+                    .arg(areaUm, 0, 'f', 0)
+                    .arg(config.area_threshold_min)
+                    .arg(config.area_threshold_max)
+            });
+        }
+    }
+
+    if (result.ringRatio <= 15.0 || result.ringRatio >= 25.0) {
+        reasons.push_back({
+            "Ring",
+            QString("Ring ratio: %1 (range: 15-25)").arg(result.ringRatio, 0, 'f', 1)
+        });
+    }
+
+    if (config.enable_deformability_range_check) {
+        if (result.deformability < config.deformability_threshold_min ||
+            result.deformability > config.deformability_threshold_max) {
+            reasons.push_back({
+                "Deform",
+                QString("Deformability: %1 (range: %2-%3)")
+                    .arg(result.deformability, 0, 'f', 3)
+                    .arg(config.deformability_threshold_min, 0, 'f', 3)
+                    .arg(config.deformability_threshold_max, 0, 'f', 3)
+            });
+        }
+    }
+
+    if (config.enable_area_ratio_check) {
+        if (result.areaRatio > config.area_ratio_threshold_max) {
+            reasons.push_back({
+                "Ratio",
+                QString("Area ratio: %1 (max: %2)")
+                    .arg(result.areaRatio, 0, 'f', 2)
+                    .arg(config.area_ratio_threshold_max, 0, 'f', 2)
+            });
+        }
+    }
+
+    return reasons;
+}
+
+} // anonymous namespace
 
 namespace frontend
 {
@@ -57,16 +143,26 @@ namespace frontend
     {
         ui->setupUi(this);
 
+        roiLabel_ = new QLabel(tr("ROI: --"), this);
+        roiLabel_->setStyleSheet("font-weight: bold; padding: 0 8px;");
+        ui->topRowLayout->addWidget(roiLabel_);
+
         setupCharts();
+        setupTuneParamsPanel();
 
         // Connect signals
         connect(ui->clearBufferBtn, &QPushButton::clicked, this, &ExperimentMonitoringTab::onClearBuffer);
+        connect(ui->sortTriggerBtn, &QPushButton::clicked, this, &ExperimentMonitoringTab::onSortTrigger);
+        connect(ui->triggerDurationSpin, qOverload<int>(&QSpinBox::valueChanged), this, [this](int us) {
+            backend_.trigger().setPulseDurationUs(us);
+        });
         connect(ui->validOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
         connect(ui->invalidOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
 
         // Set column stretch to make panels equal size
         ui->gridLayout->setColumnStretch(0, 1);
         ui->gridLayout->setColumnStretch(1, 1);
+        ui->gridLayout->setColumnStretch(2, 0); // Tune panel: minimum width
         ui->gridLayout->setRowStretch(1, 1); // Charts row
         ui->gridLayout->setRowStretch(2, 1); // Frame grids row
 
@@ -74,6 +170,11 @@ namespace frontend
         updateTimer_ = new QTimer(this);
         updateTimer_->setInterval(UPDATE_INTERVAL_MS);
         connect(updateTimer_, &QTimer::timeout, this, &ExperimentMonitoringTab::onUpdate);
+    }
+
+    void ExperimentMonitoringTab::updateRoiDisplay(int offsetX, int offsetY, int width, int height) {
+        if (roiLabel_)
+            roiLabel_->setText(tr("ROI: %1 x %2 @ (%3, %4)").arg(width).arg(height).arg(offsetX).arg(offsetY));
     }
 
     ExperimentMonitoringTab::~ExperimentMonitoringTab() {
@@ -89,13 +190,189 @@ namespace frontend
         delete ui;
     }
 
+    void ExperimentMonitoringTab::setupTuneParamsPanel()
+    {
+        auto* placeholder = ui->tuneParamsPlaceholder;
+        placeholder->setMinimumWidth(220);
+        placeholder->setMaximumWidth(280);
+
+        auto* outerLayout = new QVBoxLayout(placeholder);
+        outerLayout->setContentsMargins(0, 0, 0, 0);
+        outerLayout->setSpacing(0);
+
+        // Scrollable content area (always visible)
+        auto* scrollArea = new QScrollArea(placeholder);
+        scrollArea->setWidgetResizable(true);
+        scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        scrollArea->setFrameShape(QFrame::NoFrame);
+
+        tunePanelContent_ = new QWidget();
+        auto* contentLayout = new QVBoxLayout(tunePanelContent_);
+        contentLayout->setContentsMargins(4, 4, 4, 4);
+        contentLayout->setSpacing(6);
+
+        // --- Title ---
+        auto* titleLabel = new QLabel(tr("<b>Tune Params</b>"), tunePanelContent_);
+        contentLayout->addWidget(titleLabel);
+
+        // --- Filter Thresholds ---
+        auto* threshGroup = new QGroupBox(tr("Filter Thresholds"), tunePanelContent_);
+        auto* threshLayout = new QVBoxLayout(threshGroup);
+        threshLayout->setSpacing(4);
+
+        auto addSpinRow = [](QVBoxLayout* layout, const QString& label, QSpinBox*& spin,
+                             int min, int max, int step, int val) {
+            auto* row = new QHBoxLayout();
+            row->addWidget(new QLabel(label));
+            spin = new QSpinBox();
+            spin->setRange(min, max);
+            spin->setSingleStep(step);
+            spin->setValue(val);
+            row->addWidget(spin);
+            layout->addLayout(row);
+        };
+
+        auto addDblSpinRow = [](QVBoxLayout* layout, const QString& label, QDoubleSpinBox*& spin,
+                                double min, double max, double step, int decimals, double val) {
+            auto* row = new QHBoxLayout();
+            row->addWidget(new QLabel(label));
+            spin = new QDoubleSpinBox();
+            spin->setRange(min, max);
+            spin->setSingleStep(step);
+            spin->setDecimals(decimals);
+            spin->setValue(val);
+            row->addWidget(spin);
+            layout->addLayout(row);
+        };
+
+        addSpinRow(threshLayout, tr("Area Min"), areaMinSpin_, 0, 100000, 10, 250);
+        addSpinRow(threshLayout, tr("Area Max"), areaMaxSpin_, 0, 100000, 10, 1000);
+        addDblSpinRow(threshLayout, tr("Deform Min"), deformMinSpin_, 0.0, 1.0, 0.01, 2, 0.0);
+        addDblSpinRow(threshLayout, tr("Deform Max"), deformMaxSpin_, 0.0, 1.0, 0.01, 2, 1.0);
+        addDblSpinRow(threshLayout, tr("Area Ratio Max"), areaRatioMaxSpin_, 0.0, 10.0, 0.1, 2, 1.5);
+        contentLayout->addWidget(threshGroup);
+
+        // --- Filter Enables ---
+        auto* enableGroup = new QGroupBox(tr("Filter Enables"), tunePanelContent_);
+        auto* enableLayout = new QVBoxLayout(enableGroup);
+        enableLayout->setSpacing(2);
+
+        borderCheckBox_ = new QCheckBox(tr("Border Check"));
+        areaRangeCheckBox_ = new QCheckBox(tr("Area Range"));
+        deformRangeCheckBox_ = new QCheckBox(tr("Deformability Range"));
+        areaRatioCheckBox_ = new QCheckBox(tr("Area Ratio"));
+        singleInnerCheckBox_ = new QCheckBox(tr("Single Inner Contour"));
+
+        enableLayout->addWidget(borderCheckBox_);
+        enableLayout->addWidget(areaRangeCheckBox_);
+        enableLayout->addWidget(deformRangeCheckBox_);
+        enableLayout->addWidget(areaRatioCheckBox_);
+        enableLayout->addWidget(singleInnerCheckBox_);
+        contentLayout->addWidget(enableGroup);
+
+        // --- Target Group ---
+        auto* targetGroup = new QGroupBox(tr("Target Group"), tunePanelContent_);
+        auto* targetLayout = new QVBoxLayout(targetGroup);
+        targetLayout->setSpacing(4);
+
+        targetGroupEnableBox_ = new QCheckBox(tr("Enable"));
+        targetLayout->addWidget(targetGroupEnableBox_);
+
+        addSpinRow(targetLayout, tr("Area Min"), targetAreaMinSpin_, 0, 100000, 10, 300);
+        addSpinRow(targetLayout, tr("Area Max"), targetAreaMaxSpin_, 0, 100000, 10, 800);
+        addDblSpinRow(targetLayout, tr("Deform Min"), targetDeformMinSpin_, 0.0, 1.0, 0.01, 2, 0.0);
+        addDblSpinRow(targetLayout, tr("Deform Max"), targetDeformMaxSpin_, 0.0, 1.0, 0.01, 2, 0.3);
+        contentLayout->addWidget(targetGroup);
+
+        // --- Apply Button ---
+        auto* applyBtn = new QPushButton(tr("Apply"), tunePanelContent_);
+        connect(applyBtn, &QPushButton::clicked, this, &ExperimentMonitoringTab::onApplyParams);
+        contentLayout->addWidget(applyBtn);
+
+        contentLayout->addStretch(1);
+
+        scrollArea->setWidget(tunePanelContent_);
+        outerLayout->addWidget(scrollArea, 1);
+
+        // Load current config values into widgets
+        loadCurrentConfig();
+    }
+
+    void ExperimentMonitoringTab::loadCurrentConfig()
+    {
+        auto cfg = backend_.processing().getProcessingConfig();
+
+        // Block signals to avoid triggering anything during load
+        areaMinSpin_->setValue(cfg.area_threshold_min);
+        areaMaxSpin_->setValue(cfg.area_threshold_max);
+        deformMinSpin_->setValue(cfg.deformability_threshold_min);
+        deformMaxSpin_->setValue(cfg.deformability_threshold_max);
+        areaRatioMaxSpin_->setValue(cfg.area_ratio_threshold_max);
+
+        borderCheckBox_->setChecked(cfg.enable_border_check);
+        areaRangeCheckBox_->setChecked(cfg.enable_area_range_check);
+        deformRangeCheckBox_->setChecked(cfg.enable_deformability_range_check);
+        areaRatioCheckBox_->setChecked(cfg.enable_area_ratio_check);
+        singleInnerCheckBox_->setChecked(cfg.require_single_inner_contour);
+
+        targetGroupEnableBox_->setChecked(cfg.enable_target_group);
+        targetAreaMinSpin_->setValue(cfg.target_group_area_min);
+        targetAreaMaxSpin_->setValue(cfg.target_group_area_max);
+        targetDeformMinSpin_->setValue(cfg.target_group_deformability_min);
+        targetDeformMaxSpin_->setValue(cfg.target_group_deformability_max);
+    }
+
+    void ExperimentMonitoringTab::onApplyParams()
+    {
+        auto cfg = backend_.processing().getProcessingConfig();
+
+        // Filter thresholds
+        cfg.area_threshold_min = areaMinSpin_->value();
+        cfg.area_threshold_max = areaMaxSpin_->value();
+        cfg.deformability_threshold_min = deformMinSpin_->value();
+        cfg.deformability_threshold_max = deformMaxSpin_->value();
+        cfg.area_ratio_threshold_max = areaRatioMaxSpin_->value();
+
+        // Filter enables
+        cfg.enable_border_check = borderCheckBox_->isChecked();
+        cfg.enable_area_range_check = areaRangeCheckBox_->isChecked();
+        cfg.enable_deformability_range_check = deformRangeCheckBox_->isChecked();
+        cfg.enable_area_ratio_check = areaRatioCheckBox_->isChecked();
+        cfg.require_single_inner_contour = singleInnerCheckBox_->isChecked();
+
+        // Target group
+        cfg.enable_target_group = targetGroupEnableBox_->isChecked();
+        cfg.target_group_area_min = targetAreaMinSpin_->value();
+        cfg.target_group_area_max = targetAreaMaxSpin_->value();
+        cfg.target_group_deformability_min = targetDeformMinSpin_->value();
+        cfg.target_group_deformability_max = targetDeformMaxSpin_->value();
+
+        backend_.processing().setProcessingConfig(cfg);
+
+        SPDLOG_INFO("Tune panel: applied config (area=[{},{}], deform=[{:.2f},{:.2f}], "
+                     "border={}, areaRange={}, deformRange={}, areaRatio={}, singleInner={}, "
+                     "targetGroup={})",
+                     cfg.area_threshold_min, cfg.area_threshold_max,
+                     cfg.deformability_threshold_min, cfg.deformability_threshold_max,
+                     cfg.enable_border_check, cfg.enable_area_range_check,
+                     cfg.enable_deformability_range_check, cfg.enable_area_ratio_check,
+                     cfg.require_single_inner_contour, cfg.enable_target_group);
+    }
+
     void ExperimentMonitoringTab::setupCharts() {
         // Panel 1: Scatterplot (top-left)
         scatterplotChart_ = new QChart();
         scatterSeries_ = new QScatterSeries();
         scatterSeries_->setMarkerSize(6.0);
         scatterSeries_->setName("Valid Frames");
+        scatterSeries_->setColor(QColor(0, 200, 0));
         scatterplotChart_->addSeries(scatterSeries_);
+
+        targetGroupSeries_ = new QScatterSeries();
+        targetGroupSeries_->setMarkerSize(6.0);
+        targetGroupSeries_->setName("Target Group");
+        targetGroupSeries_->setColor(QColor(0, 120, 255));
+        scatterplotChart_->addSeries(targetGroupSeries_);
         scatterplotChart_->setTitle("Deformability vs Area (μm²)");
         scatterplotChart_->legend()->setVisible(false);
 
@@ -107,11 +384,15 @@ namespace frontend
         scatterplotChart_->addAxis(scatterYAxis_, Qt::AlignLeft);
         scatterSeries_->attachAxis(scatterXAxis_);
         scatterSeries_->attachAxis(scatterYAxis_);
+        targetGroupSeries_->attachAxis(scatterXAxis_);
+        targetGroupSeries_->attachAxis(scatterYAxis_);
         scatterXAxis_->setRange(scatterXMin_, scatterXMax_);
         scatterYAxis_->setRange(scatterYMin_, scatterYMax_);
 
-        scatterplotView_ = new QChartView(scatterplotChart_);
+        scatterplotView_ = new ZoomableChartView(scatterplotChart_);
         scatterplotView_->setRenderHint(QPainter::Antialiasing);
+        scatterplotView_->setDefaultRange(scatterXAxis_, scatterXMin_, scatterXMax_);
+        scatterplotView_->setDefaultRange(scatterYAxis_, scatterYMin_, scatterYMax_);
         // Replace placeholder with actual chart view
         ui->gridLayout->removeWidget(ui->scatterplotViewPlaceholder);
         delete ui->scatterplotViewPlaceholder;
@@ -162,8 +443,11 @@ namespace frontend
             histogramXAxis_->setRange(histogramXMin_, histogramXMax_);
         histogramYAxis_->setRange(0, std::max(1.0, histogramYMax_));
 
-        histogramView_ = new QChartView(histogramChart_);
+        histogramView_ = new ZoomableChartView(histogramChart_);
         histogramView_->setRenderHint(QPainter::Antialiasing);
+        if (histogramXAxis_)
+            histogramView_->setDefaultRange(histogramXAxis_, histogramXMin_, histogramXMax_);
+        histogramView_->setDefaultRange(histogramYAxis_, 0, std::max(1.0, histogramYMax_));
         // Replace placeholder with actual chart view
         ui->gridLayout->removeWidget(ui->histogramViewPlaceholder);
         delete ui->histogramViewPlaceholder;
@@ -239,6 +523,8 @@ namespace frontend
         {
             updateTimer_->start();
         }
+        // Refresh tune panel with current config when tab becomes visible
+        loadCurrentConfig();
     }
 
     void ExperimentMonitoringTab::hideEvent(QHideEvent *event)
@@ -254,6 +540,7 @@ namespace frontend
     void ExperimentMonitoringTab::updateScatterplot(const std::vector<backend::services::ProcessedFrame> &validFrames)
     {
         scatterSeries_->clear();
+        targetGroupSeries_->clear();
 
         const double conversionFactor = backend_.processing().getPixelToMicronFactor();
         const double areaConversionFactor = conversionFactor * conversionFactor;
@@ -264,12 +551,18 @@ namespace frontend
             {
                 double areaMicrons = frame.validation.area * areaConversionFactor;
                 double deform = frame.validation.deformability;
-                scatterSeries_->append(areaMicrons, deform);
+                if (frame.validation.isTargetGroup) {
+                    targetGroupSeries_->append(areaMicrons, deform);
+                } else {
+                    scatterSeries_->append(areaMicrons, deform);
+                }
             }
         }
 
-        scatterXAxis_->setRange(scatterXMin_, scatterXMax_);
-        scatterYAxis_->setRange(scatterYMin_, scatterYMax_);
+        if (!scatterplotView_->isUserZoomed()) {
+            scatterXAxis_->setRange(scatterXMin_, scatterXMax_);
+            scatterYAxis_->setRange(scatterYMin_, scatterYMax_);
+        }
     }
 
     void ExperimentMonitoringTab::updateHistogram(const std::vector<backend::services::ProcessedFrame> &validFrames)
@@ -287,10 +580,12 @@ namespace frontend
         const double binWidth = histogramBinWidth_;
         const int histogramBins = std::max(1, static_cast<int>(std::round((maxVal - minVal) / binWidth)));
 
-        if (histogramXAxis_)
-        {
-            histogramXAxis_->setRange(minVal, maxVal);
-            histogramXAxis_->setTickCount(6);
+        if (!histogramView_->isUserZoomed()) {
+            if (histogramXAxis_)
+            {
+                histogramXAxis_->setRange(minVal, maxVal);
+                histogramXAxis_->setTickCount(6);
+            }
         }
 
         std::vector<double> ringRatios;
@@ -305,8 +600,10 @@ namespace frontend
             }
         }
 
-        const double yMax = std::max(1.0, histogramYMax_);
-        histogramYAxis_->setRange(0, yMax);
+        if (!histogramView_->isUserZoomed()) {
+            const double yMax = std::max(1.0, histogramYMax_);
+            histogramYAxis_->setRange(0, yMax);
+        }
 
         if (ringRatios.empty())
         {
@@ -417,7 +714,7 @@ namespace frontend
                 bool alreadyRoi = (frame.originalImage.cols == roi.w && frame.originalImage.rows == roi.h);
                 cv::Mat roiOriginal = alreadyRoi ? frame.originalImage : frame.originalImage(cv::Rect(roi.x, roi.y, roi.w, roi.h));
                 cv::Mat roiMask = alreadyRoi ? frame.processedImage : frame.processedImage(cv::Rect(roi.x, roi.y, roi.w, roi.h));
-                roiImage = createOverlayImage(roiOriginal, roiMask);
+                roiImage = createOverlayImage(roiOriginal, roiMask, &frame.validation);
             }
             else
             {
@@ -471,6 +768,9 @@ namespace frontend
             return;
         }
 
+        // Fetch config once for reason derivation
+        auto config = backend_.processing().getProcessingConfig();
+
         // Get last MAX_FRAMES_TO_SHOW invalid frames
         size_t startIdx = invalidFrames.size() > MAX_FRAMES_TO_SHOW
                               ? invalidFrames.size() - MAX_FRAMES_TO_SHOW
@@ -488,7 +788,7 @@ namespace frontend
                 bool alreadyRoi = (frame.originalImage.cols == roi.w && frame.originalImage.rows == roi.h);
                 cv::Mat roiOriginal = alreadyRoi ? frame.originalImage : frame.originalImage(cv::Rect(roi.x, roi.y, roi.w, roi.h));
                 cv::Mat roiMask = alreadyRoi ? frame.processedImage : frame.processedImage(cv::Rect(roi.x, roi.y, roi.w, roi.h));
-                roiImage = createOverlayImage(roiOriginal, roiMask);
+                roiImage = createOverlayImage(roiOriginal, roiMask, &frame.validation);
             }
             else
             {
@@ -508,17 +808,47 @@ namespace frontend
                     THUMBNAIL_SIZE, THUMBNAIL_SIZE,
                     Qt::KeepAspectRatio, Qt::SmoothTransformation));
 
-                QLabel *label = new QLabel(ui->invalidFramesWidget);
-                label->setPixmap(pixmap);
-                label->setAlignment(Qt::AlignCenter);
-                label->setFrameStyle(QFrame::Box);
-                label->setLineWidth(1);
-                label->setStyleSheet("QLabel { border: 1px solid gray; }");
-                label->setMinimumSize(THUMBNAIL_SIZE, THUMBNAIL_SIZE);
-                label->setMaximumSize(THUMBNAIL_SIZE, THUMBNAIL_SIZE);
-                label->setScaledContents(false);
+                // Derive rejection reasons
+                auto reasons = getInvalidReasons(frame.validation, config,
+                    backend_.processing().getPixelToMicronFactor());
 
-                ui->invalidFramesGrid->addWidget(label, row, col);
+                // Container widget: image on top, reason text below
+                QWidget *container = new QWidget(ui->invalidFramesWidget);
+                QVBoxLayout *vbox = new QVBoxLayout(container);
+                vbox->setContentsMargins(0, 0, 0, 0);
+                vbox->setSpacing(2);
+
+                QLabel *imageLabel = new QLabel(container);
+                imageLabel->setPixmap(pixmap);
+                imageLabel->setAlignment(Qt::AlignCenter);
+                imageLabel->setFrameStyle(QFrame::Box);
+                imageLabel->setLineWidth(1);
+                imageLabel->setStyleSheet("QLabel { border: 1px solid gray; }");
+                imageLabel->setFixedSize(THUMBNAIL_SIZE, THUMBNAIL_SIZE);
+                imageLabel->setScaledContents(false);
+                vbox->addWidget(imageLabel, 0, Qt::AlignCenter);
+
+                if (!reasons.empty())
+                {
+                    QStringList shortReasons;
+                    QStringList tooltipLines;
+                    for (const auto &r : reasons)
+                    {
+                        shortReasons << r.shortText;
+                        tooltipLines << r.longText;
+                    }
+
+                    QLabel *reasonLabel = new QLabel(shortReasons.join(" | "), container);
+                    reasonLabel->setAlignment(Qt::AlignCenter);
+                    reasonLabel->setWordWrap(true);
+                    reasonLabel->setStyleSheet("QLabel { font-size: 9px; color: #cc0000; }");
+                    reasonLabel->setFixedWidth(THUMBNAIL_SIZE);
+                    vbox->addWidget(reasonLabel, 0, Qt::AlignCenter);
+
+                    container->setToolTip(tooltipLines.join("\n"));
+                }
+
+                ui->invalidFramesGrid->addWidget(container, row, col);
 
                 col++;
                 if (col >= GRID_COLUMNS)
@@ -646,11 +976,26 @@ namespace frontend
         }
     }
 
-    QImage ExperimentMonitoringTab::createOverlayImage(const cv::Mat &original, const cv::Mat &mask) const
+    void ExperimentMonitoringTab::onSortTrigger()
+    {
+        backend_.trigger().onTargetGroupResult(true);
+        SPDLOG_INFO("Manual sort trigger fired");
+    }
+
+    QImage ExperimentMonitoringTab::createOverlayImage(const cv::Mat &original, const cv::Mat &mask,
+                                                       const backend::services::FilterResult *validation) const
     {
         if (original.empty() || mask.empty())
         {
             return QImage();
+        }
+
+        // Classification color: blue=target, green=valid, red=invalid
+        cv::Vec3b tint(0, 255, 0); // default green
+        if (validation) {
+            if (validation->isTargetGroup)      tint = {0, 120, 255};  // Blue
+            else if (validation->isValid)       tint = {0, 255, 0};    // Green
+            else                                tint = {255, 0, 0};    // Red
         }
 
         // Convert original to RGB if needed
@@ -668,22 +1013,43 @@ namespace frontend
             }
         }
 
-        // Create overlay: green tint where mask is non-zero
+        // Extract contours with hierarchy to isolate nested (inner) contours.
+        // Inner contours (used for metrics) have a parent in the hierarchy.
+        std::vector<std::vector<cv::Point>> contours;
+        std::vector<cv::Vec4i> hierarchy;
+        cv::findContours(mask.clone(), contours, hierarchy, cv::RETR_CCOMP, cv::CHAIN_APPROX_SIMPLE);
+
+        // Build a mask containing only the inner (nested) contour regions
+        cv::Mat innerMask = cv::Mat::zeros(mask.rows, mask.cols, CV_8UC1);
+        bool hasInner = false;
+        for (int i = 0; i < static_cast<int>(contours.size()); ++i) {
+            if (hierarchy[i][3] >= 0) { // has parent → inner contour
+                cv::drawContours(innerMask, contours, i, cv::Scalar(255), -1);
+                hasInner = true;
+            }
+        }
+        // Fallback: if no nested contour found, use the full mask
+        const cv::Mat &tintMask = hasInner ? innerMask : mask;
+
+        // Create overlay: colored tint where tintMask is non-zero (inner contour only)
         cv::Mat overlay = rgb.clone();
-        for (int y = 0; y < overlay.rows && y < mask.rows; ++y)
+        for (int y = 0; y < overlay.rows && y < tintMask.rows; ++y)
         {
-            for (int x = 0; x < overlay.cols && x < mask.cols; ++x)
+            for (int x = 0; x < overlay.cols && x < tintMask.cols; ++x)
             {
-                if (mask.at<uchar>(y, x) > 0)
+                if (tintMask.at<uchar>(y, x) > 0)
                 {
                     cv::Vec3b &pixel = overlay.at<cv::Vec3b>(y, x);
-                    // Blend with green (0, 255, 0) at 30% opacity
-                    pixel[0] = static_cast<uchar>(pixel[0] * 0.7);                                // R
-                    pixel[1] = static_cast<uchar>(std::min(255.0, pixel[1] * 0.7 + 255.0 * 0.3)); // G
-                    pixel[2] = static_cast<uchar>(pixel[2] * 0.7);                                // B
+                    pixel[0] = static_cast<uchar>(std::min(255.0, pixel[0] * 0.7 + tint[0] * 0.3));
+                    pixel[1] = static_cast<uchar>(std::min(255.0, pixel[1] * 0.7 + tint[1] * 0.3));
+                    pixel[2] = static_cast<uchar>(std::min(255.0, pixel[2] * 0.7 + tint[2] * 0.3));
                 }
             }
         }
+
+        // Draw contour outlines for both outer and inner contours
+        const cv::Scalar contourColor(tint[0], tint[1], tint[2]);
+        cv::drawContours(overlay, contours, -1, contourColor, 1);
 
         QImage img(overlay.data, overlay.cols, overlay.rows, static_cast<int>(overlay.step), QImage::Format_RGB888);
         return img.copy();
@@ -777,6 +1143,10 @@ namespace frontend
             return;
         scatterXMin_ = minVal;
         scatterXMax_ = maxVal;
+        if (scatterplotView_) {
+            scatterplotView_->setDefaultRange(scatterXAxis_, minVal, maxVal);
+            scatterplotView_->resetZoom();
+        }
     }
 
     void ExperimentMonitoringTab::setScatterYRange(double minVal, double maxVal)
@@ -785,6 +1155,10 @@ namespace frontend
             return;
         scatterYMin_ = minVal;
         scatterYMax_ = maxVal;
+        if (scatterplotView_) {
+            scatterplotView_->setDefaultRange(scatterYAxis_, minVal, maxVal);
+            scatterplotView_->resetZoom();
+        }
     }
 
     void ExperimentMonitoringTab::setHistogramXRange(double minVal, double maxVal)
@@ -793,6 +1167,10 @@ namespace frontend
             return;
         histogramXMin_ = minVal;
         histogramXMax_ = maxVal;
+        if (histogramView_ && histogramXAxis_) {
+            histogramView_->setDefaultRange(histogramXAxis_, minVal, maxVal);
+            histogramView_->resetZoom();
+        }
     }
 
     void ExperimentMonitoringTab::setHistogramYMax(double maxVal)
@@ -800,6 +1178,10 @@ namespace frontend
         if (maxVal <= 0)
             return;
         histogramYMax_ = maxVal;
+        if (histogramView_) {
+            histogramView_->setDefaultRange(histogramYAxis_, 0, std::max(1.0, maxVal));
+            histogramView_->resetZoom();
+        }
     }
 
     void ExperimentMonitoringTab::setHistogramBinWidth(double width)

@@ -30,6 +30,10 @@ void CaptureService::setCameraFactory(CameraFactory factory) {
     cameraFactory_ = std::move(factory);
 }
 
+void CaptureService::setCameraReadyCallback(CameraReadyCallback cb) {
+    cameraReadyCallback_ = std::move(cb);
+}
+
 bool CaptureService::start() {
     if (running_.load()) return true;
     running_.store(true);
@@ -55,6 +59,9 @@ void CaptureService::run() {
     std::unique_ptr<camera::common::ICamera> camera;
 
     auto releaseCamera = [&]() {
+        if (cameraReadyCallback_) {
+            cameraReadyCallback_(nullptr);
+        }
         if (camera) {
             camera->stop();
         }
@@ -89,6 +96,10 @@ void CaptureService::run() {
 
         if (!camera->start()) {
             throw std::runtime_error("CaptureService camera failed to start");
+        }
+
+        if (cameraReadyCallback_) {
+            cameraReadyCallback_(camera.get());
         }
 
         constexpr uint64_t kStatsInterval = 1'000'000ULL;
@@ -143,7 +154,7 @@ void CaptureService::run() {
                 if (camera->pollStats(cameraStats)) {
                     stats_.lastFrameRate.store(cameraStats.frameRate, std::memory_order_relaxed);
                     stats_.lastDataRateMBps.store(cameraStats.dataRateMBps, std::memory_order_relaxed);
-                    SPDLOG_INFO("Capture stats: {} fps, {} MB/s", cameraStats.frameRate, cameraStats.dataRateMBps);
+                    SPDLOG_DEBUG("Capture stats: {} fps, {} MB/s", cameraStats.frameRate, cameraStats.dataRateMBps);
                 }
                 nextStatsPoll = now + kStatsInterval;
             }

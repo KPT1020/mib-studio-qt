@@ -23,6 +23,27 @@ void FrameStore::pushFrame(const uint8_t* src,
                            uint64_t pixelFormat,
                            uint64_t timestamp) {
     if (capacity_ == 0 || src == nullptr || size == 0) return;
+
+    // Apply frame filter if set (check before acquiring write slot)
+    {
+        std::scoped_lock lk(mutex_);
+        if (frameFilter_) {
+            // Build a temporary Frame for the filter to inspect
+            Frame tmp;
+            tmp.width = width;
+            tmp.height = height;
+            tmp.pixelFormat = pixelFormat;
+            tmp.linePitch = linePitch;
+            tmp.timestamp = timestamp;
+            tmp.data.assign(src, src + size);
+            if (frameFilter_(tmp)) {
+                // Frame is empty / should be skipped
+                totalFiltered_.fetch_add(1, std::memory_order_relaxed);
+                return;
+            }
+        }
+    }
+
     const uint64_t w = totalWritten_.fetch_add(1) + 1; // next write count
     const size_t idx = static_cast<size_t>((w - 1) % capacity_);
     std::scoped_lock lk(mutex_);
@@ -36,11 +57,29 @@ void FrameStore::pushFrame(const uint8_t* src,
     std::copy_n(src, size, f.data.begin());
 
     // Periodic stats
-    if ((w % 1000ULL) == 0ULL) {
+    if ((w % 5000ULL) == 0ULL) {
         const size_t avail = availableCount();
-        SPDLOG_DEBUG("FrameStore: totalWritten={} available={} capacity={}",
-                     static_cast<unsigned long long>(w), avail, capacity_);
+        const uint64_t filtered = totalFiltered_.load(std::memory_order_relaxed);
+        SPDLOG_DEBUG("FrameStore: totalWritten={} available={} capacity={} filtered={}",
+                     static_cast<unsigned long long>(w), avail, capacity_, filtered);
     }
+}
+
+void FrameStore::setFrameFilter(FrameFilter filter) {
+    std::scoped_lock lk(mutex_);
+    frameFilter_ = std::move(filter);
+    SPDLOG_INFO("FrameStore: Frame filter {}", frameFilter_ ? "enabled" : "cleared");
+}
+
+void FrameStore::clearFrameFilter() {
+    std::scoped_lock lk(mutex_);
+    frameFilter_ = nullptr;
+    SPDLOG_INFO("FrameStore: Frame filter cleared");
+}
+
+bool FrameStore::hasFrameFilter() const {
+    std::scoped_lock lk(mutex_);
+    return frameFilter_ != nullptr;
 }
 
 bool FrameStore::getLatest(Frame& out) const {

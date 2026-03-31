@@ -27,5 +27,19 @@
       "configurePreset": "windows-default",
       "configuration": "Release"
     }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-test",
+      "displayName": "Test (Release)",
+      "configurePreset": "windows-default",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 30
+      }
+    }
   ]
 }

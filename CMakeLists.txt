@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 # Default version (fallback if git is not available or no tags exist)
-set(DEFAULT_VERSION "0.2.1")
+set(DEFAULT_VERSION "0.2.2")
 
 # Try to get version from git tags
 set(GIT_VERSION "")
@@ -89,6 +89,7 @@ add_library(mib_backend STATIC
     src/backend/BackgroundCaptureNotifier.cpp
     include/backend/BackgroundCaptureNotifier.h
     src/backend/Tools.cpp
+    src/backend/EModulusLut.cpp
     src/backend/services/Logger.cpp
     src/backend/services/SqliteService.cpp
     src/backend/services/CameraControlService.cpp
@@ -98,6 +99,7 @@ add_library(mib_backend STATIC
     src/backend/services/ProcessingService.cpp
     src/backend/services/PlaybackService.cpp
     src/backend/services/AutofocusService.cpp
+    src/backend/services/TriggerService.cpp
     src/backend/services/YoloService.cpp
     src/backend/playback/FrameStore.cpp
     src/camera/common/EGrabberCamera.cpp
@@ -204,6 +206,8 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/tabs/ConfigTabs.h
     src/frontend/tabs/ExperimentMonitoringTab.cpp
     include/frontend/tabs/ExperimentMonitoringTab.h
+    src/frontend/widgets/ZoomableChartView.cpp
+    include/frontend/widgets/ZoomableChartView.h
     resources/ui/ExperimentMonitoringTab.ui
     src/frontend/tabs/HdfReviewTab.cpp
     include/frontend/tabs/HdfReviewTab.h
@@ -625,106 +629,97 @@ if(TARGET nlohmann_json::nlohmann_json)
     target_link_libraries(mib_studio_qt PRIVATE nlohmann_json::nlohmann_json)
 endif()
 
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
-enable_testing()
+# Test targets
+option(BUILD_TESTING "Build test targets" ON)
+if(BUILD_TESTING)
+    enable_testing()
 
-# MindVision config apply unit tests
-add_executable(mindvision_config_test
-    src/tests/mindvision_config_test.cpp
-)
+    add_executable(capture_processing_test
+        src/tests/capture_processing_test.cpp
+    )
+    target_link_libraries(capture_processing_test PRIVATE
+        mib_backend
+        spdlog::spdlog
+        Qt6::Core
+    )
+    target_include_directories(capture_processing_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
 
-target_include_directories(mindvision_config_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    "C:/Program Files/Euresys/eGrabber/include"
-)
+    add_test(
+        NAME capture_processing_test
+        COMMAND capture_processing_test
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
+    # Ensure mock camera mode for CI
+    set_tests_properties(capture_processing_test PROPERTIES
+        ENVIRONMENT "MIB_CAMERA_MODE=mock"
+        TIMEOUT 30
+    )
 
-target_link_libraries(mindvision_config_test PRIVATE
-    mib_backend
-    Qt6::Core
-    spdlog::spdlog
-)
+    # MindVision config apply unit tests
+    add_executable(mindvision_config_test
+        src/tests/mindvision_config_test.cpp
+    )
+    target_include_directories(mindvision_config_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        "C:/Program Files/Euresys/eGrabber/include"
+    )
+    target_link_libraries(mindvision_config_test PRIVATE
+        mib_backend
+        Qt6::Core
+        spdlog::spdlog
+    )
+    set_target_properties(mindvision_config_test PROPERTIES AUTOMOC ON)
+    add_test(
+        NAME mindvision_config
+        COMMAND mindvision_config_test
+        WORKING_DIRECTORY "$<TARGET_FILE_DIR:mindvision_config_test>"
+    )
 
-set_target_properties(mindvision_config_test PROPERTIES
-    AUTOMOC ON
-)
+    # MindVision visual capture test (grabs frames and saves PNGs)
+    add_executable(mindvision_visual_test
+        src/tests/mindvision_visual_test.cpp
+    )
+    target_include_directories(mindvision_visual_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        "C:/Program Files/Euresys/eGrabber/include"
+    )
+    target_link_libraries(mindvision_visual_test PRIVATE
+        mib_backend
+        Qt6::Core
+        spdlog::spdlog
+    )
+    set_target_properties(mindvision_visual_test PROPERTIES AUTOMOC ON)
+    target_compile_definitions(mindvision_visual_test PRIVATE
+        MV_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    add_test(
+        NAME mindvision_visual
+        COMMAND mindvision_visual_test
+        WORKING_DIRECTORY "$<TARGET_FILE_DIR:mindvision_visual_test>"
+    )
 
-add_test(
-    NAME  mindvision_config
-    COMMAND mindvision_config_test
-    WORKING_DIRECTORY "$<TARGET_FILE_DIR:mindvision_config_test>"
-)
-
-# Capture-processing integration test (existing, now registered with CTest)
-add_executable(capture_processing_test
-    src/tests/capture_processing_test.cpp
-)
-
-target_include_directories(capture_processing_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    "C:/Program Files/Euresys/eGrabber/include"
-)
-
-target_link_libraries(capture_processing_test PRIVATE
-    mib_backend
-    Qt6::Core
-    spdlog::spdlog
-)
-
-add_test(
-    NAME  capture_processing
-    COMMAND capture_processing_test
-    WORKING_DIRECTORY "$<TARGET_FILE_DIR:capture_processing_test>"
-)
-
-# MindVision visual capture test (grabs frames and saves PNGs)
-add_executable(mindvision_visual_test
-    src/tests/mindvision_visual_test.cpp
-)
-
-target_include_directories(mindvision_visual_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    "C:/Program Files/Euresys/eGrabber/include"
-)
-
-target_link_libraries(mindvision_visual_test PRIVATE
-    mib_backend
-    Qt6::Core
-    spdlog::spdlog
-)
-
-set_target_properties(mindvision_visual_test PROPERTIES AUTOMOC ON)
-
-target_compile_definitions(mindvision_visual_test PRIVATE
-    MV_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-)
-
-add_test(
-    NAME  mindvision_visual
-    COMMAND mindvision_visual_test
-    WORKING_DIRECTORY "$<TARGET_FILE_DIR:mindvision_visual_test>"
-)
-
-# MindVision hardware validation test (applies config, reads back from hardware)
-add_executable(mindvision_hardware_validation_test
-    src/tests/mindvision_hardware_validation_test.cpp
-)
-target_include_directories(mindvision_hardware_validation_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    "C:/Program Files/Euresys/eGrabber/include"
-)
-target_link_libraries(mindvision_hardware_validation_test PRIVATE
-    mib_backend
-    Qt6::Core
-    spdlog::spdlog
-)
-set_target_properties(mindvision_hardware_validation_test PROPERTIES AUTOMOC ON)
-add_test(
-    NAME  mindvision_hardware_validation
-    COMMAND mindvision_hardware_validation_test
-    WORKING_DIRECTORY "$<TARGET_FILE_DIR:mindvision_hardware_validation_test>"
-)
+    # MindVision hardware validation test (applies config, reads back from hardware)
+    add_executable(mindvision_hardware_validation_test
+        src/tests/mindvision_hardware_validation_test.cpp
+    )
+    target_include_directories(mindvision_hardware_validation_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        "C:/Program Files/Euresys/eGrabber/include"
+    )
+    target_link_libraries(mindvision_hardware_validation_test PRIVATE
+        mib_backend
+        Qt6::Core
+        spdlog::spdlog
+    )
+    set_target_properties(mindvision_hardware_validation_test PROPERTIES AUTOMOC ON)
+    add_test(
+        NAME mindvision_hardware_validation
+        COMMAND mindvision_hardware_validation_test
+        WORKING_DIRECTORY "$<TARGET_FILE_DIR:mindvision_hardware_validation_test>"
+    )
+endif()
 
 # Windows installer packaging (InnoSetup)
 if(WIN32)

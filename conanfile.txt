@@ -16,6 +16,7 @@ qt/*:shared=True
 qt/*:qtcharts=True
 qt/*:with_imageformats=True
 opencv/*:shared=True
+opencv/*:with_openexr=False
 hdf5/*:shared=True
 hdf5/*:enable_cxx=True
 opencv/*:dnn=False

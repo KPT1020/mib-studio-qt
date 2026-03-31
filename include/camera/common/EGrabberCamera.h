@@ -31,6 +31,9 @@ public:
     bool pollStats(CameraStats& out) const override;
     bool checkDeviceHealth() const;
 
+    void configureTriggerOutput(const std::string& lineSelector) override;
+    bool setTriggerOutput(bool high) override;
+
 private:
     void replenishPendingFrames();
 
@@ -50,6 +53,10 @@ private:
     std::deque<Frame> pendingFrames_;
     bool running_ = false;
     mutable std::mutex stateMutex_;
+
+    // Trigger output state
+    std::string triggerLineSelector_;
+    bool triggerConfigured_{false};
 };
 
 } // namespace camera::common

@@ -12,6 +12,7 @@
 #include "camera/mock/MockCamera.h"
 #include "backend/services/CameraControlService.h"
 #include "backend/services/AutofocusService.h"
+#include "backend/services/TriggerService.h"
 #include "backend/services/YoloService.h"
 #include "backend/BackgroundCaptureNotifier.h"
 #include <QImage>
@@ -71,7 +72,9 @@ namespace backend
     AppBackend::AppBackend() {
         backgroundCaptureNotifier_ = std::make_unique<BackgroundCaptureNotifier>();
     }
-    AppBackend::~AppBackend() = default;
+    AppBackend::~AppBackend() {
+        stopFrameRecording();
+    }
 
     bool AppBackend::initialize(const std::string &dataDir)
     {
@@ -88,6 +91,7 @@ namespace backend
         playbackService_ = std::make_unique<services::PlaybackService>();
         cameraControlService_ = std::make_unique<services::CameraControlService>();
         autofocusService_ = std::make_unique<services::AutofocusService>();
+        triggerService_ = std::make_unique<services::TriggerService>();
         yoloService_ = std::make_unique<services::YoloService>();
         frameStore_ = std::make_shared<playback::FrameStore>(5000);
 
@@ -103,6 +107,12 @@ namespace backend
             SPDLOG_WARN("YOLO model not loaded - segmentation features will not be available");
         }
 
+        // Load Young's modulus LUT for emodulus gating
+        std::filesystem::path lutPath = exeDir / "resources" / "isoelastic_curve" / "scaled_isoelastic_data_LUT_6.16-4.24.txt";
+        if (!processingService_->loadEModulusLut(lutPath.string())) {
+            SPDLOG_WARN("Young's modulus LUT not loaded - emodulus gating will not be available");
+        }
+
         processingService_->start();
         // Note: startRealtime() is now called when Experiment tab becomes active, not during initialization
 
@@ -112,6 +122,25 @@ namespace backend
             if (autofocusService_) {
                 autofocusService_->onRingRatio(ringRatio, timestampNs);
             } });
+
+        // Wire target group trigger: processing -> trigger service
+        processingService_->setTargetGroupCallback([this](bool isTargetGroup) {
+            if (triggerService_) {
+                triggerService_->onTargetGroupResult(isTargetGroup);
+            }
+        });
+
+        // Wire camera lifecycle to trigger service
+        captureService_->setCameraReadyCallback([this](camera::common::ICamera* cam) {
+            if (triggerService_) {
+                triggerService_->setCamera(cam);
+                if (cam) {
+                    triggerService_->start();
+                } else {
+                    triggerService_->stop();
+                }
+            }
+        });
 
         // Wire background capture callback to emit Qt signal
         processingService_->setBackgroundCaptureCallback([this](const cv::Mat& bg, uint64_t frameIndex) {
@@ -211,6 +240,7 @@ namespace backend
     services::PlaybackService &AppBackend::playback() { return *playbackService_; }
     services::CameraControlService &AppBackend::cameraControl() { return *cameraControlService_; }
     services::AutofocusService &AppBackend::autofocus() { return *autofocusService_; }
+    services::TriggerService &AppBackend::trigger() { return *triggerService_; }
     services::YoloService &AppBackend::yolo() { return *yoloService_; }
 
     void AppBackend::configureMockCamera(const camera::mock::MockCameraOptions &options)
@@ -336,8 +366,185 @@ namespace backend
             || mockCameraConfigured_;
     }
 
+    bool AppBackend::startFrameRecording(const std::string& hdf5FilePath) {
+        if (frameRecordingRunning_.load()) {
+            SPDLOG_WARN("Frame recording already in progress");
+            return false;
+        }
+        if (!captureService_ || !captureService_->isRunning()) {
+            SPDLOG_ERROR("Cannot start frame recording: camera not running");
+            return false;
+        }
+
+        // Open HDF5 file for recording
+        auto& hdf5 = *hdf5Service_;
+        if (hdf5.isFileOpen()) {
+            SPDLOG_WARN("HDF5 file already open, closing before recording");
+            hdf5.closeFile();
+        }
+
+        std::string path = hdf5FilePath;
+        if (path.size() < 3 || (path.substr(path.size() - 3) != ".h5" &&
+            (path.size() < 5 || path.substr(path.size() - 5) != ".hdf5"))) {
+            path += ".h5";
+        }
+
+        if (!hdf5.openFile(path)) {
+            SPDLOG_ERROR("Failed to open HDF5 file for recording: {}", path);
+            return false;
+        }
+        if (!hdf5.initializeRecordingDatasets()) {
+            hdf5.closeFile();
+            return false;
+        }
+
+        frameRecordingPath_ = path;
+        frameRecordingWritten_.store(0);
+        frameRecordingFiltered_.store(0);
+        frameRecordingRunning_.store(true);
+
+        // Launch recording thread
+        frameRecordingThread_ = std::make_unique<std::thread>([this]() {
+            SPDLOG_INFO("Frame recording thread started");
+
+            const uint64_t startTimeNs = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count());
+
+            uint64_t lastProcessedIdx = 0;
+            bool firstFrame = true;
+            constexpr size_t FLUSH_BATCH = 50; // Flush every N frames
+
+            std::vector<cv::Mat> batchImages;
+            std::vector<services::Hdf5Service::RecordingFrameMeta> batchMeta;
+            batchImages.reserve(FLUSH_BATCH);
+            batchMeta.reserve(FLUSH_BATCH);
+
+            while (frameRecordingRunning_.load()) {
+                // Get latest available index from FrameStore
+                const uint64_t totalWritten = frameStore_->totalWritten();
+                if (totalWritten == 0) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                    continue;
+                }
+
+                const uint64_t latestIdx = totalWritten - 1;
+                const uint64_t startIdx = firstFrame ? latestIdx : lastProcessedIdx + 1;
+                firstFrame = false;
+
+                if (startIdx > latestIdx) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    continue;
+                }
+
+                // Process new frames
+                for (uint64_t idx = startIdx; idx <= latestIdx && frameRecordingRunning_.load(); ++idx) {
+                    playback::Frame f{};
+                    if (!frameStore_->getByWriteIndex(idx, f)) {
+                        continue;
+                    }
+                    if (f.width == 0 || f.height == 0 || f.data.empty()) {
+                        continue;
+                    }
+
+                    // Check if empty using processing service config
+                    auto config = processingService_->getProcessingConfig();
+                    auto roi = processingService_->getRealtimeRoi();
+                    auto bg = processingService_->getRealtimeBackgroundGray();
+
+                    if (services::ProcessingService::isFrameEmpty(f, config, roi, bg)) {
+                        frameRecordingFiltered_.fetch_add(1, std::memory_order_relaxed);
+                        lastProcessedIdx = idx;
+                        continue;
+                    }
+
+                    // Convert to cv::Mat
+                    const int w = static_cast<int>(f.width);
+                    const int h = static_cast<int>(f.height);
+                    const size_t step = (f.linePitch == 0 ? static_cast<size_t>(f.width) : f.linePitch);
+                    cv::Mat view(h, w, CV_8UC1, f.data.data(), step);
+                    batchImages.push_back(view.clone());
+
+                    services::Hdf5Service::RecordingFrameMeta meta;
+                    meta.index = idx;
+                    meta.timestampNs = f.timestamp;
+                    meta.width = f.width;
+                    meta.height = f.height;
+                    batchMeta.push_back(meta);
+
+                    lastProcessedIdx = idx;
+
+                    // Flush batch when full
+                    if (batchImages.size() >= FLUSH_BATCH) {
+                        if (!hdf5Service_->appendRecordingFrames(batchImages, batchMeta)) {
+                            SPDLOG_ERROR("Frame recording: failed to flush batch");
+                        }
+                        frameRecordingWritten_.fetch_add(batchImages.size(), std::memory_order_relaxed);
+                        batchImages.clear();
+                        batchMeta.clear();
+                    }
+                }
+            }
+
+            // Flush remaining frames
+            if (!batchImages.empty()) {
+                if (hdf5Service_->appendRecordingFrames(batchImages, batchMeta)) {
+                    frameRecordingWritten_.fetch_add(batchImages.size(), std::memory_order_relaxed);
+                }
+            }
+
+            // Write recording info
+            const uint64_t endTimeNs = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count());
+
+            hdf5Service_->writeRecordingInfo(startTimeNs, endTimeNs,
+                                             frameRecordingWritten_.load(),
+                                             frameRecordingFiltered_.load());
+            hdf5Service_->closeFile();
+
+            SPDLOG_INFO("Frame recording stopped: {} frames recorded, {} empty filtered, file: {}",
+                        frameRecordingWritten_.load(), frameRecordingFiltered_.load(), frameRecordingPath_);
+        });
+
+        SPDLOG_INFO("Frame recording started: {}", path);
+        return true;
+    }
+
+    void AppBackend::stopFrameRecording() {
+        if (!frameRecordingRunning_.load()) return;
+
+        frameRecordingRunning_.store(false);
+        if (frameRecordingThread_ && frameRecordingThread_->joinable()) {
+            frameRecordingThread_->join();
+        }
+        frameRecordingThread_.reset();
+    }
+
+    bool AppBackend::isFrameRecording() const {
+        return frameRecordingRunning_.load();
+    }
+
+    uint64_t AppBackend::frameRecordingCount() const {
+        return frameRecordingWritten_.load();
+    }
+
+    uint64_t AppBackend::frameRecordingFiltered() const {
+        return frameRecordingFiltered_.load();
+    }
+
     BackgroundCaptureNotifier* AppBackend::backgroundCaptureNotifier() const {
         return backgroundCaptureNotifier_.get();
+    }
+
+    void AppBackend::setLastConfigJson(const std::string& json) {
+        std::lock_guard<std::mutex> lk(configJsonMutex_);
+        lastConfigJson_ = json;
+    }
+
+    std::string AppBackend::getLastConfigJson() const {
+        std::lock_guard<std::mutex> lk(configJsonMutex_);
+        return lastConfigJson_;
     }
 
 } // namespace backend

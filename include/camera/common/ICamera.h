@@ -3,6 +3,7 @@
 #include "camera/common/Frame.h"
 
 #include <cstdint>
+#include <string>
 
 namespace camera::common
 {
@@ -45,6 +46,17 @@ namespace camera::common
          * Can be called periodically to detect device failures.
          */
         virtual bool checkDeviceHealth() const { return true; }
+
+        /**
+         * Configure a digital output line for trigger output.
+         * No-op for cameras that don't support hardware trigger.
+         */
+        virtual void configureTriggerOutput(const std::string& lineSelector) { (void)lineSelector; }
+
+        /**
+         * Set trigger output line to High or Low. Returns false if not supported.
+         */
+        virtual bool setTriggerOutput(bool high) { (void)high; return false; }
     };
 
 } // namespace camera::common

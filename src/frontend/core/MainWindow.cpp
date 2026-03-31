@@ -198,6 +198,24 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
             ui->tabs->setCurrentIndex(1); // Overview tab
         } });
 
+    connect(overviewTab_, &frontend::OverviewTab::roiChanged,
+            monitoringTab, &frontend::ExperimentMonitoringTab::updateRoiDisplay);
+    connect(overviewTab_, &frontend::OverviewTab::roiChanged,
+            this, [this](int offsetX, int offsetY, int width, int height) {
+        if (roiLabel_)
+            roiLabel_->setText(tr("ROI: %1 x %2 @ (%3, %4)").arg(width).arg(height).arg(offsetX).arg(offsetY));
+    });
+    // Initialize both displays with current ROI values
+    {
+        int ox = static_cast<int>(overviewTab_->roiPosition().x());
+        int oy = static_cast<int>(overviewTab_->roiPosition().y());
+        int w = overviewTab_->roiWidth();
+        int h = overviewTab_->roiHeight();
+        monitoringTab->updateRoiDisplay(ox, oy, w, h);
+        if (roiLabel_)
+            roiLabel_->setText(tr("ROI: %1 x %2 @ (%3, %4)").arg(w).arg(h).arg(ox).arg(oy));
+    }
+
     connect(connectTab_, &frontend::ConnectTab::noCamerasFound, this, &MainWindow::onNoCamerasFound);
 
     // Device init manager runs camera and nanopositioner auto-connect off the UI thread
@@ -282,6 +300,11 @@ void MainWindow::setupCornerWidgets() {
     experimentIndicator_->setToolTip(tr("Experiment status indicator"));
     experimentControlsLayout->addWidget(experimentIndicator_);
     
+    // ROI display label
+    roiLabel_ = new QLabel(tr("ROI: --"), experimentControlsWidget);
+    roiLabel_->setStyleSheet("font-weight: bold; padding: 0 8px;");
+    experimentControlsLayout->addWidget(roiLabel_);
+
     // Create push buttons and connect them to actions
     startExperimentBtn_ = new QPushButton(startExperimentAct_->text(), experimentControlsWidget);
     stopExperimentBtn_ = new QPushButton(stopExperimentAct_->text(), experimentControlsWidget);
@@ -558,6 +581,12 @@ void MainWindow::onStopExperiment()
         hdf5.writeExperimentInfo(experimentStartTimeNs_, experimentEndTimeNs,
                                  totalValid, totalInvalid, processingConfig, roi,
                                  bg.empty() ? nullptr : &bg);
+
+        // Save full config.json content for backtracking
+        std::string configJson = backend_.getLastConfigJson();
+        if (!configJson.empty()) {
+            hdf5.writeConfigJson(configJson);
+        }
 
         // Note: Chart snapshots are no longer saved during experiment stop.
         // Charts are now generated on-demand from HDF5 data in the Review tab.

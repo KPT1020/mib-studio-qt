@@ -14,6 +14,8 @@
 #include <QTextOption>
 #include <QMouseEvent>
 #include <QRegularExpression>
+#include <QSpinBox>
+#include <QLabel>
 
 #include <spdlog/spdlog.h>
 #ifdef _WIN32
@@ -59,12 +61,35 @@ namespace frontend
         ui->setupUi(this);
 
         // Create custom SimpleImageCanvas widget and add it to the placeholder
-        canvas_ = new SimpleImageCanvas(&frameImage_, &fitMode_, &roiOverlayVisible_, &roiPosition_, ui->canvasContainer);
+        canvas_ = new SimpleImageCanvas(&frameImage_, &fitMode_, &roiOverlayVisible_, &roiPosition_, &roiWidth_, &roiHeight_, ui->canvasContainer);
         canvas_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         // Replace the placeholder with the actual canvas
         ui->canvasLayout->removeWidget(ui->canvasPlaceholder);
         delete ui->canvasPlaceholder;
         ui->canvasLayout->addWidget(canvas_, 1);
+
+        // Create ROI size spinboxes and insert into controls toolbar
+        {
+            auto *wLabel = new QLabel(tr("W:"), this);
+            roiWidthSpin_ = new QSpinBox(this);
+            roiWidthSpin_->setRange(64, 1920);
+            roiWidthSpin_->setSingleStep(EgrabberConfigParser::ROI_WIDTH_STEP);
+            roiWidthSpin_->setSuffix(tr(" px"));
+            roiWidthSpin_->setValue(roiWidth_);
+
+            auto *hLabel = new QLabel(tr("H:"), this);
+            roiHeightSpin_ = new QSpinBox(this);
+            roiHeightSpin_->setRange(16, 1080);
+            roiHeightSpin_->setSingleStep(EgrabberConfigParser::ROI_HEIGHT_STEP);
+            roiHeightSpin_->setSuffix(tr(" px"));
+            roiHeightSpin_->setValue(roiHeight_);
+
+            // Insert after roiOverlayBtn (index 2) and before the spacer
+            ui->controlsLayout->insertWidget(2, wLabel);
+            ui->controlsLayout->insertWidget(3, roiWidthSpin_);
+            ui->controlsLayout->insertWidget(4, hLabel);
+            ui->controlsLayout->insertWidget(5, roiHeightSpin_);
+        }
 
         // Set initial proportions (50/50 ratio)
         ui->splitter->setStretchFactor(0, 1);
@@ -89,6 +114,10 @@ namespace frontend
         connect(ui->roiOverlayBtn, &QToolButton::clicked, this, &OverviewTab::onToggleRoiOverlay);
         connect(static_cast<SimpleImageCanvas*>(canvas_), &SimpleImageCanvas::roiPositionChanged,
                 this, &OverviewTab::onRoiPositionChanged);
+        connect(roiWidthSpin_, &QSpinBox::valueChanged,
+                this, &OverviewTab::onRoiSizeChanged);
+        connect(roiHeightSpin_, &QSpinBox::valueChanged,
+                this, &OverviewTab::onRoiSizeChanged);
         connect(ui->jsEdit, &QPlainTextEdit::textChanged, this, [this]()
                 {
         if (ui->jsUnsavedLabel) ui->jsUnsavedLabel->setVisible(true); });
@@ -377,6 +406,7 @@ namespace frontend
     {
         roiPosition_ = imagePos;
         updateEgrabberConfigFromRect(imagePos);
+        emit roiChanged(static_cast<int>(roiPosition_.x()), static_cast<int>(roiPosition_.y()), roiWidth_, roiHeight_);
     }
 
     QString OverviewTab::egrabberConfigPath() const
@@ -423,9 +453,126 @@ namespace frontend
         }
         else
         {
-            // Use default position
             QPoint defaultPos = EgrabberConfigParser::defaultRoiPosition();
             roiPosition_ = QPointF(defaultPos);
+        }
+
+        // Read ROI size
+        int w, h;
+        if (EgrabberConfigParser::readRoiSize(path, w, h))
+        {
+            roiWidth_ = w;
+            roiHeight_ = h;
+            SPDLOG_DEBUG("Initialized ROI size from egrabberConfig.js: Width={}, Height={}", w, h);
+        }
+
+        // Update spinboxes
+        if (roiWidthSpin_)
+        {
+            roiWidthSpin_->blockSignals(true);
+            roiWidthSpin_->setValue(roiWidth_);
+            roiWidthSpin_->blockSignals(false);
+        }
+        if (roiHeightSpin_)
+        {
+            roiHeightSpin_->blockSignals(true);
+            roiHeightSpin_->setValue(roiHeight_);
+            roiHeightSpin_->blockSignals(false);
+        }
+    }
+
+    void OverviewTab::onRoiSizeChanged()
+    {
+        // Snap to alignment steps (handles typed non-aligned values)
+        int w = roiWidthSpin_->value();
+        int h = roiHeightSpin_->value();
+
+        w = (w / EgrabberConfigParser::ROI_WIDTH_STEP) * EgrabberConfigParser::ROI_WIDTH_STEP;
+        h = (h / EgrabberConfigParser::ROI_HEIGHT_STEP) * EgrabberConfigParser::ROI_HEIGHT_STEP;
+
+        if (w < 64)
+            w = 64;
+        if (w > 1920)
+            w = 1920;
+        if (h < 16)
+            h = 16;
+        if (h > 1080)
+            h = 1080;
+
+        // Update spinboxes if snapping changed the value
+        if (w != roiWidthSpin_->value())
+        {
+            roiWidthSpin_->blockSignals(true);
+            roiWidthSpin_->setValue(w);
+            roiWidthSpin_->blockSignals(false);
+        }
+        if (h != roiHeightSpin_->value())
+        {
+            roiHeightSpin_->blockSignals(true);
+            roiHeightSpin_->setValue(h);
+            roiHeightSpin_->blockSignals(false);
+        }
+
+        roiWidth_ = w;
+        roiHeight_ = h;
+
+        // Auto-clamp offset if ROI exceeds sensor bounds
+        const int maxSensorW = 1920;
+        const int maxSensorH = 1080;
+        bool offsetChanged = false;
+
+        int ox = static_cast<int>(roiPosition_.x());
+        int oy = static_cast<int>(roiPosition_.y());
+
+        if (ox + w > maxSensorW)
+        {
+            ox = ((maxSensorW - w) / EgrabberConfigParser::ROI_OFFSET_X_STEP) * EgrabberConfigParser::ROI_OFFSET_X_STEP;
+            if (ox < 0)
+                ox = 0;
+            roiPosition_.setX(ox);
+            offsetChanged = true;
+        }
+        if (oy + h > maxSensorH)
+        {
+            oy = ((maxSensorH - h) / EgrabberConfigParser::ROI_OFFSET_Y_STEP) * EgrabberConfigParser::ROI_OFFSET_Y_STEP;
+            if (oy < 0)
+                oy = 0;
+            roiPosition_.setY(oy);
+            offsetChanged = true;
+        }
+
+        // Persist size to egrabberConfig.js
+        updateEgrabberConfigSize();
+
+        // If offset was clamped, persist that too
+        if (offsetChanged)
+        {
+            updateEgrabberConfigFromRect(roiPosition_);
+        }
+
+        if (canvas_)
+            canvas_->update();
+
+        emit roiChanged(static_cast<int>(roiPosition_.x()), static_cast<int>(roiPosition_.y()), roiWidth_, roiHeight_);
+    }
+
+    void OverviewTab::updateEgrabberConfigSize()
+    {
+        const QString path = egrabberConfigPath();
+
+        if (path == appDirIncludePath("egrabberConfig.js"))
+        {
+            QString err;
+            if (!FileIOUtils::ensureDefaultsFile(path, ":/defaults/egrabberConfig.js", &err))
+            {
+                SPDLOG_WARN("ensureDefaultsFile(egrabberConfig.js) failed: {}", err.toStdString());
+            }
+        }
+
+        QString err;
+        if (!EgrabberConfigParser::updateRoiSize(path, roiWidth_, roiHeight_, &err))
+        {
+            SPDLOG_ERROR("Failed to update ROI size in egrabberConfig.js: {}", err.toStdString());
         }
     }
 

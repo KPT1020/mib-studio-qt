@@ -185,6 +185,9 @@ namespace frontend
 			return;
 		}
 		const QByteArray data = f.readAll();
+		// Store raw JSON for HDF5 metadata persistence
+		backend_.setLastConfigJson(data.toStdString());
+
 		const QJsonDocument doc = QJsonDocument::fromJson(data);
 		if (!doc.isObject())
 		{
@@ -213,6 +216,12 @@ namespace frontend
 					pcfg.area_threshold_min = ip.value("area_threshold_min").toInt(pcfg.area_threshold_min);
 				if (ip.contains("area_threshold_max"))
 					pcfg.area_threshold_max = ip.value("area_threshold_max").toInt(pcfg.area_threshold_max);
+				if (ip.contains("deformability_threshold_min"))
+					pcfg.deformability_threshold_min = ip.value("deformability_threshold_min").toDouble(pcfg.deformability_threshold_min);
+				if (ip.contains("deformability_threshold_max"))
+					pcfg.deformability_threshold_max = ip.value("deformability_threshold_max").toDouble(pcfg.deformability_threshold_max);
+				if (ip.contains("area_ratio_threshold_max"))
+					pcfg.area_ratio_threshold_max = ip.value("area_ratio_threshold_max").toDouble(pcfg.area_ratio_threshold_max);
 				if (ip.contains("empty_frame_pixel_threshold"))
 					pcfg.empty_frame_pixel_threshold = ip.value("empty_frame_pixel_threshold").toInt(pcfg.empty_frame_pixel_threshold);
 				if (ip.contains("auto_background_enabled"))
@@ -228,15 +237,58 @@ namespace frontend
 						pcfg.enable_border_check = fl.value("enable_border_check").toBool(pcfg.enable_border_check);
 					if (fl.contains("enable_area_range_check"))
 						pcfg.enable_area_range_check = fl.value("enable_area_range_check").toBool(pcfg.enable_area_range_check);
+					if (fl.contains("enable_deformability_range_check"))
+						pcfg.enable_deformability_range_check = fl.value("enable_deformability_range_check").toBool(pcfg.enable_deformability_range_check);
+					if (fl.contains("enable_area_ratio_check"))
+						pcfg.enable_area_ratio_check = fl.value("enable_area_ratio_check").toBool(pcfg.enable_area_ratio_check);
 					if (fl.contains("require_single_inner_contour"))
 						pcfg.require_single_inner_contour = fl.value("require_single_inner_contour").toBool(pcfg.require_single_inner_contour);
+				}
+				if (ip.contains("target_group") && ip.value("target_group").isObject())
+				{
+					const QJsonObject tg = ip.value("target_group").toObject();
+					if (tg.contains("enabled"))
+						pcfg.enable_target_group = tg.value("enabled").toBool(pcfg.enable_target_group);
+					if (tg.contains("area_min"))
+						pcfg.target_group_area_min = tg.value("area_min").toInt(pcfg.target_group_area_min);
+					if (tg.contains("area_max"))
+						pcfg.target_group_area_max = tg.value("area_max").toInt(pcfg.target_group_area_max);
+					if (tg.contains("deformability_min"))
+						pcfg.target_group_deformability_min = tg.value("deformability_min").toDouble(pcfg.target_group_deformability_min);
+					if (tg.contains("deformability_max"))
+						pcfg.target_group_deformability_max = tg.value("deformability_max").toDouble(pcfg.target_group_deformability_max);
+					if (tg.contains("emodulus_enabled"))
+						pcfg.enable_target_group_emodulus = tg.value("emodulus_enabled").toBool(pcfg.enable_target_group_emodulus);
+					if (tg.contains("emodulus_min"))
+						pcfg.target_group_emodulus_min = tg.value("emodulus_min").toDouble(pcfg.target_group_emodulus_min);
+					if (tg.contains("emodulus_max"))
+						pcfg.target_group_emodulus_max = tg.value("emodulus_max").toDouble(pcfg.target_group_emodulus_max);
+				}
+				// Multi-image recording mode
+				if (ip.contains("multi_image") && ip.value("multi_image").isObject())
+				{
+					const QJsonObject mi = ip.value("multi_image").toObject();
+					if (mi.contains("enabled"))
+						pcfg.multi_image_enabled = mi.value("enabled").toBool(pcfg.multi_image_enabled);
+					if (mi.contains("count"))
+						pcfg.multi_image_count = std::max(1, mi.value("count").toInt(pcfg.multi_image_count));
 				}
 			}
 		}
 		backend_.processing().setProcessingConfig(pcfg);
-		SPDLOG_INFO("AppConfigWatcher: applied ProcessingConfig (blur={}, thresh={}, morph={}x{}, area=[{},{}], empty_px={})",
+		SPDLOG_INFO("AppConfigWatcher: applied ProcessingConfig (blur={}, thresh={}, morph={}x{}, area=[{},{} um2], deform=[{:.2f},{:.2f}] enabled={}, areaRatio_max={:.2f} enabled={}, empty_px={})",
 					pcfg.gaussian_blur_size, pcfg.bg_subtract_threshold, pcfg.morph_kernel_size, pcfg.morph_iterations,
-					pcfg.area_threshold_min, pcfg.area_threshold_max, pcfg.empty_frame_pixel_threshold);
+					pcfg.area_threshold_min, pcfg.area_threshold_max,
+					pcfg.deformability_threshold_min, pcfg.deformability_threshold_max, pcfg.enable_deformability_range_check,
+					pcfg.area_ratio_threshold_max, pcfg.enable_area_ratio_check,
+					pcfg.empty_frame_pixel_threshold);
+		SPDLOG_INFO("AppConfigWatcher: target_group enabled={}, area=[{},{} um2], deform=[{:.2f},{:.2f}], emod_enabled={}, emod=[{:.1f},{:.1f}]",
+					pcfg.enable_target_group, pcfg.target_group_area_min, pcfg.target_group_area_max,
+					pcfg.target_group_deformability_min, pcfg.target_group_deformability_max,
+					pcfg.enable_target_group_emodulus, pcfg.target_group_emodulus_min, pcfg.target_group_emodulus_max);
+		if (pcfg.multi_image_enabled) {
+			SPDLOG_INFO("AppConfigWatcher: multi_image enabled, count={}", pcfg.multi_image_count);
+		}
 
 		// 2) Flush interval (buffer threshold)
 		if (root.contains("buffer_threshold"))
