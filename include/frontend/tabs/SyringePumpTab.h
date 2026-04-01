@@ -25,8 +25,6 @@ private slots:
     void onStopSheath();
     void onApplySample();
     void onApplySheath();
-    void onRefreshSamplePorts();
-    void onRefreshSheathPorts();
     void onUpdateStatus();
 
 private:
@@ -34,8 +32,6 @@ private:
     void loadConfig();
     void saveConfig();
     QString configPath() const;
-    void populateComPortList(int pumpIndex);
-    void populateSyringeOptions();
 
     // Map flow unit combo index to Modbus register value
     uint16_t flowUnitFromCombo(int comboIndex) const;
@@ -44,6 +40,8 @@ private:
     Ui::SyringePumpTab* ui;
     backend::AppBackend& backend_;
     QTimer* statusUpdateTimer_{nullptr};
+    QTimer* sampleApplyTimer_{nullptr};
+    QTimer* sheathApplyTimer_{nullptr};
 };
 
 } // namespace frontend

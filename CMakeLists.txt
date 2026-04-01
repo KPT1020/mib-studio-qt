@@ -246,6 +246,9 @@ set(FRONTEND_COMMON_SOURCES
     src/frontend/dialogs/ProcessingSettingsDialog.cpp
     include/frontend/dialogs/ProcessingSettingsDialog.h
     resources/ui/ProcessingSettingsDialog.ui
+    src/frontend/dialogs/SyringePumpSettingsDialog.cpp
+    include/frontend/dialogs/SyringePumpSettingsDialog.h
+    resources/ui/SyringePumpSettingsDialog.ui
     # Controllers
     src/frontend/controllers/CameraController.cpp
     include/frontend/controllers/CameraController.h

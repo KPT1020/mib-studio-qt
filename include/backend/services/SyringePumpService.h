@@ -35,9 +35,7 @@ public:
         int baudRate{115200};
         uint8_t modbusAddress{1};
         double flowRate{0.0};
-        uint16_t flowRateUnit{99};       // 99 = mL/min
-        uint16_t syringeMfg{0};          // Syringe manufacturer index
-        uint16_t syringeSpec{0};         // Syringe specification (volume) index
+        uint16_t flowRateUnit{100};      // 100 = µL/min
         Direction direction{Direction::Infuse};
     };
 
@@ -48,6 +46,7 @@ public:
         double accumulatedVolume{0.0};
         double minFlowRate{0.0};
         double maxFlowRate{0.0};
+        bool stalled{false};
     };
 
     SyringePumpService();
@@ -63,7 +62,9 @@ public:
     bool setDirection(PumpId id, Direction dir);
     bool start(PumpId id);
     bool stop(PumpId id);
-    bool setSyringe(PumpId id, uint16_t manufacturer, uint16_t specification);
+    bool purge(PumpId id, Direction dir);
+    bool stopPurge(PumpId id);
+    bool setSyringeVolume(PumpId id, uint16_t volume, uint16_t unit);
 
     // Status (thread-safe reads)
     PumpStatus getStatus(PumpId id) const;

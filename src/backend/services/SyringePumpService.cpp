@@ -3,6 +3,7 @@
 #include <QSerialPort>
 #include <QByteArray>
 #include <spdlog/spdlog.h>
+#include <algorithm>
 #include <cstring>
 #include <thread>
 #include <chrono>
@@ -13,12 +14,19 @@ namespace {
     // Modbus RTU register addresses (from dLSP 501X manual Appendix B)
     constexpr uint16_t REG_CHANNEL_ENABLE    = 0x0000;  // 0=disable, 1=enable (must be 1 to allow start)
     constexpr uint16_t REG_RUN_COMMAND       = 0x0001;  // 0=stop, 1=start
-    constexpr uint16_t REG_CURRENT_STATUS    = 0x0015;
+    constexpr uint16_t REG_FULL_SPEED_RUN    = 0x0008;  // 0=stop, 1=full speed infuse, 2=full speed withdraw
+    constexpr uint16_t REG_ERROR_STATUS      = 0x0100;  // bit3=stall/blockage
+    constexpr uint16_t REG_DIRECTION_STATUS  = 0x010A;  // R: 0=none, 1=infuse, 2=withdraw
     constexpr uint16_t REG_MIN_FLOW_RATE     = 0x004A;  // float32, 2 regs
     constexpr uint16_t REG_MAX_FLOW_RATE     = 0x004C;  // float32, 2 regs
     constexpr uint16_t REG_MODE              = 0x0060;  // 0=infuse, 1=withdraw, 2=infuse+withdraw, 3=withdraw+infuse
-    constexpr uint16_t REG_FLOW_RATE_VALUE   = 0x0077;  // float32, 2 regs
-    constexpr uint16_t REG_FLOW_RATE_UNIT    = 0x0079;
+    constexpr uint16_t REG_SYRINGE_VOLUME    = 0x0061;  // uint16, 1~9999
+    constexpr uint16_t REG_SYRINGE_VOL_UNIT  = 0x0062;  // uint16, volume unit code
+    constexpr uint16_t REG_INFUSE_FLOW_RATE  = 0x006A;  // uint16, 1~9999
+    constexpr uint16_t REG_INFUSE_FLOW_UNIT  = 0x006B;  // uint16, unit code
+    constexpr uint16_t REG_WITHDRAW_FLOW_RATE = 0x006C; // uint16, 1~9999
+    constexpr uint16_t REG_WITHDRAW_FLOW_UNIT = 0x006D; // uint16, unit code
+    constexpr uint16_t REG_REALTIME_INFUSE_FLOW = 0x0102; // uint16, read-only
     constexpr uint16_t REG_ACCUM_VOLUME      = 0x00C7;  // float32, 2 regs
 
     // Modbus function codes
@@ -295,13 +303,17 @@ bool SyringePumpService::connect(PumpId id, int comPort, int baudRate, uint8_t m
         pump.serial = nullptr;
         return false;
     }
-
     SPDLOG_INFO("SyringePumpService: COM{} opened for {} pump (baud={}, addr={})",
                 comPort, pumpName(id), baudRate, modbusAddress);
 
-    // Ensure channel is enabled (required for start/stop commands)
+    // Verify communication by enabling the channel (required for start/stop commands)
     if (!writeSingleRegister(idx, REG_CHANNEL_ENABLE, 1)) {
-        SPDLOG_WARN("SyringePumpService: Could not enable channel for {} pump", pumpName(id));
+        SPDLOG_ERROR("SyringePumpService: {} pump not responding on COM{} addr={} — check wiring and address",
+                     pumpName(id), comPort, modbusAddress);
+        pump.serial->close();
+        delete pump.serial;
+        pump.serial = nullptr;
+        return false;
     }
 
     // Read min/max flow rates
@@ -334,10 +346,12 @@ void SyringePumpService::disconnect(PumpId id) {
         writeSingleRegister(idx, REG_RUN_COMMAND, 0);
     }
 
-    if (pump.serial->isOpen()) {
-        pump.serial->close();
+    if (pump.serial) {
+        if (pump.serial->isOpen()) {
+            pump.serial->close();
+        }
+        delete pump.serial;
     }
-    delete pump.serial;
     pump.serial = nullptr;
     pump.status.connected = false;
     pump.status.runStatus = RunStatus::Stop;
@@ -364,22 +378,29 @@ bool SyringePumpService::setFlowRate(PumpId id, double rate, uint16_t unit) {
 
     if (!pump.status.connected) return false;
 
-    // Write flow rate value (float32 = 2 registers)
-    QByteArray regData = floatToRegisters(static_cast<float>(rate));
-    if (!writeMultipleRegisters(idx, REG_FLOW_RATE_VALUE, regData)) {
-        SPDLOG_ERROR("SyringePumpService: Failed to set flow rate for {} pump", pumpName(id));
+    uint16_t rateValue = static_cast<uint16_t>(std::clamp(rate, 1.0, 9999.0));
+
+    // Set both infuse and withdraw flow rates
+    if (!writeSingleRegister(idx, REG_INFUSE_FLOW_RATE, rateValue)) {
+        SPDLOG_ERROR("SyringePumpService: Failed to set infuse flow rate for {} pump", pumpName(id));
         return false;
     }
-
-    // Write flow rate unit
-    if (!writeSingleRegister(idx, REG_FLOW_RATE_UNIT, unit)) {
-        SPDLOG_ERROR("SyringePumpService: Failed to set flow rate unit for {} pump", pumpName(id));
+    if (!writeSingleRegister(idx, REG_INFUSE_FLOW_UNIT, unit)) {
+        SPDLOG_ERROR("SyringePumpService: Failed to set infuse flow rate unit for {} pump", pumpName(id));
+        return false;
+    }
+    if (!writeSingleRegister(idx, REG_WITHDRAW_FLOW_RATE, rateValue)) {
+        SPDLOG_ERROR("SyringePumpService: Failed to set withdraw flow rate for {} pump", pumpName(id));
+        return false;
+    }
+    if (!writeSingleRegister(idx, REG_WITHDRAW_FLOW_UNIT, unit)) {
+        SPDLOG_ERROR("SyringePumpService: Failed to set withdraw flow rate unit for {} pump", pumpName(id));
         return false;
     }
 
     pump.config.flowRate = rate;
     pump.config.flowRateUnit = unit;
-    SPDLOG_INFO("SyringePumpService: {} pump flow rate set to {} (unit={})", pumpName(id), rate, unit);
+    SPDLOG_INFO("SyringePumpService: {} pump flow rate set to {} (unit={})", pumpName(id), rateValue, unit);
     return true;
 }
 
@@ -438,21 +459,77 @@ bool SyringePumpService::stop(PumpId id) {
     return true;
 }
 
-bool SyringePumpService::setSyringe(PumpId id, uint16_t manufacturer, uint16_t specification) {
-    // dLSP 501X does not have manufacturer/specification registers.
-    // Pump uses syringe diameter (0x0061) instead — not yet implemented.
-    SPDLOG_WARN("SyringePumpService: setSyringe not supported on dLSP 501X (mfg={}, spec={})",
-                manufacturer, specification);
+bool SyringePumpService::purge(PumpId id, Direction dir) {
+    int idx = static_cast<int>(id);
+    auto& pump = pumps_[static_cast<size_t>(idx)];
+    std::scoped_lock lock(pump.mutex);
+
+    if (!pump.status.connected) return false;
+
+    if (!writeSingleRegister(idx, REG_CHANNEL_ENABLE, 1)) {
+        SPDLOG_WARN("SyringePumpService: Could not enable channel for {} pump", pumpName(id));
+    }
+
+    // Full speed: 1=infuse, 2=withdraw
+    uint16_t value = (dir == Direction::Infuse) ? 1 : 2;
+    if (!writeSingleRegister(idx, REG_FULL_SPEED_RUN, value)) {
+        SPDLOG_ERROR("SyringePumpService: Failed to purge {} pump", pumpName(id));
+        return false;
+    }
+
+    SPDLOG_INFO("SyringePumpService: {} pump purge started ({})",
+                pumpName(id), dir == Direction::Infuse ? "infuse" : "withdraw");
+    return true;
+}
+
+bool SyringePumpService::stopPurge(PumpId id) {
+    int idx = static_cast<int>(id);
+    auto& pump = pumps_[static_cast<size_t>(idx)];
+    std::scoped_lock lock(pump.mutex);
+
+    if (!pump.status.connected) return false;
+
+    if (!writeSingleRegister(idx, REG_FULL_SPEED_RUN, 0)) {
+        SPDLOG_ERROR("SyringePumpService: Failed to stop purge for {} pump", pumpName(id));
+        return false;
+    }
+
+    SPDLOG_INFO("SyringePumpService: {} pump purge stopped", pumpName(id));
+    return true;
+}
+
+bool SyringePumpService::setSyringeVolume(PumpId id, uint16_t volume, uint16_t unit) {
+    int idx = static_cast<int>(id);
+    auto& pump = pumps_[static_cast<size_t>(idx)];
+    std::scoped_lock lock(pump.mutex);
+
+    if (!pump.status.connected) return false;
+
+    uint16_t clampedVol = static_cast<uint16_t>(std::clamp(static_cast<int>(volume), 1, 9999));
+    if (!writeSingleRegister(idx, REG_SYRINGE_VOLUME, clampedVol)) {
+        SPDLOG_ERROR("SyringePumpService: Failed to set syringe volume for {} pump", pumpName(id));
+        return false;
+    }
+    if (!writeSingleRegister(idx, REG_SYRINGE_VOL_UNIT, unit)) {
+        SPDLOG_ERROR("SyringePumpService: Failed to set syringe volume unit for {} pump", pumpName(id));
+        return false;
+    }
+
+    SPDLOG_INFO("SyringePumpService: {} pump syringe volume set to {} (unit={})", pumpName(id), clampedVol, unit);
     return true;
 }
 
 // ---------------------------------------------------------------------------
 // Status
 // ---------------------------------------------------------------------------
+// REMOVED: setModbusAddress, setModbusAddressOneShot, scanModbusAddress
+// (address is volatile on dLSP 501X; using separate COM ports instead)
+
 SyringePumpService::PumpStatus SyringePumpService::getStatus(PumpId id) const {
     int idx = static_cast<int>(id);
-    const auto& pump = pumps_[static_cast<size_t>(idx)];
+    auto& pump = pumps_[static_cast<size_t>(idx)];
     std::scoped_lock lock(pump.mutex);
+
     return pump.status;
 }
 
@@ -486,19 +563,39 @@ void SyringePumpService::pollStatus(PumpId id) {
         return;
     }
 
-    // Read current run status
-    QByteArray statusData;
-    if (readHoldingRegisters(idx, REG_CURRENT_STATUS, 1, statusData)) {
-        uint16_t rawStatus = static_cast<uint16_t>(
-            (static_cast<uint8_t>(statusData[0]) << 8) | static_cast<uint8_t>(statusData[1]));
-        pump.status.runStatus = static_cast<RunStatus>(rawStatus);
+    // Read run state (0=stopped, 1=running)
+    QByteArray runData;
+    if (readHoldingRegisters(idx, REG_RUN_COMMAND, 1, runData)) {
+        uint16_t running = static_cast<uint16_t>(
+            (static_cast<uint8_t>(runData[0]) << 8) | static_cast<uint8_t>(runData[1]));
+        if (running == 0) {
+            pump.status.runStatus = RunStatus::Stop;
+        } else {
+            // Read direction to distinguish forward/backward
+            QByteArray dirData;
+            if (readHoldingRegisters(idx, REG_DIRECTION_STATUS, 1, dirData)) {
+                uint16_t dir = static_cast<uint16_t>(
+                    (static_cast<uint8_t>(dirData[0]) << 8) | static_cast<uint8_t>(dirData[1]));
+                pump.status.runStatus = (dir == 2) ? RunStatus::Backward : RunStatus::Forward;
+            } else {
+                pump.status.runStatus = RunStatus::Forward;
+            }
+        }
     }
 
-    // Read current flow rate
+    // Read error status (bit3 = stall/blockage)
+    QByteArray errData;
+    if (readHoldingRegisters(idx, REG_ERROR_STATUS, 1, errData)) {
+        uint16_t err = static_cast<uint16_t>(
+            (static_cast<uint8_t>(errData[0]) << 8) | static_cast<uint8_t>(errData[1]));
+        pump.status.stalled = (err & 0x0008) != 0;
+    }
+
+    // Read current flow rate (uint16 from realtime register)
     QByteArray flowData;
-    if (readHoldingRegisters(idx, REG_FLOW_RATE_VALUE, 2, flowData)) {
-        pump.status.currentFlowRate = registersToFloat(
-            reinterpret_cast<const uint8_t*>(flowData.constData()));
+    if (readHoldingRegisters(idx, REG_REALTIME_INFUSE_FLOW, 1, flowData)) {
+        pump.status.currentFlowRate = static_cast<double>(
+            (static_cast<uint8_t>(flowData[0]) << 8) | static_cast<uint8_t>(flowData[1]));
     }
 
     // Read accumulated volume
