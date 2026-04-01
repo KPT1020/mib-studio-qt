@@ -13,6 +13,14 @@ namespace backend::services {
 
 static std::shared_ptr<spdlog::logger> s_logger;
 
+static spdlog::level::level_enum defaultLogLevel() {
+#ifdef NDEBUG
+    return spdlog::level::info;
+#else
+    return spdlog::level::debug;
+#endif
+}
+
 void Logger::init(const std::string& logFilePath) {
     try {
         std::filesystem::path logPath(logFilePath);
@@ -26,12 +34,12 @@ void Logger::init(const std::string& logFilePath) {
         std::vector<spdlog::sink_ptr> sinks{file_sink, console_sink};
         s_logger = std::make_shared<spdlog::logger>("app", sinks.begin(), sinks.end());
 
-        s_logger->set_level(spdlog::level::info);
+        s_logger->set_level(defaultLogLevel());
         spdlog::set_default_logger(s_logger);
-        
+
         // Flush on every log level to ensure logs are written immediately
         spdlog::flush_on(spdlog::level::trace);
-        
+
         // Set flush every 3 seconds to ensure logs are written even if app crashes
         spdlog::flush_every(std::chrono::seconds(3));
 
@@ -41,14 +49,14 @@ void Logger::init(const std::string& logFilePath) {
         // If file logging fails, fall back to console-only logging
         auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
         s_logger = std::make_shared<spdlog::logger>("app", console_sink);
-        s_logger->set_level(spdlog::level::info);
+        s_logger->set_level(defaultLogLevel());
         spdlog::set_default_logger(s_logger);
         SPDLOG_ERROR("Failed to initialize file logger ({}), using console only: {}", logFilePath, e.what());
     } catch (...) {
         // Last resort: create a minimal console logger
         auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
         s_logger = std::make_shared<spdlog::logger>("app", console_sink);
-        s_logger->set_level(spdlog::level::info);
+        s_logger->set_level(defaultLogLevel());
         spdlog::set_default_logger(s_logger);
         std::cerr << "ERROR: Failed to initialize logger for: " << logFilePath << std::endl;
     }

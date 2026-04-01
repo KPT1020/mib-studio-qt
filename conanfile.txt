@@ -5,6 +5,7 @@ sqlite3/3.51.0
 hdf5/1.14.6
 opencv/4.12.0
 onnxruntime/1.18.1
+nlohmann_json/3.11.3
 
 [generators]
 CMakeDeps
@@ -13,6 +14,7 @@ CMakeToolchain
 [options]
 qt/*:shared=True
 qt/*:qtcharts=True
+qt/*:qtserialport=True
 qt/*:with_imageformats=True
 opencv/*:shared=True
 opencv/*:with_openexr=False

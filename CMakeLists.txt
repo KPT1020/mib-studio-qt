@@ -60,7 +60,7 @@ if(MSVC)
     add_compile_options(/wd4828)
 endif()
 
-find_package(Qt6 COMPONENTS Core Widgets Gui Charts Network Concurrent REQUIRED)
+find_package(Qt6 COMPONENTS Core Widgets Gui Charts Network Concurrent SerialPort REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG QUIET)
 find_package(OpenCV CONFIG REQUIRED)
@@ -99,6 +99,7 @@ add_library(mib_backend STATIC
     src/backend/services/ProcessingService.cpp
     src/backend/services/PlaybackService.cpp
     src/backend/services/AutofocusService.cpp
+    src/backend/services/SyringePumpService.cpp
     src/backend/services/TriggerService.cpp
     src/backend/services/YoloService.cpp
     src/backend/playback/FrameStore.cpp
@@ -108,6 +109,9 @@ add_library(mib_backend STATIC
 
 # Explicitly enable AUTOMOC for this target to ensure MOC files are generated
 set_target_properties(mib_backend PROPERTIES AUTOMOC ON)
+target_compile_definitions(mib_backend PUBLIC
+    $<$<CONFIG:Debug>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG>
+)
 
 target_include_directories(mib_backend PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -121,6 +125,7 @@ target_link_libraries(mib_backend PUBLIC
     spdlog::spdlog
     Qt6::Core
     Qt6::Gui
+    Qt6::SerialPort
     ${COREMOR_LIB_DIR}/XMT_DLL_SER.lib
 )
 
@@ -213,6 +218,9 @@ set(FRONTEND_COMMON_SOURCES
     src/frontend/tabs/NanopositionerTab.cpp
     include/frontend/tabs/NanopositionerTab.h
     resources/ui/NanopositionerTab.ui
+    src/frontend/tabs/SyringePumpTab.cpp
+    include/frontend/tabs/SyringePumpTab.h
+    resources/ui/SyringePumpTab.ui
     src/frontend/tabs/OverviewTab.cpp
     include/frontend/tabs/OverviewTab.h
     resources/ui/OverviewTab.ui
@@ -238,6 +246,9 @@ set(FRONTEND_COMMON_SOURCES
     src/frontend/dialogs/ProcessingSettingsDialog.cpp
     include/frontend/dialogs/ProcessingSettingsDialog.h
     resources/ui/ProcessingSettingsDialog.ui
+    src/frontend/dialogs/SyringePumpSettingsDialog.cpp
+    include/frontend/dialogs/SyringePumpSettingsDialog.h
+    resources/ui/SyringePumpSettingsDialog.ui
     # Controllers
     src/frontend/controllers/CameraController.cpp
     include/frontend/controllers/CameraController.h

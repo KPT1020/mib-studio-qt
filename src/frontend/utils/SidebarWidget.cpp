@@ -6,11 +6,13 @@
 #include <QFrame>
 #include <QSettings>
 #include <QPropertyAnimation>
+#include <QScrollArea>
 
 #include "backend/AppBackend.h"
 #include "frontend/utils/StatisticsPanel.h"
 #include "frontend/utils/BackgroundPreviewWidget.h"
 #include "frontend/tabs/NanopositionerTab.h"
+#include "frontend/tabs/SyringePumpTab.h"
 
 namespace frontend
 {
@@ -62,10 +64,24 @@ namespace frontend
         nanopositionerTab_ = new NanopositionerTab(backend_, contentWidget_);
         contentLayout_->addWidget(nanopositionerTab_);
 
+        // Separator
+        auto* pumpSeparator = new QFrame(contentWidget_);
+        pumpSeparator->setFrameShape(QFrame::HLine);
+        pumpSeparator->setFrameShadow(QFrame::Sunken);
+        contentLayout_->addWidget(pumpSeparator);
+
+        // Syringe pump tab
+        syringePumpTab_ = new SyringePumpTab(backend_, contentWidget_);
+        contentLayout_->addWidget(syringePumpTab_);
+
         contentLayout_->addStretch();
 
-        // Add content widget to main layout (left side)
-        mainLayout->addWidget(contentWidget_);
+        // Wrap content in a scroll area so the sidebar is scrollable
+        scrollArea_ = new QScrollArea(this);
+        scrollArea_->setWidget(contentWidget_);
+        scrollArea_->setWidgetResizable(true);
+        scrollArea_->setFrameShape(QFrame::NoFrame);
+        mainLayout->addWidget(scrollArea_);
 
         // Toggle button (always visible, on the right)
         toggleButton_ = new QToolButton(this);
@@ -105,7 +121,7 @@ namespace frontend
         toggleButton_->setToolTip(collapsed_ ? tr("Expand sidebar") : tr("Collapse sidebar"));
 
         // Show/hide content
-        contentWidget_->setVisible(!collapsed_);
+        scrollArea_->setVisible(!collapsed_);
 
         // Update size constraints
         int targetWidth = collapsed_ ? collapsedWidth_ : expandedWidth_;

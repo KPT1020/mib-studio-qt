@@ -1,8 +1,8 @@
-# One-time setup: add team Conan remote (Artifactory) as primary remote.
+# One-time setup: add team Conan remote as primary remote.
 # Usage: .\scripts\setup-conan-remote.ps1 [-Url <url>] [-RemoteName <name>]
 
 param(
-    [string]$Url = "https://conan.yofo.bio/artifactory/api/conan/conan",
+    [string]$Url = "https://conan.yofo.bio",
     [string]$RemoteName = "team-conan"
 )
 

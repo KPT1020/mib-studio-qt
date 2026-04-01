@@ -1,0 +1,324 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>SyringePumpTab</class>
+ <widget class="QWidget" name="SyringePumpTab">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>300</width>
+    <height>500</height>
+   </rect>
+  </property>
+  <layout class="QVBoxLayout" name="mainLayout">
+   <property name="leftMargin"><number>6</number></property>
+   <property name="topMargin"><number>6</number></property>
+   <property name="rightMargin"><number>6</number></property>
+   <property name="bottomMargin"><number>6</number></property>
+   <property name="spacing"><number>4</number></property>
+
+   <!-- ============ SAMPLE PUMP ============ -->
+   <item>
+    <widget class="QGroupBox" name="samplePumpGroup">
+     <property name="title"><string>Sample Pump</string></property>
+     <layout class="QVBoxLayout" name="sampleGroupLayout">
+      <property name="spacing"><number>6</number></property>
+      <property name="leftMargin"><number>6</number></property>
+      <property name="topMargin"><number>6</number></property>
+      <property name="rightMargin"><number>6</number></property>
+      <property name="bottomMargin"><number>6</number></property>
+
+      <!-- Connect / Disconnect -->
+      <item>
+       <layout class="QHBoxLayout" name="sampleConnBtnLayout">
+        <item>
+         <widget class="QPushButton" name="sampleConnectBtn">
+          <property name="text"><string>Connect</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="sampleDisconnectBtn">
+          <property name="text"><string>Disconnect</string></property>
+          <property name="enabled"><bool>false</bool></property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="sampleConnSpacer">
+          <property name="orientation"><enum>Qt::Horizontal</enum></property>
+          <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+
+      <!-- Flow rate control -->
+      <item>
+       <layout class="QFormLayout" name="sampleFlowForm">
+        <property name="labelAlignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+        <item row="0" column="0">
+         <widget class="QLabel" name="sampleFlowLabel">
+          <property name="text"><string>Flow Rate:</string></property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <layout class="QHBoxLayout" name="sampleFlowLayout">
+          <item>
+           <widget class="QDoubleSpinBox" name="sampleFlowRateSpinBox">
+            <property name="decimals"><number>4</number></property>
+            <property name="minimum"><double>0.0</double></property>
+            <property name="maximum"><double>100000.0</double></property>
+            <property name="value"><double>0.0</double></property>
+            <property name="enabled"><bool>false</bool></property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QComboBox" name="sampleFlowUnitCombo">
+            <property name="enabled"><bool>false</bool></property>
+            <item><property name="text"><string>uL/min</string></property></item>
+            <item><property name="text"><string>mL/min</string></property></item>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel" name="sampleDirLabel">
+          <property name="text"><string>Direction:</string></property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QComboBox" name="sampleDirectionCombo">
+          <property name="enabled"><bool>false</bool></property>
+          <item><property name="text"><string>Infuse</string></property></item>
+          <item><property name="text"><string>Withdraw</string></property></item>
+         </widget>
+        </item>
+       </layout>
+      </item>
+
+      <!-- Start / Stop / Purge -->
+      <item>
+       <layout class="QHBoxLayout" name="sampleRunBtnLayout">
+        <item>
+         <widget class="QPushButton" name="sampleStartBtn">
+          <property name="text"><string>Start</string></property>
+          <property name="enabled"><bool>false</bool></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="sampleStopBtn">
+          <property name="text"><string>Stop</string></property>
+          <property name="enabled"><bool>false</bool></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="samplePurgeBtn">
+          <property name="text"><string>Purge</string></property>
+          <property name="toolTip"><string>Run pump at full speed (hold to purge)</string></property>
+          <property name="enabled"><bool>false</bool></property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="sampleRunSpacer">
+          <property name="orientation"><enum>Qt::Horizontal</enum></property>
+          <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+
+      <!-- Status display -->
+      <item>
+       <layout class="QFormLayout" name="sampleStatusForm">
+        <property name="labelAlignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+        <item row="0" column="0">
+         <widget class="QLabel"><property name="text"><string>Status:</string></property></widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QLabel" name="sampleStatusLabel">
+          <property name="text"><string>Not connected</string></property>
+         </widget>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel"><property name="text"><string>Flow:</string></property></widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QLabel" name="sampleFlowStatusLabel">
+          <property name="text"><string>--</string></property>
+         </widget>
+        </item>
+        <item row="2" column="0">
+         <widget class="QLabel"><property name="text"><string>Volume:</string></property></widget>
+        </item>
+        <item row="2" column="1">
+         <widget class="QLabel" name="sampleVolumeLabel">
+          <property name="text"><string>--</string></property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+
+   <!-- ============ SHEATH PUMP ============ -->
+   <item>
+    <widget class="QGroupBox" name="sheathPumpGroup">
+     <property name="title"><string>Sheath Pump</string></property>
+     <layout class="QVBoxLayout" name="sheathGroupLayout">
+      <property name="spacing"><number>6</number></property>
+      <property name="leftMargin"><number>6</number></property>
+      <property name="topMargin"><number>6</number></property>
+      <property name="rightMargin"><number>6</number></property>
+      <property name="bottomMargin"><number>6</number></property>
+
+      <!-- Connect / Disconnect -->
+      <item>
+       <layout class="QHBoxLayout" name="sheathConnBtnLayout">
+        <item>
+         <widget class="QPushButton" name="sheathConnectBtn">
+          <property name="text"><string>Connect</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="sheathDisconnectBtn">
+          <property name="text"><string>Disconnect</string></property>
+          <property name="enabled"><bool>false</bool></property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="sheathConnSpacer">
+          <property name="orientation"><enum>Qt::Horizontal</enum></property>
+          <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+
+      <!-- Flow rate control -->
+      <item>
+       <layout class="QFormLayout" name="sheathFlowForm">
+        <property name="labelAlignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+        <item row="0" column="0">
+         <widget class="QLabel" name="sheathFlowLabel">
+          <property name="text"><string>Flow Rate:</string></property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <layout class="QHBoxLayout" name="sheathFlowLayout">
+          <item>
+           <widget class="QDoubleSpinBox" name="sheathFlowRateSpinBox">
+            <property name="decimals"><number>4</number></property>
+            <property name="minimum"><double>0.0</double></property>
+            <property name="maximum"><double>100000.0</double></property>
+            <property name="value"><double>0.0</double></property>
+            <property name="enabled"><bool>false</bool></property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QComboBox" name="sheathFlowUnitCombo">
+            <property name="enabled"><bool>false</bool></property>
+            <item><property name="text"><string>uL/min</string></property></item>
+            <item><property name="text"><string>mL/min</string></property></item>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel" name="sheathDirLabel">
+          <property name="text"><string>Direction:</string></property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QComboBox" name="sheathDirectionCombo">
+          <property name="enabled"><bool>false</bool></property>
+          <item><property name="text"><string>Infuse</string></property></item>
+          <item><property name="text"><string>Withdraw</string></property></item>
+         </widget>
+        </item>
+       </layout>
+      </item>
+
+      <!-- Start / Stop / Purge -->
+      <item>
+       <layout class="QHBoxLayout" name="sheathRunBtnLayout">
+        <item>
+         <widget class="QPushButton" name="sheathStartBtn">
+          <property name="text"><string>Start</string></property>
+          <property name="enabled"><bool>false</bool></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="sheathStopBtn">
+          <property name="text"><string>Stop</string></property>
+          <property name="enabled"><bool>false</bool></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="sheathPurgeBtn">
+          <property name="text"><string>Purge</string></property>
+          <property name="toolTip"><string>Run pump at full speed (hold to purge)</string></property>
+          <property name="enabled"><bool>false</bool></property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="sheathRunSpacer">
+          <property name="orientation"><enum>Qt::Horizontal</enum></property>
+          <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+
+      <!-- Status display -->
+      <item>
+       <layout class="QFormLayout" name="sheathStatusForm">
+        <property name="labelAlignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+        <item row="0" column="0">
+         <widget class="QLabel"><property name="text"><string>Status:</string></property></widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QLabel" name="sheathStatusLabel">
+          <property name="text"><string>Not connected</string></property>
+         </widget>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel"><property name="text"><string>Flow:</string></property></widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QLabel" name="sheathFlowStatusLabel">
+          <property name="text"><string>--</string></property>
+         </widget>
+        </item>
+        <item row="2" column="0">
+         <widget class="QLabel"><property name="text"><string>Volume:</string></property></widget>
+        </item>
+        <item row="2" column="1">
+         <widget class="QLabel" name="sheathVolumeLabel">
+          <property name="text"><string>--</string></property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+
+   <!-- Bottom spacer -->
+   <item>
+    <spacer name="bottomSpacer">
+     <property name="orientation"><enum>Qt::Vertical</enum></property>
+     <property name="sizeHint" stdset="0"><size><width>20</width><height>40</height></size></property>
+    </spacer>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+</ui>

@@ -5,7 +5,9 @@
 namespace backend { class AppBackend; }
 namespace frontend { class StatisticsPanel; }
 namespace frontend { class NanopositionerTab; }
+namespace frontend { class SyringePumpTab; }
 namespace frontend { class BackgroundPreviewWidget; }
+class QScrollArea;
 class QSplitter;
 class QToolButton;
 class QVBoxLayout;
@@ -28,6 +30,7 @@ namespace frontend
 
         StatisticsPanel* statisticsPanel() const { return statisticsPanel_; }
         NanopositionerTab* nanopositionerTab() const { return nanopositionerTab_; }
+        SyringePumpTab* syringePumpTab() const { return syringePumpTab_; }
 
         int expandedWidth() const { return expandedWidth_; }
         void setExpandedWidth(int width);
@@ -49,7 +52,9 @@ namespace frontend
         BackgroundPreviewWidget* backgroundPreview_ = nullptr;
         StatisticsPanel* statisticsPanel_ = nullptr;
         NanopositionerTab* nanopositionerTab_ = nullptr;
+        SyringePumpTab* syringePumpTab_ = nullptr;
         QToolButton* toggleButton_ = nullptr;
+        QScrollArea* scrollArea_ = nullptr;
         QWidget* contentWidget_ = nullptr;
         QVBoxLayout* contentLayout_ = nullptr;
         bool collapsed_ = false;

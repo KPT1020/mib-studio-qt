@@ -107,7 +107,7 @@ jobs:
           Write-Host "CI Conan profile created:"
           conan profile show -pr ci
 
-          # Add team Conan remote (Artifactory) as primary
+          # Add team Conan remote as primary
           if ($env:CONAN_REMOTE_URL) {
             conan remote add team-conan $env:CONAN_REMOTE_URL --index 0
             conan remote login team-conan $env:CONAN_REMOTE_USER -p $env:CONAN_REMOTE_PASSWORD
