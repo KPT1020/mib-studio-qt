@@ -33,7 +33,11 @@ public:
     bool pollStats(CameraStats& out) const override;
     bool checkDeviceHealth() const override;
 
+    void configureTriggerOutput(const std::string& lineSelector) override;
+    bool setTriggerOutput(bool high) override;
+
 private:
+    int triggerOutputIndex_ = -1;  // MindVision output IO index (0-based), -1 = not configured
     // Apply JSON config (configPath_) to an already-open camera handle.
     // Returns true on success; logs warnings but does not abort on individual
     // SDK failures so that a partial apply is still better than none.

@@ -396,4 +396,43 @@ bool MindVisionCamera::checkDeviceHealth() const {
     return status == CAMERA_STATUS_TIME_OUT;
 }
 
+void MindVisionCamera::configureTriggerOutput(const std::string& /*lineSelector*/) {
+    // MindVision sort trigger uses OUT2 (index 1).
+    // OUT1 (index 0) is reserved for strobe synced with the MCU freq generator.
+    constexpr int kSortOutputIndex = 1;
+
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    if (hCamera_ < 0) {
+        SPDLOG_WARN("MindVisionCamera: configureTriggerOutput called before camera open");
+        triggerOutputIndex_ = kSortOutputIndex;  // remember for later
+        return;
+    }
+
+    // Set OUT2 to general-purpose output mode (IOMODE_GP_OUTPUT = 3)
+    CameraSdkStatus s = CameraSetOutPutIOMode(hCamera_, kSortOutputIndex, IOMODE_GP_OUTPUT);
+    if (s != CAMERA_STATUS_SUCCESS) {
+        SPDLOG_WARN("MindVisionCamera: CameraSetOutPutIOMode(OUT2, GP_OUTPUT) returned {}", s);
+    }
+
+    // Ensure output starts low
+    s = CameraSetIOStateEx(hCamera_, kSortOutputIndex, 0);
+    if (s != CAMERA_STATUS_SUCCESS) {
+        SPDLOG_WARN("MindVisionCamera: CameraSetIOStateEx(OUT2, LOW) returned {}", s);
+    }
+
+    triggerOutputIndex_ = kSortOutputIndex;
+    SPDLOG_INFO("MindVisionCamera: trigger output configured on OUT2 (index {})", kSortOutputIndex);
+}
+
+bool MindVisionCamera::setTriggerOutput(bool high) {
+    if (triggerOutputIndex_ < 0 || !running_ || hCamera_ < 0) return false;
+
+    CameraSdkStatus s = CameraSetIOStateEx(hCamera_, triggerOutputIndex_, high ? 1 : 0);
+    if (s != CAMERA_STATUS_SUCCESS) {
+        SPDLOG_WARN("MindVisionCamera: CameraSetIOStateEx(OUT2, {}) returned {}", high ? "HIGH" : "LOW", s);
+        return false;
+    }
+    return true;
+}
+
 } // namespace camera::common
