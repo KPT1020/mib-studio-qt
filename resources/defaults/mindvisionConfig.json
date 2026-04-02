@@ -3,7 +3,7 @@
   "height": 96,
   "offset_x": 152,
   "offset_y": 264,
-  "exposure_time_us": 3000.0,
+  "exposure_time_us": 2.0,
   "trigger_mode": 2,
   "analog_gain": 1,
   "auto_exposure_enabled": false,

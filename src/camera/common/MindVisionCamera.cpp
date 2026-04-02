@@ -435,4 +435,17 @@ bool MindVisionCamera::setTriggerOutput(bool high) {
     return true;
 }
 
+bool MindVisionCamera::setExposureTime(double us) {
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    if (!running_ || hCamera_ < 0) return false;
+
+    CameraSdkStatus s = CameraSetExposureTime(hCamera_, us);
+    if (s != CAMERA_STATUS_SUCCESS) {
+        SPDLOG_WARN("MindVisionCamera: CameraSetExposureTime({}) returned {}", us, s);
+        return false;
+    }
+    SPDLOG_INFO("MindVisionCamera: exposure set to {} us", us);
+    return true;
+}
+
 } // namespace camera::common

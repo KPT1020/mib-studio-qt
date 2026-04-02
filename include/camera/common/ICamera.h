@@ -57,6 +57,12 @@ namespace camera::common
          * Set trigger output line to High or Low. Returns false if not supported.
          */
         virtual bool setTriggerOutput(bool high) { (void)high; return false; }
+
+        /**
+         * Set exposure time in microseconds on a running camera.
+         * Returns false if not supported or camera is not running.
+         */
+        virtual bool setExposureTime(double us) { (void)us; return false; }
     };
 
 } // namespace camera::common

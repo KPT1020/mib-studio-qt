@@ -55,6 +55,12 @@ void CaptureService::stop() {
 
 bool CaptureService::isRunning() const { return running_.load(); }
 
+bool CaptureService::setExposureTime(double us) {
+    std::scoped_lock lk(cameraMutex_);
+    if (!activeCamera_) return false;
+    return activeCamera_->setExposureTime(us);
+}
+
 void CaptureService::run() {
     std::unique_ptr<camera::common::ICamera> camera;
 

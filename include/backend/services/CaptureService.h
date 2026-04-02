@@ -57,6 +57,9 @@ public:
     void stop();
     bool isRunning() const;
 
+    // Set exposure time on the active camera (thread-safe, no-op if not running)
+    bool setExposureTime(double us);
+
     const CaptureStats& stats() const { return stats_; }
 
 private:

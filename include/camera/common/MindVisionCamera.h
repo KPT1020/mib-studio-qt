@@ -35,6 +35,7 @@ public:
 
     void configureTriggerOutput(const std::string& lineSelector) override;
     bool setTriggerOutput(bool high) override;
+    bool setExposureTime(double us) override;
 
 private:
     int triggerOutputIndex_ = -1;  // MindVision output IO index (0-based), -1 = not configured

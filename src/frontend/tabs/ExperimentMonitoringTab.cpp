@@ -49,6 +49,7 @@
 
 #include "frontend/widgets/ZoomableChartView.h"
 #include "backend/AppBackend.h"
+#include "backend/services/CaptureService.h"
 #include "backend/services/ProcessingService.h"
 #include "backend/services/TriggerService.h"
 
@@ -155,6 +156,9 @@ namespace frontend
         connect(ui->sortTriggerBtn, &QPushButton::clicked, this, &ExperimentMonitoringTab::onSortTrigger);
         connect(ui->triggerDurationSpin, qOverload<int>(&QSpinBox::valueChanged), this, [this](int us) {
             backend_.trigger().setPulseDurationUs(us);
+        });
+        connect(ui->exposureSpin, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double us) {
+            backend_.capture().setExposureTime(us);
         });
         connect(ui->validOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
         connect(ui->invalidOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
