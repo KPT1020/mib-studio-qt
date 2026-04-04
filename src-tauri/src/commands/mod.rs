@@ -1,0 +1,9 @@
+pub mod autofocus;
+pub mod camera;
+pub mod capture;
+pub mod config;
+pub mod hdf5;
+pub mod playback;
+pub mod processing;
+pub mod syringe_pump;
+pub mod trigger;

@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+:root {
+  --sidebar-collapsed-width: 30px;
+  --sidebar-expanded-width: 300px;
+  --status-bar-height: 24px;
+  --control-bar-height: 40px;
+  --thumbnail-size: 100px;
+  --grid-columns: 5;
+  --spacing-xs: 4px;
+  --spacing-sm: 6px;
+  --spacing-md: 8px;
+  --color-indicator-active: #00ff00;
+  --color-indicator-idle: gray;
+  --color-unsaved: #d17a00;
+  --color-target: #0078ff;
+  --color-valid: #00ff00;
+  --color-invalid: #ff0000;
+  --color-roi: #ffff00;
+}
+
+/* Match Qt default widget styling */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+}
+
+/* Allotment splitter styling to match Qt */
+.allotment-module_splitView__MGzYj {
+  height: 100% !important;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #a1a1a1;
+}
