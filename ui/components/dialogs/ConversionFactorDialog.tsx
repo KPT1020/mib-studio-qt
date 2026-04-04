@@ -14,31 +14,41 @@ export function ConversionFactorDialog({ onClose }: Props) {
     } catch (e) {
       console.error("Failed to set conversion factor:", e);
     }
+  };
+
+  const handleOk = async () => {
+    await handleApply();
     onClose();
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-xl w-[350px] flex flex-col">
-        <div className="px-4 py-3 border-b border-neutral-300 font-semibold text-sm">
+      <div className="bg-[var(--bg-window)] shadow-xl flex flex-col" style={{ width: 400, minHeight: 120 }}>
+        <div className="px-3 py-2 border-b border-[var(--border-widget)] font-semibold text-sm">
           Pixel to Micron Conversion
         </div>
-        <div className="px-4 py-3">
-          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-xs">
-            <label className="text-right">Pixel to Micron Factor:</label>
-            <input
-              type="number" step={0.001} min={0.001} value={factor}
-              onChange={(e) => setFactor(Number(e.target.value))}
-              className="border border-neutral-400 rounded px-1 py-0.5"
-            />
+        <div className="flex-1 px-3 py-3">
+          <div className="qt-form">
+            <label>Pixel to Micron Factor</label>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                min={0.0001}
+                max={1000}
+                step={0.0001}
+                value={factor}
+                onChange={(e) => setFactor(Number(e.target.value))}
+                className="qt-input flex-1"
+                title="Conversion factor: 1 pixel = X micron"
+              />
+              <span className="text-xs">um/pixel</span>
+            </div>
           </div>
-          <p className="text-xs text-neutral-500 mt-2">
-            1 pixel = {factor.toFixed(3)} um
-          </p>
         </div>
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-neutral-300">
-          <button onClick={onClose} className="px-3 py-1 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded">Cancel</button>
-          <button onClick={handleApply} className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">Apply</button>
+        <div className="flex justify-end gap-2 px-3 py-2 border-t border-[var(--border-widget)]">
+          <button onClick={onClose} className="qt-btn">Cancel</button>
+          <button onClick={handleApply} className="qt-btn">Apply</button>
+          <button onClick={handleOk} className="qt-btn">OK</button>
         </div>
       </div>
     </div>

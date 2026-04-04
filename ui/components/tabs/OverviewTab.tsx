@@ -12,83 +12,103 @@ export function OverviewTab() {
   const [unsaved, setUnsaved] = useState(false);
 
   return (
-    <ResizableSplitter direction="vertical" defaultSizes={[60, 40]} minSizes={[100, 0]}>
-      {/* Top: Canvas with controls */}
-      <div className="flex flex-col h-full">
-        {/* Controls bar - max height 40px */}
+    /* QVBoxLayout margins 0, spacing 0 */
+    <div style={{ height: "100%", margin: 0, padding: 0 }}>
+      {/* QSplitter vertical, childrenCollapsible=false, opaqueResize=true */}
+      <ResizableSplitter direction="vertical" defaultSizes={[60, 40]} minSizes={[100, 0]}>
+        {/* Child 1 (canvasContainer): Expanding/Expanding, minHeight=100 */}
+        <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+          {/* Controls widget: maxHeight 40px, QHBoxLayout margins 6/4/6/4 spacing 6 */}
+          <div
+            style={{
+              maxHeight: 40,
+              display: "flex",
+              alignItems: "center",
+              padding: "4px 6px",
+              gap: 6,
+              flexShrink: 0,
+            }}
+          >
+            {/* QToolButton "Fit: Window" / "Fit: 100%" */}
+            <button className="qt-tool-btn" onClick={toggleZoom}>
+              Fit: {zoomMode === "fit" ? "Window" : "100%"}
+            </button>
+            {/* QToolButton "ROI Overlay: Off" / "ROI Overlay: On" */}
+            <button className="qt-tool-btn" onClick={() => setRoiOverlay(!roiOverlay)}>
+              ROI Overlay: {roiOverlay ? "On" : "Off"}
+            </button>
+            {/* Horizontal spacer */}
+            <div style={{ flex: 1 }} />
+          </div>
+
+          {/* Canvas placeholder: Expanding/Expanding with stretch=1 */}
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <ImageCanvas />
+          </div>
+        </div>
+
+        {/* Child 2 (configWidget): Expanding/Ignored, minHeight=0 */}
         <div
-          className="flex items-center gap-1.5 px-1.5 py-1 flex-shrink-0"
-          style={{ maxHeight: "var(--control-bar-height)" }}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            height: "100%",
+            padding: 6,
+            gap: 6,
+          }}
         >
-          <button
-            onClick={toggleZoom}
-            className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded"
-          >
-            Fit: {zoomMode === "fit" ? "Window" : "100%"}
-          </button>
-          <button
-            onClick={() => setRoiOverlay(!roiOverlay)}
-            className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded"
-          >
-            ROI Overlay: {roiOverlay ? "On" : "Off"}
-          </button>
-          <div className="flex-1" />
-        </div>
-
-        {/* Canvas */}
-        <div className="flex-1 min-h-0">
-          <ImageCanvas />
-        </div>
-      </div>
-
-      {/* Bottom: JS Editor */}
-      <div className="flex flex-col h-full p-1.5" style={{ gap: "var(--spacing-sm)" }}>
-        {/* Button row */}
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          <button className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded">
-            Reset
-          </button>
-          <button
-            className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded"
-            onClick={() => setUnsaved(false)}
-          >
-            Save
-          </button>
-          <button className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded">
-            Apply to Camera
-          </button>
-          <button className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded">
-            Browse...
-          </button>
-          <button className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded">
-            Clear
-          </button>
-          <div className="flex-1" />
-          <span className="text-xs text-neutral-500 truncate max-w-[400px]">
-            {jsPath || "No file loaded"}
-          </span>
-          <div style={{ width: "8px" }} />
-          {unsaved && (
-            <span className="text-xs" style={{ color: "var(--color-unsaved)" }}>
-              Unsaved changes - click Save to apply.
+          {/* QVBoxLayout margins 6, spacing 6 */}
+          {/* Button row: Reset, Save, "Apply to Camera", "Browse...", Clear, spacer, jsPathLabel (max 400px), 8px spacer, unsaved label (orange, hidden by default) */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+            <button className="qt-btn">Reset</button>
+            <button className="qt-btn" onClick={() => setUnsaved(false)}>Save</button>
+            <button className="qt-btn">Apply to Camera</button>
+            <button className="qt-btn">Browse...</button>
+            <button className="qt-btn">Clear</button>
+            <div style={{ flex: 1 }} />
+            <span
+              style={{
+                fontSize: 12,
+                color: "#999",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                maxWidth: 400,
+              }}
+            >
+              {jsPath || "No file loaded"}
             </span>
-          )}
-        </div>
+            <div style={{ width: 8 }} />
+            {unsaved && (
+              <span style={{ fontSize: 12, color: "orange" }}>
+                Unsaved changes - click Save to apply.
+              </span>
+            )}
+          </div>
 
-        {/* Editor area */}
-        <div className="flex-1 min-h-0">
+          {/* QPlainTextEdit: no word wrap, fills remaining space */}
           <textarea
             value={jsContent}
             onChange={(e) => {
               setJsContent(e.target.value);
               setUnsaved(true);
             }}
-            className="w-full h-full font-mono text-xs p-2 border border-neutral-300 resize-none bg-white"
-            style={{ whiteSpace: "pre", overflowWrap: "normal", overflowX: "auto" }}
+            className="qt-input"
+            style={{
+              flex: 1,
+              minHeight: 0,
+              resize: "none",
+              fontFamily: "monospace",
+              fontSize: 12,
+              whiteSpace: "pre",
+              overflowWrap: "normal",
+              overflowX: "auto",
+              width: "100%",
+            }}
             spellCheck={false}
           />
         </div>
-      </div>
-    </ResizableSplitter>
+      </ResizableSplitter>
+    </div>
   );
 }

@@ -10,7 +10,7 @@ export function Sidebar() {
 
   return (
     <div
-      className="flex h-full border-r border-neutral-300 bg-neutral-50 transition-all duration-200"
+      className="flex h-full"
       style={{
         width: collapsed
           ? "var(--sidebar-collapsed-width)"
@@ -18,38 +18,58 @@ export function Sidebar() {
         minWidth: collapsed
           ? "var(--sidebar-collapsed-width)"
           : "var(--sidebar-expanded-width)",
+        transition: "width 200ms ease, min-width 200ms ease",
+        /* SizePolicy: Fixed horizontal, Expanding vertical */
+        flexShrink: 0,
+        flexGrow: 0,
       }}
     >
-      {/* Scrollable content */}
+      {/* LEFT: QScrollArea (widgetResizable=true, frameShape=NoFrame) */}
       {!collapsed && (
-        <div className="flex-1 overflow-y-auto overflow-x-hidden">
-          {/* Background preview */}
-          <BackgroundPreview />
+        <div
+          className="flex-1 overflow-y-auto overflow-x-hidden"
+          style={{
+            /* QHBoxLayout margin 0, spacing 0 */
+            margin: 0,
+            padding: 0,
+          }}
+        >
+          <div className="flex flex-col">
+            {/* BackgroundPreviewWidget */}
+            <BackgroundPreview />
 
-          <hr className="border-neutral-300" />
+            {/* QFrame::HLine separator */}
+            <hr className="qt-separator" />
 
-          {/* Statistics */}
-          <StatisticsPanel />
+            {/* StatisticsPanel */}
+            <StatisticsPanel />
 
-          <hr className="border-neutral-300" />
+            {/* QFrame::HLine separator */}
+            <hr className="qt-separator" />
 
-          {/* Nanopositioner */}
-          <NanopositionerPanel />
+            {/* NanopositionerTab */}
+            <NanopositionerPanel />
 
-          <hr className="border-neutral-300" />
+            {/* QFrame::HLine separator */}
+            <hr className="qt-separator" />
 
-          {/* Syringe Pump */}
-          <SyringePumpPanel />
+            {/* SyringePumpTab */}
+            <SyringePumpPanel />
+
+            {/* Stretch at bottom */}
+            <div className="flex-1" />
+          </div>
         </div>
       )}
 
-      {/* Toggle button - always visible */}
+      {/* RIGHT: Toggle button (30x30, fixed size, autoRaise style) */}
       <button
         onClick={toggleSidebar}
-        className="flex items-center justify-center bg-neutral-200 hover:bg-neutral-300 border-none cursor-pointer flex-shrink-0"
+        className="qt-tool-btn flex items-center justify-center flex-shrink-0"
         style={{
           width: "var(--sidebar-collapsed-width)",
           height: "var(--sidebar-collapsed-width)",
+          /* autoRaise: border only on hover (handled by qt-tool-btn) */
         }}
         title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
       >

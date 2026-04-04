@@ -14,6 +14,10 @@ export function BufferSaveDialog({ onClose }: Props) {
   const [endIndex, setEndIndex] = useState(latest);
   const [saving, setSaving] = useState(false);
 
+  const handleBrowse = async () => {
+    // TODO: Use Tauri dialog.open to select output directory
+  };
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -27,47 +31,48 @@ export function BufferSaveDialog({ onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-xl w-[450px] flex flex-col">
-        <div className="px-4 py-3 border-b border-neutral-300 font-semibold text-sm">
+      <div className="bg-[var(--bg-window)] shadow-xl flex flex-col" style={{ width: 450 }}>
+        <div className="px-3 py-2 border-b border-[var(--border-widget)] font-semibold text-sm">
           Save Buffer to Disk
         </div>
-        <div className="px-4 py-3">
-          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-xs">
-            <label className="text-right">Output Directory:</label>
+        <div className="px-3 py-3">
+          <div className="qt-form">
+            <label>Output Directory:</label>
             <div className="flex gap-1">
               <input
-                type="text" value={outputDir}
+                type="text"
+                value={outputDir}
                 onChange={(e) => setOutputDir(e.target.value)}
-                className="flex-1 border border-neutral-400 rounded px-1 py-0.5"
+                className="qt-input flex-1"
               />
-              <button className="px-2 py-0.5 bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded">
-                Browse...
-              </button>
+              <button onClick={handleBrowse} className="qt-btn">Browse...</button>
             </div>
-            <label className="text-right">Start Index:</label>
+            <label>Start Index:</label>
             <input
-              type="number" min={earliest} max={latest} value={startIndex}
+              type="number"
+              min={earliest}
+              max={latest}
+              value={startIndex}
               onChange={(e) => setStartIndex(Number(e.target.value))}
-              className="border border-neutral-400 rounded px-1 py-0.5"
+              className="qt-input"
             />
-            <label className="text-right">End Index:</label>
+            <label>End Index:</label>
             <input
-              type="number" min={earliest} max={latest} value={endIndex}
+              type="number"
+              min={earliest}
+              max={latest}
+              value={endIndex}
               onChange={(e) => setEndIndex(Number(e.target.value))}
-              className="border border-neutral-400 rounded px-1 py-0.5"
+              className="qt-input"
             />
           </div>
-          <p className="text-xs text-neutral-500 mt-2">
+          <p className="text-xs mt-2" style={{ color: "var(--text-secondary)" }}>
             Range: {earliest} - {latest} ({latest - earliest + 1} frames available)
           </p>
         </div>
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-neutral-300">
-          <button onClick={onClose} className="px-3 py-1 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded">Cancel</button>
-          <button
-            onClick={handleSave}
-            disabled={saving || !outputDir}
-            className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-          >
+        <div className="flex justify-end gap-2 px-3 py-2 border-t border-[var(--border-widget)]">
+          <button onClick={onClose} className="qt-btn">Cancel</button>
+          <button onClick={handleSave} disabled={saving || !outputDir} className="qt-btn">
             {saving ? "Saving..." : "Save"}
           </button>
         </div>

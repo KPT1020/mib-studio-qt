@@ -1,15 +1,21 @@
 @import "tailwindcss";
 
 :root {
+  /* Layout dimensions matching Qt */
   --sidebar-collapsed-width: 30px;
   --sidebar-expanded-width: 300px;
-  --status-bar-height: 24px;
+  --status-bar-height: 22px;
   --control-bar-height: 40px;
   --thumbnail-size: 100px;
   --grid-columns: 5;
+  --splitter-handle-width: 10px;
+
+  /* Spacing (matching Qt layout margins/spacing) */
   --spacing-xs: 4px;
   --spacing-sm: 6px;
   --spacing-md: 8px;
+
+  /* Colors matching Qt stylesheets */
   --color-indicator-active: #00ff00;
   --color-indicator-idle: gray;
   --color-unsaved: #d17a00;
@@ -17,31 +23,238 @@
   --color-valid: #00ff00;
   --color-invalid: #ff0000;
   --color-roi: #ffff00;
+  --color-selection: blue;
+  --color-selection-bg: lightblue;
+  --color-record-status: gray;
+
+  /* Qt-style widget colors */
+  --bg-widget: #f5f5f5;
+  --bg-window: #ececec;
+  --border-widget: #c0c0c0;
+  --text-primary: #1a1a1a;
+  --text-secondary: #666666;
 }
 
 /* Match Qt default widget styling */
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
   font-size: 13px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  background: var(--bg-window);
+}
+
+/* Standard Qt-style button */
+.qt-btn {
+  padding: 2px 8px;
+  font-size: 12px;
+  background: qlineargradient(spread:pad, x1:0, y1:0, x2:0, y2:1);
+  background-color: #e8e8e8;
+  border: 1px solid #ababab;
+  border-radius: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.qt-btn:hover {
+  background-color: #d8d8d8;
+  border-color: #999;
+}
+.qt-btn:active {
+  background-color: #c8c8c8;
+}
+.qt-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Qt-style tool button (smaller, no border normally) */
+.qt-tool-btn {
+  padding: 2px 6px;
+  font-size: 11px;
+  background-color: transparent;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.qt-tool-btn:hover {
+  background-color: #d8d8d8;
+  border-color: #bbb;
+}
+
+/* Qt-style input/select */
+.qt-input {
+  padding: 1px 4px;
+  font-size: 12px;
+  border: 1px solid #ababab;
+  border-radius: 2px;
+  background: white;
+}
+.qt-input:focus {
+  outline: none;
+  border-color: #3399ff;
+}
+.qt-input:disabled {
+  opacity: 0.5;
+  background: #f0f0f0;
+}
+
+.qt-select {
+  padding: 1px 4px;
+  font-size: 12px;
+  border: 1px solid #ababab;
+  border-radius: 2px;
+  background: white;
+}
+.qt-select:disabled {
+  opacity: 0.5;
+}
+
+/* Qt-style checkbox */
+.qt-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.qt-checkbox input[type="checkbox"] {
+  margin: 0;
+}
+
+/* Qt-style groupbox (fieldset) */
+.qt-groupbox {
+  border: 1px solid #c0c0c0;
+  border-radius: 3px;
+  padding: 8px 6px 6px 6px;
+  margin: 0;
+}
+.qt-groupbox legend {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 4px;
+}
+
+/* Qt-style form layout */
+.qt-form {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 8px;
+  align-items: center;
+  font-size: 12px;
+}
+.qt-form label {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Qt-style tab widget */
+.qt-tab-bar {
+  display: flex;
+  border-bottom: 1px solid #c0c0c0;
+  background: #ececec;
+}
+.qt-tab {
+  padding: 4px 12px;
+  font-size: 12px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 3px 3px 0 0;
+  cursor: pointer;
+  background: transparent;
+  color: var(--text-primary);
+}
+.qt-tab:hover {
+  background: #d8d8d8;
+}
+.qt-tab[data-active="true"] {
+  background: white;
+  border-color: #c0c0c0;
+  margin-bottom: -1px;
+  padding-bottom: 5px;
+}
+.qt-tab:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Qt-style list widget */
+.qt-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  background: white;
+  border: 1px solid #c0c0c0;
+}
+.qt-list-item {
+  padding: 3px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #f0f0f0;
+}
+.qt-list-item:hover {
+  background: #e8f0fe;
+}
+.qt-list-item[data-selected="true"] {
+  background: #3399ff;
+  color: white;
+}
+
+/* Qt-style separator */
+.qt-separator {
+  border: none;
+  border-top: 1px solid #c0c0c0;
+  margin: 0;
+}
+
+/* Qt-style status bar */
+.qt-statusbar {
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  height: var(--status-bar-height);
+  border-top: 1px solid #c0c0c0;
+  background: var(--bg-window);
+  font-size: 11px;
+  color: var(--text-secondary);
 }
 
 /* Allotment splitter styling to match Qt */
 .allotment-module_splitView__MGzYj {
   height: 100% !important;
 }
+.allotment-module_sash__dUHxJ {
+  background: #d0d0d0 !important;
+}
+.allotment-module_sash__dUHxJ:hover {
+  background: #b0b0b0 !important;
+}
 
-/* Scrollbar styling */
+/* Scrollbar styling - Qt-like */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 12px;
+  height: 12px;
 }
 ::-webkit-scrollbar-track {
   background: #f1f1f1;
 }
 ::-webkit-scrollbar-thumb {
   background: #c1c1c1;
-  border-radius: 4px;
+  border-radius: 0;
+  border: 2px solid #f1f1f1;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #a1a1a1;
+}
+
+/* Overlay legend text */
+.overlay-legend {
+  font-size: 11px;
+}
+.overlay-legend .swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
 }

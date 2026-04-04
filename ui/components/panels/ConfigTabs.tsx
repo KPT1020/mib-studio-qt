@@ -18,135 +18,199 @@ export function ConfigTabs() {
   const [cameraUnsaved, setCameraUnsaved] = useState(false);
 
   return (
-    <TabBar tabs={CONFIG_TABS} activeTab={activeTab} onTabChange={setActiveTab}>
-      {activeTab === "appConfig" && (
-        <div className="flex flex-col h-full p-1.5" style={{ gap: "var(--spacing-sm)" }}>
-          {/* Top button row */}
-          <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
-            <button className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded">
-              Reset
-            </button>
-            <button
-              onClick={() => setUnsaved(false)}
-              className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded"
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <TabBar tabs={CONFIG_TABS} activeTab={activeTab} onTabChange={setActiveTab}>
+        {activeTab === "appConfig" && (
+          <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+            {/* Button row: QHBoxLayout */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                flexShrink: 0,
+                flexWrap: "wrap",
+                padding: "4px 6px",
+              }}
             >
-              Save
-            </button>
-            <button className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded">
-              Browse...
-            </button>
-            <button className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded">
-              Clear
-            </button>
-            <div className="flex-1" />
-            <span className="text-xs text-neutral-500 truncate max-w-[400px]">
-              {configPath || "No config loaded"}
-            </span>
-            <div style={{ width: "8px" }} />
-            {unsaved && (
-              <span className="text-xs" style={{ color: "var(--color-unsaved)" }}>
-                Unsaved changes - click Save to apply.
-              </span>
-            )}
-            <div style={{ width: "8px" }} />
-            <span className="text-xs text-neutral-600">Profile:</span>
-            <select
-              value={profileName}
-              onChange={(e) => setProfileName(e.target.value)}
-              className="text-xs border border-neutral-400 rounded px-1 py-0.5"
-            >
-              <option value="Default">Default</option>
-            </select>
-            <button className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded">
-              Save Profile
-            </button>
-            <button className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded">
-              Rename
-            </button>
-            <button className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded">
-              Delete
-            </button>
-            <button
-              onClick={() => setViewMode(viewMode === "json" ? "table" : "json")}
-              className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded"
-            >
-              {viewMode === "json" ? "Table View" : "JSON View"}
-            </button>
-          </div>
+              <button className="qt-btn">Reset</button>
+              <button className="qt-btn" onClick={() => setUnsaved(false)}>
+                Save
+              </button>
+              <button className="qt-btn">Browse...</button>
+              <button className="qt-btn">Clear</button>
 
-          {/* Content area */}
-          <div className="flex-1 min-h-0">
-            {viewMode === "json" ? (
-              <textarea
-                value={jsonContent}
-                onChange={(e) => {
-                  setJsonContent(e.target.value);
-                  setUnsaved(true);
+              {/* stretch */}
+              <div style={{ flex: 1 }} />
+
+              {/* configPathLabel (max 400px) */}
+              <span
+                style={{
+                  fontSize: 12,
+                  color: "#888",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  maxWidth: 400,
                 }}
-                className="w-full h-full font-mono text-xs p-2 border border-neutral-300 resize-none bg-white"
-                style={{ whiteSpace: "pre", overflowWrap: "normal", overflowX: "auto" }}
+              >
+                {configPath || "No config loaded"}
+              </span>
+
+              {/* 8px spacer */}
+              <div style={{ width: 8 }} />
+
+              {/* unsaved label (orange) */}
+              {unsaved && (
+                <span style={{ fontSize: 12, color: "orange" }}>
+                  Unsaved changes - click Save to apply.
+                </span>
+              )}
+
+              {/* 8px spacer */}
+              <div style={{ width: 8 }} />
+
+              {/* "Profile:" label */}
+              <span style={{ fontSize: 12 }}>Profile:</span>
+
+              {/* QComboBox (profiles) */}
+              <select
+                className="qt-select"
+                value={profileName}
+                onChange={(e) => setProfileName(e.target.value)}
+              >
+                <option value="Default">Default</option>
+              </select>
+
+              <button className="qt-btn">Save Profile</button>
+              <button className="qt-btn">Rename</button>
+              <button className="qt-btn">Delete</button>
+
+              {/* JSON/Table toggle button */}
+              <button
+                className="qt-btn"
+                onClick={() => setViewMode(viewMode === "json" ? "table" : "json")}
+              >
+                {viewMode === "json" ? "Table View" : "JSON View"}
+              </button>
+            </div>
+
+            {/* QStackedWidget: index 0 = QPlainTextEdit (no wrap), index 1 = scroll area with grid */}
+            <div style={{ flex: 1, minHeight: 0 }}>
+              {viewMode === "json" ? (
+                <textarea
+                  className="qt-input"
+                  value={jsonContent}
+                  onChange={(e) => {
+                    setJsonContent(e.target.value);
+                    setUnsaved(true);
+                  }}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    fontFamily: "monospace",
+                    resize: "none",
+                    whiteSpace: "pre",
+                    overflowWrap: "normal",
+                    overflowX: "auto",
+                    boxSizing: "border-box",
+                  }}
+                  spellCheck={false}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    overflow: "auto",
+                    border: "1px solid #ababab",
+                    background: "white",
+                    padding: 8,
+                    boxSizing: "border-box",
+                  }}
+                >
+                  <p style={{ fontSize: 12, color: "#999" }}>
+                    Table view - grouped config parameters will render here
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === "cameraScript" && (
+          <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+            {/* Button row */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                flexShrink: 0,
+                padding: "4px 6px",
+              }}
+            >
+              <button className="qt-btn">Reset</button>
+              <button className="qt-btn" onClick={() => setCameraUnsaved(false)}>
+                Save
+              </button>
+              <button className="qt-btn">Apply to Camera</button>
+              <button className="qt-btn">Browse...</button>
+              <button className="qt-btn">Clear</button>
+
+              {/* stretch */}
+              <div style={{ flex: 1 }} />
+
+              {/* path label */}
+              <span
+                style={{
+                  fontSize: 12,
+                  color: "#888",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  maxWidth: 400,
+                }}
+              >
+                {cameraScriptPath || "No script loaded"}
+              </span>
+
+              {/* 8px spacer */}
+              <div style={{ width: 8 }} />
+
+              {/* unsaved label */}
+              {cameraUnsaved && (
+                <span style={{ fontSize: 12, color: "orange" }}>
+                  Unsaved changes - click Save to apply.
+                </span>
+              )}
+            </div>
+
+            {/* QPlainTextEdit (no wrap) */}
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <textarea
+                className="qt-input"
+                value={cameraScript}
+                onChange={(e) => {
+                  setCameraScript(e.target.value);
+                  setCameraUnsaved(true);
+                }}
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  fontFamily: "monospace",
+                  resize: "none",
+                  whiteSpace: "pre",
+                  overflowWrap: "normal",
+                  overflowX: "auto",
+                  boxSizing: "border-box",
+                }}
                 spellCheck={false}
               />
-            ) : (
-              <div className="w-full h-full overflow-auto border border-neutral-300 bg-white p-2">
-                <p className="text-xs text-neutral-400">
-                  Table view - grouped config parameters will render here
-                </p>
-              </div>
-            )}
+            </div>
           </div>
-        </div>
-      )}
-
-      {activeTab === "cameraScript" && (
-        <div className="flex flex-col h-full p-1.5" style={{ gap: "var(--spacing-sm)" }}>
-          {/* Button row */}
-          <div className="flex items-center gap-1.5 flex-shrink-0">
-            <button className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded">
-              Reset
-            </button>
-            <button
-              onClick={() => setCameraUnsaved(false)}
-              className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded"
-            >
-              Save
-            </button>
-            <button className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded">
-              Apply to Camera
-            </button>
-            <button className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded">
-              Browse...
-            </button>
-            <button className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded">
-              Clear
-            </button>
-            <div className="flex-1" />
-            <span className="text-xs text-neutral-500 truncate max-w-[400px]">
-              {cameraScriptPath || "No script loaded"}
-            </span>
-            <div style={{ width: "8px" }} />
-            {cameraUnsaved && (
-              <span className="text-xs" style={{ color: "var(--color-unsaved)" }}>
-                Unsaved changes - click Save to apply.
-              </span>
-            )}
-          </div>
-
-          {/* Editor */}
-          <div className="flex-1 min-h-0">
-            <textarea
-              value={cameraScript}
-              onChange={(e) => {
-                setCameraScript(e.target.value);
-                setCameraUnsaved(true);
-              }}
-              className="w-full h-full font-mono text-xs p-2 border border-neutral-300 resize-none bg-white"
-              style={{ whiteSpace: "pre", overflowWrap: "normal", overflowX: "auto" }}
-              spellCheck={false}
-            />
-          </div>
-        </div>
-      )}
-    </TabBar>
+        )}
+      </TabBar>
+    </div>
   );
 }

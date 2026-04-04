@@ -9,6 +9,7 @@ interface TabBarProps {
   tabs: Tab[];
   activeTab: string;
   onTabChange: (id: string) => void;
+  disabledTabs?: Set<string>;
   cornerWidget?: ReactNode;
   children: ReactNode;
 }
@@ -17,40 +18,41 @@ export function TabBar({
   tabs,
   activeTab,
   onTabChange,
+  disabledTabs,
   cornerWidget,
   children,
 }: TabBarProps) {
   return (
     <div className="flex flex-col h-full">
-      {/* Tab header row */}
-      <div className="flex items-center border-b border-neutral-300 bg-neutral-100 flex-shrink-0">
-        {/* Tab buttons */}
-        <div className="flex">
-          {tabs.map((tab) => (
+      {/* Qt-style tab bar row */}
+      <div className="qt-tab-bar flex-shrink-0" style={{ alignItems: "end" }}>
+        {/* Tab buttons using .qt-tab class */}
+        {tabs.map((tab) => {
+          const isDisabled = disabledTabs?.has(tab.id) ?? false;
+          const isActive = activeTab === tab.id;
+
+          return (
             <button
               key={tab.id}
-              onClick={() => onTabChange(tab.id)}
-              className={`px-4 py-1.5 text-xs border-r border-neutral-300 transition-colors ${
-                activeTab === tab.id
-                  ? "bg-white font-semibold border-b-2 border-b-blue-500"
-                  : "hover:bg-neutral-200 cursor-pointer"
-              }`}
+              className="qt-tab"
+              data-active={isActive}
+              disabled={isDisabled}
+              onClick={() => !isDisabled && onTabChange(tab.id)}
             >
               {tab.label}
             </button>
-          ))}
-        </div>
+          );
+        })}
 
-        {/* Spacer */}
-        <div className="flex-1" />
-
-        {/* Corner widget */}
+        {/* Corner widget (right side, ml-auto) */}
         {cornerWidget && (
-          <div className="flex items-center gap-2 px-2">{cornerWidget}</div>
+          <div className="ml-auto flex items-center px-2">
+            {cornerWidget}
+          </div>
         )}
       </div>
 
-      {/* Tab content */}
+      {/* Content area takes remaining height */}
       <div className="flex-1 min-h-0 overflow-hidden">{children}</div>
     </div>
   );

@@ -80,96 +80,119 @@ export function PlaybackPanel() {
   };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Canvas area */}
-      <div className="flex-1 min-h-0">
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        margin: 0,
+        padding: 0,
+        gap: 0,
+      }}
+    >
+      {/* Canvas area: flex-1, contains ImageCanvas */}
+      <div style={{ flex: 1, minHeight: 0 }}>
         <ImageCanvas />
       </div>
 
-      {/* Controls bar */}
-      <div className="flex items-center gap-1.5 px-1.5 py-1 flex-shrink-0 border-t border-neutral-200">
-        <button
-          onClick={handleOverlayToggle}
-          className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded"
-        >
+      {/* Controls bar: QHBoxLayout margins 6/4/6/4, spacing 6 */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          padding: "4px 6px 4px 6px",
+          gap: 6,
+          flexShrink: 0,
+        }}
+      >
+        {/* QToolButton overlay toggle */}
+        <button className="qt-tool-btn" onClick={handleOverlayToggle}>
           {OVERLAY_LABELS[overlayMode]}
         </button>
 
+        {/* Overlay legend (shown when overlay != off) */}
         {overlayMode !== "off" && (
-          <span className="text-xs">
-            <span style={{ color: "var(--color-target)" }}>&#9632;</span> Target{" "}
-            <span style={{ color: "var(--color-valid)" }}>&#9632;</span> Valid{" "}
-            <span style={{ color: "var(--color-invalid)" }}>&#9632;</span> Invalid
+          <span
+            className="overlay-legend"
+            style={{ display: "flex", alignItems: "center", gap: 4 }}
+          >
+            <span
+              className="swatch"
+              style={{ backgroundColor: "#0078FF" }}
+            />
+            Target
+            <span
+              className="swatch"
+              style={{ backgroundColor: "#00FF00" }}
+            />
+            Valid
+            <span
+              className="swatch"
+              style={{ backgroundColor: "#FF0000" }}
+            />
+            Invalid
           </span>
         )}
 
-        <button
-          onClick={handleSetBackground}
-          className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded"
-        >
+        {/* QToolButton "Set BG" */}
+        <button className="qt-tool-btn" onClick={handleSetBackground}>
           Set BG
         </button>
 
-        <label className="flex items-center gap-1 text-xs">
+        {/* Auto Background checkbox */}
+        <label className="qt-checkbox">
           <input
             type="checkbox"
             checked={autoBg}
             onChange={(e) => setAutoBg(e.target.checked)}
           />
-          Auto BG
+          Auto Background
         </label>
 
-        <button
-          onClick={handleClearRoi}
-          disabled={!roi}
-          className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded disabled:opacity-50"
-        >
+        {/* QToolButton "Clear ROI" (disabled when no ROI) */}
+        <button className="qt-tool-btn" onClick={handleClearRoi} disabled={!roi}>
           Clear ROI
         </button>
 
-        <button
-          onClick={() => openDialog("bufferSave")}
-          className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded"
-        >
+        {/* QToolButton "Save Buffer" */}
+        <button className="qt-tool-btn" onClick={() => openDialog("bufferSave")}>
           Save Buffer
         </button>
 
+        {/* QToolButton "Record" / "Stop Rec" */}
         <button
+          className="qt-tool-btn"
           onClick={handleToggleRecording}
-          className={`px-2 py-0.5 text-xs border rounded ${
-            isRecording
-              ? "bg-red-100 border-red-400 text-red-700"
-              : "bg-neutral-200 hover:bg-neutral-300 border-neutral-400"
-          }`}
+          style={isRecording ? { color: "#b91c1c" } : undefined}
         >
           {isRecording ? "Stop Rec" : "Record"}
         </button>
 
+        {/* Record status label (color: gray, padding: 0 4px) */}
         {isRecording && (
-          <span className="text-xs" style={{ color: "gray", padding: "0 4px" }}>
+          <span style={{ color: "gray", padding: "0 4px", fontSize: 12 }}>
             Recording...
           </span>
         )}
 
-        <button
-          onClick={toggleZoom}
-          className="px-2 py-0.5 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded"
-        >
+        {/* QToolButton "Fit: Window" / "Fit: 100%" */}
+        <button className="qt-tool-btn" onClick={toggleZoom}>
           Fit: {zoomMode === "fit" ? "Window" : "100%"}
         </button>
 
-        <div className="flex-1" />
+        {/* Horizontal stretch */}
+        <div style={{ flex: 1 }} />
       </div>
 
-      {/* Scrubbing slider */}
+      {/* QSlider horizontal: range from earliest to latest, step 1, page step 8 */}
       <input
         type="range"
         min={earliest}
         max={latest}
         value={currentIndex}
         onChange={(e) => seekToIndex(Number(e.target.value))}
-        className="w-full flex-shrink-0"
         step={1}
+        style={{ width: "100%", flexShrink: 0, margin: 0, display: "block" }}
       />
     </div>
   );

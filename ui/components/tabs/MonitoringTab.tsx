@@ -41,70 +41,85 @@ export function MonitoringTab() {
     }
   };
 
-  // Prepare scatter data from monitoring frames
   const scatterData = monitoringValid.map((f) => ({
     area: f.validation.area,
     deformability: f.validation.deformability,
     isTargetGroup: f.validation.isTargetGroup,
   }));
 
-  // Prepare histogram data from monitoring frames
   const histogramData = monitoringValid.map((f) => f.validation.ringRatio);
 
   return (
+    /* QGridLayout margins 6, spacing 6 */
     <div
-      className="grid h-full"
       style={{
+        display: "grid",
         gridTemplateColumns: "1fr 1fr auto",
         gridTemplateRows: "auto 1fr 1fr",
-        gap: "var(--spacing-sm)",
-        padding: "var(--spacing-sm)",
+        gap: 6,
+        padding: 6,
+        height: "100%",
+        minHeight: 0,
       }}
     >
-      {/* Row 0: Top controls (span 2 columns) */}
-      <div className="flex items-center gap-2 col-span-2">
-        <button
-          onClick={handleClearBuffer}
-          className="px-3 py-1 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded"
-        >
+      {/* Row 0, col 0-1: QHBoxLayout - Clear Buffer btn, Sort Trigger btn, QSpinBox (1-1000000 us, suffix " us"), spacer */}
+      <div
+        style={{
+          gridColumn: "1 / 3",
+          gridRow: 1,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+        }}
+      >
+        <button className="qt-btn" onClick={handleClearBuffer}>
           Clear Buffer
         </button>
         <button
+          className="qt-btn"
           onClick={handleSortTrigger}
-          className="px-3 py-1 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded"
           title="Manually fire a sort trigger pulse for testing"
         >
           Sort Trigger
         </button>
-        <div className="flex items-center gap-1">
-          <input
-            type="number"
-            min={1}
-            max={1000000}
-            value={triggerDurationUs}
-            onChange={(e) => handleTriggerDurationChange(Number(e.target.value))}
-            className="w-24 px-1 py-0.5 text-xs border border-neutral-400 rounded"
-            title="Trigger pulse duration in microseconds"
-          />
-          <span className="text-xs text-neutral-600">us</span>
-        </div>
-        <div className="flex-1" />
+        <input
+          type="number"
+          className="qt-input"
+          min={1}
+          max={1000000}
+          value={triggerDurationUs}
+          onChange={(e) => handleTriggerDurationChange(Number(e.target.value))}
+          style={{ width: 120 }}
+          title="Trigger pulse duration in microseconds"
+        />
+        <span style={{ fontSize: 12 }}>us</span>
+        <div style={{ flex: 1 }} />
       </div>
 
-      {/* Row 1, Col 0: Scatter plot */}
-      <div className="min-h-0">
+      {/* Row 1, col 0: QChartView (scatter plot) - Expanding/Expanding */}
+      <div style={{ gridColumn: 1, gridRow: 2, minHeight: 0, minWidth: 0 }}>
         <ScatterPlot data={scatterData} />
       </div>
 
-      {/* Row 1, Col 1: Histogram */}
-      <div className="min-h-0">
+      {/* Row 1, col 1: QChartView (histogram) - Expanding/Expanding */}
+      <div style={{ gridColumn: 2, gridRow: 2, minHeight: 0, minWidth: 0 }}>
         <Histogram data={histogramData} />
       </div>
 
-      {/* Row 2, Col 0: Valid frames */}
-      <div className="flex flex-col min-h-0">
-        <div className="flex items-center gap-2 mb-1">
-          <label className="flex items-center gap-1 text-xs">
+      {/* Row 2, col 0: Valid frames container (QVBoxLayout margins 0, spacing 4) */}
+      <div
+        style={{
+          gridColumn: 1,
+          gridRow: 3,
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+          minHeight: 0,
+        }}
+      >
+        {/* Show Overlay checkbox + spacer */}
+        <div style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
+          <label className="qt-checkbox">
             <input
               type="checkbox"
               checked={validOverlay}
@@ -112,17 +127,35 @@ export function MonitoringTab() {
             />
             Show Overlay
           </label>
-          <div className="flex-1" />
+          <div style={{ flex: 1 }} />
         </div>
-        <div className="flex-1 min-h-[200px] overflow-y-auto border border-neutral-300 bg-white">
+        {/* QScrollArea (min height 200, grid layout spacing 4 inside) */}
+        <div
+          style={{
+            flex: 1,
+            minHeight: 200,
+            overflow: "auto",
+            border: "1px solid #c0c0c0",
+            background: "white",
+          }}
+        >
           <FrameGrid frames={monitoringValid} showOverlay={validOverlay} />
         </div>
       </div>
 
-      {/* Row 2, Col 1: Invalid frames */}
-      <div className="flex flex-col min-h-0">
-        <div className="flex items-center gap-2 mb-1">
-          <label className="flex items-center gap-1 text-xs">
+      {/* Row 2, col 1: Invalid frames container (same structure) */}
+      <div
+        style={{
+          gridColumn: 2,
+          gridRow: 3,
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+          minHeight: 0,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
+          <label className="qt-checkbox">
             <input
               type="checkbox"
               checked={invalidOverlay}
@@ -130,15 +163,30 @@ export function MonitoringTab() {
             />
             Show Overlay
           </label>
-          <div className="flex-1" />
+          <div style={{ flex: 1 }} />
         </div>
-        <div className="flex-1 min-h-[200px] overflow-y-auto border border-neutral-300 bg-white">
+        <div
+          style={{
+            flex: 1,
+            minHeight: 200,
+            overflow: "auto",
+            border: "1px solid #c0c0c0",
+            background: "white",
+          }}
+        >
           <FrameGrid frames={monitoringInvalid} showOverlay={invalidOverlay} />
         </div>
       </div>
 
-      {/* Rows 0-2, Col 2: Tune params panel */}
-      <div className="row-span-3 min-h-0" style={{ minWidth: 0, maxWidth: 280 }}>
+      {/* Row 0-2, col 2: Tune params placeholder (minSize 0x0, spans all 3 rows) */}
+      <div
+        style={{
+          gridColumn: 3,
+          gridRow: "1 / 4",
+          minWidth: 0,
+          minHeight: 0,
+        }}
+      >
         <TuneParamsPanel />
       </div>
     </div>

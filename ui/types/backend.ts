@@ -66,6 +66,13 @@ export interface ProcessingConfig {
   multi_image_count: number;
 }
 
+export interface BrightnessQuantiles {
+  q1: number;
+  q2: number;
+  q3: number;
+  q4: number;
+}
+
 export interface FilterResult {
   isValid: boolean;
   touchesBorder: boolean;
@@ -77,6 +84,7 @@ export interface FilterResult {
   areaRatio: number;
   ringRatio: number;
   youngsModulus: number;
+  brightness: BrightnessQuantiles;
   isTargetGroup: boolean;
 }
 

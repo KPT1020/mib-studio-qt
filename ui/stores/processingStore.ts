@@ -46,6 +46,8 @@ interface ProcessingState {
   algoAvgUs: number;
   totalValidFlushed: number;
   backgroundImageBase64: string | null;
+  maskBase64: string | null;
+  contoursJson: string | null;
 
   setConfig: (config: ProcessingConfig) => void;
   setRoi: (roi: Roi | null) => void;
@@ -56,6 +58,8 @@ interface ProcessingState {
   setMonitoringInvalidFrames: (frames: ProcessedFrame[]) => void;
   setProcessingStats: (algoFps: number, validFps: number, invalidFps: number, algoAvgUs: number, totalValid: number) => void;
   setBackgroundImage: (base64: string | null) => void;
+  setMask: (base64: string | null) => void;
+  setContours: (json: string | null) => void;
 }
 
 export const useProcessingStore = create<ProcessingState>((set) => ({
@@ -72,6 +76,8 @@ export const useProcessingStore = create<ProcessingState>((set) => ({
   algoAvgUs: 0,
   totalValidFlushed: 0,
   backgroundImageBase64: null,
+  maskBase64: null,
+  contoursJson: null,
 
   setConfig: (config) => set({ config }),
   setRoi: (roi) => set({ roi }),
@@ -83,4 +89,6 @@ export const useProcessingStore = create<ProcessingState>((set) => ({
   setProcessingStats: (algoFps, validFps, invalidFps, algoAvgUs, totalValid) =>
     set({ algoFps, validFps, invalidFps, algoAvgUs, totalValidFlushed: totalValid }),
   setBackgroundImage: (base64) => set({ backgroundImageBase64: base64 }),
+  setMask: (base64) => set({ maskBase64: base64 }),
+  setContours: (json) => set({ contoursJson: json }),
 }));

@@ -65,113 +65,76 @@ export function ConnectTab() {
     }
   };
 
-  return (
-    <div className="flex flex-col h-full p-0">
-      {/* Available devices label */}
-      <div className="px-3 py-2 text-sm">Available devices:</div>
+  const items = deviceTab === "cameras" ? cameras : framegrabbers;
+  const selectedIndex = deviceTab === "cameras" ? selectedCameraIndex : selectedFramegrabberIndex;
+  const onSelect = deviceTab === "cameras" ? setSelectedCamera : setSelectedFramegrabber;
 
-      {/* Device tabs */}
-      <div className="flex-1 flex flex-col mx-0">
-        {/* Tab headers */}
-        <div className="flex border-b border-neutral-300">
+  return (
+    /* QVBoxLayout (default margins ~9px) */
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: 9, gap: 0 }}>
+      {/* QLabel "Available devices:" */}
+      <label style={{ fontSize: 12, marginBottom: 4 }}>Available devices:</label>
+
+      {/* QTabWidget with 2 tabs: "Cameras" and "Framegrabbers" */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+        {/* Tab bar */}
+        <div className="qt-tab-bar">
           <button
+            className="qt-tab"
+            data-active={deviceTab === "cameras"}
             onClick={() => setDeviceTab("cameras")}
-            className={`px-4 py-1.5 text-xs border-r border-neutral-300 ${
-              deviceTab === "cameras"
-                ? "bg-white font-semibold border-b-2 border-b-blue-500"
-                : "bg-neutral-100 hover:bg-neutral-200 cursor-pointer"
-            }`}
           >
             Cameras
           </button>
           <button
+            className="qt-tab"
+            data-active={deviceTab === "framegrabbers"}
             onClick={() => setDeviceTab("framegrabbers")}
-            className={`px-4 py-1.5 text-xs border-r border-neutral-300 ${
-              deviceTab === "framegrabbers"
-                ? "bg-white font-semibold border-b-2 border-b-blue-500"
-                : "bg-neutral-100 hover:bg-neutral-200 cursor-pointer"
-            }`}
           >
             Framegrabbers
           </button>
         </div>
 
-        {/* Device list */}
-        <div className="flex-1 overflow-y-auto bg-white border border-neutral-300 mx-3">
-          {deviceTab === "cameras" && (
-            <ul className="list-none m-0 p-0">
-              {cameras.map((cam, i) => (
-                <li
-                  key={`${cam.interfaceIndex}-${cam.deviceIndex}`}
-                  onClick={() => setSelectedCamera(i)}
-                  className={`px-3 py-1.5 text-sm cursor-pointer ${
-                    selectedCameraIndex === i
-                      ? "bg-blue-100 font-medium"
-                      : "hover:bg-neutral-50"
-                  }`}
-                >
-                  {cam.label}
-                </li>
-              ))}
-              {cameras.length === 0 && (
-                <li className="px-3 py-4 text-sm text-neutral-400 text-center">
-                  No cameras found. Click Refresh.
-                </li>
-              )}
-            </ul>
+        {/* QListWidget (single selection mode) filling the tab */}
+        <ul
+          className="qt-list"
+          style={{
+            flex: 1,
+            overflow: "auto",
+            border: "1px solid #c0c0c0",
+            borderTop: "none",
+          }}
+        >
+          {items.map((item, i) => (
+            <li
+              key={`${item.interfaceIndex}-${item.deviceIndex}`}
+              className="qt-list-item"
+              data-selected={selectedIndex === i}
+              onClick={() => onSelect(i)}
+            >
+              {item.label}
+            </li>
+          ))}
+          {items.length === 0 && (
+            <li className="qt-list-item" style={{ color: "#999", textAlign: "center" }}>
+              {deviceTab === "cameras"
+                ? "No cameras found. Click Refresh."
+                : "No framegrabbers found. Click Refresh."}
+            </li>
           )}
-          {deviceTab === "framegrabbers" && (
-            <ul className="list-none m-0 p-0">
-              {framegrabbers.map((fg, i) => (
-                <li
-                  key={`${fg.interfaceIndex}-${fg.deviceIndex}`}
-                  onClick={() => setSelectedFramegrabber(i)}
-                  className={`px-3 py-1.5 text-sm cursor-pointer ${
-                    selectedFramegrabberIndex === i
-                      ? "bg-blue-100 font-medium"
-                      : "hover:bg-neutral-50"
-                  }`}
-                >
-                  {fg.label}
-                </li>
-              ))}
-              {framegrabbers.length === 0 && (
-                <li className="px-3 py-4 text-sm text-neutral-400 text-center">
-                  No framegrabbers found. Click Refresh.
-                </li>
-              )}
-            </ul>
-          )}
-        </div>
+        </ul>
       </div>
 
-      {/* Button row */}
-      <div className="flex items-center gap-2 px-3 py-2">
-        <button
-          onClick={handleRefresh}
-          className="px-3 py-1 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded"
-        >
-          Refresh
-        </button>
-        <button
-          onClick={handleConnect}
-          className="px-3 py-1 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded"
-        >
-          Connect
-        </button>
-        <div className="flex-1" />
-        <button
-          onClick={() => openDialog("mockConfig")}
-          className="px-3 py-1 text-xs bg-neutral-200 hover:bg-neutral-300 border border-neutral-400 rounded"
-        >
-          Configure Mock...
-        </button>
+      {/* Button row (QHBoxLayout): Refresh, Connect, spacer, "Configure Mock..." */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+        <button className="qt-btn" onClick={handleRefresh}>Refresh</button>
+        <button className="qt-btn" onClick={handleConnect}>Connect</button>
+        <div style={{ flex: 1 }} />
+        <button className="qt-btn" onClick={() => openDialog("mockConfig")}>Configure Mock...</button>
       </div>
 
-      {/* Status */}
-      <div className="px-3 py-1 text-xs text-neutral-600 border-t border-neutral-200">
-        {status}
-      </div>
+      {/* QLabel status at bottom */}
+      <label style={{ fontSize: 12, color: "#666", marginTop: 4 }}>{status}</label>
     </div>
   );
 }

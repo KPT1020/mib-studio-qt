@@ -22,15 +22,17 @@ export default function App() {
     <div className="flex flex-col h-screen w-screen overflow-hidden">
       {/* Menu bar is handled by Tauri native menu */}
 
-      {/* Main content */}
+      {/* Main content area */}
       <div className="flex-1 min-h-0">
         <MainLayout />
       </div>
 
-      {/* Status bar */}
-      <StatusBar />
+      {/* Status bar - 22px, matches Qt QStatusBar */}
+      <div className="qt-statusbar">
+        <StatusBarText />
+      </div>
 
-      {/* Dialogs */}
+      {/* Dialog overlay system */}
       {activeDialog === "processingSettings" && (
         <ProcessingSettingsDialog onClose={closeDialog} />
       )}
@@ -56,15 +58,7 @@ export default function App() {
   );
 }
 
-function StatusBar() {
+function StatusBarText() {
   const statusText = useAppStore((s) => s.statusText);
-
-  return (
-    <div
-      className="flex items-center px-2 border-t border-neutral-300 bg-neutral-100 text-xs text-neutral-600"
-      style={{ height: "var(--status-bar-height)" }}
-    >
-      <span>{statusText}</span>
-    </div>
-  );
+  return <span>{statusText}</span>;
 }

@@ -1,23 +1,16 @@
 import { useState } from "react";
-import { TabBar } from "../layout/TabBar";
 import { PreviewPage } from "./PreviewPage";
 import { MonitoringTab } from "./MonitoringTab";
 import { useExperimentStore } from "../../stores/experimentStore";
 import { useProcessingStore } from "../../stores/processingStore";
 import { startExperiment, stopExperiment } from "../../hooks/useBackend";
 
-const EXPERIMENT_TABS = [
-  { id: "preview", label: "Preview" },
-  { id: "monitoring", label: "Monitoring" },
-];
-
 export function ExperimentTab() {
-  const [activeTab, setActiveTab] = useState("preview");
+  const [activeTab, setActiveTab] = useState<"preview" | "monitoring">("preview");
   const isActive = useExperimentStore((s) => s.isActive);
   const roi = useProcessingStore((s) => s.roi);
 
   const handleStartExperiment = async () => {
-    // In production, this would open a file dialog first
     try {
       await startExperiment("experiment.h5");
       useExperimentStore.getState().setActive(true);
@@ -35,54 +28,86 @@ export function ExperimentTab() {
     }
   };
 
-  const cornerWidget = (
-    <div className="flex items-center gap-2">
-      {/* Experiment indicator */}
-      <div
-        className="border border-black"
-        style={{
-          width: 20,
-          height: 20,
-          backgroundColor: isActive
-            ? "var(--color-indicator-active)"
-            : "var(--color-indicator-idle)",
-        }}
-      />
-
-      {/* ROI display */}
-      {roi && (
-        <span className="text-xs font-bold px-2">
-          ROI: {roi.w} x {roi.h} @ ({roi.x}, {roi.y})
-        </span>
-      )}
-
-      {/* Start/Stop buttons */}
-      <button
-        onClick={handleStartExperiment}
-        disabled={isActive}
-        className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        Start Experiment
-      </button>
-      <button
-        onClick={handleStopExperiment}
-        disabled={!isActive}
-        className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        Stop Experiment
-      </button>
-    </div>
-  );
-
   return (
-    <TabBar
-      tabs={EXPERIMENT_TABS}
-      activeTab={activeTab}
-      onTabChange={setActiveTab}
-      cornerWidget={cornerWidget}
-    >
-      {activeTab === "preview" && <PreviewPage />}
-      {activeTab === "monitoring" && <MonitoringTab />}
-    </TabBar>
+    /* QTabWidget with 2 tabs: "Preview" and "Monitoring" */
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {/* QTabWidget header row with corner widget (top-right of tab bar) */}
+      <div style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
+        {/* Tab bar */}
+        <div className="qt-tab-bar" style={{ flex: "none" }}>
+          <button
+            className="qt-tab"
+            data-active={activeTab === "preview"}
+            onClick={() => setActiveTab("preview")}
+          >
+            Preview
+          </button>
+          <button
+            className="qt-tab"
+            data-active={activeTab === "monitoring"}
+            onClick={() => setActiveTab("monitoring")}
+          >
+            Monitoring
+          </button>
+        </div>
+
+        {/* Spacer between tabs and corner widget */}
+        <div style={{ flex: 1, borderBottom: "1px solid #c0c0c0", background: "#ececec" }} />
+
+        {/* Corner widget (top-right of tab bar): QHBoxLayout */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "0 6px",
+            borderBottom: "1px solid #c0c0c0",
+            background: "#ececec",
+          }}
+        >
+          {/* Experiment indicator: 20x20 div, gray bg + 1px black border (green when active) */}
+          <div
+            style={{
+              width: 20,
+              height: 20,
+              border: "1px solid black",
+              backgroundColor: isActive ? "#00cc00" : "#c0c0c0",
+              flexShrink: 0,
+            }}
+          />
+
+          {/* ROI label: "ROI: W x H @ (X, Y)" with font-weight bold, padding 0 8px */}
+          {roi && (
+            <span style={{ fontSize: 12, fontWeight: "bold", padding: "0 8px" }}>
+              ROI: {roi.w} x {roi.h} @ ({roi.x}, {roi.y})
+            </span>
+          )}
+
+          {/* Start Experiment button (QPushButton) */}
+          <button
+            className="qt-btn"
+            onClick={handleStartExperiment}
+            disabled={isActive}
+          >
+            Start Experiment
+          </button>
+
+          {/* Stop Experiment button (QPushButton) */}
+          <button
+            className="qt-btn"
+            onClick={handleStopExperiment}
+            disabled={!isActive}
+          >
+            Stop Experiment
+          </button>
+        </div>
+      </div>
+
+      {/* Tab content */}
+      <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+        {activeTab === "preview" && <PreviewPage />}
+        {activeTab === "monitoring" && <MonitoringTab />}
+      </div>
+    </div>
   );
 }

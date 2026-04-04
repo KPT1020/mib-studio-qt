@@ -15,25 +15,31 @@ export function FrameViewerDialog({ onClose }: Props) {
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-lg shadow-xl max-w-[90vw] max-h-[90vh] flex flex-col"
+        className="bg-[var(--bg-window)] shadow-xl flex flex-col"
+        style={{ maxWidth: "90vw", maxHeight: "90vh" }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-4 py-2 border-b border-neutral-300">
+        {/* Title bar matching Qt dialog */}
+        <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-widget)]">
           <span className="font-semibold text-sm">Frame #{frame.index}</span>
           <button
             onClick={onClose}
-            className="text-neutral-500 hover:text-neutral-800 text-lg leading-none"
+            className="qt-tool-btn text-lg leading-none"
           >
             &times;
           </button>
         </div>
-        <div className="flex-1 min-h-0 overflow-auto p-2 bg-black flex items-center justify-center">
+        {/* Image area - black background, centered */}
+        <div className="flex-1 min-h-0 overflow-auto p-1 bg-black flex items-center justify-center">
           <img
             src={`data:image/jpeg;base64,${frame.imageBase64}`}
             alt={`Frame ${frame.index}`}
             className="max-w-full max-h-full object-contain"
             style={{ imageRendering: "pixelated" }}
           />
+        </div>
+        <div className="flex justify-end px-3 py-2 border-t border-[var(--border-widget)]">
+          <button onClick={onClose} className="qt-btn">Close</button>
         </div>
       </div>
     </div>

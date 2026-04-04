@@ -7,6 +7,7 @@ interface ResizableSplitterProps {
   children: ReactNode[];
   defaultSizes?: number[];
   minSizes?: number[];
+  handleSize?: number;
   className?: string;
 }
 
@@ -15,13 +16,22 @@ export function ResizableSplitter({
   children,
   defaultSizes,
   minSizes,
+  handleSize = 10,
   className,
 }: ResizableSplitterProps) {
   return (
     <div className={`h-full w-full ${className ?? ""}`}>
-      <Allotment vertical={direction === "vertical"} defaultSizes={defaultSizes}>
+      <Allotment
+        vertical={direction === "vertical"}
+        defaultSizes={defaultSizes}
+        separator={handleSize}
+      >
         {children.map((child, i) => (
-          <Allotment.Pane key={i} minSize={minSizes?.[i] ?? 0} snap={false}>
+          <Allotment.Pane
+            key={i}
+            minSize={minSizes?.[i] ?? 50}
+            snap={false}
+          >
             {child}
           </Allotment.Pane>
         ))}
