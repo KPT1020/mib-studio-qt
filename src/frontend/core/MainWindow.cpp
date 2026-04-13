@@ -29,6 +29,7 @@
 #include "frontend/tabs/PreviewPage.h"
 #include "frontend/tabs/HdfReviewTab.h"
 #include "frontend/tabs/ExperimentMonitoringTab.h"
+#include "frontend/system/AppConfigWatcher.h"
 #include "frontend/dialogs/MonitoringSettingsDialog.h"
 #include "frontend/tabs/OverviewTab.h"
 #include "frontend/tabs/ConfigTabs.h"
@@ -201,6 +202,12 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         if (ui->tabs) {
             ui->tabs->setCurrentIndex(1); // Overview tab
         } });
+
+    // Sync tune panel <-> config table bidirectionally
+    connect(monitoringTab, &frontend::ExperimentMonitoringTab::processingConfigApplied,
+            previewPage->getConfigWatcher(), &frontend::AppConfigWatcher::writeBackProcessingConfig);
+    connect(previewPage->getConfigWatcher(), &frontend::AppConfigWatcher::configFileChanged,
+            monitoringTab, &frontend::ExperimentMonitoringTab::loadCurrentConfig);
 
     connect(overviewTab_, &frontend::OverviewTab::roiChanged,
             monitoringTab, &frontend::ExperimentMonitoringTab::updateRoiDisplay);

@@ -80,6 +80,9 @@ public slots:
     bool exportHistogramAsTiff(const QString& filePath) const;
     bool exportScatterPlotAsTiff(const QString& filePath) const;
 
+signals:
+    void processingConfigApplied();
+
 private slots:
     void onUpdate();
     void onToggleOverlay(bool enabled);
@@ -91,10 +94,12 @@ protected:
     void showEvent(QShowEvent* event) override;
     void hideEvent(QHideEvent* event) override;
 
+public slots:
+    void loadCurrentConfig();
+
 private:
     void setupCharts();
     void setupTuneParamsPanel();
-    void loadCurrentConfig();
     void loadIsoelasticCurves();
     void updateScatterplot(const std::vector<backend::services::ProcessedFrame>& validFrames);
     void updateHistogram(const std::vector<backend::services::ProcessedFrame>& validFrames);
