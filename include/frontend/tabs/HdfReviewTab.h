@@ -65,6 +65,7 @@ namespace frontend
 
     private slots:
         void onSelectFile();
+        void onCloseFile();
         void onExportMetrics();
         void onExportAll();
         void onExportCharts();

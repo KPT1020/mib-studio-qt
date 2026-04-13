@@ -118,6 +118,7 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
 
     // Connect button signals
     connect(ui->selectFileBtn, &QPushButton::clicked, this, &HdfReviewTab::onSelectFile);
+    connect(ui->closeFileBtn, &QPushButton::clicked, this, &HdfReviewTab::onCloseFile);
     connect(ui->exportMetricsBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportMetrics);
     connect(ui->exportAllBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportAll);
     connect(ui->exportChartsBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportCharts);
@@ -261,6 +262,19 @@ void HdfReviewTab::onSelectFile() {
     }
 }
 
+void HdfReviewTab::onCloseFile() {
+    clearDisplay();
+    hdfReader_.reset();
+    ui->filePathLabel->setText(tr("No file selected"));
+    ui->statusLabel->setText(tr("Ready"));
+    ui->closeFileBtn->setEnabled(false);
+    ui->overlayModeLabel->setEnabled(false);
+    ui->overlayModeCombo->setEnabled(false);
+    ui->overlayModeCombo->setCurrentIndex(0);
+    overlayMode_ = OverlayMode::None;
+    SPDLOG_INFO("HdfReviewTab: file closed by user");
+}
+
 void HdfReviewTab::loadHdfFile(const QString& filePath) {
     ui->statusLabel->setText(tr("Loading..."));
     ui->filePathLabel->setText(filePath);
@@ -338,6 +352,7 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
     ui->exportMetricsBtn->setEnabled(hasData);
     ui->exportAllBtn->setEnabled(hasData);
     ui->exportChartsBtn->setEnabled(hasData);
+    ui->closeFileBtn->setEnabled(hasData);
     
     // Enable overlay controls if we have frames
     if (hasData) {
@@ -1259,11 +1274,10 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
     // Store current index in a way that can be modified by lambdas
     struct NavigationState {
         int currentIndex;
-        const std::vector<backend::services::ProcessedFrame>* framesPtr;
         bool isValidSet;
     };
-    
-    auto* navState = new NavigationState{frameIndex, &framesMeta, isShowingValid_};
+
+    auto* navState = new NavigationState{frameIndex, isShowingValid_};
     
     // Connect navigation signals
     // Helper lambda to load series images for a frame
@@ -1277,13 +1291,15 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
     };
 
     connect(dialog, &FrameViewerDialog::requestPreviousFrame, this, [this, dialog, navState, loadSeriesImages]() {
+        const auto& frames = navState->isValidSet ? validFrames_ : invalidFrames_;
+        if (frames.empty()) return;
         navState->currentIndex = navState->currentIndex - 1;
         if (navState->currentIndex < 0) {
-            navState->currentIndex = static_cast<int>(navState->framesPtr->size()) - 1; // Wrap to last
+            navState->currentIndex = static_cast<int>(frames.size()) - 1; // Wrap to last
         }
-        if (navState->currentIndex >= 0 && navState->currentIndex < static_cast<int>(navState->framesPtr->size())) {
+        if (navState->currentIndex >= 0 && navState->currentIndex < static_cast<int>(frames.size())) {
             // Fetch images on demand
-            backend::services::ProcessedFrame pf = (*navState->framesPtr)[navState->currentIndex];
+            backend::services::ProcessedFrame pf = frames[navState->currentIndex];
             const std::string imgPath2 = navState->isValidSet ? "/valid_frames/images" : "/invalid_frames/images";
             const std::string maskPath2 = navState->isValidSet ? "/valid_frames/masks"  : "/invalid_frames/masks";
             if (hdfReader_) {
@@ -1303,12 +1319,14 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
     });
 
     connect(dialog, &FrameViewerDialog::requestNextFrame, this, [this, dialog, navState, loadSeriesImages]() {
+        const auto& frames = navState->isValidSet ? validFrames_ : invalidFrames_;
+        if (frames.empty()) return;
         navState->currentIndex = navState->currentIndex + 1;
-        if (navState->currentIndex >= static_cast<int>(navState->framesPtr->size())) {
+        if (navState->currentIndex >= static_cast<int>(frames.size())) {
             navState->currentIndex = 0; // Wrap to first
         }
-        if (navState->currentIndex >= 0 && navState->currentIndex < static_cast<int>(navState->framesPtr->size())) {
-            backend::services::ProcessedFrame pf = (*navState->framesPtr)[navState->currentIndex];
+        if (navState->currentIndex >= 0 && navState->currentIndex < static_cast<int>(frames.size())) {
+            backend::services::ProcessedFrame pf = frames[navState->currentIndex];
             const std::string imgPath2 = navState->isValidSet ? "/valid_frames/images" : "/invalid_frames/images";
             const std::string maskPath2 = navState->isValidSet ? "/valid_frames/masks"  : "/invalid_frames/masks";
             if (hdfReader_) {

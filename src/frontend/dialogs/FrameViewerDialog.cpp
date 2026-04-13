@@ -28,7 +28,7 @@ FrameViewerDialog::FrameViewerDialog(const backend::services::ProcessedFrame& fr
                                      QWidget* parent)
     : QDialog(parent),
       ui(new Ui::FrameViewerDialog),
-      frame_(&frame),
+      frame_(frame),
       roi_(roi),
       overlayMode_(overlayMode),
       showRoiOverlay_(showRoiOverlay),
@@ -84,7 +84,7 @@ FrameViewerDialog::~FrameViewerDialog() {
 }
 
 void FrameViewerDialog::setFrame(const backend::services::ProcessedFrame& frame) {
-    frame_ = &frame;
+    frame_ = frame;
     seriesImageIndex_ = 0; // Reset to trigger image when switching frames
     setWindowTitle(tr("Frame Viewer - Frame %1").arg(frame.index));
     updateSeriesControls();
@@ -144,7 +144,7 @@ void FrameViewerDialog::onFitToWindow() {
 }
 
 void FrameViewerDialog::onPreviousSeriesImage() {
-    if (!frame_ || frame_->seriesImages.empty()) return;
+    if (frame_.seriesImages.empty()) return;
     if (seriesImageIndex_ > 0) {
         --seriesImageIndex_;
         updateSeriesControls();
@@ -154,8 +154,8 @@ void FrameViewerDialog::onPreviousSeriesImage() {
 }
 
 void FrameViewerDialog::onNextSeriesImage() {
-    if (!frame_ || frame_->seriesImages.empty()) return;
-    if (seriesImageIndex_ < static_cast<int>(frame_->seriesImages.size()) - 1) {
+    if (frame_.seriesImages.empty()) return;
+    if (seriesImageIndex_ < static_cast<int>(frame_.seriesImages.size()) - 1) {
         ++seriesImageIndex_;
         updateSeriesControls();
         updateImage();
@@ -164,7 +164,7 @@ void FrameViewerDialog::onNextSeriesImage() {
 }
 
 void FrameViewerDialog::updateSeriesControls() {
-    bool hasSeries = frame_ && frame_->seriesImages.size() > 1;
+    bool hasSeries = frame_.seriesImages.size() > 1;
     seriesPrevBtn_->setVisible(hasSeries);
     seriesLabel_->setVisible(hasSeries);
     seriesNextBtn_->setVisible(hasSeries);
@@ -172,9 +172,9 @@ void FrameViewerDialog::updateSeriesControls() {
     if (hasSeries) {
         seriesLabel_->setText(tr("Series %1/%2")
             .arg(seriesImageIndex_ + 1)
-            .arg(frame_->seriesImages.size()));
+            .arg(frame_.seriesImages.size()));
         seriesPrevBtn_->setEnabled(seriesImageIndex_ > 0);
-        seriesNextBtn_->setEnabled(seriesImageIndex_ < static_cast<int>(frame_->seriesImages.size()) - 1);
+        seriesNextBtn_->setEnabled(seriesImageIndex_ < static_cast<int>(frame_.seriesImages.size()) - 1);
     }
 }
 
@@ -209,27 +209,27 @@ void FrameViewerDialog::keyPressEvent(QKeyEvent* event) {
 }
 
 void FrameViewerDialog::updateImage() {
-    if (!frame_ || frame_->originalImage.empty()) {
+    if (frame_.originalImage.empty()) {
         displayImage_ = QImage();
         ui->imageLabel->setPixmap(QPixmap());
         return;
     }
 
     // Determine which image to display: series image or trigger image
-    bool showingSeriesImage = (seriesImageIndex_ > 0 && !frame_->seriesImages.empty()
-                               && seriesImageIndex_ < static_cast<int>(frame_->seriesImages.size()));
+    bool showingSeriesImage = (seriesImageIndex_ > 0 && !frame_.seriesImages.empty()
+                               && seriesImageIndex_ < static_cast<int>(frame_.seriesImages.size()));
 
     QImage baseImage;
     if (showingSeriesImage) {
         // Non-trigger series images: display raw (no overlay — metrics only apply to trigger)
-        baseImage = matToQImage(frame_->seriesImages[seriesImageIndex_]);
-    } else if (overlayMode_ != OverlayMode::None && !frame_->processedImage.empty()) {
+        baseImage = matToQImage(frame_.seriesImages[seriesImageIndex_]);
+    } else if (overlayMode_ != OverlayMode::None && !frame_.processedImage.empty()) {
         // Trigger image with overlay
-        const cv::Mat& img = (!frame_->seriesImages.empty()) ? frame_->seriesImages[0] : frame_->originalImage;
-        baseImage = createProcessingOverlay(img, frame_->processedImage,
-                                           &frame_->validation, overlayMode_);
+        const cv::Mat& img = (!frame_.seriesImages.empty()) ? frame_.seriesImages[0] : frame_.originalImage;
+        baseImage = createProcessingOverlay(img, frame_.processedImage,
+                                           &frame_.validation, overlayMode_);
     } else {
-        const cv::Mat& img = (!frame_->seriesImages.empty()) ? frame_->seriesImages[0] : frame_->originalImage;
+        const cv::Mat& img = (!frame_.seriesImages.empty()) ? frame_.seriesImages[0] : frame_.originalImage;
         baseImage = matToQImage(img);
     }
 
@@ -298,12 +298,12 @@ QImage FrameViewerDialog::matToQImage(const cv::Mat& mat) const {
 }
 
 void FrameViewerDialog::updateFrameInfo() {
-    if (!frame_) {
+    if (frame_.originalImage.empty()) {
         ui->frameInfoLabel->setText(tr("No frame selected"));
         return;
     }
 
-    const auto& val = frame_->validation;
+    const auto& val = frame_.validation;
     QString info = QString(
         "<b>Frame Index:</b> %1 | "
         "<b>Timestamp:</b> %2 ns | "
@@ -314,8 +314,8 @@ void FrameViewerDialog::updateFrameInfo() {
         "<b>Valid:</b> %7 | "
         "<b>Inner Count:</b> %8"
     )
-    .arg(frame_->index)
-    .arg(frame_->timestampNs)
+    .arg(frame_.index)
+    .arg(frame_.timestampNs)
     .arg(val.deformability, 0, 'f', 3)
     .arg(val.area, 0, 'f', 2)
     .arg(val.areaRatio, 0, 'f', 3)
@@ -324,12 +324,12 @@ void FrameViewerDialog::updateFrameInfo() {
     .arg(val.innerContourCount);
 
     // Add series indicator
-    if (!frame_->seriesImages.empty() && frame_->seriesImages.size() > 1) {
+    if (!frame_.seriesImages.empty() && frame_.seriesImages.size() > 1) {
         if (seriesImageIndex_ == 0) {
-            info += tr(" | <b>Series:</b> Trigger image (1/%1)").arg(frame_->seriesImages.size());
+            info += tr(" | <b>Series:</b> Trigger image (1/%1)").arg(frame_.seriesImages.size());
         } else {
             info += tr(" | <b>Series:</b> Image %1/%2 (metrics from trigger only)")
-                .arg(seriesImageIndex_ + 1).arg(frame_->seriesImages.size());
+                .arg(seriesImageIndex_ + 1).arg(frame_.seriesImages.size());
         }
     }
 
@@ -337,7 +337,7 @@ void FrameViewerDialog::updateFrameInfo() {
 }
 
 void FrameViewerDialog::onExportFrame() {
-    if (!frame_ || frame_->originalImage.empty()) {
+    if (frame_.originalImage.empty()) {
         QMessageBox::warning(this, tr("Export Error"),
                             tr("No frame data available to export."));
         return;
@@ -345,10 +345,10 @@ void FrameViewerDialog::onExportFrame() {
 
     // Default filename includes series index if viewing a series
     QString defaultName;
-    if (!frame_->seriesImages.empty() && frame_->seriesImages.size() > 1) {
-        defaultName = QString("frame_%1_series_%2.tiff").arg(frame_->index).arg(seriesImageIndex_);
+    if (!frame_.seriesImages.empty() && frame_.seriesImages.size() > 1) {
+        defaultName = QString("frame_%1_series_%2.tiff").arg(frame_.index).arg(seriesImageIndex_);
     } else {
-        defaultName = QString("frame_%1.tiff").arg(frame_->index);
+        defaultName = QString("frame_%1.tiff").arg(frame_.index);
     }
 
     QString filePath = QFileDialog::getSaveFileName(this, tr("Export Frame as TIFF"),
@@ -364,9 +364,9 @@ void FrameViewerDialog::onExportFrame() {
     }
 
     cv::Mat exportImage;
-    if (overlayMode_ != OverlayMode::None && !frame_->processedImage.empty()) {
-        QImage overlayQImage = createProcessingOverlay(frame_->originalImage, frame_->processedImage,
-                                                       &frame_->validation, overlayMode_);
+    if (overlayMode_ != OverlayMode::None && !frame_.processedImage.empty()) {
+        QImage overlayQImage = createProcessingOverlay(frame_.originalImage, frame_.processedImage,
+                                                       &frame_.validation, overlayMode_);
         if (!overlayQImage.isNull()) {
             QImage rgb888 = overlayQImage.format() == QImage::Format_RGB888
                 ? overlayQImage
@@ -375,24 +375,24 @@ void FrameViewerDialog::onExportFrame() {
                        const_cast<uchar*>(rgb888.constBits()), rgb888.bytesPerLine());
             cv::cvtColor(rgb.clone(), exportImage, cv::COLOR_RGB2BGR);
         } else {
-            if (frame_->originalImage.channels() == 1) {
-                cv::cvtColor(frame_->originalImage, exportImage, cv::COLOR_GRAY2BGR);
+            if (frame_.originalImage.channels() == 1) {
+                cv::cvtColor(frame_.originalImage, exportImage, cv::COLOR_GRAY2BGR);
             } else {
-                exportImage = frame_->originalImage.clone();
+                exportImage = frame_.originalImage.clone();
                 if (exportImage.channels() == 4) {
                     cv::cvtColor(exportImage, exportImage, cv::COLOR_BGRA2BGR);
                 }
             }
         }
     } else {
-        if (frame_->originalImage.channels() == 1) {
-            exportImage = frame_->originalImage.clone();
-        } else if (frame_->originalImage.channels() == 3) {
-            exportImage = frame_->originalImage.clone();
-        } else if (frame_->originalImage.channels() == 4) {
-            cv::cvtColor(frame_->originalImage, exportImage, cv::COLOR_BGRA2BGR);
+        if (frame_.originalImage.channels() == 1) {
+            exportImage = frame_.originalImage.clone();
+        } else if (frame_.originalImage.channels() == 3) {
+            exportImage = frame_.originalImage.clone();
+        } else if (frame_.originalImage.channels() == 4) {
+            cv::cvtColor(frame_.originalImage, exportImage, cv::COLOR_BGRA2BGR);
         } else {
-            cv::cvtColor(frame_->originalImage, exportImage, cv::COLOR_BGR2GRAY);
+            cv::cvtColor(frame_.originalImage, exportImage, cv::COLOR_BGR2GRAY);
         }
     }
 
@@ -411,7 +411,7 @@ void FrameViewerDialog::onExportFrame() {
                               tr("Failed to export frame to:\n%1").arg(filePath));
         SPDLOG_ERROR("Failed to write TIFF file: {}", filePath.toStdString());
     } else {
-        SPDLOG_INFO("Exported frame {} to TIFF: {}", frame_->index, filePath.toStdString());
+        SPDLOG_INFO("Exported frame {} to TIFF: {}", frame_.index, filePath.toStdString());
         QMessageBox::information(this, tr("Export Complete"),
                                 tr("Frame exported successfully to:\n%1").arg(filePath));
     }
