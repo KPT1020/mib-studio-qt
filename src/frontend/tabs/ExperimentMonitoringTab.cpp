@@ -99,11 +99,16 @@ std::vector<InvalidReason> getInvalidReasons(
         }
     }
 
-    if (result.ringRatio <= 15.0 || result.ringRatio >= 25.0) {
-        reasons.push_back({
-            "Ring",
-            QString("Ring ratio: %1 (range: 15-25)").arg(result.ringRatio, 0, 'f', 1)
-        });
+    if (config.enable_ring_ratio_check) {
+        if (result.ringRatio <= config.ring_ratio_min || result.ringRatio >= config.ring_ratio_max) {
+            reasons.push_back({
+                "Ring",
+                QString("Ring ratio: %1 (range: %2-%3)")
+                    .arg(result.ringRatio, 0, 'f', 1)
+                    .arg(config.ring_ratio_min, 0, 'f', 1)
+                    .arg(config.ring_ratio_max, 0, 'f', 1)
+            });
+        }
     }
 
     if (config.enable_deformability_range_check) {
@@ -250,6 +255,8 @@ namespace frontend
         addDblSpinRow(threshLayout, tr("Deform Min"), deformMinSpin_, 0.0, 1.0, 0.01, 2, 0.0);
         addDblSpinRow(threshLayout, tr("Deform Max"), deformMaxSpin_, 0.0, 1.0, 0.01, 2, 1.0);
         addDblSpinRow(threshLayout, tr("Area Ratio Max"), areaRatioMaxSpin_, 0.0, 10.0, 0.1, 2, 1.5);
+        addDblSpinRow(threshLayout, tr("Ring Min"), ringMinSpin_, 0.0, 100.0, 0.5, 1, 15.0);
+        addDblSpinRow(threshLayout, tr("Ring Max"), ringMaxSpin_, 0.0, 100.0, 0.5, 1, 25.0);
         contentLayout->addWidget(threshGroup);
 
         // --- Filter Enables ---
@@ -261,12 +268,14 @@ namespace frontend
         areaRangeCheckBox_ = new QCheckBox(tr("Area Range"));
         deformRangeCheckBox_ = new QCheckBox(tr("Deformability Range"));
         areaRatioCheckBox_ = new QCheckBox(tr("Area Ratio"));
+        ringRatioCheckBox_ = new QCheckBox(tr("Ring Ratio"));
         singleInnerCheckBox_ = new QCheckBox(tr("Single Inner Contour"));
 
         enableLayout->addWidget(borderCheckBox_);
         enableLayout->addWidget(areaRangeCheckBox_);
         enableLayout->addWidget(deformRangeCheckBox_);
         enableLayout->addWidget(areaRatioCheckBox_);
+        enableLayout->addWidget(ringRatioCheckBox_);
         enableLayout->addWidget(singleInnerCheckBox_);
         contentLayout->addWidget(enableGroup);
 
@@ -308,12 +317,19 @@ namespace frontend
         deformMinSpin_->setValue(cfg.deformability_threshold_min);
         deformMaxSpin_->setValue(cfg.deformability_threshold_max);
         areaRatioMaxSpin_->setValue(cfg.area_ratio_threshold_max);
+        ringMinSpin_->setValue(cfg.ring_ratio_min);
+        ringMaxSpin_->setValue(cfg.ring_ratio_max);
 
         borderCheckBox_->setChecked(cfg.enable_border_check);
         areaRangeCheckBox_->setChecked(cfg.enable_area_range_check);
         deformRangeCheckBox_->setChecked(cfg.enable_deformability_range_check);
         areaRatioCheckBox_->setChecked(cfg.enable_area_ratio_check);
+        ringRatioCheckBox_->setChecked(cfg.enable_ring_ratio_check);
         singleInnerCheckBox_->setChecked(cfg.require_single_inner_contour);
+
+        // Sync histogram axis defaults from ring ratio config
+        histogramXMin_ = cfg.ring_ratio_min;
+        histogramXMax_ = cfg.ring_ratio_max;
 
         targetGroupEnableBox_->setChecked(cfg.enable_target_group);
         targetAreaMinSpin_->setValue(cfg.target_group_area_min);
@@ -332,12 +348,15 @@ namespace frontend
         cfg.deformability_threshold_min = deformMinSpin_->value();
         cfg.deformability_threshold_max = deformMaxSpin_->value();
         cfg.area_ratio_threshold_max = areaRatioMaxSpin_->value();
+        cfg.ring_ratio_min = ringMinSpin_->value();
+        cfg.ring_ratio_max = ringMaxSpin_->value();
 
         // Filter enables
         cfg.enable_border_check = borderCheckBox_->isChecked();
         cfg.enable_area_range_check = areaRangeCheckBox_->isChecked();
         cfg.enable_deformability_range_check = deformRangeCheckBox_->isChecked();
         cfg.enable_area_ratio_check = areaRatioCheckBox_->isChecked();
+        cfg.enable_ring_ratio_check = ringRatioCheckBox_->isChecked();
         cfg.require_single_inner_contour = singleInnerCheckBox_->isChecked();
 
         // Target group
@@ -350,12 +369,14 @@ namespace frontend
         backend_.processing().setProcessingConfig(cfg);
 
         SPDLOG_INFO("Tune panel: applied config (area=[{},{}], deform=[{:.2f},{:.2f}], "
-                     "border={}, areaRange={}, deformRange={}, areaRatio={}, singleInner={}, "
-                     "targetGroup={})",
+                     "ring=[{:.1f},{:.1f}], border={}, areaRange={}, deformRange={}, "
+                     "areaRatio={}, ringRatio={}, singleInner={}, targetGroup={})",
                      cfg.area_threshold_min, cfg.area_threshold_max,
                      cfg.deformability_threshold_min, cfg.deformability_threshold_max,
+                     cfg.ring_ratio_min, cfg.ring_ratio_max,
                      cfg.enable_border_check, cfg.enable_area_range_check,
                      cfg.enable_deformability_range_check, cfg.enable_area_ratio_check,
+                     cfg.enable_ring_ratio_check,
                      cfg.require_single_inner_contour, cfg.enable_target_group);
     }
 

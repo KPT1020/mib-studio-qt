@@ -179,12 +179,15 @@ private:
     QDoubleSpinBox* deformMinSpin_ = nullptr;
     QDoubleSpinBox* deformMaxSpin_ = nullptr;
     QDoubleSpinBox* areaRatioMaxSpin_ = nullptr;
+    QDoubleSpinBox* ringMinSpin_ = nullptr;
+    QDoubleSpinBox* ringMaxSpin_ = nullptr;
 
     // Filter enables
     QCheckBox* borderCheckBox_ = nullptr;
     QCheckBox* areaRangeCheckBox_ = nullptr;
     QCheckBox* deformRangeCheckBox_ = nullptr;
     QCheckBox* areaRatioCheckBox_ = nullptr;
+    QCheckBox* ringRatioCheckBox_ = nullptr;
     QCheckBox* singleInnerCheckBox_ = nullptr;
 
     // Target group

@@ -44,6 +44,9 @@ struct ProcessingConfig {
     bool enable_deformability_range_check{false};
     double area_ratio_threshold_max{1.5};
     bool enable_area_ratio_check{false};
+    double ring_ratio_min{15.0};
+    double ring_ratio_max{25.0};
+    bool enable_ring_ratio_check{true};
     bool require_single_inner_contour{true};
     int empty_frame_pixel_threshold{100};
     bool auto_background_enabled{false};

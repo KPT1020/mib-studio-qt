@@ -222,6 +222,10 @@ namespace frontend
 					pcfg.deformability_threshold_max = ip.value("deformability_threshold_max").toDouble(pcfg.deformability_threshold_max);
 				if (ip.contains("area_ratio_threshold_max"))
 					pcfg.area_ratio_threshold_max = ip.value("area_ratio_threshold_max").toDouble(pcfg.area_ratio_threshold_max);
+				if (ip.contains("ring_ratio_min"))
+					pcfg.ring_ratio_min = ip.value("ring_ratio_min").toDouble(pcfg.ring_ratio_min);
+				if (ip.contains("ring_ratio_max"))
+					pcfg.ring_ratio_max = ip.value("ring_ratio_max").toDouble(pcfg.ring_ratio_max);
 				if (ip.contains("empty_frame_pixel_threshold"))
 					pcfg.empty_frame_pixel_threshold = ip.value("empty_frame_pixel_threshold").toInt(pcfg.empty_frame_pixel_threshold);
 				if (ip.contains("auto_background_enabled"))
@@ -241,6 +245,8 @@ namespace frontend
 						pcfg.enable_deformability_range_check = fl.value("enable_deformability_range_check").toBool(pcfg.enable_deformability_range_check);
 					if (fl.contains("enable_area_ratio_check"))
 						pcfg.enable_area_ratio_check = fl.value("enable_area_ratio_check").toBool(pcfg.enable_area_ratio_check);
+					if (fl.contains("enable_ring_ratio_check"))
+						pcfg.enable_ring_ratio_check = fl.value("enable_ring_ratio_check").toBool(pcfg.enable_ring_ratio_check);
 					if (fl.contains("require_single_inner_contour"))
 						pcfg.require_single_inner_contour = fl.value("require_single_inner_contour").toBool(pcfg.require_single_inner_contour);
 				}
@@ -276,11 +282,12 @@ namespace frontend
 			}
 		}
 		backend_.processing().setProcessingConfig(pcfg);
-		SPDLOG_INFO("AppConfigWatcher: applied ProcessingConfig (blur={}, thresh={}, morph={}x{}, area=[{},{} um2], deform=[{:.2f},{:.2f}] enabled={}, areaRatio_max={:.2f} enabled={}, empty_px={})",
+		SPDLOG_INFO("AppConfigWatcher: applied ProcessingConfig (blur={}, thresh={}, morph={}x{}, area=[{},{} um2], deform=[{:.2f},{:.2f}] enabled={}, areaRatio_max={:.2f} enabled={}, ring=[{:.1f},{:.1f}] enabled={}, empty_px={})",
 					pcfg.gaussian_blur_size, pcfg.bg_subtract_threshold, pcfg.morph_kernel_size, pcfg.morph_iterations,
 					pcfg.area_threshold_min, pcfg.area_threshold_max,
 					pcfg.deformability_threshold_min, pcfg.deformability_threshold_max, pcfg.enable_deformability_range_check,
 					pcfg.area_ratio_threshold_max, pcfg.enable_area_ratio_check,
+					pcfg.ring_ratio_min, pcfg.ring_ratio_max, pcfg.enable_ring_ratio_check,
 					pcfg.empty_frame_pixel_threshold);
 		SPDLOG_INFO("AppConfigWatcher: target_group enabled={}, area=[{},{} um2], deform=[{:.2f},{:.2f}], emod_enabled={}, emod=[{:.1f},{:.1f}]",
 					pcfg.enable_target_group, pcfg.target_group_area_min, pcfg.target_group_area_max,

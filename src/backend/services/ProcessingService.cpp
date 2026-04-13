@@ -566,7 +566,8 @@ FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedIma
 
             bool areaInRange = !config.enable_area_range_check ||
                               (areaUm >= config.area_threshold_min && areaUm <= config.area_threshold_max);
-            bool ringRatioInRange = (result.ringRatio > 15.0 && result.ringRatio < 25.0);
+            bool ringRatioInRange = !config.enable_ring_ratio_check ||
+                              (result.ringRatio > config.ring_ratio_min && result.ringRatio < config.ring_ratio_max);
             bool deformabilityInRange = !config.enable_deformability_range_check ||
                               (result.deformability >= config.deformability_threshold_min &&
                                result.deformability <= config.deformability_threshold_max);

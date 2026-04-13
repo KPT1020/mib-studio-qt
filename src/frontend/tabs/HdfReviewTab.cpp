@@ -1714,11 +1714,12 @@ void HdfReviewTab::generateScatterPlot(const std::vector<backend::services::Proc
 }
 
 void HdfReviewTab::generateHistogram(const std::vector<backend::services::ProcessedFrame>& validFrames) {
-    // Use fixed range for consistent comparison across datasets
-    constexpr double HISTOGRAM_MIN = 15.0;
-    constexpr double HISTOGRAM_MAX = 25.0;
+    // Use config range so the histogram matches the current ring ratio thresholds
+    auto cfg = backend_.processing().getProcessingConfig();
+    const double HISTOGRAM_MIN = cfg.ring_ratio_min;
+    const double HISTOGRAM_MAX = cfg.ring_ratio_max;
     constexpr double HISTOGRAM_BIN_WIDTH = 0.5;
-    constexpr int HISTOGRAM_BINS = static_cast<int>((HISTOGRAM_MAX - HISTOGRAM_MIN) / HISTOGRAM_BIN_WIDTH);
+    const int HISTOGRAM_BINS = std::max(1, static_cast<int>((HISTOGRAM_MAX - HISTOGRAM_MIN) / HISTOGRAM_BIN_WIDTH));
 
     // Reset series
 #if MIB_HAS_QHISTOGRAMSERIES
