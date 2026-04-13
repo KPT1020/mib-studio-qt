@@ -38,6 +38,8 @@
 #include "frontend/system/DeviceInitManager.h"
 #include "frontend/utils/SidebarWidget.h"
 #include "frontend/utils/StatisticsPanel.h"
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <spdlog/spdlog.h>
 #include <opencv2/core.hpp>
 #include <chrono>
@@ -947,6 +949,24 @@ void MainWindow::onTabChanged(int index)
         if (!backend_.applyMindVisionConfigFromFile(scriptPath.toStdString(), &backendErr)) {
             SPDLOG_ERROR("MainWindow::onTabChanged: Failed to apply MindVision config: {}", backendErr);
             return;
+        }
+        // Propagate ROI from MindVision JSON config to experiment monitoring tab
+        {
+            QFile f(scriptPath);
+            if (f.open(QIODevice::ReadOnly)) {
+                QJsonObject obj = QJsonDocument::fromJson(f.readAll()).object();
+                f.close();
+                int ox = obj.value("offset_x").toInt(0);
+                int oy = obj.value("offset_y").toInt(0);
+                int w  = obj.value("width").toInt(0);
+                int h  = obj.value("height").toInt(0);
+                if (auto* mt = qobject_cast<frontend::ExperimentMonitoringTab*>(
+                        experimentTabs_ ? experimentTabs_->widget(1) : nullptr)) {
+                    mt->updateRoiDisplay(ox, oy, w, h);
+                }
+                if (roiLabel_)
+                    roiLabel_->setText(tr("ROI: %1 x %2 @ (%3, %4)").arg(w).arg(h).arg(ox).arg(oy));
+            }
         }
     } else {
         // eGrabber path: script file must exist
