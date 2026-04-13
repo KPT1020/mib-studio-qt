@@ -6,11 +6,11 @@ import {
   discoverFramegrabbers,
   connectCamera,
 } from "../../hooks/useBackend";
-
-type DeviceTab = "cameras" | "framegrabbers";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "../ui/tabs";
+import { Button } from "../ui/button";
+import { cn } from "@/lib/utils";
 
 export function ConnectTab() {
-  const [deviceTab, setDeviceTab] = useState<DeviceTab>("cameras");
   const [status, setStatus] = useState("Select a device and click Connect.");
 
   const cameras = useCaptureStore((s) => s.cameras);
@@ -23,6 +23,7 @@ export function ConnectTab() {
   const setSelectedFramegrabber = useCaptureStore((s) => s.setSelectedFramegrabber);
   const setCameraConfigured = useCaptureStore((s) => s.setCameraConfigured);
   const openDialog = useAppStore((s) => s.openDialog);
+  const [deviceTab, setDeviceTab] = useState("cameras");
 
   const handleRefresh = async () => {
     setStatus("Discovering devices...");
@@ -65,76 +66,63 @@ export function ConnectTab() {
     }
   };
 
-  const items = deviceTab === "cameras" ? cameras : framegrabbers;
-  const selectedIndex = deviceTab === "cameras" ? selectedCameraIndex : selectedFramegrabberIndex;
-  const onSelect = deviceTab === "cameras" ? setSelectedCamera : setSelectedFramegrabber;
-
   return (
-    /* QVBoxLayout (default margins ~9px) */
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: 9, gap: 0 }}>
-      {/* QLabel "Available devices:" */}
-      <label style={{ fontSize: 12, marginBottom: 4 }}>Available devices:</label>
+    <div className="flex flex-col h-full p-3 gap-2">
+      <span className="text-sm text-muted-foreground">Available devices:</span>
 
-      {/* QTabWidget with 2 tabs: "Cameras" and "Framegrabbers" */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-        {/* Tab bar */}
-        <div className="qt-tab-bar">
-          <button
-            className="qt-tab"
-            data-active={deviceTab === "cameras"}
-            onClick={() => setDeviceTab("cameras")}
-          >
-            Cameras
-          </button>
-          <button
-            className="qt-tab"
-            data-active={deviceTab === "framegrabbers"}
-            onClick={() => setDeviceTab("framegrabbers")}
-          >
-            Framegrabbers
-          </button>
-        </div>
+      <Tabs value={deviceTab} onValueChange={setDeviceTab} className="flex-1 flex flex-col min-h-0">
+        <TabsList>
+          <TabsTrigger value="cameras">Cameras</TabsTrigger>
+          <TabsTrigger value="framegrabbers">Framegrabbers</TabsTrigger>
+        </TabsList>
 
-        {/* QListWidget (single selection mode) filling the tab */}
-        <ul
-          className="qt-list"
-          style={{
-            flex: 1,
-            overflow: "auto",
-            border: "1px solid #c0c0c0",
-            borderTop: "none",
-          }}
-        >
-          {items.map((item, i) => (
-            <li
-              key={`${item.interfaceIndex}-${item.deviceIndex}`}
-              className="qt-list-item"
-              data-selected={selectedIndex === i}
-              onClick={() => onSelect(i)}
-            >
-              {item.label}
-            </li>
-          ))}
-          {items.length === 0 && (
-            <li className="qt-list-item" style={{ color: "#999", textAlign: "center" }}>
-              {deviceTab === "cameras"
-                ? "No cameras found. Click Refresh."
-                : "No framegrabbers found. Click Refresh."}
-            </li>
+        <TabsContent value="cameras" className="flex-1 min-h-0">
+          <DeviceList items={cameras} selectedIndex={selectedCameraIndex} onSelect={setSelectedCamera} emptyText="No cameras found. Click Refresh." />
+        </TabsContent>
+        <TabsContent value="framegrabbers" className="flex-1 min-h-0">
+          <DeviceList items={framegrabbers} selectedIndex={selectedFramegrabberIndex} onSelect={setSelectedFramegrabber} emptyText="No framegrabbers found. Click Refresh." />
+        </TabsContent>
+      </Tabs>
+
+      <div className="flex items-center gap-2">
+        <Button size="sm" onClick={handleRefresh}>Refresh</Button>
+        <Button size="sm" onClick={handleConnect}>Connect</Button>
+        <div className="flex-1" />
+        <Button size="sm" variant="outline" onClick={() => openDialog("mockConfig")}>Configure Mock...</Button>
+      </div>
+
+      <span className="text-xs text-muted-foreground">{status}</span>
+    </div>
+  );
+}
+
+function DeviceList({ items, selectedIndex, onSelect, emptyText }: {
+  items: { interfaceIndex: number; deviceIndex: number; label: string }[];
+  selectedIndex: number | null;
+  onSelect: (index: number) => void;
+  emptyText: string;
+}) {
+  return (
+    <div className="h-full overflow-auto rounded-md border border-border bg-background">
+      {items.map((item, i) => (
+        <div
+          key={`${item.interfaceIndex}-${item.deviceIndex}`}
+          className={cn(
+            "px-3 py-1.5 text-sm cursor-pointer border-b border-border/50 transition-colors",
+            selectedIndex === i
+              ? "bg-primary text-primary-foreground"
+              : "hover:bg-muted"
           )}
-        </ul>
-      </div>
-
-      {/* Button row (QHBoxLayout): Refresh, Connect, spacer, "Configure Mock..." */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
-        <button className="qt-btn" onClick={handleRefresh}>Refresh</button>
-        <button className="qt-btn" onClick={handleConnect}>Connect</button>
-        <div style={{ flex: 1 }} />
-        <button className="qt-btn" onClick={() => openDialog("mockConfig")}>Configure Mock...</button>
-      </div>
-
-      {/* QLabel status at bottom */}
-      <label style={{ fontSize: 12, color: "#666", marginTop: 4 }}>{status}</label>
+          onClick={() => onSelect(i)}
+        >
+          {item.label}
+        </div>
+      ))}
+      {items.length === 0 && (
+        <div className="px-3 py-4 text-sm text-center text-muted-foreground">
+          {emptyText}
+        </div>
+      )}
     </div>
   );
 }

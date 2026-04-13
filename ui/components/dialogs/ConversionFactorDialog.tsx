@@ -1,5 +1,16 @@
 import { useState } from "react";
 import { setPixelToMicronFactor } from "../../hooks/useBackend";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from "../ui/dialog";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
 
 interface Props {
   onClose: () => void;
@@ -22,35 +33,36 @@ export function ConversionFactorDialog({ onClose }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-[var(--bg-window)] shadow-xl flex flex-col" style={{ width: 400, minHeight: 120 }}>
-        <div className="px-3 py-2 border-b border-[var(--border-widget)] font-semibold text-sm">
-          Pixel to Micron Conversion
-        </div>
-        <div className="flex-1 px-3 py-3">
-          <div className="qt-form">
-            <label>Pixel to Micron Factor</label>
-            <div className="flex items-center gap-1">
-              <input
-                type="number"
-                min={0.0001}
-                max={1000}
-                step={0.0001}
-                value={factor}
-                onChange={(e) => setFactor(Number(e.target.value))}
-                className="qt-input flex-1"
-                title="Conversion factor: 1 pixel = X micron"
-              />
-              <span className="text-xs">um/pixel</span>
-            </div>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Pixel to Micron Conversion</DialogTitle>
+          <DialogDescription>Set the conversion factor for pixel measurements.</DialogDescription>
+        </DialogHeader>
+
+        <div className="form-grid">
+          <Label>Factor</Label>
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min={0.0001}
+              max={1000}
+              step={0.0001}
+              value={factor}
+              onChange={(e) => setFactor(Number(e.target.value))}
+              title="Conversion factor: 1 pixel = X micron"
+              className="flex-1"
+            />
+            <span className="text-xs text-muted-foreground">um/pixel</span>
           </div>
         </div>
-        <div className="flex justify-end gap-2 px-3 py-2 border-t border-[var(--border-widget)]">
-          <button onClick={onClose} className="qt-btn">Cancel</button>
-          <button onClick={handleApply} className="qt-btn">Apply</button>
-          <button onClick={handleOk} className="qt-btn">OK</button>
-        </div>
-      </div>
-    </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button variant="secondary" onClick={handleApply}>Apply</Button>
+          <Button onClick={handleOk}>OK</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

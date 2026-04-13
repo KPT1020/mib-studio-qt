@@ -67,8 +67,8 @@ export function Histogram({ data, bins = 20 }: HistogramProps) {
             }}
           />
           <Tooltip
-            formatter={(value: number) => [value, "Count"]}
-            labelFormatter={(label: string) => `Ring Width: ${label}`}
+            formatter={(value) => [String(value), "Count"]}
+            labelFormatter={(label) => `Ring Width: ${label}`}
           />
           <Bar dataKey="count" fill="#6366f1" opacity={0.8} />
         </BarChart>

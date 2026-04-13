@@ -1,12 +1,13 @@
-import { useState } from "react";
 import { PreviewPage } from "./PreviewPage";
 import { MonitoringTab } from "./MonitoringTab";
 import { useExperimentStore } from "../../stores/experimentStore";
 import { useProcessingStore } from "../../stores/processingStore";
 import { startExperiment, stopExperiment } from "../../hooks/useBackend";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "../ui/tabs";
+import { Button } from "../ui/button";
+import { Badge } from "../ui/badge";
 
 export function ExperimentTab() {
-  const [activeTab, setActiveTab] = useState<"preview" | "monitoring">("preview");
   const isActive = useExperimentStore((s) => s.isActive);
   const roi = useProcessingStore((s) => s.roi);
 
@@ -29,85 +30,45 @@ export function ExperimentTab() {
   };
 
   return (
-    /* QTabWidget with 2 tabs: "Preview" and "Monitoring" */
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* QTabWidget header row with corner widget (top-right of tab bar) */}
-      <div style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
-        {/* Tab bar */}
-        <div className="qt-tab-bar" style={{ flex: "none" }}>
-          <button
-            className="qt-tab"
-            data-active={activeTab === "preview"}
-            onClick={() => setActiveTab("preview")}
-          >
-            Preview
-          </button>
-          <button
-            className="qt-tab"
-            data-active={activeTab === "monitoring"}
-            onClick={() => setActiveTab("monitoring")}
-          >
-            Monitoring
-          </button>
-        </div>
+    <Tabs defaultValue="preview" className="flex flex-col h-full">
+      <div className="flex items-end border-b border-border bg-muted/30">
+        <TabsList className="border-b-0">
+          <TabsTrigger value="preview">Preview</TabsTrigger>
+          <TabsTrigger value="monitoring">Monitoring</TabsTrigger>
+        </TabsList>
 
-        {/* Spacer between tabs and corner widget */}
-        <div style={{ flex: 1, borderBottom: "1px solid #c0c0c0", background: "#ececec" }} />
-
-        {/* Corner widget (top-right of tab bar): QHBoxLayout */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "0 6px",
-            borderBottom: "1px solid #c0c0c0",
-            background: "#ececec",
-          }}
-        >
-          {/* Experiment indicator: 20x20 div, gray bg + 1px black border (green when active) */}
+        {/* Spacer + corner widget */}
+        <div className="ml-auto flex items-center gap-2 px-2 pb-1">
+          {/* Experiment indicator */}
           <div
+            className="w-4 h-4 rounded-full border-2 flex-shrink-0"
             style={{
-              width: 20,
-              height: 20,
-              border: "1px solid black",
-              backgroundColor: isActive ? "#00cc00" : "#c0c0c0",
-              flexShrink: 0,
+              backgroundColor: isActive ? "var(--color-indicator-active)" : "var(--color-indicator-idle)",
+              borderColor: isActive ? "var(--color-indicator-active)" : "var(--color-indicator-idle)",
             }}
           />
 
-          {/* ROI label: "ROI: W x H @ (X, Y)" with font-weight bold, padding 0 8px */}
           {roi && (
-            <span style={{ fontSize: 12, fontWeight: "bold", padding: "0 8px" }}>
+            <Badge variant="secondary" className="font-mono text-xs">
               ROI: {roi.w} x {roi.h} @ ({roi.x}, {roi.y})
-            </span>
+            </Badge>
           )}
 
-          {/* Start Experiment button (QPushButton) */}
-          <button
-            className="qt-btn"
-            onClick={handleStartExperiment}
-            disabled={isActive}
-          >
+          <Button size="sm" onClick={handleStartExperiment} disabled={isActive}>
             Start Experiment
-          </button>
-
-          {/* Stop Experiment button (QPushButton) */}
-          <button
-            className="qt-btn"
-            onClick={handleStopExperiment}
-            disabled={!isActive}
-          >
+          </Button>
+          <Button size="sm" variant="outline" onClick={handleStopExperiment} disabled={!isActive}>
             Stop Experiment
-          </button>
+          </Button>
         </div>
       </div>
 
-      {/* Tab content */}
-      <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
-        {activeTab === "preview" && <PreviewPage />}
-        {activeTab === "monitoring" && <MonitoringTab />}
-      </div>
-    </div>
+      <TabsContent value="preview" className="overflow-hidden">
+        <PreviewPage />
+      </TabsContent>
+      <TabsContent value="monitoring" className="overflow-hidden">
+        <MonitoringTab />
+      </TabsContent>
+    </Tabs>
   );
 }

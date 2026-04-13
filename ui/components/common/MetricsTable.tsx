@@ -1,4 +1,13 @@
 import type { ProcessedFrame } from "../../types/backend";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../ui/table";
+import { cn } from "@/lib/utils";
 
 interface MetricsTableProps {
   frames: ProcessedFrame[];
@@ -8,7 +17,7 @@ interface MetricsTableProps {
 
 const COLUMNS = [
   { key: "index", label: "Index" },
-  { key: "area", label: "Area (um²)" },
+  { key: "area", label: "Area (um\u00B2)" },
   { key: "deformability", label: "Deformability" },
   { key: "areaRatio", label: "Area Ratio" },
   { key: "ringRatio", label: "Ring Ratio" },
@@ -20,60 +29,38 @@ const COLUMNS = [
 export function MetricsTable({ frames, selectedIndex, onSelect }: MetricsTableProps) {
   return (
     <div className="h-full overflow-auto">
-      <table className="w-full text-xs border-collapse">
-        <thead className="sticky top-0 bg-neutral-100">
-          <tr>
+      <Table>
+        <TableHeader>
+          <TableRow>
             {COLUMNS.map((col) => (
-              <th
-                key={col.key}
-                className="text-left px-2 py-1 border-b border-neutral-300 font-semibold"
-              >
-                {col.label}
-              </th>
+              <TableHead key={col.key}>{col.label}</TableHead>
             ))}
-          </tr>
-        </thead>
-        <tbody>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {frames.map((frame, i) => (
-            <tr
+            <TableRow
               key={frame.index}
               onClick={() => onSelect(i)}
-              className={`cursor-pointer ${
-                selectedIndex === i
-                  ? "bg-blue-100"
-                  : i % 2 === 0
-                    ? "bg-white"
-                    : "bg-neutral-50"
-              } hover:bg-blue-50`}
+              className={cn(
+                "cursor-pointer",
+                selectedIndex === i && "bg-primary/10"
+              )}
             >
-              <td className="px-2 py-0.5 border-b border-neutral-200">{frame.index}</td>
-              <td className="px-2 py-0.5 border-b border-neutral-200">
-                {frame.validation.area.toFixed(1)}
-              </td>
-              <td className="px-2 py-0.5 border-b border-neutral-200">
-                {frame.validation.deformability.toFixed(4)}
-              </td>
-              <td className="px-2 py-0.5 border-b border-neutral-200">
-                {frame.validation.areaRatio.toFixed(3)}
-              </td>
-              <td className="px-2 py-0.5 border-b border-neutral-200">
-                {frame.validation.ringRatio.toFixed(2)}
-              </td>
-              <td className="px-2 py-0.5 border-b border-neutral-200">
-                {frame.validation.youngsModulus.toFixed(1)}
-              </td>
-              <td className="px-2 py-0.5 border-b border-neutral-200">
-                {frame.validation.isValid ? "Yes" : "No"}
-              </td>
-              <td className="px-2 py-0.5 border-b border-neutral-200">
-                {frame.validation.isTargetGroup ? "Yes" : "No"}
-              </td>
-            </tr>
+              <TableCell className="font-mono">{frame.index}</TableCell>
+              <TableCell className="font-mono">{frame.validation.area.toFixed(1)}</TableCell>
+              <TableCell className="font-mono">{frame.validation.deformability.toFixed(4)}</TableCell>
+              <TableCell className="font-mono">{frame.validation.areaRatio.toFixed(3)}</TableCell>
+              <TableCell className="font-mono">{frame.validation.ringRatio.toFixed(2)}</TableCell>
+              <TableCell className="font-mono">{frame.validation.youngsModulus.toFixed(1)}</TableCell>
+              <TableCell>{frame.validation.isValid ? "Yes" : "No"}</TableCell>
+              <TableCell>{frame.validation.isTargetGroup ? "Yes" : "No"}</TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
       {frames.length === 0 && (
-        <p className="text-center text-xs text-neutral-400 py-4">No data</p>
+        <p className="text-center text-xs text-muted-foreground py-4">No data</p>
       )}
     </div>
   );

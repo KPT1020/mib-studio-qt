@@ -4,40 +4,20 @@ export function BackgroundPreview() {
   const backgroundImage = useProcessingStore((s) => s.backgroundImageBase64);
 
   return (
-    <div style={{ padding: "var(--spacing-sm)" }}>
-      <span
-        style={{
-          fontWeight: "bold",
-          fontSize: 12,
-          display: "block",
-          marginBottom: 4,
-        }}
-      >
-        Background
-      </span>
+    <div className="p-3">
+      <span className="font-semibold text-sm block mb-2">Background</span>
       <div
-        style={{
-          width: "100%",
-          aspectRatio: "4/3",
-          backgroundColor: "black",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          border: "1px solid #c0c0c0",
-        }}
+        className="w-full bg-black flex items-center justify-center rounded-md border border-border overflow-hidden"
+        style={{ aspectRatio: "4/3" }}
       >
         {backgroundImage ? (
           <img
             src={`data:image/jpeg;base64,${backgroundImage}`}
             alt="Background"
-            style={{
-              maxWidth: "100%",
-              maxHeight: "100%",
-              objectFit: "contain",
-            }}
+            className="max-w-full max-h-full object-contain"
           />
         ) : (
-          <span style={{ fontSize: 12, color: "#888" }}>No background</span>
+          <span className="text-xs text-muted-foreground">No background</span>
         )}
       </div>
     </div>

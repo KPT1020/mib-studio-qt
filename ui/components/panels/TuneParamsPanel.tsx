@@ -2,6 +2,11 @@ import { useState } from "react";
 import { useProcessingStore } from "../../stores/processingStore";
 import { setProcessingConfig } from "../../hooks/useBackend";
 import type { ProcessingConfig } from "../../types/backend";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Checkbox } from "../ui/checkbox";
+import { Label } from "../ui/label";
+import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 
 export function TuneParamsPanel() {
   const config = useProcessingStore((s) => s.config);
@@ -23,189 +28,154 @@ export function TuneParamsPanel() {
   };
 
   return (
-    <div
-      style={{
-        minWidth: 0,
-        maxWidth: 280,
-        height: "100%",
-        overflowY: "auto",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          padding: 8,
-          gap: 8,
-        }}
-      >
-        {/* 1. Title: "Tune Params" (bold) */}
-        <span style={{ fontWeight: "bold", fontSize: 12 }}>Tune Params</span>
+    <div className="min-w-0 max-w-[280px] h-full overflow-y-auto">
+      <div className="flex flex-col p-2 gap-2">
+        <span className="font-semibold text-sm">Tune Params</span>
 
-        {/* 2. Filter Thresholds QGroupBox */}
-        <fieldset className="qt-groupbox">
-          <legend>Filter Thresholds</legend>
-          <div className="qt-form">
-            <label>Area Min:</label>
-            <input
-              className="qt-input"
-              type="number"
-              value={local.area_threshold_min}
-              onChange={(e) => update({ area_threshold_min: Number(e.target.value) })}
-            />
-            <label>Area Max:</label>
-            <input
-              className="qt-input"
-              type="number"
-              value={local.area_threshold_max}
-              onChange={(e) => update({ area_threshold_max: Number(e.target.value) })}
-            />
-            <label>Deform Min:</label>
-            <input
-              className="qt-input"
-              type="number"
-              step={0.01}
-              value={local.deformability_threshold_min}
-              onChange={(e) =>
-                update({ deformability_threshold_min: Number(e.target.value) })
-              }
-            />
-            <label>Deform Max:</label>
-            <input
-              className="qt-input"
-              type="number"
-              step={0.01}
-              value={local.deformability_threshold_max}
-              onChange={(e) =>
-                update({ deformability_threshold_max: Number(e.target.value) })
-              }
-            />
-            <label>Area Ratio Max:</label>
-            <input
-              className="qt-input"
-              type="number"
-              step={0.01}
-              value={local.area_ratio_threshold_max}
-              onChange={(e) =>
-                update({ area_ratio_threshold_max: Number(e.target.value) })
-              }
-            />
-          </div>
-        </fieldset>
-
-        {/* 3. Filter Enables QGroupBox */}
-        <fieldset className="qt-groupbox">
-          <legend>Filter Enables</legend>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <label className="qt-checkbox">
-              <input
-                type="checkbox"
-                checked={local.enable_border_check}
-                onChange={(e) => update({ enable_border_check: e.target.checked })}
-              />
-              Border Check
-            </label>
-            <label className="qt-checkbox">
-              <input
-                type="checkbox"
-                checked={local.enable_area_range_check}
-                onChange={(e) => update({ enable_area_range_check: e.target.checked })}
-              />
-              Area Range
-            </label>
-            <label className="qt-checkbox">
-              <input
-                type="checkbox"
-                checked={local.enable_deformability_range_check}
-                onChange={(e) =>
-                  update({ enable_deformability_range_check: e.target.checked })
-                }
-              />
-              Deformability Range
-            </label>
-            <label className="qt-checkbox">
-              <input
-                type="checkbox"
-                checked={local.enable_area_ratio_check}
-                onChange={(e) => update({ enable_area_ratio_check: e.target.checked })}
-              />
-              Area Ratio
-            </label>
-            <label className="qt-checkbox">
-              <input
-                type="checkbox"
-                checked={local.require_single_inner_contour}
-                onChange={(e) =>
-                  update({ require_single_inner_contour: e.target.checked })
-                }
-              />
-              Single Inner Contour
-            </label>
-          </div>
-        </fieldset>
-
-        {/* 4. Target Group QGroupBox */}
-        <fieldset className="qt-groupbox">
-          <legend>Target Group</legend>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <label className="qt-checkbox">
-              <input
-                type="checkbox"
-                checked={local.enable_target_group}
-                onChange={(e) => update({ enable_target_group: e.target.checked })}
-              />
-              Enable
-            </label>
-            <div className="qt-form">
-              <label>Area Min:</label>
-              <input
-                className="qt-input"
+        {/* Filter Thresholds */}
+        <Card>
+          <CardHeader className="p-3 pb-0">
+            <CardTitle>Filter Thresholds</CardTitle>
+          </CardHeader>
+          <CardContent className="p-3">
+            <div className="form-grid">
+              <Label>Area Min:</Label>
+              <Input
                 type="number"
-                value={local.target_group_area_min}
-                onChange={(e) =>
-                  update({ target_group_area_min: Number(e.target.value) })
-                }
+                value={local.area_threshold_min}
+                onChange={(e) => update({ area_threshold_min: Number(e.target.value) })}
               />
-              <label>Area Max:</label>
-              <input
-                className="qt-input"
+              <Label>Area Max:</Label>
+              <Input
                 type="number"
-                value={local.target_group_area_max}
-                onChange={(e) =>
-                  update({ target_group_area_max: Number(e.target.value) })
-                }
+                value={local.area_threshold_max}
+                onChange={(e) => update({ area_threshold_max: Number(e.target.value) })}
               />
-              <label>Deform Min:</label>
-              <input
-                className="qt-input"
+              <Label>Deform Min:</Label>
+              <Input
                 type="number"
                 step={0.01}
-                value={local.target_group_deformability_min}
-                onChange={(e) =>
-                  update({ target_group_deformability_min: Number(e.target.value) })
-                }
+                value={local.deformability_threshold_min}
+                onChange={(e) => update({ deformability_threshold_min: Number(e.target.value) })}
               />
-              <label>Deform Max:</label>
-              <input
-                className="qt-input"
+              <Label>Deform Max:</Label>
+              <Input
                 type="number"
                 step={0.01}
-                value={local.target_group_deformability_max}
-                onChange={(e) =>
-                  update({ target_group_deformability_max: Number(e.target.value) })
-                }
+                value={local.deformability_threshold_max}
+                onChange={(e) => update({ deformability_threshold_max: Number(e.target.value) })}
+              />
+              <Label>Area Ratio Max:</Label>
+              <Input
+                type="number"
+                step={0.01}
+                value={local.area_ratio_threshold_max}
+                onChange={(e) => update({ area_ratio_threshold_max: Number(e.target.value) })}
               />
             </div>
-          </div>
-        </fieldset>
+          </CardContent>
+        </Card>
 
-        {/* 5. Apply QPushButton */}
-        <button className="qt-btn" onClick={handleApply} style={{ width: "100%" }}>
-          Apply
-        </button>
+        {/* Filter Enables */}
+        <Card>
+          <CardHeader className="p-3 pb-0">
+            <CardTitle>Filter Enables</CardTitle>
+          </CardHeader>
+          <CardContent className="p-3">
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="border-check"
+                  checked={local.enable_border_check}
+                  onCheckedChange={(v) => update({ enable_border_check: v === true })}
+                />
+                <Label htmlFor="border-check" className="text-xs">Border Check</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="area-range"
+                  checked={local.enable_area_range_check}
+                  onCheckedChange={(v) => update({ enable_area_range_check: v === true })}
+                />
+                <Label htmlFor="area-range" className="text-xs">Area Range</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="deform-range"
+                  checked={local.enable_deformability_range_check}
+                  onCheckedChange={(v) => update({ enable_deformability_range_check: v === true })}
+                />
+                <Label htmlFor="deform-range" className="text-xs">Deformability Range</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="area-ratio"
+                  checked={local.enable_area_ratio_check}
+                  onCheckedChange={(v) => update({ enable_area_ratio_check: v === true })}
+                />
+                <Label htmlFor="area-ratio" className="text-xs">Area Ratio</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="single-contour"
+                  checked={local.require_single_inner_contour}
+                  onCheckedChange={(v) => update({ require_single_inner_contour: v === true })}
+                />
+                <Label htmlFor="single-contour" className="text-xs">Single Inner Contour</Label>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-        {/* 6. Stretch */}
-        <div style={{ flex: 1 }} />
+        {/* Target Group */}
+        <Card>
+          <CardHeader className="p-3 pb-0">
+            <CardTitle>Target Group</CardTitle>
+          </CardHeader>
+          <CardContent className="p-3">
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="target-enable"
+                  checked={local.enable_target_group}
+                  onCheckedChange={(v) => update({ enable_target_group: v === true })}
+                />
+                <Label htmlFor="target-enable" className="text-xs">Enable</Label>
+              </div>
+              <div className="form-grid">
+                <Label>Area Min:</Label>
+                <Input
+                  type="number"
+                  value={local.target_group_area_min}
+                  onChange={(e) => update({ target_group_area_min: Number(e.target.value) })}
+                />
+                <Label>Area Max:</Label>
+                <Input
+                  type="number"
+                  value={local.target_group_area_max}
+                  onChange={(e) => update({ target_group_area_max: Number(e.target.value) })}
+                />
+                <Label>Deform Min:</Label>
+                <Input
+                  type="number"
+                  step={0.01}
+                  value={local.target_group_deformability_min}
+                  onChange={(e) => update({ target_group_deformability_min: Number(e.target.value) })}
+                />
+                <Label>Deform Max:</Label>
+                <Input
+                  type="number"
+                  step={0.01}
+                  value={local.target_group_deformability_max}
+                  onChange={(e) => update({ target_group_deformability_max: Number(e.target.value) })}
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Button onClick={handleApply} className="w-full">Apply</Button>
+        <div className="flex-1" />
       </div>
     </div>
   );

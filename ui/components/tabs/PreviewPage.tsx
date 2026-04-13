@@ -3,6 +3,8 @@ import { PlaybackPanel } from "../panels/PlaybackPanel";
 import { ConfigTabs } from "../panels/ConfigTabs";
 import { useCaptureStore } from "../../stores/captureStore";
 import { startCapture, stopCapture } from "../../hooks/useBackend";
+import { Button } from "../ui/button";
+import { Play, Square } from "lucide-react";
 
 export function PreviewPage() {
   const isRunning = useCaptureStore((s) => s.isRunning);
@@ -26,54 +28,31 @@ export function PreviewPage() {
   };
 
   return (
-    /* QVBoxLayout margins 0, spacing 0 */
-    <div style={{ height: "100%", margin: 0, padding: 0 }}>
-      {/* QSplitter vertical, childrenCollapsible=false, handleWidth=10, opaqueResize=true */}
+    <div className="h-full">
       <ResizableSplitter direction="vertical" defaultSizes={[50, 50]} minSizes={[100, 0]} handleSize={10}>
-        {/* Child 1 (overlayContainer): Expanding/Expanding, minHeight=100 */}
-        {/* QStackedLayout(StackAll): PlaybackPanel at bottom, play/stop overlay on top */}
-        <div style={{ position: "relative", height: "100%" }}>
-          {/* PlaybackPanel at bottom of stack */}
+        {/* Playback with overlay buttons */}
+        <div className="relative h-full">
           <PlaybackPanel />
 
-          {/* Play/Stop overlay: centered horizontally, visible when capture NOT running */}
+          {/* Play/Stop overlay when not running */}
           {!isRunning && (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                pointerEvents: "none",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", pointerEvents: "auto" }}>
-                {/* Play button: "Play" (min 120x48) */}
-                <button
-                  className="qt-btn"
-                  onClick={handlePlay}
-                  style={{ minWidth: 120, minHeight: 48, fontSize: 14 }}
-                >
-                  &#9654; Play
-                </button>
-                {/* 12px spacer */}
-                <div style={{ width: 12 }} />
-                {/* Stop button: "Stop" (min 120x48) */}
-                <button
-                  className="qt-btn"
-                  onClick={handleStop}
-                  style={{ minWidth: 120, minHeight: 48, fontSize: 14 }}
-                >
-                  &#9632; Stop
-                </button>
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="flex items-center gap-3 pointer-events-auto">
+                <Button size="lg" onClick={handlePlay} className="min-w-[120px] min-h-[48px] text-base gap-2">
+                  <Play className="h-5 w-5" />
+                  Play
+                </Button>
+                <Button size="lg" variant="outline" onClick={handleStop} className="min-w-[120px] min-h-[48px] text-base gap-2">
+                  <Square className="h-5 w-5" />
+                  Stop
+                </Button>
               </div>
             </div>
           )}
         </div>
 
-        {/* Child 2 (configTabsPlaceholder): Expanding/Ignored, minHeight=0 */}
-        <div style={{ height: "100%" }}>
+        {/* Config tabs */}
+        <div className="h-full">
           <ConfigTabs />
         </div>
       </ResizableSplitter>

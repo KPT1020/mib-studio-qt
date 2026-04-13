@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "../ui/tabs";
 
 interface Tab {
   id: string;
@@ -23,37 +24,29 @@ export function TabBar({
   children,
 }: TabBarProps) {
   return (
-    <div className="flex flex-col h-full">
-      {/* Qt-style tab bar row */}
-      <div className="qt-tab-bar flex-shrink-0" style={{ alignItems: "end" }}>
-        {/* Tab buttons using .qt-tab class */}
-        {tabs.map((tab) => {
-          const isDisabled = disabledTabs?.has(tab.id) ?? false;
-          const isActive = activeTab === tab.id;
-
-          return (
-            <button
+    <Tabs value={activeTab} onValueChange={onTabChange} className="flex flex-col h-full">
+      <div className="flex items-end border-b border-border bg-muted/30">
+        <TabsList className="border-b-0">
+          {tabs.map((tab) => (
+            <TabsTrigger
               key={tab.id}
-              className="qt-tab"
-              data-active={isActive}
-              disabled={isDisabled}
-              onClick={() => !isDisabled && onTabChange(tab.id)}
+              value={tab.id}
+              disabled={disabledTabs?.has(tab.id) ?? false}
             >
               {tab.label}
-            </button>
-          );
-        })}
-
-        {/* Corner widget (right side, ml-auto) */}
+            </TabsTrigger>
+          ))}
+        </TabsList>
         {cornerWidget && (
-          <div className="ml-auto flex items-center px-2">
+          <div className="ml-auto flex items-center px-2 pb-1">
             {cornerWidget}
           </div>
         )}
       </div>
-
-      {/* Content area takes remaining height */}
+      {/* Render children directly - they handle content switching */}
       <div className="flex-1 min-h-0 overflow-hidden">{children}</div>
-    </div>
+    </Tabs>
   );
 }
+
+export { TabsContent };

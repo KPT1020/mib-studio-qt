@@ -12,6 +12,10 @@ import {
   stopFrameRecording,
 } from "../../hooks/useBackend";
 import type { OverlayMode } from "../../types/backend";
+import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
+import { Label } from "../ui/label";
+import { Slider } from "../ui/slider";
 
 const OVERLAY_CYCLE: OverlayMode[] = ["off", "mask", "contours", "both"];
 const OVERLAY_LABELS: Record<OverlayMode, string> = {
@@ -80,120 +84,75 @@ export function PlaybackPanel() {
   };
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-        margin: 0,
-        padding: 0,
-        gap: 0,
-      }}
-    >
-      {/* Canvas area: flex-1, contains ImageCanvas */}
-      <div style={{ flex: 1, minHeight: 0 }}>
+    <div className="flex flex-col h-full">
+      {/* Canvas area */}
+      <div className="flex-1 min-h-0">
         <ImageCanvas />
       </div>
 
-      {/* Controls bar: QHBoxLayout margins 6/4/6/4, spacing 6 */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          padding: "4px 6px 4px 6px",
-          gap: 6,
-          flexShrink: 0,
-        }}
-      >
-        {/* QToolButton overlay toggle */}
-        <button className="qt-tool-btn" onClick={handleOverlayToggle}>
+      {/* Controls bar */}
+      <div className="flex items-center px-2 py-1 gap-2 flex-shrink-0">
+        <Button variant="ghost" size="sm" onClick={handleOverlayToggle}>
           {OVERLAY_LABELS[overlayMode]}
-        </button>
+        </Button>
 
-        {/* Overlay legend (shown when overlay != off) */}
         {overlayMode !== "off" && (
-          <span
-            className="overlay-legend"
-            style={{ display: "flex", alignItems: "center", gap: 4 }}
-          >
-            <span
-              className="swatch"
-              style={{ backgroundColor: "#0078FF" }}
-            />
-            Target
-            <span
-              className="swatch"
-              style={{ backgroundColor: "#00FF00" }}
-            />
-            Valid
-            <span
-              className="swatch"
-              style={{ backgroundColor: "#FF0000" }}
-            />
-            Invalid
+          <span className="overlay-legend flex items-center gap-1">
+            <span className="swatch" style={{ backgroundColor: "var(--color-target)" }} /> Target
+            <span className="swatch" style={{ backgroundColor: "var(--color-valid)" }} /> Valid
+            <span className="swatch" style={{ backgroundColor: "var(--color-invalid)" }} /> Invalid
           </span>
         )}
 
-        {/* QToolButton "Set BG" */}
-        <button className="qt-tool-btn" onClick={handleSetBackground}>
-          Set BG
-        </button>
+        <Button variant="ghost" size="sm" onClick={handleSetBackground}>Set BG</Button>
 
-        {/* Auto Background checkbox */}
-        <label className="qt-checkbox">
-          <input
-            type="checkbox"
+        <div className="flex items-center gap-1.5">
+          <Checkbox
+            id="auto-bg"
             checked={autoBg}
-            onChange={(e) => setAutoBg(e.target.checked)}
+            onCheckedChange={(v) => setAutoBg(v === true)}
           />
-          Auto Background
-        </label>
+          <Label htmlFor="auto-bg" className="text-xs">Auto BG</Label>
+        </div>
 
-        {/* QToolButton "Clear ROI" (disabled when no ROI) */}
-        <button className="qt-tool-btn" onClick={handleClearRoi} disabled={!roi}>
+        <Button variant="ghost" size="sm" onClick={handleClearRoi} disabled={!roi}>
           Clear ROI
-        </button>
+        </Button>
 
-        {/* QToolButton "Save Buffer" */}
-        <button className="qt-tool-btn" onClick={() => openDialog("bufferSave")}>
+        <Button variant="ghost" size="sm" onClick={() => openDialog("bufferSave")}>
           Save Buffer
-        </button>
+        </Button>
 
-        {/* QToolButton "Record" / "Stop Rec" */}
-        <button
-          className="qt-tool-btn"
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={handleToggleRecording}
-          style={isRecording ? { color: "#b91c1c" } : undefined}
+          className={isRecording ? "text-destructive" : ""}
         >
           {isRecording ? "Stop Rec" : "Record"}
-        </button>
+        </Button>
 
-        {/* Record status label (color: gray, padding: 0 4px) */}
         {isRecording && (
-          <span style={{ color: "gray", padding: "0 4px", fontSize: 12 }}>
-            Recording...
-          </span>
+          <span className="text-xs text-muted-foreground">Recording...</span>
         )}
 
-        {/* QToolButton "Fit: Window" / "Fit: 100%" */}
-        <button className="qt-tool-btn" onClick={toggleZoom}>
+        <Button variant="ghost" size="sm" onClick={toggleZoom}>
           Fit: {zoomMode === "fit" ? "Window" : "100%"}
-        </button>
+        </Button>
 
-        {/* Horizontal stretch */}
-        <div style={{ flex: 1 }} />
+        <div className="flex-1" />
       </div>
 
-      {/* QSlider horizontal: range from earliest to latest, step 1, page step 8 */}
-      <input
-        type="range"
-        min={earliest}
-        max={latest}
-        value={currentIndex}
-        onChange={(e) => seekToIndex(Number(e.target.value))}
-        step={1}
-        style={{ width: "100%", flexShrink: 0, margin: 0, display: "block" }}
-      />
+      {/* Playback slider */}
+      <div className="px-2 pb-1 flex-shrink-0">
+        <Slider
+          min={earliest}
+          max={latest || 1}
+          step={1}
+          value={[currentIndex]}
+          onValueChange={([v]) => seekToIndex(v)}
+        />
+      </div>
     </div>
   );
 }

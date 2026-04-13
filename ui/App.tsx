@@ -19,7 +19,7 @@ export default function App() {
   const closeDialog = useAppStore((s) => s.closeDialog);
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden">
+    <div className="flex flex-col h-screen w-screen overflow-hidden bg-background text-foreground">
       {/* Menu bar is handled by Tauri native menu */}
 
       {/* Main content area */}
@@ -27,8 +27,8 @@ export default function App() {
         <MainLayout />
       </div>
 
-      {/* Status bar - 22px, matches Qt QStatusBar */}
-      <div className="qt-statusbar">
+      {/* Status bar */}
+      <div className="flex items-center px-3 border-t border-border bg-muted/50 text-xs text-muted-foreground" style={{ height: "var(--status-bar-height)" }}>
         <StatusBarText />
       </div>
 

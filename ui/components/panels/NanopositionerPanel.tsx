@@ -6,6 +6,13 @@ import {
   increaseVoltage,
   decreaseVoltage,
 } from "../../hooks/useBackend";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Checkbox } from "../ui/checkbox";
+import { Label } from "../ui/label";
+import { Separator } from "../ui/separator";
+import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { Minus, Plus } from "lucide-react";
 
 export function NanopositionerPanel() {
   const [comPort, setComPort] = useState("COM1");
@@ -50,171 +57,125 @@ export function NanopositionerPanel() {
   };
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        padding: 6,
-        gap: 8,
-      }}
-    >
-      {/* QGroupBox "Nanopositioner Autofocus" */}
-      <fieldset className="qt-groupbox">
-        <legend>Nanopositioner Autofocus</legend>
+    <div className="flex flex-col p-3 gap-2">
+      <Card>
+        <CardHeader className="p-3 pb-0">
+          <CardTitle>Nanopositioner Autofocus</CardTitle>
+        </CardHeader>
+        <CardContent className="p-3 flex flex-col gap-3">
+          {/* Connection settings */}
+          <div className="form-grid">
+            <Label>COM Port:</Label>
+            <div className="flex gap-1">
+              <select
+                className="select-styled flex-1"
+                value={comPort}
+                onChange={(e) => setComPort(e.target.value)}
+              >
+                {Array.from({ length: 20 }, (_, i) => (
+                  <option key={i} value={`COM${i + 1}`}>COM{i + 1}</option>
+                ))}
+              </select>
+              <Button size="sm" variant="outline">Refresh</Button>
+            </div>
 
-        {/* QFormLayout (label right-aligned) */}
-        <div className="qt-form">
-          {/* COM Port: QComboBox + Refresh button (QHBoxLayout) */}
-          <label>COM Port:</label>
-          <div style={{ display: "flex", gap: 4 }}>
+            <Label>Baud Rate:</Label>
             <select
-              className="qt-select"
-              value={comPort}
-              onChange={(e) => setComPort(e.target.value)}
-              style={{ flex: 1 }}
+              className="select-styled"
+              value={baudRate}
+              onChange={(e) => setBaudRate(e.target.value)}
             >
-              {Array.from({ length: 20 }, (_, i) => (
-                <option key={i} value={`COM${i + 1}`}>
-                  COM{i + 1}
-                </option>
+              {["9600", "19200", "38400", "57600", "115200"].map((r) => (
+                <option key={r} value={r}>{r}</option>
               ))}
             </select>
-            <button className="qt-btn">Refresh</button>
+
+            <Label>Device Address:</Label>
+            <Input
+              type="number"
+              min={0}
+              max={255}
+              value={deviceAddress}
+              onChange={(e) => setDeviceAddress(Number(e.target.value))}
+            />
           </div>
 
-          {/* Baud Rate: QComboBox */}
-          <label>Baud Rate:</label>
-          <select
-            className="qt-select"
-            value={baudRate}
-            onChange={(e) => setBaudRate(e.target.value)}
-          >
-            {["9600", "19200", "38400", "57600", "115200"].map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
+          {/* Connect/Disconnect buttons */}
+          <div className="flex gap-1">
+            <Button size="sm" onClick={handleConnect} disabled={connected}>Connect</Button>
+            <Button size="sm" variant="outline" onClick={handleDisconnect} disabled={!connected}>
+              Disconnect
+            </Button>
+          </div>
 
-          {/* Device Address: QSpinBox (0-255, default 1) */}
-          <label>Device Address:</label>
-          <input
-            className="qt-input"
-            type="number"
-            min={0}
-            max={255}
-            value={deviceAddress}
-            onChange={(e) => setDeviceAddress(Number(e.target.value))}
-          />
-        </div>
-
-        {/* Connect/Disconnect buttons + spacer */}
-        <div
-          style={{
-            display: "flex",
-            gap: 4,
-            marginTop: 6,
-          }}
-        >
-          <button
-            className="qt-btn"
-            onClick={handleConnect}
-            disabled={connected}
-          >
-            Connect
-          </button>
-          <button
-            className="qt-btn"
-            onClick={handleDisconnect}
-            disabled={!connected}
-          >
-            Disconnect
-          </button>
-          <div style={{ flex: 1 }} />
-        </div>
-
-        {/* "Enable Autofocus" checkbox (disabled until connected) */}
-        <div style={{ marginTop: 6 }}>
-          <label className="qt-checkbox">
-            <input
-              type="checkbox"
+          {/* Autofocus toggle */}
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="autofocus-enable"
               checked={enabled}
-              onChange={(e) => handleToggleAutofocus(e.target.checked)}
+              onCheckedChange={(v) => handleToggleAutofocus(v === true)}
               disabled={!connected}
             />
-            Enable Autofocus
-          </label>
-        </div>
+            <Label htmlFor="autofocus-enable" className="text-xs">Enable Autofocus</Label>
+          </div>
 
-        {/* Target ring width: QDoubleSpinBox */}
-        <div className="qt-form" style={{ marginTop: 6 }}>
-          <label>Target ring width:</label>
-          <input
-            className="qt-input"
-            type="number"
-            step={0.01}
-            min={1}
-            max={100}
-            value={targetRingWidth}
-            onChange={(e) => setTargetRingWidth(Number(e.target.value))}
-          />
-        </div>
+          {/* Target ring width */}
+          <div className="form-grid">
+            <Label>Target ring width:</Label>
+            <Input
+              type="number"
+              step={0.01}
+              min={1}
+              max={100}
+              value={targetRingWidth}
+              onChange={(e) => setTargetRingWidth(Number(e.target.value))}
+            />
+          </div>
 
-        {/* Status form: Status + Voltage labels */}
-        <div className="qt-form" style={{ marginTop: 6 }}>
-          <label>Status:</label>
-          <span style={{ fontSize: 12 }}>{status}</span>
-          <label>Voltage:</label>
-          <span style={{ fontSize: 12 }}>{voltage}</span>
-        </div>
+          {/* Status display */}
+          <div className="form-grid">
+            <Label>Status:</Label>
+            <span className="text-xs">{status}</span>
+            <Label>Voltage:</Label>
+            <span className="text-xs">{voltage}</span>
+          </div>
 
-        {/* QFrame::HLine separator */}
-        <hr className="qt-separator" style={{ margin: "8px 0" }} />
+          <Separator />
 
-        {/* "Manual Control:" label (bold) */}
-        <span style={{ fontWeight: "bold", fontSize: 12 }}>Manual Control:</span>
-
-        {/* Decrease (-) / Increase (+) buttons + spacer + "Step:" label + QSpinBox (1-100 V) */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-            marginTop: 4,
-          }}
-        >
-          <button
-            className="qt-btn"
-            onClick={() => decreaseVoltage()}
-            disabled={!connected}
-          >
-            -
-          </button>
-          <button
-            className="qt-btn"
-            onClick={() => increaseVoltage()}
-            disabled={!connected}
-          >
-            +
-          </button>
-          <div style={{ flex: 1 }} />
-          <span style={{ fontSize: 12 }}>Step:</span>
-          <input
-            className="qt-input"
-            type="number"
-            min={1}
-            max={100}
-            value={voltageStep}
-            onChange={(e) => setVoltageStep(Number(e.target.value))}
-            disabled={!connected}
-            style={{ width: 56 }}
-          />
-          <span style={{ fontSize: 12 }}>V</span>
-        </div>
-      </fieldset>
-
-      {/* Vertical spacer */}
-      <div style={{ flex: 1 }} />
+          {/* Manual Control */}
+          <span className="font-semibold text-xs">Manual Control:</span>
+          <div className="flex items-center gap-1">
+            <Button
+              size="icon"
+              variant="outline"
+              onClick={() => decreaseVoltage()}
+              disabled={!connected}
+            >
+              <Minus className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              size="icon"
+              variant="outline"
+              onClick={() => increaseVoltage()}
+              disabled={!connected}
+            >
+              <Plus className="h-3.5 w-3.5" />
+            </Button>
+            <div className="flex-1" />
+            <span className="text-xs text-muted-foreground">Step:</span>
+            <Input
+              type="number"
+              min={1}
+              max={100}
+              value={voltageStep}
+              onChange={(e) => setVoltageStep(Number(e.target.value))}
+              disabled={!connected}
+              className="w-14"
+            />
+            <span className="text-xs text-muted-foreground">V</span>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

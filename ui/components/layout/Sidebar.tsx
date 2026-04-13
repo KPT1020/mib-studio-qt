@@ -3,6 +3,9 @@ import { BackgroundPreview } from "../panels/BackgroundPreview";
 import { StatisticsPanel } from "../panels/StatisticsPanel";
 import { NanopositionerPanel } from "../panels/NanopositionerPanel";
 import { SyringePumpPanel } from "../panels/SyringePumpPanel";
+import { Separator } from "../ui/separator";
+import { Button } from "../ui/button";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 export function Sidebar() {
   const collapsed = useAppStore((s) => s.sidebarCollapsed);
@@ -10,71 +13,43 @@ export function Sidebar() {
 
   return (
     <div
-      className="flex h-full"
+      className="flex h-full border-r border-border bg-muted/20"
       style={{
-        width: collapsed
-          ? "var(--sidebar-collapsed-width)"
-          : "var(--sidebar-expanded-width)",
-        minWidth: collapsed
-          ? "var(--sidebar-collapsed-width)"
-          : "var(--sidebar-expanded-width)",
+        width: collapsed ? "var(--sidebar-collapsed-width)" : "var(--sidebar-expanded-width)",
+        minWidth: collapsed ? "var(--sidebar-collapsed-width)" : "var(--sidebar-expanded-width)",
         transition: "width 200ms ease, min-width 200ms ease",
-        /* SizePolicy: Fixed horizontal, Expanding vertical */
         flexShrink: 0,
         flexGrow: 0,
       }}
     >
-      {/* LEFT: QScrollArea (widgetResizable=true, frameShape=NoFrame) */}
       {!collapsed && (
-        <div
-          className="flex-1 overflow-y-auto overflow-x-hidden"
-          style={{
-            /* QHBoxLayout margin 0, spacing 0 */
-            margin: 0,
-            padding: 0,
-          }}
-        >
+        <div className="flex-1 overflow-y-auto overflow-x-hidden">
           <div className="flex flex-col">
-            {/* BackgroundPreviewWidget */}
             <BackgroundPreview />
-
-            {/* QFrame::HLine separator */}
-            <hr className="qt-separator" />
-
-            {/* StatisticsPanel */}
+            <Separator />
             <StatisticsPanel />
-
-            {/* QFrame::HLine separator */}
-            <hr className="qt-separator" />
-
-            {/* NanopositionerTab */}
+            <Separator />
             <NanopositionerPanel />
-
-            {/* QFrame::HLine separator */}
-            <hr className="qt-separator" />
-
-            {/* SyringePumpTab */}
+            <Separator />
             <SyringePumpPanel />
-
-            {/* Stretch at bottom */}
             <div className="flex-1" />
           </div>
         </div>
       )}
 
-      {/* RIGHT: Toggle button (30x30, fixed size, autoRaise style) */}
-      <button
+      <Button
+        variant="ghost"
+        size="icon"
         onClick={toggleSidebar}
-        className="qt-tool-btn flex items-center justify-center flex-shrink-0"
+        className="flex-shrink-0 rounded-none"
         style={{
           width: "var(--sidebar-collapsed-width)",
           height: "var(--sidebar-collapsed-width)",
-          /* autoRaise: border only on hover (handled by qt-tool-btn) */
         }}
         title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
       >
-        {collapsed ? "\u25B6" : "\u25C0"}
-      </button>
+        {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+      </Button>
     </div>
   );
 }

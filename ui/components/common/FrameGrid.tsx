@@ -1,5 +1,6 @@
 import type { ProcessedFrame } from "../../types/backend";
 import { useAppStore } from "../../stores/appStore";
+import { cn } from "@/lib/utils";
 
 interface FrameGridProps {
   frames: ProcessedFrame[];
@@ -10,7 +11,7 @@ interface FrameGridProps {
 
 export function FrameGrid({
   frames,
-  showOverlay = false,
+  showOverlay: _showOverlay = false,
   selectedIndex = null,
   onSelect,
 }: FrameGridProps) {
@@ -26,7 +27,12 @@ export function FrameGrid({
       {frames.map((frame, i) => (
         <div
           key={frame.index}
-          className="cursor-pointer"
+          className={cn(
+            "cursor-pointer rounded-sm overflow-hidden transition-all",
+            selectedIndex === i
+              ? "ring-2 ring-primary bg-primary/10"
+              : "ring-1 ring-border hover:ring-primary/50"
+          )}
           onClick={() => onSelect?.(i)}
           onDoubleClick={() =>
             openFrameViewer({
@@ -37,11 +43,6 @@ export function FrameGrid({
           style={{
             width: "var(--thumbnail-size)",
             height: "var(--thumbnail-size)",
-            border:
-              selectedIndex === i
-                ? "3px solid blue"
-                : "2px solid gray",
-            backgroundColor: selectedIndex === i ? "lightblue" : "transparent",
           }}
         >
           {frame.imageBase64 ? (
@@ -51,14 +52,14 @@ export function FrameGrid({
               className="w-full h-full object-contain"
             />
           ) : (
-            <div className="w-full h-full bg-neutral-200 flex items-center justify-center text-xs text-neutral-400">
+            <div className="w-full h-full bg-muted flex items-center justify-center text-xs text-muted-foreground">
               {frame.index}
             </div>
           )}
         </div>
       ))}
       {frames.length === 0 && (
-        <p className="col-span-5 text-center text-xs text-neutral-400 py-4">
+        <p className="col-span-5 text-center text-xs text-muted-foreground py-4">
           No frames
         </p>
       )}

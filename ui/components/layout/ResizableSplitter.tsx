@@ -1,5 +1,4 @@
 import { Allotment } from "allotment";
-import "allotment/dist/style.css";
 import type { ReactNode } from "react";
 
 interface ResizableSplitterProps {
@@ -16,7 +15,7 @@ export function ResizableSplitter({
   children,
   defaultSizes,
   minSizes,
-  handleSize = 10,
+  handleSize: _handleSize = 10,
   className,
 }: ResizableSplitterProps) {
   return (
@@ -24,7 +23,6 @@ export function ResizableSplitter({
       <Allotment
         vertical={direction === "vertical"}
         defaultSizes={defaultSizes}
-        separator={handleSize}
       >
         {children.map((child, i) => (
           <Allotment.Pane

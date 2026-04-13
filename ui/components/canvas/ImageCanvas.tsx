@@ -1,7 +1,7 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import { usePlaybackStore } from "../../stores/playbackStore";
 import { useProcessingStore } from "../../stores/processingStore";
-import type { Roi, OverlayMode } from "../../types/backend";
+import type { Roi } from "../../types/backend";
 
 /** ROI alignment constraints matching Qt implementation */
 const ROI_OFFSET_X_STEP = 16;

@@ -12,41 +12,32 @@ export function StatisticsPanel() {
   const totalValidFlushed = useProcessingStore((s) => s.totalValidFlushed);
 
   return (
-    <div style={{ padding: "var(--spacing-sm)" }}>
-      <span
-        style={{
-          fontWeight: "bold",
-          fontSize: 12,
-          display: "block",
-          marginBottom: 4,
-        }}
-      >
-        Statistics
-      </span>
-      <div className="qt-form">
+    <div className="p-3">
+      <span className="font-semibold text-sm block mb-2">Statistics</span>
+      <div className="form-grid">
         <label>Capture FPS:</label>
-        <span style={{ fontFamily: "monospace" }}>{frameRate.toFixed(1)}</span>
+        <span className="font-mono text-xs">{frameRate.toFixed(1)}</span>
 
         <label>Data Rate (MB/s):</label>
-        <span style={{ fontFamily: "monospace" }}>{dataRate.toFixed(1)}</span>
+        <span className="font-mono text-xs">{dataRate.toFixed(1)}</span>
 
         <label>Frames:</label>
-        <span style={{ fontFamily: "monospace" }}>{framesProcessed}</span>
+        <span className="font-mono text-xs">{framesProcessed}</span>
 
         <label>Algo FPS:</label>
-        <span style={{ fontFamily: "monospace" }}>{algoFps.toFixed(1)}</span>
+        <span className="font-mono text-xs">{algoFps.toFixed(1)}</span>
 
         <label>Valid FPS:</label>
-        <span style={{ fontFamily: "monospace" }}>{validFps.toFixed(1)}</span>
+        <span className="font-mono text-xs">{validFps.toFixed(1)}</span>
 
         <label>Invalid FPS:</label>
-        <span style={{ fontFamily: "monospace" }}>{invalidFps.toFixed(1)}</span>
+        <span className="font-mono text-xs">{invalidFps.toFixed(1)}</span>
 
         <label>Algo Avg (us):</label>
-        <span style={{ fontFamily: "monospace" }}>{algoAvgUs.toFixed(0)}</span>
+        <span className="font-mono text-xs">{algoAvgUs.toFixed(0)}</span>
 
         <label>Total Valid:</label>
-        <span style={{ fontFamily: "monospace" }}>{totalValidFlushed}</span>
+        <span className="font-mono text-xs">{totalValidFlushed}</span>
       </div>
     </div>
   );

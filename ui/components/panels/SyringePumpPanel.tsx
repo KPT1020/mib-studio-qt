@@ -9,6 +9,10 @@ import {
   stopPump,
   purgePump,
 } from "../../hooks/useBackend";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
+import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 
 interface PumpState {
   connected: boolean;
@@ -52,42 +56,24 @@ function PumpGroup({ pumpId, title }: { pumpId: PumpId; title: string }) {
   };
 
   return (
-    <fieldset className="qt-groupbox">
-      <legend>{title}</legend>
-
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 6,
-          padding: 6,
-        }}
-      >
-        {/* Connect/Disconnect + spacer */}
-        <div style={{ display: "flex", gap: 4 }}>
-          <button
-            className="qt-btn"
-            onClick={handleConnect}
-            disabled={state.connected}
-          >
-            Connect
-          </button>
-          <button
-            className="qt-btn"
-            onClick={handleDisconnect}
-            disabled={!state.connected}
-          >
+    <Card>
+      <CardHeader className="p-3 pb-0">
+        <CardTitle>{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="p-3 flex flex-col gap-2">
+        {/* Connect/Disconnect */}
+        <div className="flex gap-1">
+          <Button size="sm" onClick={handleConnect} disabled={state.connected}>Connect</Button>
+          <Button size="sm" variant="outline" onClick={handleDisconnect} disabled={!state.connected}>
             Disconnect
-          </button>
-          <div style={{ flex: 1 }} />
+          </Button>
         </div>
 
-        {/* QFormLayout: Flow Rate (QDoubleSpinBox 4 decimals + unit combo), Direction */}
-        <div className="qt-form">
-          <label>Flow Rate:</label>
-          <div style={{ display: "flex", gap: 4 }}>
-            <input
-              className="qt-input"
+        {/* Flow Rate & Direction */}
+        <div className="form-grid">
+          <Label>Flow Rate:</Label>
+          <div className="flex gap-1">
+            <Input
               type="number"
               step={0.0001}
               min={0}
@@ -99,22 +85,23 @@ function PumpGroup({ pumpId, title }: { pumpId: PumpId; title: string }) {
                 setPumpFlowRate(pumpId, val, state.flowUnit === "uL/min" ? 0 : 1);
               }}
               disabled={!state.connected}
-              style={{ flex: 1 }}
+              className="flex-1"
             />
             <select
-              className="qt-select"
+              className="select-styled"
               value={state.flowUnit}
               onChange={(e) => setState((s) => ({ ...s, flowUnit: e.target.value }))}
               disabled={!state.connected}
+              style={{ width: 90 }}
             >
               <option value="uL/min">uL/min</option>
               <option value="mL/min">mL/min</option>
             </select>
           </div>
 
-          <label>Direction:</label>
+          <Label>Direction:</Label>
           <select
-            className="qt-select"
+            className="select-styled"
             value={state.direction}
             onChange={(e) => {
               const dir = e.target.value as PumpDirection;
@@ -128,61 +115,35 @@ function PumpGroup({ pumpId, title }: { pumpId: PumpId; title: string }) {
           </select>
         </div>
 
-        {/* Start/Stop/Purge + spacer */}
-        <div style={{ display: "flex", gap: 4 }}>
-          <button
-            className="qt-btn"
-            onClick={() => startPump(pumpId)}
-            disabled={!state.connected}
-          >
-            Start
-          </button>
-          <button
-            className="qt-btn"
-            onClick={() => stopPump(pumpId)}
-            disabled={!state.connected}
-          >
-            Stop
-          </button>
-          <button
-            className="qt-btn"
-            onClick={() => purgePump(pumpId, state.direction)}
-            disabled={!state.connected}
-          >
+        {/* Start/Stop/Purge */}
+        <div className="flex gap-1">
+          <Button size="sm" onClick={() => startPump(pumpId)} disabled={!state.connected}>Start</Button>
+          <Button size="sm" variant="outline" onClick={() => stopPump(pumpId)} disabled={!state.connected}>Stop</Button>
+          <Button size="sm" variant="outline" onClick={() => purgePump(pumpId, state.direction)} disabled={!state.connected}>
             Purge
-          </button>
-          <div style={{ flex: 1 }} />
+          </Button>
         </div>
 
-        {/* Status form: Status, Flow, Volume labels */}
-        <div className="qt-form">
-          <label>Status:</label>
-          <span style={{ fontSize: 12 }}>{state.status}</span>
-          <label>Flow:</label>
-          <span style={{ fontSize: 12 }}>{state.flowStatus}</span>
-          <label>Volume:</label>
-          <span style={{ fontSize: 12 }}>{state.volume}</span>
+        {/* Status display */}
+        <div className="form-grid">
+          <Label>Status:</Label>
+          <span className="text-xs">{state.status}</span>
+          <Label>Flow:</Label>
+          <span className="text-xs">{state.flowStatus}</span>
+          <Label>Volume:</Label>
+          <span className="text-xs">{state.volume}</span>
         </div>
-      </div>
-    </fieldset>
+      </CardContent>
+    </Card>
   );
 }
 
 export function SyringePumpPanel() {
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        padding: 6,
-        gap: 4,
-      }}
-    >
+    <div className="flex flex-col p-3 gap-2">
       <PumpGroup pumpId="sample" title="Sample Pump" />
       <PumpGroup pumpId="sheath" title="Sheath Pump" />
-
-      {/* Bottom spacer */}
-      <div style={{ flex: 1 }} />
+      <div className="flex-1" />
     </div>
   );
 }
