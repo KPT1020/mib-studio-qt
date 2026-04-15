@@ -1,0 +1,49 @@
+# Agent Onboarding
+
+> Guided reading order for a fresh agent. ~10 minutes to acquire working context.
+
+## Step 1 — Orient
+
+1. Read `CLAUDE.md` (top-level project instructions, build commands, conventions).
+2. Read [[architecture/Overview]] — what this app is and how it's layered.
+3. Read [[architecture/Data-Flow]] — the realtime path from camera to HDF5.
+
+## Step 2 — Understand the shared state
+
+4. [[data-model/FrameStore]] — the ring buffer every layer shares.
+5. [[architecture/AppBackend]] — how services are wired together.
+6. [[architecture/Threading-Model]] — who runs on which thread.
+
+## Step 3 — Pick the relevant cluster
+
+Jump to the notes that match your task:
+
+| If you're touching... | Start here |
+|---|---|
+| Frame acquisition / camera | [[services/CaptureService]] + [[camera/_MOC]] |
+| Image analysis / metrics | [[services/ProcessingService]] + [[domain/Microscopy-Pipeline]] |
+| Saving/reading experiment files | [[services/Hdf5Service]] + [[data-model/HDF5-Storage]] |
+| Live preview / ROI / overlays | [[frontend/PreviewPage]], [[frontend/ConfigTabs]] |
+| Post-experiment review | [[frontend/HdfReviewTab]] |
+| Live charts during a run | [[frontend/ExperimentMonitoringTab]] |
+| Autofocus / nanopositioner | [[services/AutofocusService]] + [[frontend/NanopositionerTab]] |
+| Syringe pumps | [[services/SyringePumpService]] + [[frontend/SyringePumpTab]] |
+| Build / deploy | [[build-and-run/Build]], [[build-and-run/Run-Modes]] |
+
+## Step 4 — Before you write code
+
+7. Scan [[conventions/Code-Conventions]] — spdlog over `std::cout`, reuse
+   `Tools.cpp`, headers mirror src, etc.
+8. Check [[current-state/Recent-Work]] and [[current-state/Task-Log-Index]] to
+   see what's actively in flight and what pitfalls other agents have hit.
+
+## Step 5 — Domain lookup
+
+9. If microscopy terms are unfamiliar, skim [[domain/Glossary]].
+
+## Ground rules
+
+- Work on the feature branch specified in the task prompt.
+- Never `std::cout` in app code — use `spdlog` (see [[conventions/Logging]]).
+- Reuse existing utilities in `src/backend/Tools.cpp` before writing new ones.
+- Task notes go in `knowledge_map/task/`; user docs go in `docs/`.

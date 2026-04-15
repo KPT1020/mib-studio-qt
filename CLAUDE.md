@@ -2,10 +2,28 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Onboarding (read this first)
+
+New agents should ramp up via the knowledge vault before making changes. Start at
+`knowledge_map/README.md` and follow the `[[WikiLinks]]`. For a guided reading
+order, open `knowledge_map/Agent-Onboarding.md`.
+
+The vault (Obsidian-style, atomic notes) covers:
+- **Architecture** — layered design, `AppBackend` composition root, threading, data flow
+- **Services** — one note per backend service under `knowledge_map/services/`
+- **Frontend** — one note per tab/controller under `knowledge_map/frontend/`
+- **Camera abstraction**, **FrameStore**, **HDF5 storage**
+- **Domain glossary** (deformability, ring ratio, PFNC, GenICam, etc.)
+- **Build & run**, **conventions**, **current state**
+
+Related locations (unchanged):
+- `docs/` — user-facing how-tos and integration guides
+- `knowledge_map/task/` — dated task records (historical context)
+
 ## Build Commands
 
 ```bash
-# Configure (Windows, VS2022 x64, vcpkg manifest mode)
+# Configure (Windows, VS2022 x64, Conan toolchain)
 cmake --preset windows-default
 
 # Build Debug
@@ -37,7 +55,7 @@ C++17 / Qt6 (Widgets + Charts) application for real-time microscopy image captur
 
 ### Layered Design
 
-**Frontend** (`src/frontend/`) — Qt widgets. `MainWindow` coordinates tabs: `ConnectTab` (device selection), `PreviewPage` (live display), `PlaybackPanel` (frame playback), `ExperimentMonitoringTab` (live histograms), `HdfReviewTab` (post-experiment review), `ConfigTabs` (nanopositioner config).
+**Frontend** (`src/frontend/`) — Qt widgets. `MainWindow` coordinates tabs: `ConnectTab` (device selection), `PreviewPage` (live display + `PlaybackPanel`), `ConfigTabs` (processing + camera-script config), `ExperimentMonitoringTab` (live histograms), `HdfReviewTab` (post-experiment review), `NanopositionerTab` (autofocus), `SyringePumpTab` (dual-pump control).
 
 **AppBackend** (`src/backend/AppBackend.cpp`) — Service facade. Owns and wires all backend services. Entry point for all backend operations.
 
@@ -48,11 +66,15 @@ C++17 / Qt6 (Widgets + Charts) application for real-time microscopy image captur
 - `PlaybackService` — Wraps `FrameStore` ring buffer for UI queries
 - `AutofocusService` — Nanopositioner control via serial COM port; uses ring ratio feedback from processing
 - `CameraControlService` — GenICam parameter application
+- `TriggerService` — Camera digital output pulse on target-group frame detection
+- `SyringePumpService` — Dual-pump (sample/sheath) Modbus control over serial
+- `YoloService` — ONNX Runtime model loader (segmentation; optional)
+- `RecorderService` — Raw frame container writer (recording mode)
 - `SqliteService` — Metadata persistence
 
 **Camera abstraction** (`src/camera/`) — `ICamera` interface with `EGrabberCamera` (hardware) and `MockCamera` (folder-backed) implementations.
 
-**FrameStore** (`src/backend/playback/FrameStore.cpp`) — Ring buffer (512 capacity) for in-memory frame history.
+**FrameStore** (`src/backend/playback/FrameStore.cpp`) — Ring buffer for in-memory frame history. Default constructor capacity is 512, but `AppBackend::initialize` overrides it to **5000**.
 
 ### Threading Model
 
