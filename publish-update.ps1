@@ -21,6 +21,19 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "=== Publishing MIB Studio Qt Update ===" -ForegroundColor Cyan
 
+function Restore-ChecksumEnvVar {
+    param(
+        [string]$Name,
+        [string]$PreviousValue
+    )
+
+    if ($null -eq $PreviousValue) {
+        Remove-Item "Env:$Name" -ErrorAction SilentlyContinue
+    } else {
+        Set-Item "Env:$Name" $PreviousValue
+    }
+}
+
 # Validate installer exists
 if (-not (Test-Path $Installer)) {
     Write-Host "ERROR: Installer file does not exist: $Installer" -ForegroundColor Red
@@ -97,9 +110,22 @@ if ($Profile) {
     $awsArgs += @("--profile", $Profile)
 }
 
-# Upload installer (always use public-read ACL)
+# Force AWS CLI checksum behavior that is compatible with S3-compatible endpoints.
+$previousRequestChecksumCalculation = $env:AWS_REQUEST_CHECKSUM_CALCULATION
+$previousResponseChecksumValidation = $env:AWS_RESPONSE_CHECKSUM_VALIDATION
+$env:AWS_REQUEST_CHECKSUM_CALCULATION = "when_required"
+$env:AWS_RESPONSE_CHECKSUM_VALIDATION = "when_required"
+
+# Upload installer with single-request put-object (avoids multipart edge cases on some S3-compatible endpoints)
 Write-Host "`n3. Uploading installer..." -ForegroundColor Yellow
-$installerArgs = $awsArgs + @("s3", "cp", $Installer, "s3://$Bucket/$installerKey", "--content-type", "application/octet-stream", "--acl", "public-read")
+$installerArgs = $awsArgs + @(
+    "s3api", "put-object",
+    "--bucket", $Bucket,
+    "--key", $installerKey,
+    "--body", $Installer,
+    "--content-type", "application/octet-stream",
+    "--acl", "public-read"
+)
 
 Write-Host "   Command: aws $($installerArgs -join ' ')" -ForegroundColor Gray
 $result = & aws $installerArgs 2>&1
@@ -108,6 +134,8 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: Installer upload failed!" -ForegroundColor Red
     Write-Host $result -ForegroundColor Red
     Remove-Item $manifestPath -ErrorAction SilentlyContinue
+    Restore-ChecksumEnvVar -Name "AWS_REQUEST_CHECKSUM_CALCULATION" -PreviousValue $previousRequestChecksumCalculation
+    Restore-ChecksumEnvVar -Name "AWS_RESPONSE_CHECKSUM_VALIDATION" -PreviousValue $previousResponseChecksumValidation
     exit 1
 }
 
@@ -127,6 +155,8 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: Manifest upload failed!" -ForegroundColor Red
     Write-Host $result -ForegroundColor Red
     Remove-Item $manifestPath -ErrorAction SilentlyContinue
+    Restore-ChecksumEnvVar -Name "AWS_REQUEST_CHECKSUM_CALCULATION" -PreviousValue $previousRequestChecksumCalculation
+    Restore-ChecksumEnvVar -Name "AWS_RESPONSE_CHECKSUM_VALIDATION" -PreviousValue $previousResponseChecksumValidation
     exit 1
 }
 
@@ -137,6 +167,8 @@ Write-Host "   Manifest uploaded successfully" -ForegroundColor Green
 
 # Cleanup
 Remove-Item $manifestPath -ErrorAction SilentlyContinue
+Restore-ChecksumEnvVar -Name "AWS_REQUEST_CHECKSUM_CALCULATION" -PreviousValue $previousRequestChecksumCalculation
+Restore-ChecksumEnvVar -Name "AWS_RESPONSE_CHECKSUM_VALIDATION" -PreviousValue $previousResponseChecksumValidation
 
 Write-Host "`n=== Publish Complete ===" -ForegroundColor Cyan
 Write-Host "Manifest URL: $endpointNoSlash/$Bucket/$manifestKey" -ForegroundColor Green

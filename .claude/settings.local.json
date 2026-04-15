@@ -67,7 +67,12 @@
       "Bash(do echo:*)",
       "Read(//c/Users/gavin/Developer/mib-studio-qt/**)",
       "Bash(done)",
-      "Bash(gh --version)"
+      "Bash(gh --version)",
+      "Bash(conan --version)",
+      "Bash(conan list *)",
+      "Bash(cmake --build build --config Release --target mib_studio_qt)",
+      "Bash(cmake -E copy_if_different \"C:/Users/gavin/.conan2/p/b/qtd632f7a3c80dc/p/bin/Qt6Charts.dll\" \"C:/Users/gavin/Developer/mib-studio-qt/build/Release/\")",
+      "Bash(echo \"---exit=$?\")"
     ]
   }
 }

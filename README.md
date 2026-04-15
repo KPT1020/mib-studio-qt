@@ -55,7 +55,7 @@ Quick start:
 1. Build Release configuration: `cmake --build build --config Release`
 2. Build installer: `cmake --build build --target package_installer`
 3. Build update package: `cmake --build build --target package_installer_update`
-4. Find installer at: `build/dist/MIB_Studio_Qt_Setup_v0.1.0.exe`
+4. Find installer at: `resources/build/dist/MIB_Studio_Qt_Setup_v0.1.0.exe`
 
 After building installers, see [Publishing Updates](#publishing-updates) below to publish them for distribution.
 
@@ -69,12 +69,12 @@ After building installers, use `publish-update.ps1` to upload them to RustFS (S3
 
 **Publish update package (for auto-updates):**
 ```powershell
-.\publish-update.ps1 -Installer "build\dist\MIB_Studio_Qt_Update_v0.2.0.exe" -Profile rustfs
+.\publish-update.ps1 -Installer "resources\build\dist\MIB_Studio_Qt_Update_v0.2.0.exe" -Profile rustfs
 ```
 
 **Publish full installer (optional, for manual downloads):**
 ```powershell
-.\publish-update.ps1 -Installer "build\dist\MIB_Studio_Qt_Setup_v0.2.0.exe" -Profile rustfs
+.\publish-update.ps1 -Installer "resources\build\dist\MIB_Studio_Qt_Setup_v0.2.0.exe" -Profile rustfs
 ```
 
 The script auto-detects version from filename, computes SHA-256, generates a manifest, and uploads files with public-read ACL.
