@@ -536,32 +536,59 @@ void MainWindow::onStopExperiment()
         return;
     }
 
+    // --- Stop-lag diagnostic timing ---------------------------------------
+    // Every blocking section below is wrapped in a steady_clock timer and
+    // emitted via SPDLOG_INFO under the "stop-lag:" prefix so the slow
+    // segment is easy to grep out of the log. Investigative only; the
+    // behaviour of the stop path is unchanged.
+    using stop_clock = std::chrono::steady_clock;
+    const auto tStopBegin = stop_clock::now();
+    auto sinceMs = [](stop_clock::time_point t0) {
+        return std::chrono::duration<double, std::milli>(stop_clock::now() - t0).count();
+    };
+
     // End experiment and flush any remaining frames
     auto &processing = backend_.processing();
 
     // Wait for any ongoing flush to complete
-    if (flushInProgress_ && flushWatcher_)
     {
-        flushWatcher_->waitForFinished();
+        const auto t0 = stop_clock::now();
+        const bool wasInProgress = flushInProgress_;
+        if (flushInProgress_ && flushWatcher_)
+        {
+            flushWatcher_->waitForFinished();
+        }
+        SPDLOG_INFO("stop-lag: waitForFinished(async flush) took {:.3f} ms (inProgress={})",
+                    sinceMs(t0), wasInProgress);
     }
 
     // Flush any remaining buffered frames (synchronous for final flush)
     auto &hdf5 = backend_.hdf5();
     if (hdf5.isFileOpen())
     {
+        const auto t0 = stop_clock::now();
         size_t flushed = processing.flushBufferedFrames(hdf5);
+        SPDLOG_INFO("stop-lag: final flushBufferedFrames took {:.3f} ms (frames={})",
+                    sinceMs(t0), flushed);
         if (flushed > 0)
         {
             SPDLOG_INFO("Final flush: {} frames written to HDF5", flushed);
         }
     }
 
-    processing.endExperiment();
-    backend_.processing().resetRealtimeMetrics();
+    {
+        const auto t0 = stop_clock::now();
+        processing.endExperiment();
+        backend_.processing().resetRealtimeMetrics();
+        SPDLOG_INFO("stop-lag: endExperiment+resetRealtimeMetrics took {:.3f} ms", sinceMs(t0));
+    }
 
     // Get final frame counts (should be empty after flush, but check anyway)
+    const auto tGetFramesStart = stop_clock::now();
     auto validFrames = processing.getValidFrames();
     auto invalidFrames = processing.getInvalidFrames();
+    SPDLOG_INFO("stop-lag: get{{Valid,Invalid}}Frames took {:.3f} ms (valid={}, invalid={})",
+                sinceMs(tGetFramesStart), validFrames.size(), invalidFrames.size());
 
     // Record experiment end time
     uint64_t experimentEndTimeNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -573,8 +600,13 @@ void MainWindow::onStopExperiment()
     {
         if (!validFrames.empty() || !invalidFrames.empty())
         {
+            const auto t0 = stop_clock::now();
             // Save any remaining frames that weren't flushed
-            if (!hdf5.appendFrames(validFrames, invalidFrames))
+            const bool appendOk = hdf5.appendFrames(validFrames, invalidFrames);
+            SPDLOG_INFO("stop-lag: appendFrames(remaining) took {:.3f} ms "
+                        "(valid={}, invalid={})",
+                        sinceMs(t0), validFrames.size(), invalidFrames.size());
+            if (!appendOk)
             {
                 QMessageBox::warning(this, tr("Warning"),
                                      tr("Failed to save remaining frames to HDF5"));
@@ -589,14 +621,21 @@ void MainWindow::onStopExperiment()
         auto processingConfig = processing.getProcessingConfig();
         auto roi = processing.getRealtimeRoi();
         cv::Mat bg = processing.getRealtimeBackgroundGray();
-        hdf5.writeExperimentInfo(experimentStartTimeNs_, experimentEndTimeNs,
-                                 totalValid, totalInvalid, processingConfig, roi,
-                                 bg.empty() ? nullptr : &bg);
+        {
+            const auto t0 = stop_clock::now();
+            hdf5.writeExperimentInfo(experimentStartTimeNs_, experimentEndTimeNs,
+                                     totalValid, totalInvalid, processingConfig, roi,
+                                     bg.empty() ? nullptr : &bg);
+            SPDLOG_INFO("stop-lag: writeExperimentInfo took {:.3f} ms", sinceMs(t0));
+        }
 
         // Save full config.json content for backtracking
         std::string configJson = backend_.getLastConfigJson();
         if (!configJson.empty()) {
+            const auto t0 = stop_clock::now();
             hdf5.writeConfigJson(configJson);
+            SPDLOG_INFO("stop-lag: writeConfigJson took {:.3f} ms (bytes={})",
+                        sinceMs(t0), configJson.size());
         }
 
         // Note: Chart snapshots are no longer saved during experiment stop.
@@ -605,7 +644,11 @@ void MainWindow::onStopExperiment()
         statusLabel_->setText(QString("Experiment saved: %1 valid, %2 invalid frames")
                                   .arg(totalValid)
                                   .arg(totalInvalid));
-        hdf5.closeFile();
+        {
+            const auto t0 = stop_clock::now();
+            hdf5.closeFile();
+            SPDLOG_INFO("stop-lag: closeFile (H5Fclose) took {:.3f} ms", sinceMs(t0));
+        }
     }
     else
     {
@@ -614,6 +657,11 @@ void MainWindow::onStopExperiment()
 
     experimentActive_ = false;
     updateExperimentButtonStates(); // This will also call updateTabStates() to enable Overview and Review tabs
+
+    const auto cfgAtStop = processing.getProcessingConfig();
+    SPDLOG_INFO("stop-lag: onStopExperiment total {:.3f} ms (multiImage={}/{})",
+                sinceMs(tStopBegin),
+                cfgAtStop.multi_image_enabled, cfgAtStop.multi_image_count);
 }
 
 void MainWindow::onUpdateStats()
