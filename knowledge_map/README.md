@@ -56,6 +56,13 @@ following `[[WikiLinks]]`. If you are a new agent, start here:
 - [[current-state/Recent-Work]]
 - [[current-state/Task-Log-Index]]
 
+## Maintenance
+
+This vault is required reading *and* required writing. Every code change
+must land with matching vault updates in the same commit. See the
+"Vault Maintenance" section in `CLAUDE.md` for the source-file → vault-note
+mapping, and [[Agent-Onboarding]] for the pre-commit checklist.
+
 ## Related
 
 - `docs/` — user-facing how-tos (`docs/howto/*.md`) and integration notes

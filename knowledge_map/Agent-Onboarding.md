@@ -47,3 +47,32 @@ Jump to the notes that match your task:
 - Never `std::cout` in app code — use `spdlog` (see [[conventions/Logging]]).
 - Reuse existing utilities in `src/backend/Tools.cpp` before writing new ones.
 - Task notes go in `knowledge_map/task/`; user docs go in `docs/`.
+
+## Before you finish — update the vault
+
+The vault is the onboarding path for the **next** agent. If your change
+leaves the vault stale, you've broken that path. Every non-trivial commit
+MUST include vault updates alongside code changes.
+
+See `CLAUDE.md` → "Vault Maintenance (required for every change)" for the
+full source-file → vault-note mapping. In short:
+
+- **Touched a service?** Update `knowledge_map/services/<Name>Service.md`
+  (Responsibility, Key APIs, Gotchas).
+- **Touched a tab or dialog?** Update the matching note under
+  `knowledge_map/frontend/`.
+- **Added or removed anything?** Create/delete the atomic note AND update
+  the cluster's `_MOC.md` AND the vault `README.md` AND this file.
+- **Shipped a feature or non-trivial fix?** Add a line to
+  `knowledge_map/current-state/Recent-Work.md`.
+- **Found a stale note while working?** Fix it — don't leave it for next
+  time.
+
+Quick sanity check before committing:
+
+```
+grep -r '\[\[' knowledge_map/ | <verify each target exists>
+```
+
+If your PR has code changes but no vault changes, expect reviewers to push
+back.

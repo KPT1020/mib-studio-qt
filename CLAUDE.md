@@ -20,6 +20,49 @@ Related locations (unchanged):
 - `docs/` — user-facing how-tos and integration guides
 - `knowledge_map/task/` — dated task records (historical context)
 
+## Vault Maintenance (required for every change)
+
+The vault is only useful if it stays current. **Every agent that modifies
+code must update the vault in the same commit/PR as the code change.**
+
+### When to update
+
+| If you change... | Update the note at... |
+|---|---|
+| A service under `src/backend/services/<Name>Service.{cpp,h}` | `knowledge_map/services/<Name>Service.md` |
+| A frontend tab / controller / dialog under `src/frontend/` | The matching note under `knowledge_map/frontend/` |
+| `src/backend/AppBackend.{cpp,h}` wiring | `knowledge_map/architecture/AppBackend.md` |
+| Threading, data flow, or layering | `knowledge_map/architecture/{Threading-Model,Data-Flow,Overview}.md` |
+| `src/backend/playback/FrameStore.*` | `knowledge_map/data-model/FrameStore.md` |
+| HDF5 schema / dataset paths (`Hdf5Service.cpp`) | `knowledge_map/data-model/HDF5-Storage.md` + `services/Hdf5Service.md` |
+| `src/camera/` (ICamera, EGrabber, Mock) | `knowledge_map/camera/*.md` |
+| `CMakeLists.txt`, `conanfile.txt`, `CMakePresets.json` | `knowledge_map/build-and-run/{Build,Dependencies,Run-Modes}.md` |
+| Conventions / logging patterns | `knowledge_map/conventions/*.md` |
+| Domain vocabulary (new metric, new concept) | `knowledge_map/domain/{Glossary,Microscopy-Pipeline}.md` |
+| **Added a new** service / tab / dialog / camera impl | Create the atomic note AND add it to the cluster's `_MOC.md` AND link it from `knowledge_map/README.md` and `knowledge_map/Agent-Onboarding.md` |
+| **Renamed or removed** any of the above | Rename/remove the note AND update every `[[WikiLink]]` that points to it |
+
+### What to update inside a note
+
+- Change the **Responsibility** paragraph if behavior shifted.
+- Update **Key APIs / Entry points** when public signatures change.
+- Add new gotchas to **Gotchas**; remove fixed ones.
+- Touch **Source:** paths if files moved.
+- Update the module's `_MOC.md` if a new sibling concept appeared.
+
+### Shipping the change
+
+1. On every non-trivial feature/fix, also append a short dated entry to
+   `knowledge_map/current-state/Recent-Work.md` (and — if the work was
+   multi-step — create `knowledge_map/task/YYYY-MM-DD-<slug>.md`).
+2. Before committing, verify that no wikilinks you touched are broken:
+   `grep -r '\[\[' knowledge_map/` and confirm each target note exists.
+3. If you find any note that disagrees with current code, fix it while
+   you're there — the vault is a living document, not an archive.
+
+Do not skip this step. If a reviewer sees code changes without matching
+vault updates, they should push back.
+
 ## Build Commands
 
 ```bash
