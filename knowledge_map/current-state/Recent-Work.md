@@ -28,6 +28,13 @@
 - Param tuning panel now stays in sync with the config table both
   directions.
 - HDF Review tab: fixed dangling pointer crash on file close.
+- **2026-04-15** — `package_installer` / `package_installer_update`
+  now pass `/O${INSTALLER_OUTPUT_DIR}` to ISCC so installers land in
+  `build/dist/` as CMake and `build-windows.yml` expect. Without it,
+  Inno Setup honored `OutputDir=build\dist` from the `.iss` file
+  relative to `resources/installers/`, writing to
+  `resources/installers/build/dist/` and breaking the CI artifact
+  upload step.
 
 ## Historical tasks worth knowing about
 

@@ -697,7 +697,7 @@ if(WIN32)
             COMMAND ${CMAKE_COMMAND} -E echo "Checking for ${CMAKE_BINARY_DIR}/Release/mib_studio_qt.exe..."
             # Build installer
             COMMAND ${CMAKE_COMMAND} -E echo "Compiling InnoSetup script..."
-            COMMAND "${ISCC_EXE}" "/DAppVersion=${PROJECT_VERSION}" "${INNOSETUP_SCRIPT}"
+            COMMAND "${ISCC_EXE}" "/DAppVersion=${PROJECT_VERSION}" "/O${INSTALLER_OUTPUT_DIR}" "${INNOSETUP_SCRIPT}"
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             COMMENT "Building Windows installer with InnoSetup"
             DEPENDS mib_studio_qt
@@ -712,7 +712,7 @@ if(WIN32)
             COMMAND ${CMAKE_COMMAND} -E echo "Checking for ${CMAKE_BINARY_DIR}/Release/mib_studio_qt.exe..."
             # Build update package
             COMMAND ${CMAKE_COMMAND} -E echo "Compiling InnoSetup update script..."
-            COMMAND "${ISCC_EXE}" "/DAppVersion=${PROJECT_VERSION}" "${INNOSETUP_UPDATE_SCRIPT}"
+            COMMAND "${ISCC_EXE}" "/DAppVersion=${PROJECT_VERSION}" "/O${INSTALLER_OUTPUT_DIR}" "${INNOSETUP_UPDATE_SCRIPT}"
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             COMMENT "Building Windows update package with InnoSetup"
             DEPENDS mib_studio_qt
