@@ -40,6 +40,12 @@
   The local tag was never pushed, so `gh release create` refused to
   bind the release to it. `--target` makes gh create the tag
   server-side atomically.
+- **2026-04-15** — `publish-update.ps1` installer upload switched
+  from `s3api put-object` (single-part) to `aws s3 cp` (multipart)
+  so the 616 MiB full installer stops hitting HTTP 413 at the
+  s3.yofo.bio proxy. `AWS_REQUEST_CHECKSUM_CALCULATION=when_required`
+  (already set by `eb375d6`) keeps multipart compatible with the
+  S3-compatible endpoint.
 
 ## Historical tasks worth knowing about
 
