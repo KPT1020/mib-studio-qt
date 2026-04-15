@@ -40,12 +40,14 @@
   The local tag was never pushed, so `gh release create` refused to
   bind the release to it. `--target` makes gh create the tag
   server-side atomically.
-- **2026-04-15** — `publish-update.ps1` installer upload switched
-  from `s3api put-object` (single-part) to `aws s3 cp` (multipart)
-  so the 616 MiB full installer stops hitting HTTP 413 at the
-  s3.yofo.bio proxy. `AWS_REQUEST_CHECKSUM_CALCULATION=when_required`
-  (already set by `eb375d6`) keeps multipart compatible with the
-  S3-compatible endpoint.
+- **2026-04-15** — Tried switching `publish-update.ps1` to
+  `aws s3 cp` (multipart) to fix a 413 on the 616 MiB full installer,
+  but s3.yofo.bio rejected `CreateMultipartUpload` with
+  `MissingContentLength`. Reverted to `s3api put-object`. Update
+  package (22 MiB) uploads fine; the full installer still 413s and
+  needs either a larger body-size cap on the s3.yofo.bio proxy or a
+  non-AWS-CLI uploader. Beta / stable release pipeline partially
+  degraded: update channel works, setup/full installer does not.
 
 ## Historical tasks worth knowing about
 

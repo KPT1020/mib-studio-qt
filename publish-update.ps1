@@ -116,12 +116,13 @@ $previousResponseChecksumValidation = $env:AWS_RESPONSE_CHECKSUM_VALIDATION
 $env:AWS_REQUEST_CHECKSUM_CALCULATION = "when_required"
 $env:AWS_RESPONSE_CHECKSUM_VALIDATION = "when_required"
 
-# Upload installer via aws s3 cp, which uses multipart for files above the
-# CLI default threshold (8 MiB). The checksum env vars above keep multipart
-# compatible with S3-compatible endpoints that reject default CRC32 checksums.
+# Upload installer with single-request put-object (avoids multipart edge cases on some S3-compatible endpoints)
 Write-Host "`n3. Uploading installer..." -ForegroundColor Yellow
 $installerArgs = $awsArgs + @(
-    "s3", "cp", $Installer, "s3://$Bucket/$installerKey",
+    "s3api", "put-object",
+    "--bucket", $Bucket,
+    "--key", $installerKey,
+    "--body", $Installer,
     "--content-type", "application/octet-stream",
     "--acl", "public-read"
 )
