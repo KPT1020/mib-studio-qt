@@ -201,6 +201,10 @@ private:
     QSpinBox* targetAreaMaxSpin_ = nullptr;
     QDoubleSpinBox* targetDeformMinSpin_ = nullptr;
     QDoubleSpinBox* targetDeformMaxSpin_ = nullptr;
+
+    // Multi-image acquisition
+    QCheckBox* multiImageEnableBox_ = nullptr;
+    QSpinBox* multiImageCountSpin_ = nullptr;
 };
 
 } // namespace frontend

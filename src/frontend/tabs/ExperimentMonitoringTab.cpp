@@ -293,6 +293,17 @@ namespace frontend
         addDblSpinRow(targetLayout, tr("Deform Max"), targetDeformMaxSpin_, 0.0, 1.0, 0.01, 2, 0.3);
         contentLayout->addWidget(targetGroup);
 
+        // --- Multi-Image ---
+        auto* multiImageGroup = new QGroupBox(tr("Multi-Image"), tunePanelContent_);
+        auto* multiImageLayout = new QVBoxLayout(multiImageGroup);
+        multiImageLayout->setSpacing(4);
+
+        multiImageEnableBox_ = new QCheckBox(tr("Enable"));
+        multiImageLayout->addWidget(multiImageEnableBox_);
+
+        addSpinRow(multiImageLayout, tr("Images per trigger"), multiImageCountSpin_, 1, 32, 1, 1);
+        contentLayout->addWidget(multiImageGroup);
+
         // --- Apply Button ---
         auto* applyBtn = new QPushButton(tr("Apply"), tunePanelContent_);
         connect(applyBtn, &QPushButton::clicked, this, &ExperimentMonitoringTab::onApplyParams);
@@ -336,6 +347,9 @@ namespace frontend
         targetAreaMaxSpin_->setValue(cfg.target_group_area_max);
         targetDeformMinSpin_->setValue(cfg.target_group_deformability_min);
         targetDeformMaxSpin_->setValue(cfg.target_group_deformability_max);
+
+        multiImageEnableBox_->setChecked(cfg.multi_image_enabled);
+        multiImageCountSpin_->setValue(std::max(1, cfg.multi_image_count));
     }
 
     void ExperimentMonitoringTab::onApplyParams()
@@ -366,18 +380,24 @@ namespace frontend
         cfg.target_group_deformability_min = targetDeformMinSpin_->value();
         cfg.target_group_deformability_max = targetDeformMaxSpin_->value();
 
+        // Multi-image acquisition
+        cfg.multi_image_enabled = multiImageEnableBox_->isChecked();
+        cfg.multi_image_count = multiImageCountSpin_->value();
+
         backend_.processing().setProcessingConfig(cfg);
 
         SPDLOG_INFO("Tune panel: applied config (area=[{},{}], deform=[{:.2f},{:.2f}], "
                      "ring=[{:.1f},{:.1f}], border={}, areaRange={}, deformRange={}, "
-                     "areaRatio={}, ringRatio={}, singleInner={}, targetGroup={})",
+                     "areaRatio={}, ringRatio={}, singleInner={}, targetGroup={}, "
+                     "multiImage={}/{} )",
                      cfg.area_threshold_min, cfg.area_threshold_max,
                      cfg.deformability_threshold_min, cfg.deformability_threshold_max,
                      cfg.ring_ratio_min, cfg.ring_ratio_max,
                      cfg.enable_border_check, cfg.enable_area_range_check,
                      cfg.enable_deformability_range_check, cfg.enable_area_ratio_check,
                      cfg.enable_ring_ratio_check,
-                     cfg.require_single_inner_contour, cfg.enable_target_group);
+                     cfg.require_single_inner_contour, cfg.enable_target_group,
+                     cfg.multi_image_enabled, cfg.multi_image_count);
 
         emit processingConfigApplied();
     }
