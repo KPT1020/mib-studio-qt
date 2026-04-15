@@ -35,14 +35,19 @@ namespace backend::playback
     public:
         explicit FrameStore(size_t capacity = 512);
 
-        // Copy frame data into the ring buffer
+        // Copy frame data into the ring buffer.
+        // captureSteadyNs is an optional monotonic CPU timestamp (steady_clock nanoseconds
+        // since epoch) recorded as close to camera capture as possible. It is used by the
+        // trigger pipeline to schedule pulse onset at a fixed delay after capture,
+        // independent of processing-pipeline jitter. Pass 0 if unavailable.
         void pushFrame(const uint8_t *src,
                        size_t size,
                        uint64_t width,
                        uint64_t height,
                        size_t linePitch,
                        uint64_t pixelFormat,
-                       uint64_t timestamp);
+                       uint64_t timestamp,
+                       uint64_t captureSteadyNs = 0);
 
         // Retrieve a copy of the latest frame; returns false if empty
         bool getLatest(Frame &out) const;
@@ -54,6 +59,11 @@ namespace backend::playback
         // Returns false if out-of-range or invalid ROI
         // The ROI is extracted directly from the frame data, avoiding full frame copy
         bool getByWriteIndexROI(uint64_t writeIndex, int roiX, int roiY, int roiW, int roiH, Frame &out) const;
+
+        // Retrieve the monotonic CPU capture timestamp (steady_clock nanoseconds since
+        // epoch) recorded by the producer at frame-grab time. Returns false if
+        // out-of-range or if no steady_clock timestamp was stored (outNs will be 0).
+        bool getCaptureSteadyNs(uint64_t writeIndex, uint64_t &outNs) const;
 
         // Absolute index helpers (monotonic sequence since start)
         // Earliest absolute index currently retained in the ring
@@ -120,6 +130,9 @@ namespace backend::playback
         size_t capacity_;
         mutable std::mutex mutex_;
         std::vector<Frame> ring_;
+        // Parallel ring of steady_clock capture timestamps (nanoseconds since epoch),
+        // indexed identically to ring_. 0 means "not recorded by producer".
+        std::vector<uint64_t> captureSteadyNs_;
         std::atomic<uint64_t> totalWritten_{0};
         std::atomic<uint64_t> totalFiltered_{0};
 

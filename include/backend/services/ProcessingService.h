@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -202,8 +203,12 @@ public:
     using RingRatioCallback = std::function<void(double ringRatio, int64_t timestampNs)>;
     void setRingRatioCallback(RingRatioCallback callback);
 
-    // Target group trigger callback (called for each valid frame with target group result)
-    using TargetGroupCallback = std::function<void(bool isTargetGroup)>;
+    // Target group trigger callback (called for each valid frame with target group result).
+    // captureObserved is the steady_clock timestamp recorded in CaptureService at frame
+    // grab time, used downstream to schedule trigger onset at a fixed delay from capture
+    // (decoupling it from this service's variable processing latency).
+    using TargetGroupCallback = std::function<void(bool isTargetGroup,
+                                                   std::chrono::steady_clock::time_point captureObserved)>;
     void setTargetGroupCallback(TargetGroupCallback callback);
 
     // Young's modulus LUT loading

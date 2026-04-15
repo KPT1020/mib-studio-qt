@@ -25,6 +25,18 @@
 
 ## Recent fixes
 
+- **2026-04-15** — **Decoupled trigger onset from processing-pipeline
+  latency.** Previously [[../services/TriggerService]] fired its DO pulse
+  immediately upon [[../services/ProcessingService]]'s target-group
+  callback, so onset-from-capture tracked variable processing cost (1–10 ms
+  jitter per frame). Now the trigger schedules pulses on a deadline queue
+  using a steady_clock capture timestamp recorded in
+  [[../services/CaptureService]] right after `grabFrame()`, propagated
+  via a new sideband ring in [[../data-model/FrameStore]]. New
+  `setTriggerDelayUs` knob (default 0, regression-safe) exposed in
+  [[../frontend/ExperimentMonitoringTab]] as `triggerDelaySpin`. New
+  metrics: `getLastRealizedDelayUs`, `getLastSlipUs`,
+  `getDroppedTriggers`.
 - Param tuning panel now stays in sync with the config table both
   directions.
 - HDF Review tab: fixed dangling pointer crash on file close.

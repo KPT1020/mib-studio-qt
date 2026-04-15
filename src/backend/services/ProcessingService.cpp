@@ -899,11 +899,19 @@ void ProcessingService::realtimeLoop() {
                             ringRatioCallback_(validation.ringRatio, f.timestamp);
                         }
                     }
-                    // Notify trigger service of target group classification
+                    // Notify trigger service of target group classification.
+                    // Use the steady_clock capture timestamp recorded in CaptureService
+                    // so the trigger fires at a fixed delay from capture, independent
+                    // of variable processing latency. Fall back to now() if missing.
                     {
+                        uint64_t capNs = 0;
+                        const bool capOk = rtStore_ && rtStore_->getCaptureSteadyNs(idx, capNs) && capNs != 0;
+                        const auto captureTp = capOk
+                            ? std::chrono::steady_clock::time_point{std::chrono::nanoseconds{capNs}}
+                            : std::chrono::steady_clock::now();
                         std::scoped_lock callbackLk(targetGroupCallbackMutex_);
                         if (targetGroupCallback_) {
-                            targetGroupCallback_(validation.isTargetGroup);
+                            targetGroupCallback_(validation.isTargetGroup, captureTp);
                         }
                     }
                 } else {
@@ -1258,11 +1266,19 @@ void ProcessingService::realtimeLoop() {
                                 ringRatioCallback_(validation.ringRatio, f.timestamp);
                             }
                         }
-                        // Notify trigger service of target group classification
+                        // Notify trigger service of target group classification.
+                        // Use the steady_clock capture timestamp recorded in CaptureService
+                        // so the trigger fires at a fixed delay from capture, independent
+                        // of variable processing latency. Fall back to now() if missing.
                         {
+                            uint64_t capNs = 0;
+                            const bool capOk = rtStore_ && rtStore_->getCaptureSteadyNs(idx, capNs) && capNs != 0;
+                            const auto captureTp = capOk
+                                ? std::chrono::steady_clock::time_point{std::chrono::nanoseconds{capNs}}
+                                : std::chrono::steady_clock::now();
                             std::scoped_lock callbackLk(targetGroupCallbackMutex_);
                             if (targetGroupCallback_) {
-                                targetGroupCallback_(validation.isTargetGroup);
+                                targetGroupCallback_(validation.isTargetGroup, captureTp);
                             }
                         }
                     } else {
@@ -1635,11 +1651,19 @@ void ProcessingService::realtimeLoop() {
                                 ringRatioCallback_(validation.ringRatio, f.timestamp);
                             }
                         }
-                        // Notify trigger service of target group classification
+                        // Notify trigger service of target group classification.
+                        // Use the steady_clock capture timestamp recorded in CaptureService
+                        // so the trigger fires at a fixed delay from capture, independent
+                        // of variable processing latency. Fall back to now() if missing.
                         {
+                            uint64_t capNs = 0;
+                            const bool capOk = rtStore_ && rtStore_->getCaptureSteadyNs(idx, capNs) && capNs != 0;
+                            const auto captureTp = capOk
+                                ? std::chrono::steady_clock::time_point{std::chrono::nanoseconds{capNs}}
+                                : std::chrono::steady_clock::now();
                             std::scoped_lock callbackLk(targetGroupCallbackMutex_);
                             if (targetGroupCallback_) {
-                                targetGroupCallback_(validation.isTargetGroup);
+                                targetGroupCallback_(validation.isTargetGroup, captureTp);
                             }
                         }
                     } else {

@@ -13,7 +13,7 @@
 namespace backend::playback {
 
 FrameStore::FrameStore(size_t capacity)
-    : capacity_(capacity), ring_(capacity) {}
+    : capacity_(capacity), ring_(capacity), captureSteadyNs_(capacity, 0) {}
 
 void FrameStore::pushFrame(const uint8_t* src,
                            size_t size,
@@ -21,7 +21,8 @@ void FrameStore::pushFrame(const uint8_t* src,
                            uint64_t height,
                            size_t linePitch,
                            uint64_t pixelFormat,
-                           uint64_t timestamp) {
+                           uint64_t timestamp,
+                           uint64_t captureSteadyNs) {
     if (capacity_ == 0 || src == nullptr || size == 0) return;
 
     // Apply frame filter if set (check before acquiring write slot)
@@ -55,6 +56,7 @@ void FrameStore::pushFrame(const uint8_t* src,
     f.timestamp = timestamp;
     f.data.resize(size);
     std::copy_n(src, size, f.data.begin());
+    captureSteadyNs_[idx] = captureSteadyNs;
 
     // Periodic stats
     if ((w % 5000ULL) == 0ULL) {
@@ -98,6 +100,18 @@ bool FrameStore::getByWriteIndex(uint64_t writeIndex, Frame& out) const {
     std::scoped_lock lk(mutex_);
     out = ring_[idx];
     return !out.data.empty();
+}
+
+bool FrameStore::getCaptureSteadyNs(uint64_t writeIndex, uint64_t& outNs) const {
+    outNs = 0;
+    const uint64_t w = totalWritten_.load();
+    if (writeIndex >= w || capacity_ == 0) return false;
+    const size_t idx = static_cast<size_t>(writeIndex % capacity_);
+    std::scoped_lock lk(mutex_);
+    if (idx >= captureSteadyNs_.size()) return false;
+    outNs = captureSteadyNs_[idx];
+    // Also require the slot to hold valid frame data (ring may have been overwritten).
+    return !ring_[idx].data.empty();
 }
 
 bool FrameStore::getByWriteIndexROI(uint64_t writeIndex, int roiX, int roiY, int roiW, int roiH, Frame& out) const {
@@ -297,6 +311,7 @@ bool FrameStore::resize(size_t newCapacity) {
 
     // Create new ring buffer
     std::vector<Frame> newRing(newCapacity);
+    std::vector<uint64_t> newCaptureSteadyNs(newCapacity, 0);
 
     if (newCapacity >= currentAvailable && w > 0) {
         // Preserve existing frames - access ring buffer directly since we hold the lock
@@ -306,6 +321,9 @@ bool FrameStore::resize(size_t newCapacity) {
             const size_t ringIdx = static_cast<size_t>(idx % capacity_);
             if (ringIdx < ring_.size() && !ring_[ringIdx].data.empty()) {
                 newRing[preservedCount] = ring_[ringIdx];
+                if (ringIdx < captureSteadyNs_.size()) {
+                    newCaptureSteadyNs[preservedCount] = captureSteadyNs_[ringIdx];
+                }
                 ++preservedCount;
             }
         }
@@ -314,16 +332,17 @@ bool FrameStore::resize(size_t newCapacity) {
         // After resize, frames will be at indices 0 to preservedCount-1
         totalWritten_.store(static_cast<uint64_t>(preservedCount));
 
-        SPDLOG_INFO("FrameStore: Resized from {} to {} capacity, preserved {}/{} frames", 
+        SPDLOG_INFO("FrameStore: Resized from {} to {} capacity, preserved {}/{} frames",
                     capacity_, newCapacity, preservedCount, currentAvailable);
     } else {
         // New capacity is smaller than available frames, clear buffer
         totalWritten_.store(0);
-        SPDLOG_INFO("FrameStore: Resized from {} to {} capacity, cleared buffer (new size < available frames)", 
+        SPDLOG_INFO("FrameStore: Resized from {} to {} capacity, cleared buffer (new size < available frames)",
                     capacity_, newCapacity);
     }
 
     ring_ = std::move(newRing);
+    captureSteadyNs_ = std::move(newCaptureSteadyNs);
     capacity_ = newCapacity;
 
     return true;

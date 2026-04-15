@@ -40,12 +40,18 @@ window:
 ## Push / query APIs
 
 ```cpp
-void pushFrame(src, size, w, h, linePitch, pixelFormat, timestamp);
+void pushFrame(src, size, w, h, linePitch, pixelFormat, timestamp,
+               captureSteadyNs = 0);  // last arg: steady_clock nanos at grab
 
 bool getLatest(Frame& out) const;
 bool getByWriteIndex(uint64_t idx, Frame& out) const;
 bool getByWriteIndexROI(uint64_t idx, int roiX, int roiY, int roiW, int roiH,
                         Frame& out) const;  // avoids full-frame copy
+
+// Sideband: fetch the steady_clock capture nanos recorded at grab time.
+// Used by the trigger pipeline to schedule pulse onset at a fixed delay
+// from capture, independent of processing latency.
+bool getCaptureSteadyNs(uint64_t idx, uint64_t& outNs) const;
 
 bool saveFramesToDisk(dir, filterFn = nullptr) const;       // all frames
 bool saveFramesToDisk(dir, startIdx, endIdx, filterFn);     // by index
@@ -54,6 +60,23 @@ bool saveFramesToDisk(dir, startTs, endTs, /*useTs=*/true, filterFn);
 bool resize(size_t newCapacity);
 size_t estimateMemoryBytesForCapacity(size_t capacity) const;
 ```
+
+## Sideband capture timestamps
+
+Parallel to `ring_` the store keeps a `std::vector<uint64_t>
+captureSteadyNs_` of the same capacity, indexed identically. Each entry is
+the `std::chrono::steady_clock::now()` nanosecond count recorded by the
+producer ([[../services/CaptureService]]) immediately after
+`camera->grabFrame()` returns. 0 means "not recorded".
+
+This is intentionally kept out of `struct Frame` to avoid rippling through
+the many consumers that persist `Frame` (HDF5 writes, TIFF saves, playback
+copies). The sideband is updated and read under the same `mutex_` as
+`ring_`.
+
+Consumed by [[../services/ProcessingService]]'s realtime loop, which
+passes the timepoint through the `TargetGroupCallback` to
+[[../services/TriggerService]].
 
 ## Frame filter (recording mode)
 

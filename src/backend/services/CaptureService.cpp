@@ -131,6 +131,12 @@ void CaptureService::run() {
                 continue;
             }
 
+            // Record steady_clock timestamp as close to frame capture as possible.
+            // This is used by the trigger pipeline to schedule pulse onset at a fixed
+            // delay after capture, independent of downstream processing-pipeline jitter.
+            const uint64_t captureSteadyNs = static_cast<uint64_t>(
+                std::chrono::steady_clock::now().time_since_epoch().count());
+
             if (callback_) {
                 callback_(frame.data.data(),
                           frame.data.size(),
@@ -145,7 +151,8 @@ void CaptureService::run() {
                                        frame.height,
                                        frame.linePitch,
                                        frame.pixelFormat,
-                                       frame.timestamp);
+                                       frame.timestamp,
+                                       captureSteadyNs);
             }
             stats_.framesProcessed.fetch_add(1, std::memory_order_relaxed);
 

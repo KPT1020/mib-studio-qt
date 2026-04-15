@@ -31,7 +31,13 @@
    - `isTargetGroup` (second gate for trigger-worthy frames)
 4. Emits:
    - **Ring ratio** via `RingRatioCallback` → [[AutofocusService]].
-   - **Target group** bool via `TargetGroupCallback` → [[TriggerService]].
+   - **Target group** via `TargetGroupCallback(bool, steady_clock::time_point)`
+     → [[TriggerService]]. The timepoint is the steady_clock capture
+     timestamp fetched from [[../data-model/FrameStore]]'s sideband (set
+     in [[CaptureService]] right after `grabFrame`), allowing the trigger
+     to fire at a fixed delay from capture, independent of this service's
+     variable processing time. Falls back to `now()` if the sideband has
+     no entry.
    - **Background capture** (if auto-background enabled) via
      `BackgroundCaptureCallback` → UI notifier.
 

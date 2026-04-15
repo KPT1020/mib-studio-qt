@@ -124,12 +124,16 @@ namespace backend
                 autofocusService_->onRingRatio(ringRatio, timestampNs);
             } });
 
-        // Wire target group trigger: processing -> trigger service
-        processingService_->setTargetGroupCallback([this](bool isTargetGroup) {
-            if (triggerService_) {
-                triggerService_->onTargetGroupResult(isTargetGroup);
-            }
-        });
+        // Wire target group trigger: processing -> trigger service.
+        // The capture timestamp (steady_clock) flows through so TriggerService can
+        // schedule pulse onset at a fixed delay from frame capture, independent of
+        // variable processing-pipeline latency.
+        processingService_->setTargetGroupCallback(
+            [this](bool isTargetGroup, std::chrono::steady_clock::time_point captureObserved) {
+                if (triggerService_) {
+                    triggerService_->onTargetGroupResult(isTargetGroup, captureObserved);
+                }
+            });
 
         // Wire camera lifecycle to trigger service
         captureService_->setCameraReadyCallback([this](camera::common::ICamera* cam) {

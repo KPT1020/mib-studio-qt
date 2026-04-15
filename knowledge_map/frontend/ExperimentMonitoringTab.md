@@ -18,6 +18,12 @@
   `QBarSeries`, etc. `frontend::ZoomableChartView` adds scroll/zoom.
 - Live totals: valid count, invalid count, algo FPS, valid FPS.
 - `showEvent` / `hideEvent` pause rendering when the tab isn't visible.
+- Trigger controls in the top row: `sortTriggerBtn` (manual test pulse),
+  `triggerDurationSpin` (pulse width, µs), `triggerDelaySpin` (fixed delay
+  from frame capture to pulse onset, µs — decouples onset from variable
+  processing latency; see [[../services/TriggerService]]). Both spin boxes
+  are initialized from the backend's current values on tab construction
+  so reopening the tab doesn't reset the configuration.
 
 ## Gotchas
 

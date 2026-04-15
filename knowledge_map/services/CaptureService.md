@@ -13,6 +13,10 @@
 - One thread per service: `run()` blocks on the camera's blocking `grabFrame`.
 - Copies frame bytes into `FrameStore` and fires `FrameCallback` (used by UI
   for live preview).
+- Records `std::chrono::steady_clock::now()` immediately after `grabFrame()`
+  returns and passes it to `FrameStore::pushFrame(..., captureSteadyNs)` so
+  downstream consumers (notably [[TriggerService]]) can schedule actions at
+  a fixed delay from capture, independent of processing latency.
 - Exposes `CaptureStats` — `framesProcessed`, `lastFrameRate`,
   `lastDataRateMBps` (the latter two come from EGrabber StreamModule).
 

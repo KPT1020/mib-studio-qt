@@ -35,6 +35,7 @@
 #include <QShowEvent>
 #include <QHideEvent>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <set>
@@ -161,6 +162,13 @@ namespace frontend
         connect(ui->triggerDurationSpin, qOverload<int>(&QSpinBox::valueChanged), this, [this](int us) {
             backend_.trigger().setPulseDurationUs(us);
         });
+        connect(ui->triggerDelaySpin, qOverload<int>(&QSpinBox::valueChanged), this, [this](int us) {
+            backend_.trigger().setTriggerDelayUs(us);
+        });
+        // Initialize spin boxes from current backend state to avoid overwriting on first
+        // user interaction.
+        ui->triggerDurationSpin->setValue(backend_.trigger().getPulseDurationUs());
+        ui->triggerDelaySpin->setValue(backend_.trigger().getTriggerDelayUs());
         connect(ui->validOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
         connect(ui->invalidOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
 
@@ -1021,7 +1029,9 @@ namespace frontend
 
     void ExperimentMonitoringTab::onSortTrigger()
     {
-        backend_.trigger().onTargetGroupResult(true);
+        // Manual UI test trigger: use now() as the "capture" time so the pulse fires
+        // triggerDelayUs after the click (matching the real pipeline's delay semantics).
+        backend_.trigger().onTargetGroupResult(true, std::chrono::steady_clock::now());
         SPDLOG_INFO("Manual sort trigger fired");
     }
 
