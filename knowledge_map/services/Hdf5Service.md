@@ -44,3 +44,9 @@ Blocking I/O on whichever thread calls it. In practice:
   `knowledge_map/task/review_2gb_scalability.md`.
 - PIMPL means you can't see HDF5 types in headers — look at
   `src/backend/services/Hdf5Service.cpp` for dataset paths and dtypes.
+- The frame-metadata compound type is schema-tolerant on read: when new
+  members are added (e.g. `processingTimeNs`), `readMetadataDataset`
+  introspects the file compound type via `H5Tget_member_index` and only
+  inserts present members into the memory type — older files load with
+  the missing field defaulting to 0. When adding a new member, update
+  both `writeMetadataDataset` and `appendMetadataDataset` in lock-step.

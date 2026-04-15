@@ -25,6 +25,15 @@
 
 ## Recent fixes
 
+- **2026-04-15** — Pipeline processing time (nanoseconds) is now
+  recorded per frame and persisted to HDF5. Added
+  `ProcessedFrame::processingTimeNs`, measured around the three
+  realtime paths in [[../services/ProcessingService]] between
+  `algoStart` and `algoEnd`; added `processingTimeNs` member to the
+  `/valid_frames/metadata` and `/invalid_frames/metadata` compound
+  type in [[../services/Hdf5Service]]; made `readMetadataDataset`
+  schema-tolerant so older files still load. See
+  [[../data-model/HDF5-Storage]] for the full compound schema.
 - Param tuning panel now stays in sync with the config table both
   directions.
 - HDF Review tab: fixed dangling pointer crash on file close.

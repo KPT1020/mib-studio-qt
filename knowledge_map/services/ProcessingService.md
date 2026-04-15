@@ -35,6 +35,13 @@
    - **Background capture** (if auto-background enabled) via
      `BackgroundCaptureCallback` → UI notifier.
 
+Every frame's pipeline wall-time (blur → threshold → morphology →
+contour-find → validation) is measured around the three realtime code
+paths (ROI, full-frame, full-frame-variant) and recorded on each
+`ProcessedFrame` as `processingTimeNs`. This propagates into the
+monitoring ring buffers and — when experiments are active — into the
+per-frame HDF5 metadata record (see [[../data-model/HDF5-Storage]]).
+
 ## Config — `ProcessingConfig`
 
 All gates in one struct. Notable fields:

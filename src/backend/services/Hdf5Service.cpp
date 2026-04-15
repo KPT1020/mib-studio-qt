@@ -261,6 +261,7 @@ namespace backend::services
         {
             uint64_t index;
             uint64_t timestampNs;
+            uint64_t processingTimeNs; // Pipeline processing time (ns) per frame
             double deformability;
             double area;
             double areaRatio;
@@ -282,6 +283,7 @@ namespace backend::services
         hid_t compTypeId = H5Tcreate(H5T_COMPOUND, sizeof(FrameMetadata));
         H5Tinsert(compTypeId, "index", HOFFSET(FrameMetadata, index), H5T_NATIVE_UINT64);
         H5Tinsert(compTypeId, "timestampNs", HOFFSET(FrameMetadata, timestampNs), H5T_NATIVE_UINT64);
+        H5Tinsert(compTypeId, "processingTimeNs", HOFFSET(FrameMetadata, processingTimeNs), H5T_NATIVE_UINT64);
         H5Tinsert(compTypeId, "deformability", HOFFSET(FrameMetadata, deformability), H5T_NATIVE_DOUBLE);
         H5Tinsert(compTypeId, "area", HOFFSET(FrameMetadata, area), H5T_NATIVE_DOUBLE);
         H5Tinsert(compTypeId, "areaRatio", HOFFSET(FrameMetadata, areaRatio), H5T_NATIVE_DOUBLE);
@@ -334,6 +336,7 @@ namespace backend::services
             FrameMetadata md{};
             md.index = frame.index;
             md.timestampNs = frame.timestampNs;
+            md.processingTimeNs = frame.processingTimeNs;
             md.deformability = frame.validation.deformability;
             md.area = frame.validation.area;
             md.areaRatio = frame.validation.areaRatio;
@@ -559,6 +562,7 @@ namespace backend::services
         {
             uint64_t index;
             uint64_t timestampNs;
+            uint64_t processingTimeNs; // Pipeline processing time (ns) per frame
             double deformability;
             double area;
             double areaRatio;
@@ -616,6 +620,7 @@ namespace backend::services
             FrameMetadata md{};
             md.index = frame.index;
             md.timestampNs = frame.timestampNs;
+            md.processingTimeNs = frame.processingTimeNs;
             md.deformability = frame.validation.deformability;
             md.area = frame.validation.area;
             md.areaRatio = frame.validation.areaRatio;
@@ -1444,9 +1449,10 @@ namespace backend::services
             return false;
         }
 
-        // Get compound type
-        hid_t compTypeId = H5Dget_type(datasetId);
-        if (compTypeId < 0)
+        // Get file compound type (used to detect which fields are present for
+        // backward compatibility with files written before a field was added).
+        hid_t fileTypeId = H5Dget_type(datasetId);
+        if (fileTypeId < 0)
         {
             H5Dclose(datasetId);
             SPDLOG_ERROR("Failed to get compound type from dataset {}", datasetPath);
@@ -1462,7 +1468,7 @@ namespace backend::services
         hsize_t numFrames = dims[0];
         if (numFrames == 0)
         {
-            H5Tclose(compTypeId);
+            H5Tclose(fileTypeId);
             H5Dclose(datasetId);
             frames.clear();
             return true;
@@ -1473,6 +1479,7 @@ namespace backend::services
         {
             uint64_t index;
             uint64_t timestampNs;
+            uint64_t processingTimeNs; // May be absent in older files; defaults to 0
             double deformability;
             double area;
             double areaRatio;
@@ -1490,10 +1497,59 @@ namespace backend::services
             uint8_t isTargetGroup;
         };
 
-        // Read metadata
+        // Enumerate the members once up front so we can do name checks
+        // without triggering HDF5 error-stack output on missing members.
+        std::vector<std::string> fileMemberNames;
+        {
+            const int nMembers = H5Tget_nmembers(fileTypeId);
+            fileMemberNames.reserve(nMembers > 0 ? nMembers : 0);
+            for (int i = 0; i < nMembers; ++i) {
+                char* name = H5Tget_member_name(fileTypeId, static_cast<unsigned>(i));
+                if (name) {
+                    fileMemberNames.emplace_back(name);
+                    H5free_memory(name);
+                }
+            }
+        }
+        auto hasMember = [&](const char* name) -> bool {
+            for (const auto& m : fileMemberNames) if (m == name) return true;
+            return false;
+        };
+
+        // Build a memory compound type that includes only the members that
+        // actually exist in the file type. HDF5 requires every member of the
+        // memory type to be present in the file type; fields missing from the
+        // file type are left zero-initialized in the output buffer.
+        hid_t memTypeId = H5Tcreate(H5T_COMPOUND, sizeof(FrameMetadata));
+        auto insertIfPresent = [&](const char* name, size_t offset, hid_t nativeType) {
+            if (hasMember(name)) {
+                H5Tinsert(memTypeId, name, offset, nativeType);
+            }
+        };
+        insertIfPresent("index", HOFFSET(FrameMetadata, index), H5T_NATIVE_UINT64);
+        insertIfPresent("timestampNs", HOFFSET(FrameMetadata, timestampNs), H5T_NATIVE_UINT64);
+        insertIfPresent("processingTimeNs", HOFFSET(FrameMetadata, processingTimeNs), H5T_NATIVE_UINT64);
+        insertIfPresent("deformability", HOFFSET(FrameMetadata, deformability), H5T_NATIVE_DOUBLE);
+        insertIfPresent("area", HOFFSET(FrameMetadata, area), H5T_NATIVE_DOUBLE);
+        insertIfPresent("areaRatio", HOFFSET(FrameMetadata, areaRatio), H5T_NATIVE_DOUBLE);
+        insertIfPresent("ringRatio", HOFFSET(FrameMetadata, ringRatio), H5T_NATIVE_DOUBLE);
+        insertIfPresent("isValid", HOFFSET(FrameMetadata, isValid), H5T_NATIVE_UINT8);
+        insertIfPresent("touchesBorder", HOFFSET(FrameMetadata, touchesBorder), H5T_NATIVE_UINT8);
+        insertIfPresent("hasSingleInnerContour", HOFFSET(FrameMetadata, hasSingleInnerContour), H5T_NATIVE_UINT8);
+        insertIfPresent("inRange", HOFFSET(FrameMetadata, inRange), H5T_NATIVE_UINT8);
+        insertIfPresent("innerContourCount", HOFFSET(FrameMetadata, innerContourCount), H5T_NATIVE_INT32);
+        insertIfPresent("brightness_q1", HOFFSET(FrameMetadata, brightness_q1), H5T_NATIVE_DOUBLE);
+        insertIfPresent("brightness_q2", HOFFSET(FrameMetadata, brightness_q2), H5T_NATIVE_DOUBLE);
+        insertIfPresent("brightness_q3", HOFFSET(FrameMetadata, brightness_q3), H5T_NATIVE_DOUBLE);
+        insertIfPresent("brightness_q4", HOFFSET(FrameMetadata, brightness_q4), H5T_NATIVE_DOUBLE);
+        insertIfPresent("youngsModulus", HOFFSET(FrameMetadata, youngsModulus), H5T_NATIVE_DOUBLE);
+        insertIfPresent("isTargetGroup", HOFFSET(FrameMetadata, isTargetGroup), H5T_NATIVE_UINT8);
+
+        // Value-initialize (zero-fills missing fields, e.g. processingTimeNs on older files).
         std::vector<FrameMetadata> metadata(numFrames);
-        herr_t status = H5Dread(datasetId, compTypeId, H5S_ALL, H5S_ALL, H5P_DEFAULT, metadata.data());
-        H5Tclose(compTypeId);
+        herr_t status = H5Dread(datasetId, memTypeId, H5S_ALL, H5S_ALL, H5P_DEFAULT, metadata.data());
+        H5Tclose(memTypeId);
+        H5Tclose(fileTypeId);
         H5Dclose(datasetId);
 
         if (status < 0)
@@ -1510,6 +1566,7 @@ namespace backend::services
             ProcessedFrame frame;
             frame.index = md.index;
             frame.timestampNs = md.timestampNs;
+            frame.processingTimeNs = md.processingTimeNs;
             frame.validation.deformability = md.deformability;
             frame.validation.area = md.area;
             frame.validation.areaRatio = md.areaRatio;

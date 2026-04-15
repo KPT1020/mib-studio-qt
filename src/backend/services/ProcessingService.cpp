@@ -871,18 +871,21 @@ void ProcessingService::realtimeLoop() {
                 }
                 const auto algoEnd = clock::now();
                 const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
+                const uint64_t algoNs = static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(algoEnd - algoStart).count());
                 algoMsSinceSummary += algoMs;
                 if (validation.isValid) {
                     ++validSinceSummary;
                 } else {
                     ++invalidSinceSummary;
                 }
-                
+
                 // Always accumulate frames for monitoring (with size limit)
                 {
                     ProcessedFrame monitoringFrame;
                     monitoringFrame.index = idx;
                     monitoringFrame.timestampNs = f.timestamp;
+                    monitoringFrame.processingTimeNs = algoNs;
                     monitoringFrame.validation = validation;
                     // Store ROI-only images (already ROI-sized, just clone)
                     monitoringFrame.originalImage = grayROI.clone();
@@ -987,6 +990,7 @@ void ProcessingService::realtimeLoop() {
                             pendingMultiImageFrame = ProcessedFrame{};
                             pendingMultiImageFrame.index = idx;
                             pendingMultiImageFrame.timestampNs = f.timestamp;
+                            pendingMultiImageFrame.processingTimeNs = algoNs;
                             pendingMultiImageFrame.validation = validation;
                             pendingMultiImageFrame.originalImage = fullGray.clone();
                             pendingMultiImageFrame.processedImage = fullMask.clone();
@@ -1009,6 +1013,7 @@ void ProcessingService::realtimeLoop() {
                         ProcessedFrame frame;
                         frame.index = idx;
                         frame.timestampNs = f.timestamp;
+                        frame.processingTimeNs = algoNs;
                         frame.validation = validation;
                         cv::Mat fullGray = makeFullGray();
                         cv::Mat fullMask(fullGray.rows, fullGray.cols, CV_8UC1, cv::Scalar(0));
@@ -1223,30 +1228,33 @@ void ProcessingService::realtimeLoop() {
                 cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
                 FilterResult validation = filterProcessedImage(mask, cvRoi, config, gray);
-                
+
                 // Extract contours from validation result for snapshot
                 std::vector<std::vector<cv::Point>> contours = validation.allContours;
                 const auto algoEnd = clock::now();
                 const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
+                const uint64_t algoNs = static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(algoEnd - algoStart).count());
                 algoMsSinceSummary += algoMs;
                 if (validation.isValid) {
                     ++validSinceSummary;
                 } else {
                     ++invalidSinceSummary;
                 }
-                
+
                 // Always accumulate frames for monitoring (with size limit)
                 {
                     ProcessedFrame monitoringFrame;
                     monitoringFrame.index = idx;
                     monitoringFrame.timestampNs = f.timestamp;
+                    monitoringFrame.processingTimeNs = algoNs;
                     monitoringFrame.validation = validation;
                     // Store ROI-only images to reduce memory usage
                     cv::Mat roiOriginal = gray(cvRoi).clone();
                     cv::Mat roiMask = mask(cvRoi).clone();
                     monitoringFrame.originalImage = std::move(roiOriginal);
                     monitoringFrame.processedImage = std::move(roiMask);
-                    
+
                     std::scoped_lock monitoringLk(monitoringFramesMutex_);
                     if (validation.isValid) {
                         monitoringValidFrames_.push_back(std::move(monitoringFrame));
@@ -1314,10 +1322,11 @@ void ProcessingService::realtimeLoop() {
                         ProcessedFrame frame;
                         frame.index = idx;
                         frame.timestampNs = f.timestamp;
+                        frame.processingTimeNs = algoNs;
                         frame.validation = validation;
                         frame.originalImage = gray.clone();
                         frame.processedImage = mask.clone();
-                        
+
                         {
                             std::scoped_lock framesLk(framesMutex_);
                             if (validation.isValid) {
@@ -1325,7 +1334,7 @@ void ProcessingService::realtimeLoop() {
                             } else {
                                 invalidFrames_.emplace_back(std::move(frame));
                             }
-                            
+
                             size_t totalFrames = validFrames_.size() + invalidFrames_.size();
                             size_t interval = flushInterval_.load(std::memory_order_relaxed);
                             if (interval > 0 && totalFrames >= interval) {
@@ -1605,6 +1614,8 @@ void ProcessingService::realtimeLoop() {
                 }
                 const auto algoEnd = clock::now();
                 const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
+                const uint64_t algoNs = static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(algoEnd - algoStart).count());
                 algoMsSinceSummary += algoMs;
                 if (validation.isValid) {
                     ++validSinceSummary;
@@ -1617,6 +1628,7 @@ void ProcessingService::realtimeLoop() {
                     ProcessedFrame monitoringFrame;
                     monitoringFrame.index = idx;
                     monitoringFrame.timestampNs = f.timestamp;
+                    monitoringFrame.processingTimeNs = algoNs;
                     monitoringFrame.validation = validation;
                     // Store ROI-only images to reduce memory usage
                     cv::Mat roiOriginal = gray(cvRoi).clone();
@@ -1710,6 +1722,7 @@ void ProcessingService::realtimeLoop() {
                                 pendingMultiImageFrame = ProcessedFrame{};
                                 pendingMultiImageFrame.index = idx;
                                 pendingMultiImageFrame.timestampNs = f.timestamp;
+                                pendingMultiImageFrame.processingTimeNs = algoNs;
                                 pendingMultiImageFrame.validation = validation;
                                 pendingMultiImageFrame.originalImage = gray.clone();
                                 pendingMultiImageFrame.processedImage = mask.clone();
@@ -1734,6 +1747,7 @@ void ProcessingService::realtimeLoop() {
                             ProcessedFrame frame;
                             frame.index = idx;
                             frame.timestampNs = f.timestamp;
+                            frame.processingTimeNs = algoNs;
                             frame.validation = validation;
                             frame.originalImage = gray.clone();
                             frame.processedImage = mask.clone();

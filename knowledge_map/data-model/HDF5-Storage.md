@@ -22,6 +22,29 @@
 - Chart snapshot datasets — 2D/3D `cv::Mat` saved via
   `saveChartSnapshot(path, image)`.
 
+## Frame metadata compound schema
+
+Per-frame rows stored at `/valid_frames/metadata` and
+`/invalid_frames/metadata` are HDF5 compound records with these members
+(see `writeMetadataDataset` / `appendMetadataDataset` in
+`Hdf5Service.cpp`):
+
+- `index` (uint64), `timestampNs` (uint64)
+- `processingTimeNs` (uint64) — wall-clock time spent in the processing
+  pipeline for this frame (blur → threshold → morphology → contour-find
+  → validation). Excludes frame-fetch, buffer pushes, and snapshot
+  publishing. Sourced from `ProcessedFrame::processingTimeNs`.
+- `deformability`, `area`, `areaRatio`, `ringRatio` (doubles)
+- `isValid`, `touchesBorder`, `hasSingleInnerContour`, `inRange`,
+  `isTargetGroup` (uint8 booleans)
+- `innerContourCount` (int32)
+- `brightness_q1..q4`, `youngsModulus` (doubles)
+
+`readMetadataDataset` is schema-tolerant: it builds the memory compound
+type from only the members that exist in the file type, so older files
+that predate a field (e.g. `processingTimeNs`) still load — the missing
+field defaults to 0 in the returned `ProcessedFrame`.
+
 ## Write paths
 
 - **Batch save** (rarely used for experiments, useful for tests):

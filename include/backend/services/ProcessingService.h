@@ -90,6 +90,11 @@ struct FilterResult {
 struct ProcessedFrame {
     uint64_t index{0};
     uint64_t timestampNs{0};
+    // Wall-clock time (nanoseconds) spent in the processing pipeline for this
+    // frame: blur → threshold → morphology → contour-find → filterProcessedImage.
+    // Excludes surrounding bookkeeping (frame fetch, monitoring buffer push,
+    // experiment accumulation, snapshot publish). 0 when not measured.
+    uint64_t processingTimeNs{0};
     cv::Mat originalImage;
     cv::Mat processedImage; // mask
     FilterResult validation;
