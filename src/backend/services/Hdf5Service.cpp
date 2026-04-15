@@ -105,6 +105,20 @@ namespace backend::services
         }
     }
 
+    bool Hdf5Service::flush()
+    {
+        if (!isFileOpen())
+            return false;
+        herr_t s = H5Fflush(impl_->fileId_, H5F_SCOPE_GLOBAL);
+        if (s < 0)
+        {
+            SPDLOG_ERROR("H5Fflush failed for {}", impl_->filePath_);
+            return false;
+        }
+        SPDLOG_DEBUG("H5Fflush completed for {}", impl_->filePath_);
+        return true;
+    }
+
     bool Hdf5Service::isFileOpen() const
     {
         return impl_->isOpen_ && impl_->fileId_ != H5I_INVALID_HID;

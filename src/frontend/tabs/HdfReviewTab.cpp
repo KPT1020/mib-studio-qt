@@ -285,8 +285,15 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
     hdfReader_.reset();
     hdfReader_ = std::make_unique<backend::services::Hdf5Service>();
     if (!hdfReader_->loadFile(filePath.toStdString())) {
-        QMessageBox::critical(this, tr("Error"), 
-                             tr("Failed to open HDF file:\n%1").arg(filePath));
+        const bool exists = QFile::exists(filePath);
+        const QString detail = exists
+            ? tr("The file exists but its HDF5 metadata is corrupt, likely caused by "
+                 "an interrupted write (crash or forced close during an experiment).\n\n"
+                 "Frame data may be partially recoverable using the h5recover tool "
+                 "from the HDF5 utilities package.")
+            : tr("File not found.");
+        QMessageBox::critical(this, tr("Cannot Open HDF5 File"),
+                              tr("Failed to open:\n%1\n\n%2").arg(filePath).arg(detail));
         ui->statusLabel->setText(tr("Error loading file"));
         return;
     }

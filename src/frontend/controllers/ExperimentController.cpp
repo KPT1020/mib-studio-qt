@@ -134,6 +134,12 @@ namespace frontend
             validFrames = validFramesVec.size();
             invalidFrames = invalidFramesVec.size();
 
+            // Flush all frame data to disk before writing metadata. This ensures that
+            // even if a crash occurs during writeExperimentInfo, the frame datasets are
+            // already safely committed and the root object header is consistent on disk.
+            if (!hdf5.flush())
+                SPDLOG_WARN("H5Fflush before writeExperimentInfo failed — file may be corrupt on crash");
+
             // Write experiment metadata (including background image for reproducibility if set)
             auto processingConfig = processing.getProcessingConfig();
             auto roi = processing.getRealtimeRoi();
