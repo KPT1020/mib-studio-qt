@@ -378,6 +378,8 @@ namespace frontend
                      cfg.enable_deformability_range_check, cfg.enable_area_ratio_check,
                      cfg.enable_ring_ratio_check,
                      cfg.require_single_inner_contour, cfg.enable_target_group);
+
+        emit processingConfigApplied();
     }
 
     void ExperimentMonitoringTab::setupCharts() {
