@@ -667,6 +667,24 @@ if(BUILD_TESTING)
     )
 endif()
 
+# Headless HF-dataset pipeline runner (offline verification + CNN training corpus).
+# Streams a folder of grayscale frames through the production ProcessingService
+# and writes the standard experiment HDF5. See docs/howto/hf-dataset-verification.md.
+add_executable(hf_pipeline_runner
+    src/tools/hf_pipeline_runner.cpp
+)
+target_link_libraries(hf_pipeline_runner PRIVATE
+    mib_backend
+    spdlog::spdlog
+    Qt6::Core
+)
+if(TARGET nlohmann_json::nlohmann_json)
+    target_link_libraries(hf_pipeline_runner PRIVATE nlohmann_json::nlohmann_json)
+endif()
+target_include_directories(hf_pipeline_runner PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
 # Windows installer packaging (InnoSetup)
 if(WIN32)
     # Find InnoSetup compiler

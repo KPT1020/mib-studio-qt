@@ -5,6 +5,16 @@
 
 ## Features shipped
 
+- **HuggingFace dataset offline runner + CNN training-data export**
+  (2026-04-15) — new `hf_pipeline_runner` executable
+  (`src/tools/hf_pipeline_runner.cpp`) streams a folder of HF dataset
+  frames through the production [[../services/ProcessingService]] via
+  [[../camera/MockCamera]] and writes the standard experiment HDF5.
+  Python helpers: `scripts/hf_dataset_download.py` (HF → PNG folder) and
+  `scripts/hf_cnn_export.py` (HDF5 → `images/`, `masks/`, `labels.csv`
+  layout with provenance + rejection reasons). See
+  [[../../docs/howto/hf-dataset-verification.md]] and
+  [[../task/2026-04-15-hf-dataset-runner]].
 - **Dual syringe pump control** (PR #58) —
   [[../services/SyringePumpService]] + [[../frontend/SyringePumpTab]] +
   `SyringePumpSettingsDialog`. Modbus RTU over two COM ports (Sample +

@@ -14,6 +14,13 @@
   (`src/tests/capture_processing_test.cpp`). Uses
   [[../camera/MockCamera]] to exercise capture + processing without
   the UI.
+- **`hf_pipeline_runner.exe`** — headless offline runner
+  (`src/tools/hf_pipeline_runner.cpp`). Streams a folder of frames
+  (typically produced by `scripts/hf_dataset_download.py` from a
+  HuggingFace dataset) through the production pipeline and writes the
+  standard experiment HDF5. See
+  [[../../docs/howto/hf-dataset-verification.md]] and
+  [[../task/2026-04-15-hf-dataset-runner]].
 
 ## Mock camera env vars
 

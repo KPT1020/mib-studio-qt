@@ -3,3 +3,7 @@ h5py>=3.8.0
 numpy>=1.24.0
 opencv-python>=4.8.0
 pyinstaller>=5.13.0
+# hf_dataset_download.py: fetch HF image datasets for offline pipeline verification
+datasets>=2.14.0
+huggingface_hub>=0.20.0
+Pillow>=10.0.0
