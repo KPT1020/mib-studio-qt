@@ -13,6 +13,7 @@
 | `ConversionFactorDialog` | Set pixel→μm conversion factor | [[PreviewPage]] |
 | `FrameViewerDialog` | Popout frame inspector with overlay toggles | [[HdfReviewTab]], [[PreviewPage]] |
 | `SyringePumpSettingsDialog` | Per-pump COM port, baud, Modbus address | [[SyringePumpTab]] |
+| `BatchMaskDialog` | Re-generate masks from HDF5 range or image folder via [[../services/ProcessingService]]'s `processBatch` | [[HdfReviewTab]] |
 
 ## Conventions
 

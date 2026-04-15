@@ -44,6 +44,7 @@
 #include "backend/AppBackend.h"
 #include "backend/services/Hdf5Service.h"
 #include "backend/services/ProcessingService.h"
+#include "frontend/dialogs/BatchMaskDialog.h"
 #include "frontend/dialogs/FrameViewerDialog.h"
 #include "frontend/models/HdfMetricsModel.h"
 #include "frontend/utils/OverlayRenderer.h"
@@ -122,6 +123,7 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
     connect(ui->exportMetricsBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportMetrics);
     connect(ui->exportAllBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportAll);
     connect(ui->exportChartsBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportCharts);
+    connect(ui->regenerateMasksBtn, &QPushButton::clicked, this, &HdfReviewTab::onRegenerateMasks);
     connect(ui->overlayModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &HdfReviewTab::onOverlayModeChanged);
     connect(ui->roiOverlayCheck, &QCheckBox::toggled, this, &HdfReviewTab::onToggleRoiOverlay);
@@ -792,6 +794,52 @@ void HdfReviewTab::onThumbnailDoubleClicked(int frameIndex) {
 
 void HdfReviewTab::onViewFrameDetails(int frameIndex) {
     showFrameViewer(frameIndex);
+}
+
+void HdfReviewTab::onRegenerateMasks() {
+    // Grab the currently loaded HDF5 path (if any) so the dialog can offer
+    // "Current HDF5 frames" as a source.
+    QString loadedPath;
+    if (hdfReader_) {
+        const QString label = ui->filePathLabel->text();
+        if (label != tr("No file selected")) loadedPath = label;
+    }
+
+    BatchMaskDialog dlg(backend_, loadedPath, this);
+    if (dlg.exec() != QDialog::Accepted) return;
+
+    if (!dlg.displayRequested()) return;
+
+    // Replace the current in-memory frame set with the batch result so the
+    // thumbnail grid refreshes against the newly computed masks.
+    const auto& out = dlg.processedFrames();
+    if (out.empty()) return;
+
+    std::vector<backend::services::ProcessedFrame> valid, invalid;
+    valid.reserve(out.size());
+    invalid.reserve(out.size());
+    for (const auto& f : out) {
+        if (f.validation.isValid) valid.push_back(f);
+        else invalid.push_back(f);
+    }
+
+    // Reset caches tied to the old dataset indexing.
+    thumbnailCache_.clear();
+    validThumbnailsLoaded_ = 0;
+    invalidThumbnailsLoaded_ = 0;
+
+    validFrames_ = std::move(valid);
+    invalidFrames_ = std::move(invalid);
+
+    populateFrames(validFrames_, true);
+    populateFrames(invalidFrames_, false);
+    updateCharts();
+
+    ui->statusLabel->setText(
+        tr("Regenerated masks: %1 valid, %2 invalid")
+            .arg(validFrames_.size()).arg(invalidFrames_.size()));
+    SPDLOG_INFO("HdfReviewTab: regenerated masks ({} valid, {} invalid)",
+                validFrames_.size(), invalidFrames_.size());
 }
 
 void HdfReviewTab::onTableSelectionChanged() {

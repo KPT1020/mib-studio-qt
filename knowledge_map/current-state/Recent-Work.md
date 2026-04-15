@@ -5,6 +5,12 @@
 
 ## Features shipped
 
+- **Batch mask generation from stream images** (2026-04-15) —
+  [[../services/ProcessingService]] gained `computeProcessedFrame()` and
+  `processBatch()`, enabling offline mask regeneration without driving the
+  realtime loop. New [[../services/BatchMaskSources]] adapters load from
+  HDF5 / folder and save as PNG / HDF5. [[../frontend/HdfReviewTab]] gets
+  a "Regenerate masks…" toolbar button backed by `BatchMaskDialog`.
 - **Dual syringe pump control** (PR #58) —
   [[../services/SyringePumpService]] + [[../frontend/SyringePumpTab]] +
   `SyringePumpSettingsDialog`. Modbus RTU over two COM ports (Sample +

@@ -76,6 +76,16 @@
       </widget>
      </item>
      <item>
+      <widget class="QPushButton" name="regenerateMasksBtn">
+       <property name="text">
+        <string>Regenerate masks...</string>
+       </property>
+       <property name="toolTip">
+        <string>Re-run the processing pipeline on a batch of stream images (HDF5 range or folder) to generate masks.</string>
+       </property>
+      </widget>
+     </item>
+     <item>
       <widget class="QLabel" name="overlayModeLabel">
        <property name="text">
         <string>Overlay:</string>

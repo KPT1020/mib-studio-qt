@@ -27,6 +27,20 @@
   see `git log` entry
   "fix: add Close File button and fix dangling pointer crash in review tab").
 
+## Regenerate masks button
+
+Toolbar action **"Regenerate masks…"** opens [[Dialogs|BatchMaskDialog]]
+(`include/frontend/dialogs/BatchMaskDialog.h`). The dialog drives
+[[../services/ProcessingService]]'s `processBatch` API on either the
+currently loaded HDF5 file's `/valid_frames/images` (with start/count) or
+a folder of TIFF/PNG/JPEG images. Outputs can be written as PNG masks,
+saved to a new HDF5 file via [[../services/BatchMaskSources]]
+`saveMasksToHdf5`, and/or pushed back into the tab to refresh thumbnails
+and metrics with the newly-computed masks. The currently active
+`ProcessingConfig`, ROI, and background image (from
+`processing().getProcessingConfig()` / `getRealtimeRoi()` /
+`getRealtimeBackgroundGray()`) are used as inputs.
+
 ## Gotchas
 
 - Multi-image series (4D dataset) need `readSeriesImagesByIndex` — not the

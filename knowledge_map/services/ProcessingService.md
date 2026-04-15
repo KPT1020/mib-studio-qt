@@ -63,6 +63,30 @@ All gates in one struct. Notable fields:
 1-second rolling window: `getAlgoFps1s`, `getValidFps1s`, `getInvalidFps1s`,
 `getAlgoAvgUs1s`. Plus `getTotalValidFlushed` for experiment totals.
 
+## Batch processing (offline / re-runs)
+
+For re-generating masks from stream images that are **not** coming from a
+live camera — e.g., frames stored in an HDF5 experiment file or a folder of
+TIFFs — use:
+
+- `ProcessingService::computeProcessedFrame(grayInput, background, config, roi, index, ts)`
+  — pure helper: blur → (optional) background subtract → threshold →
+  morphology → `filterProcessedImage`. Zero side-effects (no monitoring
+  rings, no experiment accumulation, no callbacks, no auto-background).
+  Returns a `ProcessedFrame` with a full-size mask (zero outside ROI).
+- `ProcessingService::processBatch(grayImages, config, background, roi, progressCb)`
+  — wraps `computeProcessedFrame` over a vector of grayscale `cv::Mat`
+  inputs, returns `std::vector<ProcessedFrame>`. Progress is reported via
+  `BatchProgressCallback(BatchProgress{done, total})`.
+
+Input/output adapters live in [[BatchMaskSources]] —
+`loadFromHdf5` / `loadFromFolder` (input), `saveMaskImages` /
+`saveMasksToHdf5` (output). `HdfReviewTab` exposes a "Regenerate masks…"
+button that drives this via `BatchMaskDialog`.
+
+Batch calls do **not** touch realtime state or monitoring buffers, so
+they're safe to run concurrently with live capture.
+
 ## Gotchas
 
 - Realtime drop-frames mode is ignored while an experiment is active.
@@ -79,3 +103,6 @@ All gates in one struct. Notable fields:
   refcounted shallow copy (`= blurredCurr`, **not** `.clone()`). Cloning
   every non-empty frame was an allocator-pressure source for algo-time
   variance when auto-background was enabled.
+- `computeProcessedFrame` intentionally omits the auto-background /
+  previous-frame-diff path used in `realtimeLoop()`. Callers needing that
+  should continue to drive frames through `FrameStore` + `startRealtime`.

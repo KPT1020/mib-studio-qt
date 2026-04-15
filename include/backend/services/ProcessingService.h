@@ -198,6 +198,46 @@ public:
                             const Roi& roi,
                             const cv::Mat& background = cv::Mat());
 
+    // ---- Batch mask generation ----
+    // Pure pipeline: Gaussian blur -> (optional) background subtract -> binary
+    // threshold -> morphology -> contour validation. Produces a full-frame mask
+    // (zero outside ROI) so outputs round-trip through Hdf5Service without
+    // special handling. Does NOT touch realtime state, monitoring buffers,
+    // experiment accumulation, or any callback.
+    //
+    // Inputs:
+    //   grayInput          - CV_8UC1 image (or any type that can be converted)
+    //   backgroundGray     - full-size CV_8UC1 background (empty = no subtract)
+    //   config             - processing thresholds
+    //   roi                - ROI to analyze; {0,0,0,0} means full frame
+    //   index, timestampNs - copied into the ProcessedFrame
+    //
+    // Returns a ProcessedFrame with originalImage (full gray clone),
+    // processedImage (full-size mask, CV_8UC1), and validation metrics filled.
+    ProcessedFrame computeProcessedFrame(
+        const cv::Mat& grayInput,
+        const cv::Mat& backgroundGray,
+        const ProcessingConfig& config,
+        const Roi& roi,
+        uint64_t index = 0,
+        uint64_t timestampNs = 0);
+
+    struct BatchProgress {
+        size_t done{0};
+        size_t total{0};
+    };
+    using BatchProgressCallback = std::function<void(const BatchProgress&)>;
+
+    // Run computeProcessedFrame on each image in order. Does not modify
+    // realtime config, monitoring buffers, experiment state, or fire any
+    // callback. Safe to call from any thread.
+    std::vector<ProcessedFrame> processBatch(
+        const std::vector<cv::Mat>& grayImages,
+        const ProcessingConfig& config,
+        const cv::Mat& background = cv::Mat{},
+        const Roi& roi = Roi{0, 0, 0, 0},
+        BatchProgressCallback progress = {});
+
     // Ring ratio callback for autofocus (called when validated frames are processed)
     using RingRatioCallback = std::function<void(double ringRatio, int64_t timestampNs)>;
     void setRingRatioCallback(RingRatioCallback callback);
