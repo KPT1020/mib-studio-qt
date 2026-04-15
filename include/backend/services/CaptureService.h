@@ -21,6 +21,15 @@ struct CaptureStats {
     std::atomic<uint64_t> framesProcessed{0};
     std::atomic<uint64_t> lastFrameRate{0};     // from StreamModule StatisticsFrameRate
     std::atomic<uint64_t> lastDataRateMBps{0};  // from StreamModule StatisticsDataRate
+    // EMA-smoothed offset between CPU steady_clock and the camera's hardware
+    // timestamp clock, in nanoseconds (cpu_ns - hw_ns). Used to derive a
+    // jitter-free "predicted" CPU capture time = frame.timestamp + offset, so
+    // downstream trigger scheduling lands on the hardware's periodic grid
+    // regardless of CPU-side scheduling jitter caused by processing load.
+    // 0 means "not initialized" or "no hardware timestamp available".
+    std::atomic<int64_t> clockOffsetNs{0};
+    // Raw latest observed offset (not smoothed); useful for debugging.
+    std::atomic<int64_t> lastRawOffsetNs{0};
 };
 
 class CaptureService {

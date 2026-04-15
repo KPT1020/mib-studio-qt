@@ -7,6 +7,7 @@
 #include <spdlog/spdlog.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <stdexcept>
 #include <thread>
 
@@ -107,6 +108,24 @@ void CaptureService::run() {
         uint64_t nextStatsPoll = Tools::getTimestamp() + kStatsInterval;
         uint64_t nextHealthCheck = Tools::getTimestamp() + kHealthCheckInterval;
 
+        // Clock-offset tracker (cpu_steady_ns - hw_frame_timestamp_ns). The camera
+        // hardware timestamps arrive on a periodic, jitter-free grid; the CPU
+        // steady_clock reading taken after grabFrame() returns is subject to
+        // scheduling jitter driven by processing-pipeline load. We track a slow
+        // EMA of the offset so we can predict the "ideal" CPU-clock capture time
+        // for each frame (hw_ns + offsetSmoothed). That prediction is what we
+        // push into FrameStore's sideband and what TriggerService uses as the
+        // scheduling anchor, so pulses land on the hardware periodic grid
+        // regardless of CPU-side jitter.
+        int64_t clockOffsetSmoothedNs = 0;
+        bool clockOffsetInitialized = false;
+        // EMA weight = 1/alphaDenom. 1/64 (≈0.016) is slow enough to reject CPU
+        // jitter but fast enough to track gradual drift between the two clocks.
+        constexpr int64_t kOffsetEmaDenom = 64;
+        // If the raw offset jumps by more than this, assume the hardware clock
+        // restarted (e.g. camera re-armed) and re-bootstrap the smoothed value.
+        constexpr int64_t kOffsetResetThresholdNs = 100'000'000LL; // 100 ms
+
         while (running_.load()) {
             // Periodic health check
             const uint64_t now = Tools::getTimestamp();
@@ -132,10 +151,41 @@ void CaptureService::run() {
             }
 
             // Record steady_clock timestamp as close to frame capture as possible.
-            // This is used by the trigger pipeline to schedule pulse onset at a fixed
-            // delay after capture, independent of downstream processing-pipeline jitter.
-            const uint64_t captureSteadyNs = static_cast<uint64_t>(
+            // This gives us the CPU-side observation of when the frame arrived;
+            // it is subject to scheduling jitter driven by processing-pipeline load.
+            const int64_t cpuObservedNs = static_cast<int64_t>(
                 std::chrono::steady_clock::now().time_since_epoch().count());
+
+            // Derive a jitter-free "predicted" CPU capture time by combining the
+            // hardware timestamp (periodic, jitter-free) with a slow EMA of the
+            // hw-to-CPU offset. This is what the downstream trigger pipeline uses
+            // as its scheduling anchor, so onsets land on the hardware grid even
+            // when CPU-side capture timing drifts under load.
+            uint64_t captureSteadyNs = static_cast<uint64_t>(cpuObservedNs);
+            if (frame.timestamp != 0) {
+                const int64_t hwNs = static_cast<int64_t>(frame.timestamp);
+                const int64_t rawOffset = cpuObservedNs - hwNs;
+                stats_.lastRawOffsetNs.store(rawOffset, std::memory_order_relaxed);
+
+                const bool reset = !clockOffsetInitialized
+                    || std::llabs(rawOffset - clockOffsetSmoothedNs) > kOffsetResetThresholdNs;
+                if (reset) {
+                    if (clockOffsetInitialized) {
+                        SPDLOG_WARN("CaptureService: hw-clock offset jumped by {} ns; re-bootstrapping",
+                                    rawOffset - clockOffsetSmoothedNs);
+                    }
+                    clockOffsetSmoothedNs = rawOffset;
+                    clockOffsetInitialized = true;
+                } else {
+                    // EMA: smoothed += (raw - smoothed) / denom
+                    clockOffsetSmoothedNs +=
+                        (rawOffset - clockOffsetSmoothedNs) / kOffsetEmaDenom;
+                }
+                stats_.clockOffsetNs.store(clockOffsetSmoothedNs, std::memory_order_relaxed);
+
+                // Predicted CPU-clock capture instant on the hardware periodic grid.
+                captureSteadyNs = static_cast<uint64_t>(hwNs + clockOffsetSmoothedNs);
+            }
 
             if (callback_) {
                 callback_(frame.data.data(),

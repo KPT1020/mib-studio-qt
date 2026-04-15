@@ -55,11 +55,17 @@ edge of [[ProcessingService]]'s realtime pipeline (blur, morphology,
 contour detection, classification). Processing time is variable (1–10 ms
 per frame), so onset-from-capture jitter tracked processing jitter 1:1.
 
-Now onset is scheduled from `captureObserved` (set in [[CaptureService]]
-right after `grabFrame()`), so pulse timing is independent of downstream
-processing cost. Slip occurs only when `processing_time + scheduler_wake
-> triggerDelayUs_`, in which case the pulse fires immediately and the
-slip amount is logged and recorded in `lastSlipUs_`.
+Now onset is scheduled from `captureObserved` (the **predicted CPU-clock
+capture time** derived in [[CaptureService]] as `frame.timestamp` +
+EMA-smoothed hw→CPU offset — see [[CaptureService#Clock-offset tracking]]),
+so pulse timing is independent of both (a) downstream processing cost and
+(b) CPU-side `grabFrame()`-return jitter caused by processing load.
+Mechanically the per-frame delay from the raw CPU observation is
+**variable** — it's (`triggerDelayUs_` + predicted_cpu − observed_cpu) —
+precisely to make the realized onset land on the hardware's periodic
+grid. Slip occurs only when `processing_time + scheduler_wake >
+triggerDelayUs_`, in which case the pulse fires immediately and the slip
+amount is logged and recorded in `lastSlipUs_`.
 
 ## Gotchas
 

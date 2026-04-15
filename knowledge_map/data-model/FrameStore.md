@@ -64,10 +64,14 @@ size_t estimateMemoryBytesForCapacity(size_t capacity) const;
 ## Sideband capture timestamps
 
 Parallel to `ring_` the store keeps a `std::vector<uint64_t>
-captureSteadyNs_` of the same capacity, indexed identically. Each entry is
-the `std::chrono::steady_clock::now()` nanosecond count recorded by the
-producer ([[../services/CaptureService]]) immediately after
-`camera->grabFrame()` returns. 0 means "not recorded".
+captureSteadyNs_` of the same capacity, indexed identically. Each entry
+is a **predicted CPU-clock capture timestamp** produced by
+[[../services/CaptureService]]: `frame.timestamp` (hardware ns, periodic,
+jitter-free) plus an EMA-smoothed hw→CPU offset. This gives the trigger
+pipeline a jitter-free anchor so pulses land on the hardware's periodic
+capture grid even under variable processing load. 0 means "not
+recorded" or "no hardware timestamp available" (in which case the
+producer falls back to raw `steady_clock::now()`).
 
 This is intentionally kept out of `struct Frame` to avoid rippling through
 the many consumers that persist `Frame` (HDF5 writes, TIFF saves, playback

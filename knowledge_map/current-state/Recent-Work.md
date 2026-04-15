@@ -37,6 +37,16 @@
   [[../frontend/ExperimentMonitoringTab]] as `triggerDelaySpin`. New
   metrics: `getLastRealizedDelayUs`, `getLastSlipUs`,
   `getDroppedTriggers`.
+- **2026-04-15** — **Anchored trigger scheduling on hardware clock to
+  eliminate CPU-side capture jitter.** CaptureService now tracks a slow
+  EMA of `cpu_ns - hw_ns` (weight 1/64) and pushes a **predicted** CPU
+  capture time (`frame.timestamp` + smoothed offset) into FrameStore's
+  sideband instead of raw `steady_clock::now()`. This makes trigger
+  onsets land on the camera's jitter-free periodic grid regardless of
+  processing-pipeline load. Sudden hw-clock jumps (> 100 ms) trigger a
+  re-bootstrap with a WARN log. New `CaptureStats` fields
+  `clockOffsetNs` / `lastRawOffsetNs` expose the correction for
+  diagnostics.
 - Param tuning panel now stays in sync with the config table both
   directions.
 - HDF Review tab: fixed dangling pointer crash on file close.

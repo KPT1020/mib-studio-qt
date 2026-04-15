@@ -85,5 +85,29 @@ firing immediately on classification.
   software. Slip floor is OS scheduler granularity (~tens of µs on
   Windows). Busy-wait is used only for the pulse width itself, not for
   the scheduled delay.
-- Hardware-side camera timestamps (`Frame.timestamp`) are device ticks
-  and not comparable to `steady_clock`, so we don't reuse them here.
+
+## Addendum — Hardware-clock anchoring (same day)
+
+**Refinement:** anchor the trigger schedule on the camera's hardware
+timestamp (periodic, jitter-free) rather than raw `steady_clock::now()`
+at `grabFrame()` return, because the latter is jittered by CPU
+scheduling which is itself driven by processing-pipeline load.
+[[../services/CaptureService]] now maintains an EMA-smoothed offset
+between the two clocks (`cpu_ns - hw_ns`, weight `1/64`) and pushes the
+**predicted** CPU-clock capture time (`frame.timestamp` + smoothed
+offset) into FrameStore's sideband. Downstream (ProcessingService,
+TriggerService) is unchanged — it already consumes this timestamp as the
+scheduling anchor, so onsets now land on the hardware's periodic grid.
+
+Makes the per-frame delay (from raw CPU observation) effectively
+variable: `triggerDelayUs + (predicted − observed)`, which is precisely
+the adjustment needed to land on a unified onset time.
+
+Bootstrap / reset handling:
+- First frame → smoothed offset = raw offset, no smoothing.
+- Raw offset jump > 100 ms (e.g. camera re-arm) → re-bootstrap with WARN.
+- `frame.timestamp == 0` (some mock paths) → fall back to raw
+  `steady_clock::now()`.
+
+New `CaptureStats` members: `clockOffsetNs` (smoothed) and
+`lastRawOffsetNs` (latest raw sample) for diagnostics.

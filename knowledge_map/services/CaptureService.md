@@ -13,12 +13,29 @@
 - One thread per service: `run()` blocks on the camera's blocking `grabFrame`.
 - Copies frame bytes into `FrameStore` and fires `FrameCallback` (used by UI
   for live preview).
-- Records `std::chrono::steady_clock::now()` immediately after `grabFrame()`
-  returns and passes it to `FrameStore::pushFrame(..., captureSteadyNs)` so
-  downstream consumers (notably [[TriggerService]]) can schedule actions at
-  a fixed delay from capture, independent of processing latency.
+- Computes a **predicted CPU capture timestamp** per frame
+  (`frame.timestamp` + EMA-smoothed hw→CPU offset) and passes it to
+  `FrameStore::pushFrame(..., captureSteadyNs)`. Downstream consumers
+  (notably [[TriggerService]]) use this as the scheduling anchor, so
+  trigger onsets land on the camera's periodic hardware grid regardless
+  of CPU-side jitter caused by processing-pipeline load.
 - Exposes `CaptureStats` — `framesProcessed`, `lastFrameRate`,
-  `lastDataRateMBps` (the latter two come from EGrabber StreamModule).
+  `lastDataRateMBps`, plus `clockOffsetNs` (smoothed hw→CPU offset) and
+  `lastRawOffsetNs` (latest raw offset sample) for diagnostics.
+
+## Clock-offset tracking
+
+Raw `steady_clock::now()` at `grabFrame()` return is jittered by CPU
+scheduling (which is driven by processing-pipeline load). The hardware
+timestamps from EGrabber (`BUFFER_INFO_TIMESTAMP` / per-part timestamps,
+nanoseconds) arrive on a periodic jitter-free grid. We maintain a slow
+EMA of `cpu_observed_ns - hw_ns` (weight `1/64`) and publish the frame's
+predicted CPU-clock capture time as `hw_ns + smoothed_offset`.
+
+On the first frame (or after a sudden hw-clock jump > 100 ms, e.g. camera
+re-arm), the smoothed offset is re-bootstrapped from the raw sample and a
+WARN is logged. For cameras with no hardware timestamp (`frame.timestamp
+== 0`, e.g. some mock configs), we fall back to raw `steady_clock::now()`.
 
 ## Key APIs
 
