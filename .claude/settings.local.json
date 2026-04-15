@@ -66,7 +66,8 @@
       "Bash(for dir:*)",
       "Bash(do echo:*)",
       "Read(//c/Users/gavin/Developer/mib-studio-qt/**)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(gh --version)"
     ]
   }
 }
