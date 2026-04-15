@@ -68,3 +68,14 @@ All gates in one struct. Notable fields:
 - Realtime drop-frames mode is ignored while an experiment is active.
 - `pixelToMicronFactor_` default is `0.4886` — UI lets users change this.
 - YOLO is a separate service ([[YoloService]]); this pipeline does not use it.
+- **Callback ordering invariant**: `TargetGroupCallback` and
+  `RingRatioCallback` are invoked **before** `monitoringFramesMutex_` is
+  taken (and with no other locks held) so the UI thread's periodic
+  `getMonitoringValidFrames()` / `getMonitoringInvalidFrames()` snapshot
+  cannot stall the [[TriggerService]] wake-up. Do not move these callback
+  calls back inside the monitoring-mutex scope; hold-time there directly
+  becomes trigger-onset jitter (see 2026-04-15 task record).
+- Per-frame `previousFrameForAutoCapture_` assignment uses cv::Mat's
+  refcounted shallow copy (`= blurredCurr`, **not** `.clone()`). Cloning
+  every non-empty frame was an allocator-pressure source for algo-time
+  variance when auto-background was enabled.

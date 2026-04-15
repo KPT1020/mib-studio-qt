@@ -25,6 +25,17 @@
 
 ## Recent fixes
 
+- **2026-04-15** — Trigger onset latency regression fix
+  (`claude/fix-trigger-timing-bug-xGgbx`). The target-group callback
+  (which wakes [[../services/TriggerService]]) was being dispatched inside
+  `monitoringFramesMutex_`, the same mutex held by the UI thread when it
+  snapshotted the 1000-frame monitoring ring buffer for
+  [[../frontend/ExperimentMonitoringTab]] (every 500 ms). End-to-end
+  trigger onset drifted from ~400 µs to up to ~1 ms at the UI cadence. Now
+  the callback fires before the monitoring mutex is taken. Also removed
+  per-frame `cv::Mat::clone()` on `previousFrameForAutoCapture_` (shallow
+  refcounted copy is enough). Task record:
+  `knowledge_map/task/2026-04-15-trigger-timing-bug.md`.
 - Param tuning panel now stays in sync with the config table both
   directions.
 - HDF Review tab: fixed dangling pointer crash on file close.
