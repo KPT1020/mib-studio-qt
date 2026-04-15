@@ -30,3 +30,8 @@ microseconds (default 1 µs).
 - Not all cameras support `setTriggerOutput`. `ICamera::setTriggerOutput`
   returns `false` by default (see [[../camera/ICamera]]).
 - Requires `ProcessingService::enable_target_group` + thresholds to be set.
+- `getLastOnsetUs()` measures only the duration of the
+  `setTriggerOutput(true)` call, not end-to-end frame→trigger latency. For
+  end-to-end latency use an oscilloscope on the TTL line. See
+  [[ProcessingService]] "Callback ordering invariant" — the callback is
+  dispatched outside `monitoringFramesMutex_` to keep wake-up latency flat.

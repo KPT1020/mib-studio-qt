@@ -775,7 +775,7 @@ void ProcessingService::realtimeLoop() {
                         cv::absdiff(blurredCurr, previousFrameForAutoCapture_, diffForAutoCapture);
                     } else {
                         // First frame or size mismatch: store current frame and skip auto-capture check
-                        previousFrameForAutoCapture_ = blurredCurr.clone();
+                        previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
                         diffForAutoCapture = blurredCurr; // Use current frame for thresholding (will not be empty)
                     }
                 } else {
@@ -812,7 +812,7 @@ void ProcessingService::realtimeLoop() {
                                 // Update previous frame cache to current frame (for next frame-to-frame comparison)
                                 {
                                     std::scoped_lock prevFrameLk(previousFrameMutex_);
-                                    previousFrameForAutoCapture_ = blurredCurr.clone();
+                                    previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
                                 }
                                 
                                 // Notify via callback
@@ -846,7 +846,7 @@ void ProcessingService::realtimeLoop() {
                 // Update previous frame for frame-to-frame comparison (always when auto-capture enabled)
                 if (config.auto_background_enabled && !experimentActive_.load()) {
                     std::scoped_lock prevFrameLk(previousFrameMutex_);
-                    previousFrameForAutoCapture_ = blurredCurr.clone();
+                    previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
                 }
                 
                 // Use background subtraction diff for actual processing (morphology, contours, etc.)
@@ -878,6 +878,25 @@ void ProcessingService::realtimeLoop() {
                     ++invalidSinceSummary;
                 }
                 
+                // Fire trigger + autofocus callbacks BEFORE taking monitoringFramesMutex_
+                // so the UI thread's ring-buffer snapshot cannot stall the trigger path.
+                if (validation.isValid) {
+                    if (validation.ringRatio > 0.0) {
+                        RingRatioCallback rrCb;
+                        {
+                            std::scoped_lock cbLk(ringRatioCallbackMutex_);
+                            rrCb = ringRatioCallback_;
+                        }
+                        if (rrCb) rrCb(validation.ringRatio, f.timestamp);
+                    }
+                    TargetGroupCallback tgCb;
+                    {
+                        std::scoped_lock cbLk(targetGroupCallbackMutex_);
+                        tgCb = targetGroupCallback_;
+                    }
+                    if (tgCb) tgCb(validation.isTargetGroup);
+                }
+
                 // Always accumulate frames for monitoring (with size limit)
                 {
                     ProcessedFrame monitoringFrame;
@@ -887,25 +906,10 @@ void ProcessingService::realtimeLoop() {
                     // Store ROI-only images (already ROI-sized, just clone)
                     monitoringFrame.originalImage = grayROI.clone();
                     monitoringFrame.processedImage = mask.clone();
-                
+
                 std::scoped_lock monitoringLk(monitoringFramesMutex_);
                 if (validation.isValid) {
                     monitoringValidFrames_.push_back(std::move(monitoringFrame));
-                    
-                    // Notify autofocus service of ring ratio from validated frames
-                    if (validation.ringRatio > 0.0) {
-                        std::scoped_lock callbackLk(ringRatioCallbackMutex_);
-                        if (ringRatioCallback_) {
-                            ringRatioCallback_(validation.ringRatio, f.timestamp);
-                        }
-                    }
-                    // Notify trigger service of target group classification
-                    {
-                        std::scoped_lock callbackLk(targetGroupCallbackMutex_);
-                        if (targetGroupCallback_) {
-                            targetGroupCallback_(validation.isTargetGroup);
-                        }
-                    }
                 } else {
                     monitoringInvalidFrames_.push_back(std::move(monitoringFrame));
                 }
@@ -1135,7 +1139,7 @@ void ProcessingService::realtimeLoop() {
                         cv::absdiff(blurredCurr, previousFrameForAutoCapture_, diffForAutoCapture);
                     } else {
                         // First frame or size mismatch: store current frame and skip auto-capture check
-                        previousFrameForAutoCapture_ = blurredCurr.clone();
+                        previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
                         diffForAutoCapture = blurredCurr; // Use current frame for thresholding (will not be empty)
                     }
                 } else {
@@ -1172,7 +1176,7 @@ void ProcessingService::realtimeLoop() {
                                 // Update previous frame cache to current frame (for next frame-to-frame comparison)
                                 {
                                     std::scoped_lock prevFrameLk(previousFrameMutex_);
-                                    previousFrameForAutoCapture_ = blurredCurr.clone();
+                                    previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
                                 }
                                 
                                 // Notify via callback
@@ -1206,7 +1210,7 @@ void ProcessingService::realtimeLoop() {
                 // Update previous frame for frame-to-frame comparison (always when auto-capture enabled)
                 if (config.auto_background_enabled && !experimentActive_.load()) {
                     std::scoped_lock prevFrameLk(previousFrameMutex_);
-                    previousFrameForAutoCapture_ = blurredCurr.clone();
+                    previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
                 }
                 
                 // Use background subtraction diff for actual processing (morphology, contours, etc.)
@@ -1215,7 +1219,7 @@ void ProcessingService::realtimeLoop() {
                 // Update previous frame for frame-to-frame comparison (when no background and auto-capture enabled)
                 if (!hasBackground && config.auto_background_enabled && !experimentActive_.load()) {
                     std::scoped_lock prevFrameLk(previousFrameMutex_);
-                    previousFrameForAutoCapture_ = blurredCurr.clone();
+                    previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
                 }
                 
                 cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
@@ -1235,6 +1239,25 @@ void ProcessingService::realtimeLoop() {
                     ++invalidSinceSummary;
                 }
                 
+                // Fire trigger + autofocus callbacks BEFORE taking monitoringFramesMutex_
+                // so the UI thread's ring-buffer snapshot cannot stall the trigger path.
+                if (validation.isValid) {
+                    if (validation.ringRatio > 0.0) {
+                        RingRatioCallback rrCb;
+                        {
+                            std::scoped_lock cbLk(ringRatioCallbackMutex_);
+                            rrCb = ringRatioCallback_;
+                        }
+                        if (rrCb) rrCb(validation.ringRatio, f.timestamp);
+                    }
+                    TargetGroupCallback tgCb;
+                    {
+                        std::scoped_lock cbLk(targetGroupCallbackMutex_);
+                        tgCb = targetGroupCallback_;
+                    }
+                    if (tgCb) tgCb(validation.isTargetGroup);
+                }
+
                 // Always accumulate frames for monitoring (with size limit)
                 {
                     ProcessedFrame monitoringFrame;
@@ -1246,25 +1269,10 @@ void ProcessingService::realtimeLoop() {
                     cv::Mat roiMask = mask(cvRoi).clone();
                     monitoringFrame.originalImage = std::move(roiOriginal);
                     monitoringFrame.processedImage = std::move(roiMask);
-                    
+
                     std::scoped_lock monitoringLk(monitoringFramesMutex_);
                     if (validation.isValid) {
                         monitoringValidFrames_.push_back(std::move(monitoringFrame));
-                        
-                        // Notify autofocus service of ring ratio from validated frames
-                        if (validation.ringRatio > 0.0) {
-                            std::scoped_lock callbackLk(ringRatioCallbackMutex_);
-                            if (ringRatioCallback_) {
-                                ringRatioCallback_(validation.ringRatio, f.timestamp);
-                            }
-                        }
-                        // Notify trigger service of target group classification
-                        {
-                            std::scoped_lock callbackLk(targetGroupCallbackMutex_);
-                            if (targetGroupCallback_) {
-                                targetGroupCallback_(validation.isTargetGroup);
-                            }
-                        }
                     } else {
                         monitoringInvalidFrames_.push_back(std::move(monitoringFrame));
                     }
@@ -1477,7 +1485,7 @@ void ProcessingService::realtimeLoop() {
                         cv::absdiff(blurredCurr, previousFrameForAutoCapture_, diffForAutoCapture);
                     } else {
                         // First frame or size mismatch: store current frame and skip auto-capture check
-                        previousFrameForAutoCapture_ = blurredCurr.clone();
+                        previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
                         diffForAutoCapture = blurredCurr; // Use current frame for thresholding (will not be empty)
                     }
                 } else {
@@ -1514,7 +1522,7 @@ void ProcessingService::realtimeLoop() {
                                 // Update previous frame cache to current frame (for next frame-to-frame comparison)
                                 {
                                     std::scoped_lock prevFrameLk(previousFrameMutex_);
-                                    previousFrameForAutoCapture_ = blurredCurr.clone();
+                                    previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
                                 }
                                 
                                 // Notify via callback
@@ -1571,7 +1579,7 @@ void ProcessingService::realtimeLoop() {
                 // Update previous frame for frame-to-frame comparison (always when auto-capture enabled)
                 if (config.auto_background_enabled && !experimentActive_.load()) {
                     std::scoped_lock prevFrameLk(previousFrameMutex_);
-                    previousFrameForAutoCapture_ = blurredCurr.clone();
+                    previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
                 }
 
                 // Use background subtraction diff for actual processing (morphology, contours, etc.)
@@ -1580,7 +1588,7 @@ void ProcessingService::realtimeLoop() {
                 // Update previous frame for frame-to-frame comparison (when no background and auto-capture enabled)
                 if (!hasBackground && config.auto_background_enabled && !experimentActive_.load()) {
                     std::scoped_lock prevFrameLk(previousFrameMutex_);
-                    previousFrameForAutoCapture_ = blurredCurr.clone();
+                    previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
                 }
 
                 cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
@@ -1612,6 +1620,25 @@ void ProcessingService::realtimeLoop() {
                     ++invalidSinceSummary;
                 }
 
+                // Fire trigger + autofocus callbacks BEFORE taking monitoringFramesMutex_
+                // so the UI thread's ring-buffer snapshot cannot stall the trigger path.
+                if (validation.isValid) {
+                    if (validation.ringRatio > 0.0) {
+                        RingRatioCallback rrCb;
+                        {
+                            std::scoped_lock cbLk(ringRatioCallbackMutex_);
+                            rrCb = ringRatioCallback_;
+                        }
+                        if (rrCb) rrCb(validation.ringRatio, f.timestamp);
+                    }
+                    TargetGroupCallback tgCb;
+                    {
+                        std::scoped_lock cbLk(targetGroupCallbackMutex_);
+                        tgCb = targetGroupCallback_;
+                    }
+                    if (tgCb) tgCb(validation.isTargetGroup);
+                }
+
                 // Always accumulate frames for monitoring (with size limit)
                 {
                     ProcessedFrame monitoringFrame;
@@ -1627,21 +1654,6 @@ void ProcessingService::realtimeLoop() {
                     std::scoped_lock monitoringLk(monitoringFramesMutex_);
                     if (validation.isValid) {
                         monitoringValidFrames_.push_back(std::move(monitoringFrame));
-
-                        // Notify autofocus service of ring ratio from validated frames
-                        if (validation.ringRatio > 0.0) {
-                            std::scoped_lock callbackLk(ringRatioCallbackMutex_);
-                            if (ringRatioCallback_) {
-                                ringRatioCallback_(validation.ringRatio, f.timestamp);
-                            }
-                        }
-                        // Notify trigger service of target group classification
-                        {
-                            std::scoped_lock callbackLk(targetGroupCallbackMutex_);
-                            if (targetGroupCallback_) {
-                                targetGroupCallback_(validation.isTargetGroup);
-                            }
-                        }
                     } else {
                         monitoringInvalidFrames_.push_back(std::move(monitoringFrame));
                     }
