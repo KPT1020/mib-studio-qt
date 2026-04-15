@@ -10,6 +10,7 @@ Credentials come from the standard AWS env vars / --profile /
 ~/.aws/credentials chain.
 """
 import argparse
+import logging
 import os
 import sys
 
@@ -60,7 +61,11 @@ def main() -> int:
     parser.add_argument("--content-type", default="application/octet-stream")
     parser.add_argument("--acl", default="public-read")
     parser.add_argument("--profile", default=None)
+    parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
+
+    if args.debug:
+        boto3.set_stream_logger("botocore", level=logging.DEBUG)
 
     session = (
         boto3.Session(profile_name=args.profile)
@@ -72,7 +77,12 @@ def main() -> int:
         endpoint_url=args.endpoint,
         config=Config(
             signature_version="s3v4",
-            s3={"addressing_style": "path"},
+            s3={
+                "addressing_style": "path",
+                # Force full-body SigV4 so the client computes Content-Length
+                # upfront instead of streaming with unsigned/chunked payloads.
+                "payload_signing_enabled": True,
+            },
         ),
     )
     s3.meta.events.register("before-send.s3", _ensure_content_length)

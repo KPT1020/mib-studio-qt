@@ -115,6 +115,7 @@ function Invoke-S3Upload {
         "--acl", "public-read"
     )
     if ($Profile) { $uploadArgs += @("--profile", $Profile) }
+    if ($env:S3_UPLOAD_DEBUG) { $uploadArgs += @("--debug") }
 
     Write-Host "   Command: python $($uploadArgs -join ' ')" -ForegroundColor Gray
     & python $uploadArgs
