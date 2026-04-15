@@ -36,6 +36,16 @@
       </widget>
      </item>
      <item>
+      <widget class="QPushButton" name="closeFileBtn">
+       <property name="text">
+        <string>Close File</string>
+       </property>
+       <property name="enabled">
+        <bool>false</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
       <widget class="QPushButton" name="exportMetricsBtn">
        <property name="text">
         <string>Export Metrics to CSV...</string>
