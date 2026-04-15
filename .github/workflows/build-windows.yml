@@ -202,9 +202,8 @@ jobs:
           $installers = Get-ChildItem "build\dist\*.exe"
 
           if ($channel -eq "beta") {
-            # Beta: pre-release, create lightweight tag on current commit
-            git tag $tag
-            gh release create $tag $installers --title "v$version" --generate-notes --prerelease
+            # Beta: pre-release; gh creates the tag server-side on this commit
+            gh release create $tag $installers --title "v$version" --generate-notes --prerelease --target ${{ github.sha }}
           } else {
             # Release: full release (tag already pushed in version step)
             gh release create $tag $installers --title "v$version" --generate-notes

@@ -35,6 +35,11 @@
   relative to `resources/installers/`, writing to
   `resources/installers/build/dist/` and breaking the CI artifact
   upload step.
+- **2026-04-15** — `build-windows.yml` beta path now uses
+  `gh release create --target <sha>` instead of `git tag` + create.
+  The local tag was never pushed, so `gh release create` refused to
+  bind the release to it. `--target` makes gh create the tag
+  server-side atomically.
 
 ## Historical tasks worth knowing about
 
