@@ -23,6 +23,34 @@ from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 
+def _ensure_content_length(request, **kwargs):
+    """Force a Content-Length header onto every S3 request.
+
+    s3.yofo.bio (rustfs-style S3-compatible server) rejects
+    CreateMultipartUpload with 'missing header: content-length' when
+    the client omits Content-Length on empty-body control ops. This
+    hook computes and fills it in before the request goes out.
+    """
+    if "Content-Length" in request.headers:
+        return
+    body = request.body
+    if body is None:
+        length = 0
+    elif isinstance(body, (bytes, bytearray)):
+        length = len(body)
+    elif isinstance(body, str):
+        length = len(body.encode("utf-8"))
+    elif hasattr(body, "seek") and hasattr(body, "tell"):
+        pos = body.tell()
+        body.seek(0, 2)
+        end = body.tell()
+        body.seek(pos)
+        length = end - pos
+    else:
+        return
+    request.headers["Content-Length"] = str(length)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--endpoint", required=True)
@@ -47,6 +75,7 @@ def main() -> int:
             s3={"addressing_style": "path"},
         ),
     )
+    s3.meta.events.register("before-send.s3", _ensure_content_length)
 
     try:
         s3.upload_file(

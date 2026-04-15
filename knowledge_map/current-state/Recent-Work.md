@@ -41,14 +41,12 @@
   bind the release to it. `--target` makes gh create the tag
   server-side atomically.
 - **2026-04-15** — `publish-update.ps1` switched from `aws` CLI to a
-  small boto3 helper at `scripts/s3_upload.py`. aws CLI v2's multipart
-  path omits `Content-Length` on `CreateMultipartUpload`, which
-  s3.yofo.bio rejects; single-part PUT hit the proxy's body-size cap
-  for the 616 MiB full installer. boto3's multipart flow always sends
-  Content-Length, so both the update package and the full installer
-  can upload via one code path. Workflows now `pip install conan
-  boto3` together. Local runs also require boto3; install with
-  `pip install boto3`.
+  small boto3 helper at `scripts/s3_upload.py`. Both CLIs omit
+  `Content-Length` on `CreateMultipartUpload` and s3.yofo.bio
+  rejects that; the helper registers a `before-send.s3` event hook
+  that forces `Content-Length` onto every S3 request before it goes
+  out. Workflows now `pip install conan boto3`. Local runs also
+  require boto3 (`pip install boto3`).
 
 ## Historical tasks worth knowing about
 
