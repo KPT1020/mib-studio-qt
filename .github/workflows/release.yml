@@ -45,7 +45,7 @@ jobs:
 
       - name: Install Conan
         run: |
-          pip install conan
+          pip install conan boto3
           conan profile detect --force
 
           # Create CI profile pinned to msvc 194 to match prebuilt binaries

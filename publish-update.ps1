@@ -21,17 +21,11 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "=== Publishing MIB Studio Qt Update ===" -ForegroundColor Cyan
 
-function Restore-ChecksumEnvVar {
-    param(
-        [string]$Name,
-        [string]$PreviousValue
-    )
-
-    if ($null -eq $PreviousValue) {
-        Remove-Item "Env:$Name" -ErrorAction SilentlyContinue
-    } else {
-        Set-Item "Env:$Name" $PreviousValue
-    }
+# Locate boto3 uploader helper
+$s3UploadScript = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "scripts\s3_upload.py"
+if (-not (Test-Path $s3UploadScript)) {
+    Write-Host "ERROR: Cannot find $s3UploadScript" -ForegroundColor Red
+    exit 1
 }
 
 # Validate installer exists
@@ -104,71 +98,48 @@ $manifestJson | Out-File -FilePath $manifestPath -Encoding UTF8 -NoNewline
 
 Write-Host "   Manifest created: $manifestPath" -ForegroundColor Green
 
-# Build AWS CLI base args
-$awsArgs = @("--endpoint-url", $Endpoint)
-if ($Profile) {
-    $awsArgs += @("--profile", $Profile)
+function Invoke-S3Upload {
+    param(
+        [string]$File,
+        [string]$Key,
+        [string]$ContentType
+    )
+
+    $uploadArgs = @(
+        $s3UploadScript,
+        "--endpoint", $Endpoint,
+        "--bucket", $Bucket,
+        "--key", $Key,
+        "--file", $File,
+        "--content-type", $ContentType,
+        "--acl", "public-read"
+    )
+    if ($Profile) { $uploadArgs += @("--profile", $Profile) }
+
+    Write-Host "   Command: python $($uploadArgs -join ' ')" -ForegroundColor Gray
+    & python $uploadArgs
+    return $LASTEXITCODE
 }
 
-# Force AWS CLI checksum behavior that is compatible with S3-compatible endpoints.
-$previousRequestChecksumCalculation = $env:AWS_REQUEST_CHECKSUM_CALCULATION
-$previousResponseChecksumValidation = $env:AWS_RESPONSE_CHECKSUM_VALIDATION
-$env:AWS_REQUEST_CHECKSUM_CALCULATION = "when_required"
-$env:AWS_RESPONSE_CHECKSUM_VALIDATION = "when_required"
-
-# Upload installer with single-request put-object (avoids multipart edge cases on some S3-compatible endpoints)
+# Upload installer (boto3 handles multipart with correct Content-Length headers)
 Write-Host "`n3. Uploading installer..." -ForegroundColor Yellow
-$installerArgs = $awsArgs + @(
-    "s3api", "put-object",
-    "--bucket", $Bucket,
-    "--key", $installerKey,
-    "--body", $Installer,
-    "--content-type", "application/octet-stream",
-    "--acl", "public-read"
-)
-
-Write-Host "   Command: aws $($installerArgs -join ' ')" -ForegroundColor Gray
-$result = & aws $installerArgs 2>&1
-
-if ($LASTEXITCODE -ne 0) {
+$uploadExit = Invoke-S3Upload -File $Installer -Key $installerKey -ContentType "application/octet-stream"
+if ($uploadExit -ne 0) {
     Write-Host "ERROR: Installer upload failed!" -ForegroundColor Red
-    Write-Host $result -ForegroundColor Red
     Remove-Item $manifestPath -ErrorAction SilentlyContinue
-    Restore-ChecksumEnvVar -Name "AWS_REQUEST_CHECKSUM_CALCULATION" -PreviousValue $previousRequestChecksumCalculation
-    Restore-ChecksumEnvVar -Name "AWS_RESPONSE_CHECKSUM_VALIDATION" -PreviousValue $previousResponseChecksumValidation
     exit 1
-}
-
-if ($result) {
-    Write-Host "   $result" -ForegroundColor Gray
 }
 Write-Host "   Installer uploaded successfully" -ForegroundColor Green
 
-# Upload manifest (always use public-read ACL)
+# Upload manifest
 Write-Host "`n4. Uploading manifest..." -ForegroundColor Yellow
-$manifestArgs = $awsArgs + @("s3", "cp", $manifestPath, "s3://$Bucket/$manifestKey", "--content-type", "application/json", "--acl", "public-read")
-
-Write-Host "   Command: aws $($manifestArgs -join ' ')" -ForegroundColor Gray
-$result = & aws $manifestArgs 2>&1
-
-if ($LASTEXITCODE -ne 0) {
+$uploadExit = Invoke-S3Upload -File $manifestPath -Key $manifestKey -ContentType "application/json"
+Remove-Item $manifestPath -ErrorAction SilentlyContinue
+if ($uploadExit -ne 0) {
     Write-Host "ERROR: Manifest upload failed!" -ForegroundColor Red
-    Write-Host $result -ForegroundColor Red
-    Remove-Item $manifestPath -ErrorAction SilentlyContinue
-    Restore-ChecksumEnvVar -Name "AWS_REQUEST_CHECKSUM_CALCULATION" -PreviousValue $previousRequestChecksumCalculation
-    Restore-ChecksumEnvVar -Name "AWS_RESPONSE_CHECKSUM_VALIDATION" -PreviousValue $previousResponseChecksumValidation
     exit 1
 }
-
-if ($result) {
-    Write-Host "   $result" -ForegroundColor Gray
-}
 Write-Host "   Manifest uploaded successfully" -ForegroundColor Green
-
-# Cleanup
-Remove-Item $manifestPath -ErrorAction SilentlyContinue
-Restore-ChecksumEnvVar -Name "AWS_REQUEST_CHECKSUM_CALCULATION" -PreviousValue $previousRequestChecksumCalculation
-Restore-ChecksumEnvVar -Name "AWS_RESPONSE_CHECKSUM_VALIDATION" -PreviousValue $previousResponseChecksumValidation
 
 Write-Host "`n=== Publish Complete ===" -ForegroundColor Cyan
 Write-Host "Manifest URL: $endpointNoSlash/$Bucket/$manifestKey" -ForegroundColor Green

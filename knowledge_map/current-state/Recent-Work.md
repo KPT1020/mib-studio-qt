@@ -40,14 +40,15 @@
   The local tag was never pushed, so `gh release create` refused to
   bind the release to it. `--target` makes gh create the tag
   server-side atomically.
-- **2026-04-15** — Tried switching `publish-update.ps1` to
-  `aws s3 cp` (multipart) to fix a 413 on the 616 MiB full installer,
-  but s3.yofo.bio rejected `CreateMultipartUpload` with
-  `MissingContentLength`. Reverted to `s3api put-object`. Update
-  package (22 MiB) uploads fine; the full installer still 413s and
-  needs either a larger body-size cap on the s3.yofo.bio proxy or a
-  non-AWS-CLI uploader. Beta / stable release pipeline partially
-  degraded: update channel works, setup/full installer does not.
+- **2026-04-15** — `publish-update.ps1` switched from `aws` CLI to a
+  small boto3 helper at `scripts/s3_upload.py`. aws CLI v2's multipart
+  path omits `Content-Length` on `CreateMultipartUpload`, which
+  s3.yofo.bio rejects; single-part PUT hit the proxy's body-size cap
+  for the 616 MiB full installer. boto3's multipart flow always sends
+  Content-Length, so both the update package and the full installer
+  can upload via one code path. Workflows now `pip install conan
+  boto3` together. Local runs also require boto3; install with
+  `pip install boto3`.
 
 ## Historical tasks worth knowing about
 
