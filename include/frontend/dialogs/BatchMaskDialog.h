@@ -17,7 +17,6 @@ namespace backend { class AppBackend; }
 class QRadioButton;
 class QLineEdit;
 class QSpinBox;
-class QCheckBox;
 class QPushButton;
 class QLabel;
 class QProgressBar;
@@ -27,9 +26,10 @@ class QDoubleSpinBox;
 namespace frontend {
 
 // Dialog for running the batch mask generation pipeline on a range of
-// stream images sourced from either an HDF5 file or a folder. Results can
-// be saved as PNG masks, written to a new HDF5 file, and/or returned via
-// processedFrames() for display in the parent tab.
+// stream images sourced from either an HDF5 file or a folder. On
+// completion the results are written to a standard HDF5 file next to
+// the source; the saved path is exposed via savedHdf5Path() so the
+// caller can reload HdfReviewTab from it.
 //
 // The right-hand preview panel lets the user visually select an ROI by
 // dragging on a source frame, and designate one frame as the background
@@ -44,17 +44,15 @@ public:
                              QWidget* parent = nullptr);
     ~BatchMaskDialog() override;
 
-    // After the dialog closes with Accepted, these return the results of
-    // the most recent successful run. processedFrames() is only populated
-    // when the "Display in review tab" checkbox was ticked.
+    // After the dialog closes with Accepted:
+    // - processedFrames() holds the raw batch results (always populated on success)
+    // - savedHdf5Path() holds the path of the written HDF5 file (empty if save failed)
     const std::vector<backend::services::ProcessedFrame>& processedFrames() const { return results_; }
-    bool displayRequested() const;
+    QString savedHdf5Path() const { return savedHdf5Path_; }
 
 private slots:
     void onSourceChanged();
     void onBrowseFolder();
-    void onBrowseOutputPng();
-    void onBrowseOutputHdf5();
     void onRun();
 
     void onPreviewSourceChanged();
@@ -71,9 +69,10 @@ private:
                     QString& errorOut);
     void setRunning(bool running);
 
-    void   loadPreviewFrame(int index);
-    int    getSourceFrameCount() const;
-    QImage matToQImage(const cv::Mat& gray) const;
+    void    loadPreviewFrame(int index);
+    int     getSourceFrameCount() const;
+    QImage  matToQImage(const cv::Mat& gray) const;
+    QString computeAutoOutputPath() const;
 
     backend::AppBackend& backend_;
     QString hdf5LoadedPath_;
@@ -85,15 +84,6 @@ private:
     QPushButton* folderBrowseBtn_ = nullptr;
     QSpinBox* startIdxSpin_ = nullptr;
     QSpinBox* countSpin_ = nullptr;
-
-    // Output options
-    QCheckBox* displayCheck_ = nullptr;
-    QCheckBox* savePngCheck_ = nullptr;
-    QLineEdit* pngDirEdit_ = nullptr;
-    QPushButton* pngBrowseBtn_ = nullptr;
-    QCheckBox* saveHdf5Check_ = nullptr;
-    QLineEdit* hdf5PathEdit_ = nullptr;
-    QPushButton* hdf5BrowseBtn_ = nullptr;
 
     // Status + controls
     QPushButton* runBtn_ = nullptr;
@@ -130,6 +120,7 @@ private:
     backend::services::ProcessingConfig localConfig_;
 
     std::vector<backend::services::ProcessedFrame> results_;
+    QString savedHdf5Path_;
 };
 
 } // namespace frontend

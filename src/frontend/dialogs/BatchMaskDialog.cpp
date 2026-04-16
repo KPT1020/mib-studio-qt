@@ -6,10 +6,11 @@
 #include "backend/services/ProcessingService.h"
 #include "frontend/utils/RoiDrawCanvas.h"
 
-#include <QCheckBox>
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -45,10 +46,6 @@ BatchMaskDialog::BatchMaskDialog(backend::AppBackend& backend,
 }
 
 BatchMaskDialog::~BatchMaskDialog() = default;
-
-bool BatchMaskDialog::displayRequested() const {
-    return displayCheck_ && displayCheck_->isChecked();
-}
 
 void BatchMaskDialog::buildUi() {
     auto* root = new QVBoxLayout(this);
@@ -97,39 +94,6 @@ void BatchMaskDialog::buildUi() {
 
     leftCol->addWidget(srcGroup);
 
-    // --- Output group ---
-    auto* outGroup  = new QGroupBox(tr("Output"), this);
-    auto* outLayout = new QVBoxLayout(outGroup);
-
-    displayCheck_ = new QCheckBox(tr("Display results in review tab"), outGroup);
-    displayCheck_->setChecked(true);
-    outLayout->addWidget(displayCheck_);
-
-    savePngCheck_ = new QCheckBox(tr("Save mask PNGs to directory"), outGroup);
-    outLayout->addWidget(savePngCheck_);
-    auto* pngRow = new QHBoxLayout();
-    pngRow->addSpacing(20);
-    pngDirEdit_ = new QLineEdit(outGroup);
-    pngDirEdit_->setEnabled(false);
-    pngRow->addWidget(pngDirEdit_);
-    pngBrowseBtn_ = new QPushButton(tr("Browse..."), outGroup);
-    pngBrowseBtn_->setEnabled(false);
-    pngRow->addWidget(pngBrowseBtn_);
-    outLayout->addLayout(pngRow);
-
-    saveHdf5Check_ = new QCheckBox(tr("Save masks to HDF5 file"), outGroup);
-    outLayout->addWidget(saveHdf5Check_);
-    auto* h5Row = new QHBoxLayout();
-    h5Row->addSpacing(20);
-    hdf5PathEdit_ = new QLineEdit(outGroup);
-    hdf5PathEdit_->setEnabled(false);
-    h5Row->addWidget(hdf5PathEdit_);
-    hdf5BrowseBtn_ = new QPushButton(tr("Browse..."), outGroup);
-    hdf5BrowseBtn_->setEnabled(false);
-    h5Row->addWidget(hdf5BrowseBtn_);
-    outLayout->addLayout(h5Row);
-
-    leftCol->addWidget(outGroup);
     leftCol->addStretch();
 
     topRow->addLayout(leftCol, 1);
@@ -270,14 +234,6 @@ void BatchMaskDialog::buildUi() {
     connect(srcFolder_,  &QRadioButton::toggled, this, &BatchMaskDialog::onSourceChanged);
     connect(folderBrowseBtn_, &QPushButton::clicked, this, &BatchMaskDialog::onBrowseFolder);
 
-    connect(savePngCheck_,  &QCheckBox::toggled, pngDirEdit_,  &QWidget::setEnabled);
-    connect(savePngCheck_,  &QCheckBox::toggled, pngBrowseBtn_,&QWidget::setEnabled);
-    connect(pngBrowseBtn_,  &QPushButton::clicked, this, &BatchMaskDialog::onBrowseOutputPng);
-
-    connect(saveHdf5Check_, &QCheckBox::toggled, hdf5PathEdit_,  &QWidget::setEnabled);
-    connect(saveHdf5Check_, &QCheckBox::toggled, hdf5BrowseBtn_, &QWidget::setEnabled);
-    connect(hdf5BrowseBtn_, &QPushButton::clicked, this, &BatchMaskDialog::onBrowseOutputHdf5);
-
     connect(runBtn_,   &QPushButton::clicked, this, &BatchMaskDialog::onRun);
     connect(closeBtn_, &QPushButton::clicked, this, &QDialog::accept);
 
@@ -340,21 +296,6 @@ void BatchMaskDialog::onBrowseFolder() {
         folderEdit_->setText(dir);
         onPreviewSourceChanged();
     }
-}
-
-void BatchMaskDialog::onBrowseOutputPng() {
-    const QString dir = QFileDialog::getExistingDirectory(
-        this, tr("Select output directory for mask PNGs"),
-        pngDirEdit_->text());
-    if (!dir.isEmpty()) pngDirEdit_->setText(dir);
-}
-
-void BatchMaskDialog::onBrowseOutputHdf5() {
-    const QString file = QFileDialog::getSaveFileName(
-        this, tr("Save masks to HDF5 file"),
-        hdf5PathEdit_->text(),
-        tr("HDF5 files (*.h5 *.hdf5)"));
-    if (!file.isEmpty()) hdf5PathEdit_->setText(file);
 }
 
 // ---------------------------------------------------------------------------
@@ -586,13 +527,6 @@ void BatchMaskDialog::setRunning(bool running) {
     srcHdf5_->setEnabled(!running && !hdf5LoadedPath_.isEmpty());
     srcFolder_->setEnabled(!running);
     folderBrowseBtn_->setEnabled(!running && srcFolder_->isChecked());
-    savePngCheck_->setEnabled(!running);
-    pngDirEdit_->setEnabled(!running && savePngCheck_->isChecked());
-    pngBrowseBtn_->setEnabled(!running && savePngCheck_->isChecked());
-    saveHdf5Check_->setEnabled(!running);
-    hdf5PathEdit_->setEnabled(!running && saveHdf5Check_->isChecked());
-    hdf5BrowseBtn_->setEnabled(!running && saveHdf5Check_->isChecked());
-    displayCheck_->setEnabled(!running);
     prevFrameBtn_->setEnabled(!running && previewFrameIndex_ > 0);
     nextFrameBtn_->setEnabled(!running && previewFrameIndex_ < previewFrameTotal_ - 1);
     setBgBtn_->setEnabled(!running);
@@ -606,6 +540,23 @@ void BatchMaskDialog::setRunning(bool running) {
 void BatchMaskDialog::onRun() {
     logView_->clear();
     results_.clear();
+    savedHdf5Path_.clear();
+
+    const QString outputPath = computeAutoOutputPath();
+    if (outputPath.isEmpty()) {
+        QMessageBox::warning(this, tr("Cannot determine output path"),
+                             tr("Select a source before running."));
+        return;
+    }
+
+    if (QFile::exists(outputPath)) {
+        const auto answer = QMessageBox::question(
+            this, tr("Overwrite?"),
+            tr("Output file already exists:\n%1\n\nOverwrite?").arg(outputPath),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer != QMessageBox::Yes) return;
+    }
+
     statusLabel_->setText(tr("Loading images..."));
     progressBar_->setValue(0);
     setRunning(true);
@@ -621,11 +572,9 @@ void BatchMaskDialog::onRun() {
     }
     logView_->appendPlainText(tr("Loaded %1 images.").arg(images.size()));
 
-    auto& proc         = backend_.processing();
-    const auto config  = localConfig_;
+    auto& proc        = backend_.processing();
+    const auto config = localConfig_;
 
-    // Use the ROI and background selected in the preview panel instead of
-    // the live pipeline values.
     const QRect qroi = roiCanvas_->getRoi();
     const backend::services::ProcessingService::Roi roi{
         qroi.x(), qroi.y(), qroi.width(), qroi.height()};
@@ -649,33 +598,32 @@ void BatchMaskDialog::onRun() {
         tr("Processed %1 images: %2 valid, %3 invalid.")
             .arg(results_.size()).arg(validCount).arg(results_.size() - validCount));
 
-    if (savePngCheck_->isChecked()) {
-        const QString dir = pngDirEdit_->text().trimmed();
-        if (dir.isEmpty()) {
-            logView_->appendPlainText(tr("PNG output skipped: no directory chosen."));
-        } else {
-            size_t n = backend::services::batch_masks::saveMaskImages(
-                results_, dir.toStdString(), names);
-            logView_->appendPlainText(tr("Wrote %1 PNG masks to %2").arg(n).arg(dir));
-        }
+    const bool ok = backend::services::batch_masks::saveMasksToHdf5(
+        results_, outputPath.toStdString(), config,
+        roi.x, roi.y, roi.w, roi.h, background);
+
+    if (ok) {
+        savedHdf5Path_ = outputPath;
+        logView_->appendPlainText(tr("Saved: %1").arg(outputPath));
+        statusLabel_->setText(tr("Done."));
+    } else {
+        logView_->appendPlainText(tr("HDF5 write FAILED: %1").arg(outputPath));
+        statusLabel_->setText(tr("Done (save failed \u2014 see log)."));
     }
 
-    if (saveHdf5Check_->isChecked()) {
-        const QString path = hdf5PathEdit_->text().trimmed();
-        if (path.isEmpty()) {
-            logView_->appendPlainText(tr("HDF5 output skipped: no path chosen."));
-        } else {
-            bool ok = backend::services::batch_masks::saveMasksToHdf5(
-                results_, path.toStdString(), config,
-                roi.x, roi.y, roi.w, roi.h, background);
-            logView_->appendPlainText(
-                ok ? tr("Wrote HDF5 to %1").arg(path)
-                   : tr("HDF5 write FAILED for %1").arg(path));
-        }
-    }
-
-    statusLabel_->setText(tr("Done."));
     setRunning(false);
+}
+
+QString BatchMaskDialog::computeAutoOutputPath() const {
+    if (srcHdf5_->isChecked() && !hdf5LoadedPath_.isEmpty()) {
+        const QFileInfo fi(hdf5LoadedPath_);
+        return fi.dir().filePath(fi.baseName() + "_remasked.h5");
+    }
+    const QString folder = folderEdit_->text().trimmed();
+    if (folder.isEmpty()) return {};
+    const QDir dir(folder);
+    const QString name = dir.dirName().isEmpty() ? QStringLiteral("batch") : dir.dirName();
+    return dir.filePath(name + "_remasked.h5");
 }
 
 } // namespace frontend

@@ -5,6 +5,13 @@
 
 ## Features shipped
 
+- **BatchMaskDialog always saves standard HDF5** (2026-04-16) —
+  Replaced the Output group box (Display / Save PNG / Save HDF5 checkboxes)
+  with a single auto-save path: `<source_dir>/<stem>_remasked.h5`. After Run,
+  `HdfReviewTab` reloads via `loadHdfFile()` giving full scatter plot,
+  histogram, metadata table, and thumbnail support. Overwrite is prompted.
+  Files: `BatchMaskDialog.h/cpp`, `HdfReviewTab.cpp`.
+
 - **ROI & background selection GUI in BatchMaskDialog** (2026-04-16) —
   `BatchMaskDialog` extended with a right-hand preview panel. New
   `RoiDrawCanvas` widget (`src/frontend/utils/RoiDrawCanvas.cpp`) renders a

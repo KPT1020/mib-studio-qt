@@ -808,8 +808,6 @@ void HdfReviewTab::onViewFrameDetails(int frameIndex) {
 }
 
 void HdfReviewTab::onRegenerateMasks() {
-    // Grab the currently loaded HDF5 path (if any) so the dialog can offer
-    // "Current HDF5 frames" as a source.
     QString loadedPath;
     if (hdfReader_) {
         const QString label = ui->filePathLabel->text();
@@ -819,38 +817,10 @@ void HdfReviewTab::onRegenerateMasks() {
     BatchMaskDialog dlg(backend_, loadedPath, this);
     if (dlg.exec() != QDialog::Accepted) return;
 
-    if (!dlg.displayRequested()) return;
+    const QString savedPath = dlg.savedHdf5Path();
+    if (savedPath.isEmpty()) return;
 
-    // Replace the current in-memory frame set with the batch result so the
-    // thumbnail grid refreshes against the newly computed masks.
-    const auto& out = dlg.processedFrames();
-    if (out.empty()) return;
-
-    std::vector<backend::services::ProcessedFrame> valid, invalid;
-    valid.reserve(out.size());
-    invalid.reserve(out.size());
-    for (const auto& f : out) {
-        if (f.validation.isValid) valid.push_back(f);
-        else invalid.push_back(f);
-    }
-
-    // Reset caches tied to the old dataset indexing.
-    thumbnailCache_.clear();
-    validThumbnailsLoaded_ = 0;
-    invalidThumbnailsLoaded_ = 0;
-
-    validFrames_ = std::move(valid);
-    invalidFrames_ = std::move(invalid);
-
-    populateFrames(validFrames_, true);
-    populateFrames(invalidFrames_, false);
-    updateCharts();
-
-    ui->statusLabel->setText(
-        tr("Regenerated masks: %1 valid, %2 invalid")
-            .arg(validFrames_.size()).arg(invalidFrames_.size()));
-    SPDLOG_INFO("HdfReviewTab: regenerated masks ({} valid, {} invalid)",
-                validFrames_.size(), invalidFrames_.size());
+    loadHdfFile(savedPath);
 }
 
 void HdfReviewTab::onTableSelectionChanged() {
