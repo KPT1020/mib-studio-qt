@@ -42,8 +42,9 @@
 ### Trigger / realtime performance
 - `task/2026-04-15-trigger-timing-bug.md`
 - `task/2026-04-16-thread-performance-audit.md`
+- `task/2026-04-16-thread-perf-tests.md`
 
-## By filename (all 21)
+## By filename (all 22)
 
 ```
 2025-11-14-safe-start-stop-egrabber.md
@@ -53,6 +54,7 @@
 2025-11-25-config-profiles.md
 2026-04-15-trigger-timing-bug.md
 2026-04-16-thread-performance-audit.md
+2026-04-16-thread-perf-tests.md
 camera-reset.md
 diagnostic-logging.md
 external-config-browse.md

@@ -670,6 +670,33 @@ if(BUILD_TESTING)
         ENVIRONMENT "MIB_CAMERA_MODE=mock"
         TIMEOUT 30
     )
+
+    # Thread performance benchmarks — backs the 2026-04-16 thread audit.
+    # No camera, no Qt event loop; drives TriggerService + AutofocusService
+    # directly to measure trigger wake-up and onRingRatio producer latency.
+    # Emits a JSON report at $MIB_THREAD_PERF_JSON (default
+    # thread_perf_results.json in the working dir) for MLflow ingestion.
+    add_executable(thread_perf_test
+        src/tests/thread_perf_test.cpp
+    )
+    target_link_libraries(thread_perf_test PRIVATE
+        mib_backend
+        spdlog::spdlog
+        Qt6::Core
+    )
+    target_include_directories(thread_perf_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+
+    add_test(
+        NAME thread_perf_test
+        COMMAND thread_perf_test
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    )
+    set_tests_properties(thread_perf_test PROPERTIES
+        ENVIRONMENT "MIB_THREAD_PERF_JSON=${CMAKE_BINARY_DIR}/thread_perf_results.json"
+        TIMEOUT 60
+    )
 endif()
 
 # Windows installer packaging (InnoSetup)

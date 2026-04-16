@@ -74,3 +74,10 @@ statistics. Same pattern on `disconnect()`.
 ## Third-party
 
 See `include/Coremor/` for the XMT_DLL_SER DLL shipped with the repo.
+
+## Regression test
+
+`src/tests/thread_perf_test.cpp` benchmarks `onRingRatio` with the
+stats deque pre-saturated to 1200 samples so `statsThread_` is sorting
+worst-case concurrently. The producer must stay O(1) (p99 < ~200 µs is
+the soft ceiling). Task record: [[../task/2026-04-16-thread-perf-tests]].

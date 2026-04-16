@@ -47,3 +47,13 @@
 Stopping capture first drains the realtime loop safely. See
 `docs/howto/safe-start-stop-egrabber.md` for EGrabber-specific shutdown
 requirements (including `StreamModule` stat refresh — see [[../conventions/Code-Conventions]]).
+
+## Measuring thread performance
+
+`src/tests/thread_perf_test.cpp` (CTest target `thread_perf_test`)
+drives [[../services/TriggerService]] and [[../services/AutofocusService]]
+directly (no camera, no Qt, no HDF5) and reports latency percentiles
+for `onRingRatio` and trigger wake-up under three load profiles. Emits
+`thread_perf_results.json` for MLflow ingest via
+`scripts/upload_thread_perf.py`. Task record:
+[[../task/2026-04-16-thread-perf-tests]].

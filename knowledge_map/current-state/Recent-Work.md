@@ -76,6 +76,20 @@
 
 ## Recent fixes
 
+- **2026-04-16** — Thread performance tests + MLflow metrics
+  (`claude/add-thread-performance-tests-Xp316`). Added
+  `src/tests/thread_perf_test.cpp` (CTest target `thread_perf_test`)
+  that benchmarks [[../services/AutofocusService]] `onRingRatio`
+  producer-side latency (with a saturated stats deque) and
+  [[../services/TriggerService]] end-to-end wake-up latency three
+  ways — idle, under a concurrent ring-ratio producer, and under a
+  simulated `monitoringFramesMutex_` contender. Emits
+  `thread_perf_results.json` with min/median/mean/p95/p99/max per
+  bench; `scripts/upload_thread_perf.py` pushes the metrics to
+  MLflow (experiment `thread-performance`) per the CLAUDE.md
+  convention. No hardware needed; drives the services directly via a
+  one-off `ICamera` subclass that time-stamps trigger transitions.
+  Task record: [[../task/2026-04-16-thread-perf-tests]].
 - **2026-04-16** — Moved autofocus statistics sort onto its own thread
   (`claude/audit-thread-performance-Pr9OI`). Follow-up to the callback
   reorder below: instead of just running ring-ratio second on the

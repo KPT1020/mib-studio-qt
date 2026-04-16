@@ -54,3 +54,12 @@ microseconds (default 1 µs).
   the line. The UI thread only calls `onTargetGroupResult` for the manual
   `sortTriggerBtn` / `periodicTriggerBtn` paths — those are non-blocking
   by construction. No UI mutex is held across a trigger wake-up.
+
+## Regression test
+
+`src/tests/thread_perf_test.cpp` measures `TriggerService` wake-up
+latency three ways — idle, with a concurrent `AutofocusService::onRingRatio`
+producer saturating `statsThread_`, and with a background thread
+simulating `monitoringFramesMutex_` contention. Results land in
+`thread_perf_results.json`; `scripts/upload_thread_perf.py` pushes them
+to MLflow. Task record: [[../task/2026-04-16-thread-perf-tests]].
