@@ -44,4 +44,13 @@ microseconds (default 1 µs).
   `setTriggerOutput(true)` call, not end-to-end frame→trigger latency. For
   end-to-end latency use an oscilloscope on the TTL line. See
   [[ProcessingService]] "Callback ordering invariant" — the callback is
-  dispatched outside `monitoringFramesMutex_` to keep wake-up latency flat.
+  dispatched outside `monitoringFramesMutex_` to keep wake-up latency flat,
+  and the target-group callback fires **before** the ring-ratio callback
+  so the CV notification is not serialised behind autofocus buffer
+  maintenance + sort.
+- The trigger thread is fully decoupled from the Qt event loop: it waits
+  on `triggerCV_`, wakes on `onTargetGroupResult(true)` (atomic store +
+  `notify_one`), fires a pulse, busy-waits `pulseDurationUs_`, and lowers
+  the line. The UI thread only calls `onTargetGroupResult` for the manual
+  `sortTriggerBtn` / `periodicTriggerBtn` paths — those are non-blocking
+  by construction. No UI mutex is held across a trigger wake-up.

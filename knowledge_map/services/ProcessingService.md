@@ -99,6 +99,14 @@ they're safe to run concurrently with live capture.
   cannot stall the [[TriggerService]] wake-up. Do not move these callback
   calls back inside the monitoring-mutex scope; hold-time there directly
   becomes trigger-onset jitter (see 2026-04-15 task record).
+- **Callback order: target-group THEN ring-ratio.** Within the hoisted
+  callback block, `TargetGroupCallback` fires **first** so the
+  [[TriggerService]] condition variable is notified before
+  `RingRatioCallback`. As of 2026-04-16 `AutofocusService::onRingRatio`
+  is O(1) (push into an inbox + atomic updates + `notify_one`) with the
+  sort / deque trim moved onto a dedicated stats thread, so this ordering
+  is no longer strictly required — but target-group first is still the
+  safest invariant in case the ring-ratio callback target changes.
 - Per-frame `previousFrameForAutoCapture_` assignment uses cv::Mat's
   refcounted shallow copy (`= blurredCurr`, **not** `.clone()`). Cloning
   every non-empty frame was an allocator-pressure source for algo-time

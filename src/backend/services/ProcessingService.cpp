@@ -984,7 +984,17 @@ void ProcessingService::realtimeLoop() {
                 
                 // Fire trigger + autofocus callbacks BEFORE taking monitoringFramesMutex_
                 // so the UI thread's ring-buffer snapshot cannot stall the trigger path.
+                // Target-group fires FIRST; RingRatio callback is O(1) on the realtime
+                // thread as of 2026-04-16 (push into AutofocusService::pendingSamples_
+                // + notify_one; the O(n log n) sort runs on AutofocusService::statsThread_).
                 if (validation.isValid) {
+                    TargetGroupCallback tgCb;
+                    {
+                        std::scoped_lock cbLk(targetGroupCallbackMutex_);
+                        tgCb = targetGroupCallback_;
+                    }
+                    if (tgCb) tgCb(validation.isTargetGroup);
+
                     if (validation.ringRatio > 0.0) {
                         RingRatioCallback rrCb;
                         {
@@ -993,12 +1003,6 @@ void ProcessingService::realtimeLoop() {
                         }
                         if (rrCb) rrCb(validation.ringRatio, f.timestamp);
                     }
-                    TargetGroupCallback tgCb;
-                    {
-                        std::scoped_lock cbLk(targetGroupCallbackMutex_);
-                        tgCb = targetGroupCallback_;
-                    }
-                    if (tgCb) tgCb(validation.isTargetGroup);
                 }
 
                 // Always accumulate frames for monitoring (with size limit)
@@ -1345,7 +1349,17 @@ void ProcessingService::realtimeLoop() {
                 
                 // Fire trigger + autofocus callbacks BEFORE taking monitoringFramesMutex_
                 // so the UI thread's ring-buffer snapshot cannot stall the trigger path.
+                // Target-group fires FIRST; RingRatio callback is O(1) on the realtime
+                // thread as of 2026-04-16 (push into AutofocusService::pendingSamples_
+                // + notify_one; the O(n log n) sort runs on AutofocusService::statsThread_).
                 if (validation.isValid) {
+                    TargetGroupCallback tgCb;
+                    {
+                        std::scoped_lock cbLk(targetGroupCallbackMutex_);
+                        tgCb = targetGroupCallback_;
+                    }
+                    if (tgCb) tgCb(validation.isTargetGroup);
+
                     if (validation.ringRatio > 0.0) {
                         RingRatioCallback rrCb;
                         {
@@ -1354,12 +1368,6 @@ void ProcessingService::realtimeLoop() {
                         }
                         if (rrCb) rrCb(validation.ringRatio, f.timestamp);
                     }
-                    TargetGroupCallback tgCb;
-                    {
-                        std::scoped_lock cbLk(targetGroupCallbackMutex_);
-                        tgCb = targetGroupCallback_;
-                    }
-                    if (tgCb) tgCb(validation.isTargetGroup);
                 }
 
                 // Always accumulate frames for monitoring (with size limit)
@@ -1726,7 +1734,17 @@ void ProcessingService::realtimeLoop() {
 
                 // Fire trigger + autofocus callbacks BEFORE taking monitoringFramesMutex_
                 // so the UI thread's ring-buffer snapshot cannot stall the trigger path.
+                // Target-group fires FIRST; RingRatio callback is O(1) on the realtime
+                // thread as of 2026-04-16 (push into AutofocusService::pendingSamples_
+                // + notify_one; the O(n log n) sort runs on AutofocusService::statsThread_).
                 if (validation.isValid) {
+                    TargetGroupCallback tgCb;
+                    {
+                        std::scoped_lock cbLk(targetGroupCallbackMutex_);
+                        tgCb = targetGroupCallback_;
+                    }
+                    if (tgCb) tgCb(validation.isTargetGroup);
+
                     if (validation.ringRatio > 0.0) {
                         RingRatioCallback rrCb;
                         {
@@ -1735,12 +1753,6 @@ void ProcessingService::realtimeLoop() {
                         }
                         if (rrCb) rrCb(validation.ringRatio, f.timestamp);
                     }
-                    TargetGroupCallback tgCb;
-                    {
-                        std::scoped_lock cbLk(targetGroupCallbackMutex_);
-                        tgCb = targetGroupCallback_;
-                    }
-                    if (tgCb) tgCb(validation.isTargetGroup);
                 }
 
                 // Always accumulate frames for monitoring (with size limit)
