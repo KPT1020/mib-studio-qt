@@ -161,6 +161,18 @@ namespace frontend
         connect(ui->triggerDurationSpin, qOverload<int>(&QSpinBox::valueChanged), this, [this](int us) {
             backend_.trigger().setPulseDurationUs(us);
         });
+
+        // Setup periodic test trigger timer
+        periodicTriggerTimer_ = new QTimer(this);
+        periodicTriggerTimer_->setInterval(ui->periodicTriggerIntervalSpin->value());
+        connect(periodicTriggerTimer_, &QTimer::timeout, this, [this]() {
+            backend_.trigger().onTargetGroupResult(true);
+            ++periodicTriggerPulseCount_;
+        });
+        connect(ui->periodicTriggerBtn, &QPushButton::toggled, this, &ExperimentMonitoringTab::onPeriodicTriggerToggled);
+        connect(ui->periodicTriggerIntervalSpin, qOverload<int>(&QSpinBox::valueChanged), this, [this](int ms) {
+            if (periodicTriggerTimer_) periodicTriggerTimer_->setInterval(ms);
+        });
         connect(ui->validOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
         connect(ui->invalidOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
 
@@ -576,6 +588,11 @@ namespace frontend
         if (updateTimer_ && updateTimer_->isActive())
         {
             updateTimer_->stop();
+        }
+        // Disarm periodic test trigger on hide to avoid background pulsing
+        if (ui->periodicTriggerBtn->isChecked())
+        {
+            ui->periodicTriggerBtn->setChecked(false);
         }
     }
 
@@ -1023,6 +1040,26 @@ namespace frontend
     {
         backend_.trigger().onTargetGroupResult(true);
         SPDLOG_INFO("Manual sort trigger fired");
+    }
+
+    void ExperimentMonitoringTab::onPeriodicTriggerToggled(bool checked)
+    {
+        if (!periodicTriggerTimer_) return;
+        if (checked)
+        {
+            const int intervalMs = ui->periodicTriggerIntervalSpin->value();
+            periodicTriggerPulseCount_ = 0;
+            periodicTriggerTimer_->setInterval(intervalMs);
+            periodicTriggerTimer_->start();
+            ui->periodicTriggerIntervalSpin->setEnabled(false);
+            SPDLOG_INFO("Periodic sort trigger started (interval={} ms)", intervalMs);
+        }
+        else
+        {
+            periodicTriggerTimer_->stop();
+            ui->periodicTriggerIntervalSpin->setEnabled(true);
+            SPDLOG_INFO("Periodic sort trigger stopped (pulses fired={})", periodicTriggerPulseCount_);
+        }
     }
 
     QImage ExperimentMonitoringTab::createOverlayImage(const cv::Mat &original, const cv::Mat &mask,

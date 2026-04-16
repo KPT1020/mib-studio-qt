@@ -22,6 +22,16 @@
 Dedicated thread waiting on `triggerCV_`. Pulse duration is configurable in
 microseconds (default 1 µs).
 
+## Manual & periodic test paths
+
+- Manual single pulse: `sortTriggerBtn` in
+  [[../frontend/ExperimentMonitoringTab]] calls
+  `onTargetGroupResult(true)` once.
+- Periodic test pulses: `periodicTriggerBtn` + `periodicTriggerIntervalSpin`
+  in the same tab arm a `QTimer` that calls `onTargetGroupResult(true)`
+  every N ms. Useful for bring-up / oscilloscope checks without needing
+  a running pipeline that classifies real "target group" frames.
+
 ## Gotchas
 
 - Camera pointer is non-owning and read via `std::atomic`. If the camera
