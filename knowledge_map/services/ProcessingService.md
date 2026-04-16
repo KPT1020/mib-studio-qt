@@ -114,3 +114,17 @@ they're safe to run concurrently with live capture.
 - `computeProcessedFrame` intentionally omits the auto-background /
   previous-frame-diff path used in `realtimeLoop()`. Callers needing that
   should continue to drive frames through `FrameStore` + `startRealtime`.
+
+## Regression test
+
+`src/tests/processing_perf_test.cpp` sweeps `computeProcessedFrame` at
+3 sizes × {bg, no-bg} × {full-frame, 50% ROI} = 12 cells and reports
+latency percentiles plus implied FPS to
+`processing_perf_results.json`. The hottest cell (2048x2048 with
+background, full-frame) is the ground truth for what
+`getAlgoAvgUs1s()` should settle around on real hardware. The end-to-
+end `src/tests/capture_processing_test.cpp` dumps every published
+metric (algoFps1s, validFps1s, invalidFps1s, algoAvgUs1s,
+totalValidFlushed, jobsQueued/Processed) to
+`capture_processing_results.json` and asserts the plumbing invariants.
+Task record: [[../task/2026-04-16-thread-perf-tests]].

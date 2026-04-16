@@ -665,17 +665,25 @@ if(BUILD_TESTING)
         COMMAND capture_processing_test
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
-    # Ensure mock camera mode for CI
+    # Ensure mock camera mode for CI. JSON output path is set below in the
+    # perf-suite block so it's colocated with the other perf tests.
     set_tests_properties(capture_processing_test PROPERTIES
-        ENVIRONMENT "MIB_CAMERA_MODE=mock"
         TIMEOUT 30
     )
 
-    # Thread performance benchmarks — backs the 2026-04-16 thread audit.
-    # No camera, no Qt event loop; drives TriggerService + AutofocusService
-    # directly to measure trigger wake-up and onRingRatio producer latency.
-    # Emits a JSON report at $MIB_THREAD_PERF_JSON (default
-    # thread_perf_results.json in the working dir) for MLflow ingestion.
+    # --- Performance test suite ---
+    #
+    # Each executable emits a JSON report for MLflow ingestion via
+    # scripts/upload_perf_results.py. Shared helpers live in
+    # src/tests/perf_common.h. All tests are CTest-registered; they
+    # are "soft" (WARN on anomaly but don't fail) except
+    # capture_processing_test, which asserts metric-plumbing
+    # invariants.
+    #
+    # Backs the 2026-04-16 thread audit (see
+    # knowledge_map/task/2026-04-16-thread-perf-tests.md).
+
+    # Thread performance: TriggerService + AutofocusService.
     add_executable(thread_perf_test
         src/tests/thread_perf_test.cpp
     )
@@ -686,16 +694,80 @@ if(BUILD_TESTING)
     )
     target_include_directories(thread_perf_test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/tests
     )
-
-    add_test(
-        NAME thread_perf_test
-        COMMAND thread_perf_test
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
+    add_test(NAME thread_perf_test COMMAND thread_perf_test
+             WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
     set_tests_properties(thread_perf_test PROPERTIES
         ENVIRONMENT "MIB_THREAD_PERF_JSON=${CMAKE_BINARY_DIR}/thread_perf_results.json"
         TIMEOUT 60
+    )
+
+    # FrameStore push/get latency under producer-consumer load.
+    add_executable(framestore_perf_test
+        src/tests/framestore_perf_test.cpp
+    )
+    target_link_libraries(framestore_perf_test PRIVATE
+        mib_backend
+        spdlog::spdlog
+        Qt6::Core
+    )
+    target_include_directories(framestore_perf_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/tests
+    )
+    add_test(NAME framestore_perf_test COMMAND framestore_perf_test
+             WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+    set_tests_properties(framestore_perf_test PROPERTIES
+        ENVIRONMENT "MIB_FRAMESTORE_PERF_JSON=${CMAKE_BINARY_DIR}/framestore_perf_results.json"
+        TIMEOUT 120
+    )
+
+    # ProcessingService::computeProcessedFrame throughput.
+    add_executable(processing_perf_test
+        src/tests/processing_perf_test.cpp
+    )
+    target_link_libraries(processing_perf_test PRIVATE
+        mib_backend
+        spdlog::spdlog
+        Qt6::Core
+    )
+    target_include_directories(processing_perf_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/tests
+    )
+    add_test(NAME processing_perf_test COMMAND processing_perf_test
+             WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+    set_tests_properties(processing_perf_test PROPERTIES
+        ENVIRONMENT "MIB_PROCESSING_PERF_JSON=${CMAKE_BINARY_DIR}/processing_perf_results.json"
+        TIMEOUT 180
+    )
+
+    # Hdf5Service append throughput. Skips gracefully if HDF5 isn't
+    # available at runtime (openFile returns false).
+    add_executable(hdf5_perf_test
+        src/tests/hdf5_perf_test.cpp
+    )
+    target_link_libraries(hdf5_perf_test PRIVATE
+        mib_backend
+        spdlog::spdlog
+        Qt6::Core
+    )
+    target_include_directories(hdf5_perf_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/tests
+    )
+    add_test(NAME hdf5_perf_test COMMAND hdf5_perf_test
+             WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+    set_tests_properties(hdf5_perf_test PROPERTIES
+        ENVIRONMENT "MIB_HDF5_PERF_JSON=${CMAKE_BINARY_DIR}/hdf5_perf_results.json"
+        TIMEOUT 120
+    )
+
+    # capture_processing_test: wire JSON output for MLflow ingest. The
+    # existing mock-camera env var stays in place.
+    set_tests_properties(capture_processing_test PROPERTIES
+        ENVIRONMENT "MIB_CAMERA_MODE=mock;MIB_CAPTURE_PERF_JSON=${CMAKE_BINARY_DIR}/capture_processing_results.json"
     )
 endif()
 

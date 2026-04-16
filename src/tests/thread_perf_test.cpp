@@ -35,17 +35,15 @@
 #include "backend/services/AutofocusService.h"
 #include "backend/services/TriggerService.h"
 #include "camera/common/ICamera.h"
+#include "perf_common.h"
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
-#include <fstream>
-#include <iomanip>
-#include <numeric>
+#include <mutex>
 #include <random>
-#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -55,6 +53,10 @@
 namespace {
 
 using perf_clock = std::chrono::steady_clock;
+using mib::perf::LatencyStats;
+using mib::perf::summarise;
+using mib::perf::logStats;
+using mib::perf::envSizeOr;
 
 // Fake camera that records trigger output transitions so the test can
 // time TriggerService::triggerLoop from outside.
@@ -99,45 +101,6 @@ private:
     std::atomic<uint64_t> highCount_{0};
     std::atomic<uint64_t> lowCount_{0};
 };
-
-struct LatencyStats {
-    size_t n{0};
-    double minUs{0.0};
-    double meanUs{0.0};
-    double medianUs{0.0};
-    double p95Us{0.0};
-    double p99Us{0.0};
-    double maxUs{0.0};
-};
-
-LatencyStats summarise(std::vector<double> samplesUs) {
-    LatencyStats s;
-    if (samplesUs.empty()) return s;
-    std::sort(samplesUs.begin(), samplesUs.end());
-    s.n = samplesUs.size();
-    s.minUs = samplesUs.front();
-    s.maxUs = samplesUs.back();
-    s.medianUs = samplesUs[s.n / 2];
-    const size_t p95Idx = std::min(s.n - 1, static_cast<size_t>(s.n * 0.95));
-    const size_t p99Idx = std::min(s.n - 1, static_cast<size_t>(s.n * 0.99));
-    s.p95Us = samplesUs[p95Idx];
-    s.p99Us = samplesUs[p99Idx];
-    s.meanUs = std::accumulate(samplesUs.begin(), samplesUs.end(), 0.0) / static_cast<double>(s.n);
-    return s;
-}
-
-void logStats(const std::string& label, const LatencyStats& s) {
-    SPDLOG_INFO("{} | n={} min={:.3f}us median={:.3f}us mean={:.3f}us "
-                "p95={:.3f}us p99={:.3f}us max={:.3f}us",
-                label, s.n, s.minUs, s.medianUs, s.meanUs, s.p95Us, s.p99Us, s.maxUs);
-}
-
-size_t envSizeOr(const char* key, size_t fallback) {
-    if (const char* v = std::getenv(key)) {
-        try { return static_cast<size_t>(std::stoull(v)); } catch (...) {}
-    }
-    return fallback;
-}
 
 // Bench 1: onRingRatio producer-side latency.
 //
@@ -323,40 +286,6 @@ LatencyStats benchTriggerUnderUiSnapshotSim(size_t iterations) {
     return summarise(std::move(samples));
 }
 
-std::string statsToJson(const LatencyStats& s) {
-    std::ostringstream o;
-    o << std::fixed << std::setprecision(3)
-      << "{"
-      << "\"n\":" << s.n
-      << ",\"min_us\":" << s.minUs
-      << ",\"median_us\":" << s.medianUs
-      << ",\"mean_us\":" << s.meanUs
-      << ",\"p95_us\":" << s.p95Us
-      << ",\"p99_us\":" << s.p99Us
-      << ",\"max_us\":" << s.maxUs
-      << "}";
-    return o.str();
-}
-
-void writeJsonReport(const std::string& path,
-                     const LatencyStats& onRingRatio,
-                     const LatencyStats& triggerIdle,
-                     const LatencyStats& triggerLoaded,
-                     const LatencyStats& triggerUnderUi) {
-    std::ofstream out(path);
-    if (!out) {
-        SPDLOG_WARN("Failed to open {} for JSON report", path);
-        return;
-    }
-    out << "{\n"
-        << "  \"on_ring_ratio_latency\": "              << statsToJson(onRingRatio)    << ",\n"
-        << "  \"trigger_wakeup_idle\": "                << statsToJson(triggerIdle)    << ",\n"
-        << "  \"trigger_wakeup_ring_ratio_load\": "     << statsToJson(triggerLoaded)  << ",\n"
-        << "  \"trigger_wakeup_ui_snapshot_sim\": "     << statsToJson(triggerUnderUi) << "\n"
-        << "}\n";
-    SPDLOG_INFO("Wrote JSON report: {}", path);
-}
-
 } // namespace
 
 int main() {
@@ -401,10 +330,18 @@ int main() {
         check("trigger under ring-ratio", trigLoaded.p99Us, 5000.0);
         check("trigger under UI snapshot sim", trigUnderUi.p99Us, 5000.0);
 
-        const char* jsonOut = std::getenv("MIB_THREAD_PERF_JSON");
-        const std::string jsonPath = jsonOut ? jsonOut : "thread_perf_results.json";
-        writeJsonReport(jsonPath, onRR, trigIdle, trigLoaded, trigUnderUi);
-
+        const std::string jsonPath = mib::perf::resolveJsonOutPath(
+            "MIB_THREAD_PERF_JSON", "thread_perf_results.json");
+        mib::perf::JsonReport report;
+        report.addStats("on_ring_ratio_latency",           onRR)
+              .addStats("trigger_wakeup_idle",             trigIdle)
+              .addStats("trigger_wakeup_ring_ratio_load",  trigLoaded)
+              .addStats("trigger_wakeup_ui_snapshot_sim",  trigUnderUi);
+        if (!report.writeTo(jsonPath)) {
+            SPDLOG_WARN("Failed to open {} for JSON report", jsonPath);
+        } else {
+            SPDLOG_INFO("Wrote JSON report: {}", jsonPath);
+        }
         return 0;
     } catch (const std::exception& ex) {
         SPDLOG_ERROR("thread_perf_test exception: {}", ex.what());

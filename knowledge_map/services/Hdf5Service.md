@@ -44,3 +44,12 @@ Blocking I/O on whichever thread calls it. In practice:
   `knowledge_map/task/review_2gb_scalability.md`.
 - PIMPL means you can't see HDF5 types in headers — look at
   `src/backend/services/Hdf5Service.cpp` for dataset paths and dtypes.
+
+## Regression test
+
+`src/tests/hdf5_perf_test.cpp` measures `appendFrames` throughput at
+batch sizes 10 / 100 / 1000 plus a sustained 10×100 run, and a
+parallel `appendRecordingFrames` bench. Reports frames/s and MB/s to
+`hdf5_perf_results.json`. Skips gracefully (empty JSON + "status":
+"skipped_no_hdf5") if the HDF5 library isn't available at runtime.
+Task record: [[../task/2026-04-16-thread-perf-tests]].

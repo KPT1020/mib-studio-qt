@@ -76,20 +76,23 @@
 
 ## Recent fixes
 
-- **2026-04-16** — Thread performance tests + MLflow metrics
-  (`claude/add-thread-performance-tests-Xp316`). Added
-  `src/tests/thread_perf_test.cpp` (CTest target `thread_perf_test`)
-  that benchmarks [[../services/AutofocusService]] `onRingRatio`
-  producer-side latency (with a saturated stats deque) and
-  [[../services/TriggerService]] end-to-end wake-up latency three
-  ways — idle, under a concurrent ring-ratio producer, and under a
-  simulated `monitoringFramesMutex_` contender. Emits
-  `thread_perf_results.json` with min/median/mean/p95/p99/max per
-  bench; `scripts/upload_thread_perf.py` pushes the metrics to
-  MLflow (experiment `thread-performance`) per the CLAUDE.md
-  convention. No hardware needed; drives the services directly via a
-  one-off `ICamera` subclass that time-stamps trigger transitions.
-  Task record: [[../task/2026-04-16-thread-perf-tests]].
+- **2026-04-16** — Performance test suite + MLflow metrics
+  (`claude/add-thread-performance-tests-Xp316`). Five CTest targets
+  backed by a shared `src/tests/perf_common.h`: `thread_perf_test`
+  ([[../services/TriggerService]] / [[../services/AutofocusService]]
+  latency), `framestore_perf_test` ([[../data-model/FrameStore]]
+  push/get latency + contention), `processing_perf_test`
+  ([[../services/ProcessingService]] `computeProcessedFrame` sweep at
+  3 sizes × 2 backgrounds × 2 ROI modes), `hdf5_perf_test`
+  ([[../services/Hdf5Service]] `appendFrames` / recording throughput
+  — skips gracefully if HDF5 absent), and an extended
+  `capture_processing_test` that dumps every exposed CaptureStats /
+  ProcessingStats atomic to JSON and asserts plumbing invariants.
+  `scripts/upload_perf_results.py` (renamed from
+  `upload_thread_perf.py`) accepts repeated `--json` flags and
+  namespaces metrics by filename stem into a single MLflow run
+  (experiment `mib-studio-perf`). Task record:
+  [[../task/2026-04-16-thread-perf-tests]].
 - **2026-04-16** — Moved autofocus statistics sort onto its own thread
   (`claude/audit-thread-performance-Pr9OI`). Follow-up to the callback
   reorder below: instead of just running ring-ratio second on the

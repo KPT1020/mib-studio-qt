@@ -111,3 +111,14 @@ free, but per-frame work is a `std::vector<uint8_t>` move.
 - With the empty-frame filter enabled, AVI frame count is smaller than
   the requested buffer range — 1:1 buffer-index-to-AVI-index mapping is
   lost. Acceptable for mask regen; don't depend on it elsewhere.
+
+## Regression test
+
+`src/tests/framestore_perf_test.cpp` benches `pushFrame` / `getLatest`
+/ `getByWriteIndex` / `getByWriteIndexROI` at 512x512, 1024x1024, and
+2048x2048 resolutions, plus a producer-consumer contention loop on
+1024x1024 for 1 s. Results land in `framestore_perf_results.json`;
+the audit flagged the single `std::mutex` as a future jitter source,
+so these numbers are the baseline any alternative (reader/writer lock,
+lock-free ring) has to beat. Task record:
+[[../task/2026-04-16-thread-perf-tests]].
