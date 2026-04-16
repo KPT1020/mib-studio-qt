@@ -27,9 +27,9 @@
      </property>
      <layout class="QVBoxLayout" name="formatLayout">
       <item>
-       <widget class="QRadioButton" name="tiffFormatRadio">
+       <widget class="QRadioButton" name="aviFormatRadio">
         <property name="text">
-         <string>Individual TIFF files (folder)</string>
+         <string>Single AVI file (uncompressed)</string>
         </property>
         <property name="checked">
          <bool>true</bool>
@@ -37,9 +37,9 @@
        </widget>
       </item>
       <item>
-       <widget class="QRadioButton" name="aviFormatRadio">
+       <widget class="QRadioButton" name="tiffFormatRadio">
         <property name="text">
-         <string>Single AVI file (uncompressed)</string>
+         <string>Individual TIFF files (folder)</string>
         </property>
        </widget>
       </item>

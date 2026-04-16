@@ -8,10 +8,16 @@
 - **Buffer save to AVI + AVI source for mask regeneration** (2026-04-16) —
   [[../data-model/FrameStore]] gained `saveFramesToAvi()` overloads
   (all/index-range/timestamp-range) writing a single uncompressed AVI via
-  `cv::VideoWriter` — Y800 preferred, DIB/BGR fallback.
+  `cv::VideoWriter` — Y800 preferred, DIB/BGR fallback. Y800 files don't
+  play in Windows Media Player / Movies & TV (known codec support gap) but
+  round-trip cleanly through `cv::VideoCapture` and ImageJ.
   [[../frontend/Dialogs]] `BufferSaveDialog` adds an "Output Format" radio
-  group (TIFF folder vs single AVI file) with FPS spinner. The empty-frame
-  filter applies to both formats. [[../services/BatchMaskSources]] gets
+  group — **AVI is the default** — with FPS spinner; the dialog
+  auto-iterates the output path (`_1`, `_2`, ...) so it never overwrites
+  an existing file or non-empty folder, and after an AVI save it prompts
+  "Open with ImageJ?" (launches ImageJ/Fiji from common paths /
+  `MIB_IMAGEJ_EXE` env var / PATH, falls back to
+  `QDesktopServices::openUrl`). [[../services/BatchMaskSources]] gets
   `loadFromAvi()` and `BatchMaskDialog` grows a third "AVI video file"
   source radio. `CMakeLists.txt` links `opencv_videoio` on both targets.
   Files: `CMakeLists.txt`, `FrameStore.{h,cpp}`, `PlaybackService.{h,cpp}`,

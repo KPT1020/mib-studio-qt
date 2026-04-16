@@ -30,6 +30,16 @@ private:
     void updateMemoryDisplay();
     QString formatMemoryBytes(uint64_t bytes) const;
 
+    // Returns a path that does not currently exist, by appending "_1",
+    // "_2", ... to the base name if needed. Works for both files (preserves
+    // the extension) and directories.
+    QString resolveNonCollidingPath(const QString& candidate) const;
+
+    // Prompt the user to open `path` with ImageJ. On Yes, attempts to launch
+    // ImageJ or Fiji from common locations / PATH; if nothing works, shows
+    // a message with the saved path so the user can open it manually.
+    void promptOpenWithImageJ(const QString& path);
+
     Ui::BufferSaveDialog* ui;
     backend::AppBackend& backend_;
 };

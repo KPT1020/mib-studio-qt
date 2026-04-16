@@ -3,11 +3,14 @@
 
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QMessageBox>
+#include <QProcess>
 #include <QPushButton>
 #include <QStandardPaths>
+#include <QUrl>
 #include <QDir>
 
 #include <climits>
@@ -62,7 +65,11 @@ BufferSaveDialog::BufferSaveDialog(backend::AppBackend& backend, QWidget* parent
         const QString appDir = QCoreApplication::applicationDirPath();
         defaultDir = QDir(appDir).absoluteFilePath("saved_frames");
     }
-    ui->outputDirEdit->setText(QDir(defaultDir).absolutePath());
+    // AVI is the default format, so seed the field with a full .avi path.
+    const QString defaultAviName = QStringLiteral("buffer_") +
+                                   QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")) +
+                                   QStringLiteral(".avi");
+    ui->outputDirEdit->setText(QDir(defaultDir).absoluteFilePath(defaultAviName));
 
     // Initial update
     updateAvailableRanges();
@@ -132,6 +139,25 @@ void BufferSaveDialog::onFormatChanged() {
         ui->outputDirEdit->setPlaceholderText(aviMode
             ? tr("Select output AVI file path")
             : tr("Select output directory for saved frames"));
+
+        // Rewrite the path so it matches the selected format:
+        // - AVI: ensure we end with "<dir>/buffer_<timestamp>.avi"
+        // - TIFF: ensure we end with a directory (strip the .avi filename)
+        const QString current = ui->outputDirEdit->text().trimmed();
+        if (!current.isEmpty()) {
+            if (aviMode) {
+                if (!current.endsWith(QStringLiteral(".avi"), Qt::CaseInsensitive)) {
+                    const QString name = QStringLiteral("buffer_") +
+                                         QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")) +
+                                         QStringLiteral(".avi");
+                    ui->outputDirEdit->setText(QDir(current).absoluteFilePath(name));
+                }
+            } else {
+                if (current.endsWith(QStringLiteral(".avi"), Qt::CaseInsensitive)) {
+                    ui->outputDirEdit->setText(QFileInfo(current).absolutePath());
+                }
+            }
+        }
     }
     if (ui->browseBtn) {
         ui->browseBtn->setText(aviMode ? tr("Choose File...") : tr("Browse..."));
@@ -275,8 +301,16 @@ void BufferSaveDialog::onSaveFrames() {
     const bool aviMode = ui->aviFormatRadio && ui->aviFormatRadio->isChecked();
     if (aviMode && !outputPath.endsWith(QStringLiteral(".avi"), Qt::CaseInsensitive)) {
         outputPath += QStringLiteral(".avi");
-        ui->outputDirEdit->setText(outputPath);
     }
+
+    // Auto-iterate to avoid overwriting an existing file / non-empty directory.
+    const QString resolvedPath = resolveNonCollidingPath(outputPath);
+    if (resolvedPath != outputPath) {
+        SPDLOG_INFO("BufferSaveDialog: output path '{}' already exists; writing to '{}' instead",
+                    outputPath.toStdString(), resolvedPath.toStdString());
+    }
+    outputPath = resolvedPath;
+    ui->outputDirEdit->setText(outputPath);
 
     ui->statusLabel->setText(tr("Saving frames..."));
     ui->buttons->button(QDialogButtonBox::Save)->setEnabled(false);
@@ -328,7 +362,11 @@ void BufferSaveDialog::onSaveFrames() {
 
     if (success) {
         ui->statusLabel->setText(tr("Frames saved successfully to: %1").arg(outputPath));
-        QMessageBox::information(this, tr("Save Frames"), tr("Frames saved successfully."));
+        if (aviMode) {
+            promptOpenWithImageJ(outputPath);
+        } else {
+            QMessageBox::information(this, tr("Save Frames"), tr("Frames saved successfully."));
+        }
     } else {
         ui->statusLabel->setText(tr("Failed to save frames. Check logs for details."));
         QMessageBox::warning(this, tr("Save Frames"), tr("Failed to save frames. Check logs for details."));
@@ -459,6 +497,96 @@ void BufferSaveDialog::updateMemoryDisplay() {
     auto& playback = backend_.playback();
     const size_t estimatedMemoryBytes = playback.estimateMemoryBytesForCapacity(newCapacity);
     ui->estimatedMemoryLabel->setText(tr("Estimated memory: %1").arg(formatMemoryBytes(estimatedMemoryBytes)));
+}
+
+QString BufferSaveDialog::resolveNonCollidingPath(const QString& candidate) const {
+    const QFileInfo info(candidate);
+    if (!QFileInfo::exists(candidate)) {
+        return candidate;
+    }
+
+    // A directory only "collides" if it exists AND is non-empty. An empty
+    // directory is fine to reuse — the user picked it as the destination.
+    if (info.isDir()) {
+        const QDir d(candidate);
+        if (d.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty()) {
+            return candidate;
+        }
+    }
+
+    const QString parent = info.absolutePath();
+    const QString suffix = info.isFile() && !info.suffix().isEmpty()
+                           ? QStringLiteral(".") + info.suffix()
+                           : QString();
+    const QString stem = info.isFile()
+                         ? info.completeBaseName()
+                         : info.fileName();
+
+    for (int n = 1; n < 10000; ++n) {
+        const QString candidateName = stem + QStringLiteral("_") + QString::number(n) + suffix;
+        const QString resolved = QDir(parent).absoluteFilePath(candidateName);
+        if (!QFileInfo::exists(resolved)) return resolved;
+        if (QFileInfo(resolved).isDir()) {
+            const QDir d(resolved);
+            if (d.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty()) {
+                return resolved;
+            }
+        }
+    }
+
+    // Last resort: append a timestamp so we never overwrite.
+    return QDir(parent).absoluteFilePath(
+        stem + QStringLiteral("_") +
+        QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss_zzz")) +
+        suffix);
+}
+
+void BufferSaveDialog::promptOpenWithImageJ(const QString& path) {
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Question);
+    box.setWindowTitle(tr("Save Frames"));
+    box.setText(tr("Saved to:\n%1\n\nOpen with ImageJ?").arg(path));
+    box.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+    box.setDefaultButton(QMessageBox::Yes);
+    if (box.exec() != QMessageBox::Yes) {
+        return;
+    }
+
+    // Try to launch ImageJ / Fiji.
+    //  1. Explicit env var MIB_IMAGEJ_EXE (user override).
+    //  2. Common install locations on Windows.
+    //  3. Bare executable names on PATH.
+    //  4. Last resort: hand the file to the OS default associator.
+    QStringList candidates;
+    const QString envExe = QString::fromLocal8Bit(qgetenv("MIB_IMAGEJ_EXE"));
+    if (!envExe.isEmpty()) candidates << envExe;
+
+    candidates << QStringLiteral("C:/Fiji.app/ImageJ-win64.exe")
+               << QStringLiteral("C:/Program Files/Fiji.app/ImageJ-win64.exe")
+               << QStringLiteral("C:/Program Files/ImageJ/ImageJ.exe")
+               << QStringLiteral("C:/Program Files (x86)/ImageJ/ImageJ.exe")
+               << QStringLiteral("ImageJ-win64.exe")
+               << QStringLiteral("ImageJ.exe")
+               << QStringLiteral("imagej");
+
+    for (const QString& exe : candidates) {
+        if (QProcess::startDetached(exe, QStringList{path})) {
+            SPDLOG_INFO("BufferSaveDialog: launched ImageJ from {} with {}",
+                        exe.toStdString(), path.toStdString());
+            return;
+        }
+    }
+
+    // Fall back to the OS default handler for the file.
+    if (QDesktopServices::openUrl(QUrl::fromLocalFile(path))) {
+        SPDLOG_INFO("BufferSaveDialog: opened {} via default OS handler", path.toStdString());
+        return;
+    }
+
+    QMessageBox::information(this, tr("Open with ImageJ"),
+        tr("Could not locate ImageJ. Saved file:\n%1\n\n"
+           "Tip: set the MIB_IMAGEJ_EXE environment variable to your ImageJ executable path.")
+        .arg(path));
 }
 
 } // namespace frontend
