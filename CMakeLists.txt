@@ -270,6 +270,8 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/utils/JsonFlatten.h
     src/frontend/utils/RoiManager.cpp
     include/frontend/utils/RoiManager.h
+    src/frontend/utils/RoiDrawCanvas.cpp
+    include/frontend/utils/RoiDrawCanvas.h
     src/frontend/utils/SimpleImageCanvas.cpp
     include/frontend/utils/SimpleImageCanvas.h
     src/frontend/utils/StatsDisplayManager.cpp

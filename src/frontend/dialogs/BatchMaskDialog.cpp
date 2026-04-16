@@ -4,10 +4,11 @@
 #include "backend/services/BatchMaskSources.h"
 #include "backend/services/Hdf5Service.h"
 #include "backend/services/ProcessingService.h"
+#include "frontend/utils/RoiDrawCanvas.h"
 
 #include <QCheckBox>
 #include <QCoreApplication>
-#include <QDialogButtonBox>
+#include <QDir>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -19,10 +20,13 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QDoubleSpinBox>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
 #include <opencv2/core.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
 
 #include <spdlog/spdlog.h>
 
@@ -33,9 +37,11 @@ BatchMaskDialog::BatchMaskDialog(backend::AppBackend& backend,
                                  QWidget* parent)
     : QDialog(parent), backend_(backend), hdf5LoadedPath_(std::move(hdf5LoadedPath)) {
     setWindowTitle(tr("Regenerate Masks from Stream Images"));
-    resize(560, 520);
+    resize(1180, 540);
     buildUi();
+    resetConfigToLive();
     onSourceChanged();
+    onPreviewSourceChanged();
 }
 
 BatchMaskDialog::~BatchMaskDialog() = default;
@@ -47,8 +53,14 @@ bool BatchMaskDialog::displayRequested() const {
 void BatchMaskDialog::buildUi() {
     auto* root = new QVBoxLayout(this);
 
+    // -----------------------------------------------------------------------
+    // Top section: left controls + right preview
+    // -----------------------------------------------------------------------
+    auto* topRow  = new QHBoxLayout();
+    auto* leftCol = new QVBoxLayout();
+
     // --- Source group ---
-    auto* srcGroup = new QGroupBox(tr("Input source"), this);
+    auto* srcGroup  = new QGroupBox(tr("Input source"), this);
     auto* srcLayout = new QVBoxLayout(srcGroup);
 
     srcHdf5_ = new QRadioButton(tr("Current HDF5 frames (/valid_frames/images)"), srcGroup);
@@ -83,10 +95,10 @@ void BatchMaskDialog::buildUi() {
     folderRow->addWidget(folderBrowseBtn_);
     srcLayout->addLayout(folderRow);
 
-    root->addWidget(srcGroup);
+    leftCol->addWidget(srcGroup);
 
     // --- Output group ---
-    auto* outGroup = new QGroupBox(tr("Output"), this);
+    auto* outGroup  = new QGroupBox(tr("Output"), this);
     auto* outLayout = new QVBoxLayout(outGroup);
 
     displayCheck_ = new QCheckBox(tr("Display results in review tab"), outGroup);
@@ -117,18 +129,118 @@ void BatchMaskDialog::buildUi() {
     h5Row->addWidget(hdf5BrowseBtn_);
     outLayout->addLayout(h5Row);
 
-    root->addWidget(outGroup);
+    leftCol->addWidget(outGroup);
+    leftCol->addStretch();
 
-    // --- Info: using current ProcessingConfig ---
+    topRow->addLayout(leftCol, 1);
+
+    // --- Preview & ROI group ---
+    auto* previewGroup  = new QGroupBox(tr("Preview && ROI"), this);
+    auto* previewLayout = new QVBoxLayout(previewGroup);
+
+    roiCanvas_ = new RoiDrawCanvas(previewGroup);
+    previewLayout->addWidget(roiCanvas_, 1);
+
+    auto* navRow = new QHBoxLayout();
+    prevFrameBtn_ = new QPushButton(tr("\u2190 Prev"), previewGroup);
+    prevFrameBtn_->setEnabled(false);
+    navRow->addWidget(prevFrameBtn_);
+    frameCountLabel_ = new QLabel(tr("No frames"), previewGroup);
+    frameCountLabel_->setAlignment(Qt::AlignCenter);
+    navRow->addWidget(frameCountLabel_, 1);
+    nextFrameBtn_ = new QPushButton(tr("Next \u2192"), previewGroup);
+    nextFrameBtn_->setEnabled(false);
+    navRow->addWidget(nextFrameBtn_);
+    previewLayout->addLayout(navRow);
+
+    auto* bgRow = new QHBoxLayout();
+    setBgBtn_ = new QPushButton(tr("Set as Background"), previewGroup);
+    bgRow->addWidget(setBgBtn_);
+    clearBgBtn_ = new QPushButton(tr("Clear"), previewGroup);
+    bgRow->addWidget(clearBgBtn_);
+    bgStatusLabel_ = new QLabel(tr("Background: none"), previewGroup);
+    bgStatusLabel_->setStyleSheet("color: gray;");
+    bgRow->addWidget(bgStatusLabel_, 1);
+    previewLayout->addLayout(bgRow);
+
+    topRow->addWidget(previewGroup, 1);
+
+    // --- Processing Config group (third column) ---
+    auto* configGroup  = new QGroupBox(tr("Processing Config"), this);
+    configGroup->setFixedWidth(230);
+    auto* configLayout = new QVBoxLayout(configGroup);
+
+    // Image Processing sub-group
+    auto* imgGroup  = new QGroupBox(tr("Image Processing"), configGroup);
+    auto* imgForm   = new QFormLayout(imgGroup);
+
+    blurSpin_ = new QSpinBox(imgGroup);
+    blurSpin_->setRange(1, 99);
+    blurSpin_->setSingleStep(2);
+    imgForm->addRow(tr("Blur kernel:"), blurSpin_);
+
+    bgThreshSpin_ = new QSpinBox(imgGroup);
+    bgThreshSpin_->setRange(0, 255);
+    imgForm->addRow(tr("BG threshold:"), bgThreshSpin_);
+
+    morphKernelSpin_ = new QSpinBox(imgGroup);
+    morphKernelSpin_->setRange(1, 99);
+    morphKernelSpin_->setSingleStep(2);
+    imgForm->addRow(tr("Morph kernel:"), morphKernelSpin_);
+
+    morphIterSpin_ = new QSpinBox(imgGroup);
+    morphIterSpin_->setRange(1, 20);
+    imgForm->addRow(tr("Morph iters:"), morphIterSpin_);
+
+    configLayout->addWidget(imgGroup);
+
+    // Validation sub-group
+    auto* valGroup = new QGroupBox(tr("Validation"), configGroup);
+    auto* valForm  = new QFormLayout(valGroup);
+
+    areaMinSpin_ = new QSpinBox(valGroup);
+    areaMinSpin_->setRange(0, 10000);
+    areaMinSpin_->setSuffix(tr(" \u03bcm\u00b2"));
+    valForm->addRow(tr("Area min:"), areaMinSpin_);
+
+    areaMaxSpin_ = new QSpinBox(valGroup);
+    areaMaxSpin_->setRange(0, 10000);
+    areaMaxSpin_->setSuffix(tr(" \u03bcm\u00b2"));
+    valForm->addRow(tr("Area max:"), areaMaxSpin_);
+
+    deformMinSpin_ = new QDoubleSpinBox(valGroup);
+    deformMinSpin_->setRange(0.0, 1.0);
+    deformMinSpin_->setSingleStep(0.001);
+    deformMinSpin_->setDecimals(4);
+    valForm->addRow(tr("Deform min:"), deformMinSpin_);
+
+    deformMaxSpin_ = new QDoubleSpinBox(valGroup);
+    deformMaxSpin_->setRange(0.0, 1.0);
+    deformMaxSpin_->setSingleStep(0.001);
+    deformMaxSpin_->setDecimals(4);
+    valForm->addRow(tr("Deform max:"), deformMaxSpin_);
+
+    configLayout->addWidget(valGroup);
+
+    auto* resetConfigBtn = new QPushButton(tr("Reset to live defaults"), configGroup);
+    configLayout->addWidget(resetConfigBtn);
+    configLayout->addStretch();
+
+    topRow->addWidget(configGroup);
+
+    root->addLayout(topRow);
+
+    // -----------------------------------------------------------------------
+    // Bottom section: info, progress, log, buttons
+    // -----------------------------------------------------------------------
     auto* cfgLabel = new QLabel(
-        tr("Using the current ProcessingConfig from the live pipeline "
-           "(edit it via the Processing settings tab before running)."),
+        tr("Processing parameters are local to this run. "
+           "Use \u201cReset to live defaults\u201d to re-sync with the live pipeline."),
         this);
     cfgLabel->setWordWrap(true);
     cfgLabel->setStyleSheet("color: gray;");
     root->addWidget(cfgLabel);
 
-    // --- Status ---
     progressBar_ = new QProgressBar(this);
     progressBar_->setRange(0, 100);
     progressBar_->setValue(0);
@@ -139,10 +251,9 @@ void BatchMaskDialog::buildUi() {
 
     logView_ = new QPlainTextEdit(this);
     logView_->setReadOnly(true);
-    logView_->setMaximumHeight(120);
+    logView_->setMaximumHeight(100);
     root->addWidget(logView_);
 
-    // --- Buttons ---
     auto* btnRow = new QHBoxLayout();
     btnRow->addStretch();
     runBtn_ = new QPushButton(tr("Run"), this);
@@ -152,22 +263,66 @@ void BatchMaskDialog::buildUi() {
     btnRow->addWidget(closeBtn_);
     root->addLayout(btnRow);
 
-    // --- Signals ---
-    connect(srcHdf5_, &QRadioButton::toggled, this, &BatchMaskDialog::onSourceChanged);
-    connect(srcFolder_, &QRadioButton::toggled, this, &BatchMaskDialog::onSourceChanged);
+    // -----------------------------------------------------------------------
+    // Signals
+    // -----------------------------------------------------------------------
+    connect(srcHdf5_,    &QRadioButton::toggled, this, &BatchMaskDialog::onSourceChanged);
+    connect(srcFolder_,  &QRadioButton::toggled, this, &BatchMaskDialog::onSourceChanged);
     connect(folderBrowseBtn_, &QPushButton::clicked, this, &BatchMaskDialog::onBrowseFolder);
 
-    connect(savePngCheck_, &QCheckBox::toggled, pngDirEdit_, &QWidget::setEnabled);
-    connect(savePngCheck_, &QCheckBox::toggled, pngBrowseBtn_, &QWidget::setEnabled);
-    connect(pngBrowseBtn_, &QPushButton::clicked, this, &BatchMaskDialog::onBrowseOutputPng);
+    connect(savePngCheck_,  &QCheckBox::toggled, pngDirEdit_,  &QWidget::setEnabled);
+    connect(savePngCheck_,  &QCheckBox::toggled, pngBrowseBtn_,&QWidget::setEnabled);
+    connect(pngBrowseBtn_,  &QPushButton::clicked, this, &BatchMaskDialog::onBrowseOutputPng);
 
-    connect(saveHdf5Check_, &QCheckBox::toggled, hdf5PathEdit_, &QWidget::setEnabled);
+    connect(saveHdf5Check_, &QCheckBox::toggled, hdf5PathEdit_,  &QWidget::setEnabled);
     connect(saveHdf5Check_, &QCheckBox::toggled, hdf5BrowseBtn_, &QWidget::setEnabled);
     connect(hdf5BrowseBtn_, &QPushButton::clicked, this, &BatchMaskDialog::onBrowseOutputHdf5);
 
-    connect(runBtn_, &QPushButton::clicked, this, &BatchMaskDialog::onRun);
+    connect(runBtn_,   &QPushButton::clicked, this, &BatchMaskDialog::onRun);
     connect(closeBtn_, &QPushButton::clicked, this, &QDialog::accept);
+
+    // Preview panel signals
+    connect(srcHdf5_,  &QRadioButton::toggled,
+            this, &BatchMaskDialog::onPreviewSourceChanged);
+    connect(srcFolder_,&QRadioButton::toggled,
+            this, &BatchMaskDialog::onPreviewSourceChanged);
+    connect(folderEdit_, &QLineEdit::editingFinished,
+            this, &BatchMaskDialog::onPreviewSourceChanged);
+    connect(startIdxSpin_, qOverload<int>(&QSpinBox::valueChanged),
+            this, &BatchMaskDialog::onPreviewSourceChanged);
+
+    connect(prevFrameBtn_,  &QPushButton::clicked, this, &BatchMaskDialog::onPrevFrame);
+    connect(nextFrameBtn_,  &QPushButton::clicked, this, &BatchMaskDialog::onNextFrame);
+    connect(setBgBtn_,      &QPushButton::clicked, this, &BatchMaskDialog::onSetBackground);
+    connect(clearBgBtn_,    &QPushButton::clicked, this, &BatchMaskDialog::onClearBackground);
+
+    // Config spinbox → localConfig_ live update
+    // Blur and morph kernels must be odd (pipeline calls toOdd() internally,
+    // but we enforce it here so the displayed value matches what runs).
+    auto toOdd = [](int v){ return (v % 2 == 0) ? v + 1 : v; };
+    connect(blurSpin_,       qOverload<int>(&QSpinBox::valueChanged),
+            this, [this, toOdd](int v){ localConfig_.gaussian_blur_size = toOdd(v); });
+    connect(bgThreshSpin_,   qOverload<int>(&QSpinBox::valueChanged),
+            this, [this](int v){ localConfig_.bg_subtract_threshold = v; });
+    connect(morphKernelSpin_,qOverload<int>(&QSpinBox::valueChanged),
+            this, [this, toOdd](int v){ localConfig_.morph_kernel_size = toOdd(v); });
+    connect(morphIterSpin_,  qOverload<int>(&QSpinBox::valueChanged),
+            this, [this](int v){ localConfig_.morph_iterations = v; });
+    connect(areaMinSpin_,    qOverload<int>(&QSpinBox::valueChanged),
+            this, [this](int v){ localConfig_.area_threshold_min = v; });
+    connect(areaMaxSpin_,    qOverload<int>(&QSpinBox::valueChanged),
+            this, [this](int v){ localConfig_.area_threshold_max = v; });
+    connect(deformMinSpin_,  qOverload<double>(&QDoubleSpinBox::valueChanged),
+            this, [this](double v){ localConfig_.deformability_threshold_min = v; });
+    connect(deformMaxSpin_,  qOverload<double>(&QDoubleSpinBox::valueChanged),
+            this, [this](double v){ localConfig_.deformability_threshold_max = v; });
+    connect(resetConfigBtn,  &QPushButton::clicked,
+            this, &BatchMaskDialog::resetConfigToLive);
 }
+
+// ---------------------------------------------------------------------------
+// Source / browse slots (unchanged from original)
+// ---------------------------------------------------------------------------
 
 void BatchMaskDialog::onSourceChanged() {
     const bool hdf5 = srcHdf5_->isChecked();
@@ -181,7 +336,10 @@ void BatchMaskDialog::onBrowseFolder() {
     const QString dir = QFileDialog::getExistingDirectory(
         this, tr("Select folder of stream images"),
         folderEdit_->text());
-    if (!dir.isEmpty()) folderEdit_->setText(dir);
+    if (!dir.isEmpty()) {
+        folderEdit_->setText(dir);
+        onPreviewSourceChanged();
+    }
 }
 
 void BatchMaskDialog::onBrowseOutputPng() {
@@ -199,6 +357,173 @@ void BatchMaskDialog::onBrowseOutputHdf5() {
     if (!file.isEmpty()) hdf5PathEdit_->setText(file);
 }
 
+// ---------------------------------------------------------------------------
+// Preview panel: source changed
+// ---------------------------------------------------------------------------
+
+void BatchMaskDialog::onPreviewSourceChanged() {
+    backgroundMat_ = cv::Mat{};
+    bgStatusLabel_->setText(tr("Background: none"));
+
+    previewFrameTotal_ = getSourceFrameCount();
+    previewFrameIndex_ = 0;
+
+    // Pre-populate ROI from HDF5 experiment_info when possible
+    if (srcHdf5_->isChecked() && !hdf5LoadedPath_.isEmpty()) {
+        backend::services::Hdf5Service reader;
+        if (reader.loadFile(hdf5LoadedPath_.toStdString())) {
+            uint64_t s{}, e{};
+            size_t v{}, inv{};
+            backend::services::ProcessingService::Roi roi{};
+            if (reader.readExperimentInfo(s, e, v, inv, &roi) && roi.w > 0 && roi.h > 0) {
+                roiCanvas_->setRoi(QRect(roi.x, roi.y, roi.w, roi.h));
+            }
+        }
+    }
+
+    loadPreviewFrame(0);
+}
+
+// ---------------------------------------------------------------------------
+// Preview panel: frame navigation
+// ---------------------------------------------------------------------------
+
+int BatchMaskDialog::getSourceFrameCount() const {
+    if (srcHdf5_->isChecked()) {
+        if (hdf5LoadedPath_.isEmpty()) return 0;
+        backend::services::Hdf5Service reader;
+        if (!reader.loadFile(hdf5LoadedPath_.toStdString())) return 0;
+        size_t count = 0;
+        int h = 0, w = 0, ch = 0;
+        if (!reader.getDatasetInfo("/valid_frames/images", count, h, w, ch)) return 0;
+        const size_t start = static_cast<size_t>(startIdxSpin_->value());
+        if (start >= count) return 0;
+        const size_t requested = static_cast<size_t>(countSpin_->value());
+        return static_cast<int>(std::min(requested, count - start));
+    } else {
+        const QString folder = folderEdit_->text().trimmed();
+        if (folder.isEmpty()) return 0;
+        QDir dir(folder);
+        QStringList files = dir.entryList(
+            {"*.tif", "*.tiff", "*.png", "*.jpg", "*.jpeg"},
+            QDir::Files, QDir::Name);
+        return files.size();
+    }
+}
+
+void BatchMaskDialog::loadPreviewFrame(int index) {
+    if (previewFrameTotal_ <= 0) {
+        roiCanvas_->setImage(QImage{});
+        frameCountLabel_->setText(tr("No frames"));
+        prevFrameBtn_->setEnabled(false);
+        nextFrameBtn_->setEnabled(false);
+        return;
+    }
+
+    previewFrameIndex_ = qBound(0, index, previewFrameTotal_ - 1);
+    frameCountLabel_->setText(
+        tr("Frame %1 / %2").arg(previewFrameIndex_ + 1).arg(previewFrameTotal_));
+    prevFrameBtn_->setEnabled(previewFrameIndex_ > 0);
+    nextFrameBtn_->setEnabled(previewFrameIndex_ < previewFrameTotal_ - 1);
+
+    cv::Mat mat;
+    if (srcHdf5_->isChecked()) {
+        backend::services::Hdf5Service reader;
+        if (reader.loadFile(hdf5LoadedPath_.toStdString())) {
+            const size_t absIdx =
+                static_cast<size_t>(startIdxSpin_->value()) + previewFrameIndex_;
+            reader.readImageByIndex("/valid_frames/images", absIdx, mat);
+        }
+    } else {
+        QDir dir(folderEdit_->text().trimmed());
+        QStringList files = dir.entryList(
+            {"*.tif", "*.tiff", "*.png", "*.jpg", "*.jpeg"},
+            QDir::Files, QDir::Name);
+        if (previewFrameIndex_ < files.size()) {
+            mat = cv::imread(
+                dir.filePath(files[previewFrameIndex_]).toStdString(),
+                cv::IMREAD_GRAYSCALE);
+        }
+    }
+
+    roiCanvas_->setImage(matToQImage(mat));
+}
+
+void BatchMaskDialog::onPrevFrame() { loadPreviewFrame(previewFrameIndex_ - 1); }
+void BatchMaskDialog::onNextFrame() { loadPreviewFrame(previewFrameIndex_ + 1); }
+
+// ---------------------------------------------------------------------------
+// Preview panel: background selection
+// ---------------------------------------------------------------------------
+
+void BatchMaskDialog::onSetBackground() {
+    cv::Mat mat;
+    if (srcHdf5_->isChecked()) {
+        backend::services::Hdf5Service reader;
+        if (reader.loadFile(hdf5LoadedPath_.toStdString())) {
+            const size_t absIdx =
+                static_cast<size_t>(startIdxSpin_->value()) + previewFrameIndex_;
+            reader.readImageByIndex("/valid_frames/images", absIdx, mat);
+        }
+    } else {
+        QDir dir(folderEdit_->text().trimmed());
+        QStringList files = dir.entryList(
+            {"*.tif", "*.tiff", "*.png", "*.jpg", "*.jpeg"},
+            QDir::Files, QDir::Name);
+        if (previewFrameIndex_ < files.size()) {
+            mat = cv::imread(
+                dir.filePath(files[previewFrameIndex_]).toStdString(),
+                cv::IMREAD_GRAYSCALE);
+        }
+    }
+
+    if (mat.empty()) {
+        spdlog::warn("BatchMaskDialog: could not load frame {} as background",
+                     previewFrameIndex_);
+        return;
+    }
+    backgroundMat_ = mat;
+    bgStatusLabel_->setText(tr("Background: Frame %1").arg(previewFrameIndex_ + 1));
+}
+
+void BatchMaskDialog::onClearBackground() {
+    backgroundMat_ = cv::Mat{};
+    bgStatusLabel_->setText(tr("Background: none"));
+}
+
+void BatchMaskDialog::resetConfigToLive() {
+    localConfig_ = backend_.processing().getProcessingConfig();
+    const QSignalBlocker b1(blurSpin_),       b2(bgThreshSpin_);
+    const QSignalBlocker b3(morphKernelSpin_), b4(morphIterSpin_);
+    const QSignalBlocker b5(areaMinSpin_),     b6(areaMaxSpin_);
+    const QSignalBlocker b7(deformMinSpin_),   b8(deformMaxSpin_);
+    blurSpin_->setValue(localConfig_.gaussian_blur_size);
+    bgThreshSpin_->setValue(localConfig_.bg_subtract_threshold);
+    morphKernelSpin_->setValue(localConfig_.morph_kernel_size);
+    morphIterSpin_->setValue(localConfig_.morph_iterations);
+    areaMinSpin_->setValue(localConfig_.area_threshold_min);
+    areaMaxSpin_->setValue(localConfig_.area_threshold_max);
+    deformMinSpin_->setValue(localConfig_.deformability_threshold_min);
+    deformMaxSpin_->setValue(localConfig_.deformability_threshold_max);
+}
+
+// ---------------------------------------------------------------------------
+// matToQImage helper
+// ---------------------------------------------------------------------------
+
+QImage BatchMaskDialog::matToQImage(const cv::Mat& gray) const {
+    if (gray.empty()) return {};
+    cv::Mat rgb;
+    cv::cvtColor(gray, rgb, cv::COLOR_GRAY2RGB);
+    return QImage(rgb.data, rgb.cols, rgb.rows,
+                  static_cast<int>(rgb.step),
+                  QImage::Format_RGB888).copy();
+}
+
+// ---------------------------------------------------------------------------
+// Input loading
+// ---------------------------------------------------------------------------
+
 bool BatchMaskDialog::loadInputs(std::vector<cv::Mat>& outGray,
                                  std::vector<std::string>& outNames,
                                  QString& errorOut) {
@@ -210,8 +535,6 @@ bool BatchMaskDialog::loadInputs(std::vector<cv::Mat>& outGray,
             errorOut = tr("No HDF5 file is currently loaded.");
             return false;
         }
-        // The HdfReviewTab's reader is not exposed to us, so open a fresh
-        // read-only reader for the batch operation.
         backend::services::Hdf5Service reader;
         if (!reader.loadFile(hdf5LoadedPath_.toStdString())) {
             errorOut = tr("Failed to open HDF5 file: %1").arg(hdf5LoadedPath_);
@@ -254,15 +577,31 @@ bool BatchMaskDialog::loadInputs(std::vector<cv::Mat>& outGray,
     }
 }
 
+// ---------------------------------------------------------------------------
+// Running state
+// ---------------------------------------------------------------------------
+
 void BatchMaskDialog::setRunning(bool running) {
     runBtn_->setEnabled(!running);
     srcHdf5_->setEnabled(!running && !hdf5LoadedPath_.isEmpty());
     srcFolder_->setEnabled(!running);
     folderBrowseBtn_->setEnabled(!running && srcFolder_->isChecked());
     savePngCheck_->setEnabled(!running);
+    pngDirEdit_->setEnabled(!running && savePngCheck_->isChecked());
+    pngBrowseBtn_->setEnabled(!running && savePngCheck_->isChecked());
     saveHdf5Check_->setEnabled(!running);
+    hdf5PathEdit_->setEnabled(!running && saveHdf5Check_->isChecked());
+    hdf5BrowseBtn_->setEnabled(!running && saveHdf5Check_->isChecked());
     displayCheck_->setEnabled(!running);
+    prevFrameBtn_->setEnabled(!running && previewFrameIndex_ > 0);
+    nextFrameBtn_->setEnabled(!running && previewFrameIndex_ < previewFrameTotal_ - 1);
+    setBgBtn_->setEnabled(!running);
+    clearBgBtn_->setEnabled(!running);
 }
+
+// ---------------------------------------------------------------------------
+// Run
+// ---------------------------------------------------------------------------
 
 void BatchMaskDialog::onRun() {
     logView_->clear();
@@ -282,13 +621,15 @@ void BatchMaskDialog::onRun() {
     }
     logView_->appendPlainText(tr("Loaded %1 images.").arg(images.size()));
 
-    // Run processing synchronously (processBatch is fast per-frame and the
-    // UI stays responsive enough for typical batch sizes thanks to
-    // QCoreApplication::processEvents in the progress callback).
-    auto& proc = backend_.processing();
-    const auto config = proc.getProcessingConfig();
-    const auto roi = proc.getRealtimeRoi();
-    const cv::Mat background = proc.getRealtimeBackgroundGray();
+    auto& proc         = backend_.processing();
+    const auto config  = localConfig_;
+
+    // Use the ROI and background selected in the preview panel instead of
+    // the live pipeline values.
+    const QRect qroi = roiCanvas_->getRoi();
+    const backend::services::ProcessingService::Roi roi{
+        qroi.x(), qroi.y(), qroi.width(), qroi.height()};
+    const cv::Mat background = backgroundMat_;
 
     progressBar_->setRange(0, static_cast<int>(images.size()));
     statusLabel_->setText(tr("Processing %1 images...").arg(images.size()));
@@ -308,7 +649,6 @@ void BatchMaskDialog::onRun() {
         tr("Processed %1 images: %2 valid, %3 invalid.")
             .arg(results_.size()).arg(validCount).arg(results_.size() - validCount));
 
-    // Save outputs
     if (savePngCheck_->isChecked()) {
         const QString dir = pngDirEdit_->text().trimmed();
         if (dir.isEmpty()) {

@@ -568,20 +568,31 @@ void HdfReviewTab::loadThumbnailsBatch(const std::vector<backend::services::Proc
             const std::string imgPath = isValid ? "/valid_frames/images" : "/invalid_frames/images";
             const std::string maskPath = isValid ? "/valid_frames/masks"  : "/invalid_frames/masks";
 
-            // Read original image by dataset position (i), not by frame.index
+            // Read original image by dataset position (i), not by frame.index.
+            // Fall back to the in-memory ProcessedFrame when the HDF5 reader is
+            // unavailable (e.g. results came from a folder-sourced batch).
+            const auto& framesRef = isValid ? validFrames_ : invalidFrames_;
             cv::Mat original;
             if (!hdfReader_ || !hdfReader_->readImageByIndex(imgPath, i, original)) {
-                SPDLOG_WARN("HdfReviewTab: failed to read original image {}[{}]", imgPath, i);
-                // If image cannot be read, leave placeholder (already added)
-                continue;
+                if (i < framesRef.size() && !framesRef[i].originalImage.empty()) {
+                    original = framesRef[i].originalImage;
+                } else {
+                    SPDLOG_WARN("HdfReviewTab: failed to read original image {}[{}]", imgPath, i);
+                    continue;
+                }
             }
 
-            // Optional processing overlay when overlay mode is not None
-            const auto& framesRef = isValid ? validFrames_ : invalidFrames_;
+            // Optional processing overlay when overlay mode is not None.
+            // Same fallback: use in-memory mask when HDF5 is unavailable.
             const backend::services::FilterResult* validation = (i < framesRef.size()) ? &framesRef[i].validation : nullptr;
             if (overlayMode_ != OverlayMode::None) {
                 cv::Mat mask;
-                if (hdfReader_->readImageByIndex(maskPath, i, mask) && !mask.empty()) {
+                bool maskOk = hdfReader_ && hdfReader_->readImageByIndex(maskPath, i, mask) && !mask.empty();
+                if (!maskOk && i < framesRef.size() && !framesRef[i].processedImage.empty()) {
+                    mask = framesRef[i].processedImage;
+                    maskOk = true;
+                }
+                if (maskOk) {
                     thumbImage = createProcessingOverlay(original, mask, validation, overlayMode_);
                 } else {
                     SPDLOG_DEBUG("HdfReviewTab: mask not available for {}[{}] (overlay on)", maskPath, i);

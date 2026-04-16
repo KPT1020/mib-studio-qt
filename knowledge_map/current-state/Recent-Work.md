@@ -5,6 +5,15 @@
 
 ## Features shipped
 
+- **ROI & background selection GUI in BatchMaskDialog** (2026-04-16) —
+  `BatchMaskDialog` extended with a right-hand preview panel. New
+  `RoiDrawCanvas` widget (`src/frontend/utils/RoiDrawCanvas.cpp`) renders a
+  source frame and accepts drag-to-draw ROI selection. Frame nav buttons
+  (←/→) lazy-load frames one at a time from HDF5 or folder; "Set as
+  Background" captures the current frame as the subtraction background.
+  ROI pre-populates from HDF5 `experiment_info` on open. `onRun()` now
+  uses dialog-selected ROI + background instead of live pipeline values.
+
 - **Batch mask generation from stream images** (2026-04-15) —
   [[../services/ProcessingService]] gained `computeProcessedFrame()` and
   `processBatch()`, enabling offline mask regeneration without driving the
