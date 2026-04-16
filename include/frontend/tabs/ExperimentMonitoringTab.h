@@ -89,6 +89,7 @@ private slots:
     void onClearBuffer();
     void onApplyParams();
     void onSortTrigger();
+    void onPeriodicTriggerToggled(bool checked);
 
 protected:
     void showEvent(QShowEvent* event) override;
@@ -115,6 +116,8 @@ private:
     Ui::ExperimentMonitoringTab* ui;
     backend::AppBackend& backend_;
     QTimer* updateTimer_ = nullptr;
+    QTimer* periodicTriggerTimer_ = nullptr;
+    uint64_t periodicTriggerPulseCount_ = 0;
     QLabel* roiLabel_ = nullptr;
 
     // Panel 1: Scatterplot

@@ -5,6 +5,16 @@
 
 ## Features shipped
 
+- **Periodic sort-trigger test button** (2026-04-16) — Added
+  `periodicTriggerBtn` (checkable) + `periodicTriggerIntervalSpin` to
+  the top row of [[../frontend/ExperimentMonitoringTab]]. When armed,
+  a `QTimer` fires [[../services/TriggerService]]::`onTargetGroupResult(true)`
+  every N ms (10..60000, default 1000). Interval spinbox locks while
+  armed; `hideEvent` disarms. Pure UI addition; no backend changes.
+  Files: `resources/ui/ExperimentMonitoringTab.ui`,
+  `include/frontend/tabs/ExperimentMonitoringTab.h`,
+  `src/frontend/tabs/ExperimentMonitoringTab.cpp`.
+
 - **BatchMaskDialog always saves standard HDF5** (2026-04-16) —
   Replaced the Output group box (Display / Save PNG / Save HDF5 checkboxes)
   with a single auto-save path: `<source_dir>/<stem>_remasked.h5`. After Run,
