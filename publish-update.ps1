@@ -118,7 +118,11 @@ function Invoke-S3Upload {
     if ($env:S3_UPLOAD_DEBUG) { $uploadArgs += @("--debug") }
 
     Write-Host "   Command: python $($uploadArgs -join ' ')" -ForegroundColor Gray
-    & python $uploadArgs
+    # Pipe stdout through Write-Host so it goes to the console, not the
+    # success stream. Otherwise callers that assign `$var = Invoke-S3Upload`
+    # capture ["uploaded: ...", 0] and the `-ne 0` array-filter returns the
+    # string element, making every successful upload look like a failure.
+    & python $uploadArgs | Write-Host
     return $LASTEXITCODE
 }
 

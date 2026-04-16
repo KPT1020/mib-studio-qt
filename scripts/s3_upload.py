@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Upload a single file to S3-compatible storage via boto3.
 
-Replaces `aws s3 cp` / `aws s3api put-object` for publish-update.ps1.
-boto3's multipart flow always sends Content-Length on
-CreateMultipartUpload; aws CLI v2 can omit it and s3.yofo.bio rejects
-that with HTTP 400 MissingContentLength.
+Uses put_object (single PUT) rather than the multipart transfer manager so
+that an explicit Content-Length is always sent. Cloudflare strips the header
+from the empty-body CreateMultipartUpload POST, causing rustfs to reject with
+MissingContentLength; a single PUT with a real body is unaffected.
+
+Botocore 1.42+ auto-appends a CRC32 trailer which forces aws-chunked encoding
+and removes Content-Length again. The two env vars below disable that.
+payload_signing_enabled forces full-body SigV4 (plain PUT, no trailers).
 
 Credentials come from the standard AWS env vars / --profile /
 ~/.aws/credentials chain.
@@ -14,42 +18,15 @@ import logging
 import os
 import sys
 
-# Keep S3-compatible endpoints happy: skip the new CRC32 trailers that
-# some servers (rustfs, older MinIO, etc.) reject.
+# Disable automatic CRC32 checksum trailers — they force aws-chunked encoding
+# which strips Content-Length. Also skip response checksum validation to avoid
+# false failures when the server echoes back a checksum we didn't request.
 os.environ.setdefault("AWS_REQUEST_CHECKSUM_CALCULATION", "when_required")
 os.environ.setdefault("AWS_RESPONSE_CHECKSUM_VALIDATION", "when_required")
 
 import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
-
-
-def _ensure_content_length(request, **kwargs):
-    """Force a Content-Length header onto every S3 request.
-
-    s3.yofo.bio (rustfs-style S3-compatible server) rejects
-    CreateMultipartUpload with 'missing header: content-length' when
-    the client omits Content-Length on empty-body control ops. This
-    hook computes and fills it in before the request goes out.
-    """
-    if "Content-Length" in request.headers:
-        return
-    body = request.body
-    if body is None:
-        length = 0
-    elif isinstance(body, (bytes, bytearray)):
-        length = len(body)
-    elif isinstance(body, str):
-        length = len(body.encode("utf-8"))
-    elif hasattr(body, "seek") and hasattr(body, "tell"):
-        pos = body.tell()
-        body.seek(0, 2)
-        end = body.tell()
-        body.seek(pos)
-        length = end - pos
-    else:
-        return
-    request.headers["Content-Length"] = str(length)
 
 
 def main() -> int:
@@ -79,24 +56,24 @@ def main() -> int:
             signature_version="s3v4",
             s3={
                 "addressing_style": "path",
-                # Force full-body SigV4 so the client computes Content-Length
-                # upfront instead of streaming with unsigned/chunked payloads.
+                # Full-body SigV4: signs the entire payload upfront and sends
+                # a plain PUT with Content-Length — no aws-chunked, no trailers.
                 "payload_signing_enabled": True,
             },
         ),
     )
-    s3.meta.events.register("before-send.s3", _ensure_content_length)
 
+    file_size = os.path.getsize(args.file)
     try:
-        s3.upload_file(
-            args.file,
-            args.bucket,
-            args.key,
-            ExtraArgs={
-                "ContentType": args.content_type,
-                "ACL": args.acl,
-            },
-        )
+        with open(args.file, "rb") as fh:
+            s3.put_object(
+                Bucket=args.bucket,
+                Key=args.key,
+                Body=fh,
+                ContentLength=file_size,
+                ContentType=args.content_type,
+                ACL=args.acl,
+            )
     except (BotoCoreError, ClientError) as e:
         print(f"ERROR: upload failed: {e}", file=sys.stderr)
         return 1
