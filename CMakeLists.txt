@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 # Default version (fallback if git is not available or no tags exist)
-set(DEFAULT_VERSION "0.2.3")
+set(DEFAULT_VERSION "1.0.0")
 
 # Try to get version from git tags
 set(GIT_VERSION "")
