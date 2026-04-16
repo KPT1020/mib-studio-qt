@@ -19,10 +19,24 @@ namespace {
     constexpr double PROBE_VOLTAGE_MAX = 250.0;
 } // namespace
 
-AutofocusService::AutofocusService() = default;
+AutofocusService::AutofocusService() {
+    // statsThread_ runs for the lifetime of the service so that ring-ratio
+    // samples accepted via onRingRatio (called from the ProcessingService
+    // realtime thread on every valid frame) can be drained off the realtime
+    // thread. It's independent of connect() / disconnect() because the UI
+    // continues to read statistics even when the nanopositioner is not
+    // connected.
+    statsRunning_.store(true);
+    statsThread_ = std::thread(&AutofocusService::statsLoop, this);
+}
 
 AutofocusService::~AutofocusService() {
     disconnect();
+    // Stop stats thread
+    if (statsRunning_.exchange(false)) {
+        pendingSamplesCV_.notify_all();
+        if (statsThread_.joinable()) statsThread_.join();
+    }
 }
 
 bool AutofocusService::connect(int comPort, int baudRate, unsigned char deviceAddress) {
@@ -96,9 +110,11 @@ void AutofocusService::disconnect() {
     CloseSer();
     connected_.store(false);
 
-    // Clear buffers
+    // Clear buffers (both pending inbox and ring-ratio buffer) so a later
+    // reconnect starts from a clean slate.
     {
-        std::scoped_lock ringLock(ringRatioMutex_);
+        std::scoped_lock lock(pendingSamplesMutex_, ringRatioMutex_);
+        pendingSamples_.clear();
         ringRatioBuffer_.clear();
         ringRatioTimestamps_.clear();
         ringRatioSequence_.store(0);
@@ -161,30 +177,26 @@ AutofocusService::Config AutofocusService::getConfig() const {
 }
 
 void AutofocusService::onRingRatio(double ringRatio, int64_t timestampNs) {
-    // Always accept samples to compute statistics, even if not connected
+    // Called on the ProcessingService realtime thread on every valid frame
+    // — keep this function O(1) and allocation-light. Heavy work (deque
+    // trim, sort, stats refresh) happens on statsThread_.
     if (ringRatio <= 0.0) {
         return;
     }
 
-    std::scoped_lock lock(ringRatioMutex_);
-    
-    // Add to buffer
-    ringRatioBuffer_.push_back(ringRatio);
-    ringRatioTimestamps_.push_back(timestampNs);
-    
-    // Trim buffer if too large
-    if (ringRatioBuffer_.size() > MAX_BUFFER_SIZE) {
-        ringRatioBuffer_.pop_front();
-        ringRatioTimestamps_.pop_front();
+    {
+        std::scoped_lock lk(pendingSamplesMutex_);
+        pendingSamples_.push_back({ringRatio, timestampNs});
     }
-    
-    // Update sequence and timestamp
+
+    // Freshness + sequence markers are updated here (not in statsLoop) so
+    // the control loop and UI see data arrival immediately, even if the
+    // stats thread is briefly behind.
     ringRatioSequence_.fetch_add(1, std::memory_order_relaxed);
     lastRingRatioTimestampNs_.store(timestampNs, std::memory_order_relaxed);
     lastRingRatioUpdateUs_.store(backend::Tools::getTimestamp(), std::memory_order_relaxed);
 
-    // Update statistics
-    updateStatistics();
+    pendingSamplesCV_.notify_one();
 }
 
 void AutofocusService::updateStatistics() {
@@ -228,6 +240,54 @@ double AutofocusService::calculateMedian(const std::vector<double>& sorted) cons
 void AutofocusService::setStatusCallback(StatusCallback callback) {
     std::scoped_lock lock(callbackMutex_);
     statusCallback_ = std::move(callback);
+}
+
+void AutofocusService::statsLoop() {
+    SPDLOG_INFO("AutofocusService: Stats loop started");
+
+    // Local drain buffer — swapped with pendingSamples_ under the pending
+    // mutex so the realtime-thread producer is blocked only for the swap
+    // itself (O(1) pointer swap).
+    std::vector<PendingSample> drained;
+    drained.reserve(1024);
+
+    // Bound the wake rate so the sort cost amortises across samples. At
+    // 5 kfps this batches ~50 samples per drain; at UI rates it drains
+    // single samples. Autofocus control runs at ~20 Hz so stats freshness
+    // of 10 ms is well under what the control loop can act on.
+    constexpr auto kMinDrainInterval = std::chrono::milliseconds(10);
+
+    while (statsRunning_.load()) {
+        {
+            std::unique_lock<std::mutex> lk(pendingSamplesMutex_);
+            pendingSamplesCV_.wait(lk, [this] {
+                return !statsRunning_.load() || !pendingSamples_.empty();
+            });
+            if (!statsRunning_.load() && pendingSamples_.empty()) break;
+            drained.swap(pendingSamples_);
+        }
+
+        if (!drained.empty()) {
+            std::scoped_lock ringLock(ringRatioMutex_);
+            for (const auto& s : drained) {
+                ringRatioBuffer_.push_back(s.ringRatio);
+                ringRatioTimestamps_.push_back(s.timestampNs);
+                if (ringRatioBuffer_.size() > MAX_BUFFER_SIZE) {
+                    ringRatioBuffer_.pop_front();
+                    ringRatioTimestamps_.pop_front();
+                }
+            }
+            updateStatistics();
+        }
+        drained.clear();
+
+        // Batch further incoming samples for kMinDrainInterval before the
+        // next wake. Samples arriving during this sleep accumulate in
+        // pendingSamples_ and are handled in one pass on the next iteration.
+        std::this_thread::sleep_for(kMinDrainInterval);
+    }
+
+    SPDLOG_INFO("AutofocusService: Stats loop stopped");
 }
 
 void AutofocusService::controlLoop() {
@@ -332,9 +392,12 @@ void AutofocusService::controlLoop() {
                     currentVoltage_.store(newVoltage);
                     lastAppliedSequence_ = currentSequence;
 
-                    // Clear buffer after a step to ensure next statistics are based on post-step samples
+                    // Clear buffer after a step to ensure next statistics are based on post-step samples.
+                    // Also drop anything queued in pendingSamples_ that hasn't yet been absorbed by
+                    // statsLoop, otherwise pre-step samples would leak into the post-step buffer.
                     {
-                        std::scoped_lock ringLock(ringRatioMutex_);
+                        std::scoped_lock lock(pendingSamplesMutex_, ringRatioMutex_);
+                        pendingSamples_.clear();
                         ringRatioBuffer_.clear();
                         ringRatioTimestamps_.clear();
                         ringRatioSequence_.store(0);

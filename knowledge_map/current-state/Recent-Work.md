@@ -76,6 +76,19 @@
 
 ## Recent fixes
 
+- **2026-04-16** — Moved autofocus statistics sort onto its own thread
+  (`claude/audit-thread-performance-Pr9OI`). Follow-up to the callback
+  reorder below: instead of just running ring-ratio second on the
+  realtime thread, the sort is now off the realtime thread entirely.
+  `AutofocusService::onRingRatio` is O(1) — a push into
+  `pendingSamples_` + atomic freshness markers + `notify_one`. A new
+  `statsThread_` (lifetime = service constructor → destructor) drains
+  the inbox at up to 100 Hz, maintains the 1000-sample deque under
+  `ringRatioMutex_`, and refreshes the `{median, average, min, max}`
+  atomics. The ProcessingService realtime thread no longer touches
+  `ringRatioMutex_` or the sort. Post-step buffer clear in `controlLoop`
+  now also clears `pendingSamples_` under a combined `std::scoped_lock`
+  so pre-step samples don't leak forward.
 - **2026-04-16** — Thread performance audit + trigger callback reorder
   (`claude/audit-thread-performance-Pr9OI`). Swept every long-running
   thread for UI-thread coupling to the trigger path; the 2026-04-15 fix
@@ -83,7 +96,7 @@
   hot-path issue: within the hoisted block, `RingRatioCallback` fired
   **before** `TargetGroupCallback`, so the [[../services/TriggerService]]
   CV wake-up was serialised behind `AutofocusService::onRingRatio`, which
-  locks `ringRatioMutex_` and runs an O(n log n) sort over up to 1000
+  locked `ringRatioMutex_` and ran an O(n log n) sort over up to 1000
   samples (~20–50 µs per valid frame). Reordered so target-group fires
   first in all three realtime paths (ROI+drop, full+drop, every-frame).
   Task record: `knowledge_map/task/2026-04-16-thread-performance-audit.md`.

@@ -984,10 +984,9 @@ void ProcessingService::realtimeLoop() {
                 
                 // Fire trigger + autofocus callbacks BEFORE taking monitoringFramesMutex_
                 // so the UI thread's ring-buffer snapshot cannot stall the trigger path.
-                // Target-group fires FIRST so the TriggerService CV wake-up is not
-                // serialised behind the ring-ratio callback's buffer maintenance + sort
-                // (AutofocusService::onRingRatio locks ringRatioMutex_ and does an
-                // O(n log n) sort over up to 1000 samples).
+                // Target-group fires FIRST; RingRatio callback is O(1) on the realtime
+                // thread as of 2026-04-16 (push into AutofocusService::pendingSamples_
+                // + notify_one; the O(n log n) sort runs on AutofocusService::statsThread_).
                 if (validation.isValid) {
                     TargetGroupCallback tgCb;
                     {
@@ -1350,10 +1349,9 @@ void ProcessingService::realtimeLoop() {
                 
                 // Fire trigger + autofocus callbacks BEFORE taking monitoringFramesMutex_
                 // so the UI thread's ring-buffer snapshot cannot stall the trigger path.
-                // Target-group fires FIRST so the TriggerService CV wake-up is not
-                // serialised behind the ring-ratio callback's buffer maintenance + sort
-                // (AutofocusService::onRingRatio locks ringRatioMutex_ and does an
-                // O(n log n) sort over up to 1000 samples).
+                // Target-group fires FIRST; RingRatio callback is O(1) on the realtime
+                // thread as of 2026-04-16 (push into AutofocusService::pendingSamples_
+                // + notify_one; the O(n log n) sort runs on AutofocusService::statsThread_).
                 if (validation.isValid) {
                     TargetGroupCallback tgCb;
                     {
@@ -1736,10 +1734,9 @@ void ProcessingService::realtimeLoop() {
 
                 // Fire trigger + autofocus callbacks BEFORE taking monitoringFramesMutex_
                 // so the UI thread's ring-buffer snapshot cannot stall the trigger path.
-                // Target-group fires FIRST so the TriggerService CV wake-up is not
-                // serialised behind the ring-ratio callback's buffer maintenance + sort
-                // (AutofocusService::onRingRatio locks ringRatioMutex_ and does an
-                // O(n log n) sort over up to 1000 samples).
+                // Target-group fires FIRST; RingRatio callback is O(1) on the realtime
+                // thread as of 2026-04-16 (push into AutofocusService::pendingSamples_
+                // + notify_one; the O(n log n) sort runs on AutofocusService::statsThread_).
                 if (validation.isValid) {
                     TargetGroupCallback tgCb;
                     {

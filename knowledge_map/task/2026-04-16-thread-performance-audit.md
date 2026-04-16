@@ -77,12 +77,35 @@ duration is an atomic `int`, and metrics (`triggerCount_`,
 deferred in the 2026-04-15 task and remains deferred — the oscilloscope
 is the authoritative source.
 
-## Not fixed (tracked for later)
+## Follow-up fix: stats off the realtime thread
 
-- `AutofocusService::onRingRatio` still sorts on the realtime thread.
-  Could be moved behind a dirty flag consumed by `controlLoop`, or the
-  sort replaced with an online median structure. Lower priority now that
-  target-group fires first.
+After the initial callback reorder, a follow-up pass moved
+`AutofocusService`'s buffer maintenance and sort onto a dedicated
+thread. `onRingRatio` is now O(1) on the producer side:
+
+1. Producer (ProcessingService realtime thread) pushes into a
+   `std::vector<PendingSample> pendingSamples_` under a small mutex,
+   updates atomic freshness markers (`ringRatioSequence_`,
+   `lastRingRatioUpdateUs_`, `lastRingRatioTimestampNs_`), and fires
+   `pendingSamplesCV_.notify_one()`. No sort, no deque trim, no
+   allocator pressure beyond a single vector `push_back`.
+2. Consumer (`statsThread_`, constructor → destructor lifetime) wakes
+   on the CV, swaps `pendingSamples_` into a local drain buffer (O(1)
+   pointer swap), then under `ringRatioMutex_` drains into the 1000-
+   sample deque and runs `updateStatistics()` (sort). A 10 ms minimum
+   drain interval caps wake-rate at ~100 Hz so the sort amortises
+   across a batch of ~50 samples at 5 kfps.
+3. `controlLoop`'s post-step clear and `disconnect`'s teardown take
+   **both** mutexes via `std::scoped_lock(pendingSamplesMutex_,
+   ringRatioMutex_)` and drop the inbox as well as the deque so
+   pre-step samples can't leak into post-step stats.
+
+The ProcessingService realtime thread no longer touches
+`ringRatioMutex_` at all. This hardens the trigger path: even if the
+ring-ratio deque grew or the sort got more expensive, it could never
+delay a trigger-worthy frame's CV wake-up.
+
+## Not fixed (tracked for later)
 - `FrameStore::mutex_` is a single `std::mutex` shared by push (capture
   thread) and query (realtime/UI/frame-recording). Contention is bounded
   by small per-call hold times, but a reader/writer lock or a lock-free
@@ -100,11 +123,18 @@ is the authoritative source.
 
 - `src/backend/services/ProcessingService.cpp` — 3× callback order swap
   (target-group before ring-ratio) in the hoisted callback block.
-- `knowledge_map/services/ProcessingService.md` — added callback-order
-  gotcha.
-- `knowledge_map/services/TriggerService.md` — clarified UI decoupling
-  and the new callback order.
-- `knowledge_map/current-state/Recent-Work.md` — dated entry.
+- `src/backend/services/AutofocusService.cpp` +
+  `include/backend/services/AutofocusService.h` — new `statsThread_` +
+  `pendingSamples_` inbox + `pendingSamplesCV_`; `onRingRatio` reduced
+  to O(1); `statsLoop()` added; buffer clear in `controlLoop` and
+  `disconnect` extended to drop the inbox too.
+- `knowledge_map/services/ProcessingService.md` — callback-order gotcha.
+- `knowledge_map/services/TriggerService.md` — clarified UI decoupling.
+- `knowledge_map/services/AutofocusService.md` — documented the new
+  3-thread split (caller / stats / control) and the post-step clear.
+- `knowledge_map/architecture/Threading-Model.md` — split the autofocus
+  row into stats + control threads.
+- `knowledge_map/current-state/Recent-Work.md` — dated entries.
 
 ## Verification
 
