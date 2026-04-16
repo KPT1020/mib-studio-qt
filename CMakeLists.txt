@@ -699,6 +699,7 @@ if(BUILD_TESTING)
     add_test(NAME thread_perf_test COMMAND thread_perf_test
              WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
     set_tests_properties(thread_perf_test PROPERTIES
+        LABELS "perf"
         ENVIRONMENT "MIB_THREAD_PERF_JSON=${CMAKE_BINARY_DIR}/thread_perf_results.json"
         TIMEOUT 60
     )
@@ -719,6 +720,7 @@ if(BUILD_TESTING)
     add_test(NAME framestore_perf_test COMMAND framestore_perf_test
              WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
     set_tests_properties(framestore_perf_test PROPERTIES
+        LABELS "perf"
         ENVIRONMENT "MIB_FRAMESTORE_PERF_JSON=${CMAKE_BINARY_DIR}/framestore_perf_results.json"
         TIMEOUT 120
     )
@@ -739,6 +741,7 @@ if(BUILD_TESTING)
     add_test(NAME processing_perf_test COMMAND processing_perf_test
              WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
     set_tests_properties(processing_perf_test PROPERTIES
+        LABELS "perf"
         ENVIRONMENT "MIB_PROCESSING_PERF_JSON=${CMAKE_BINARY_DIR}/processing_perf_results.json"
         TIMEOUT 180
     )
@@ -760,14 +763,30 @@ if(BUILD_TESTING)
     add_test(NAME hdf5_perf_test COMMAND hdf5_perf_test
              WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
     set_tests_properties(hdf5_perf_test PROPERTIES
+        LABELS "perf"
         ENVIRONMENT "MIB_HDF5_PERF_JSON=${CMAKE_BINARY_DIR}/hdf5_perf_results.json"
         TIMEOUT 120
     )
 
-    # capture_processing_test: wire JSON output for MLflow ingest. The
-    # existing mock-camera env var stays in place.
+    # capture_processing_test: wire JSON output for MLflow ingest and
+    # label it so `ctest -L perf` picks it up alongside the other
+    # perf tests. The existing mock-camera env var stays in place.
     set_tests_properties(capture_processing_test PROPERTIES
+        LABELS "perf"
         ENVIRONMENT "MIB_CAMERA_MODE=mock;MIB_CAPTURE_PERF_JSON=${CMAKE_BINARY_DIR}/capture_processing_results.json"
+    )
+
+    # Convenience meta-target: `cmake --build build --target perf_suite`
+    # builds every perf-labelled binary in one shot, so you can then
+    # drive them via `python scripts/run_perf_suite.py`.
+    add_custom_target(perf_suite
+        DEPENDS
+            thread_perf_test
+            framestore_perf_test
+            processing_perf_test
+            hdf5_perf_test
+            capture_processing_test
+        COMMENT "Built all performance test binaries"
     )
 endif()
 

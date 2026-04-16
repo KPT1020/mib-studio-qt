@@ -76,22 +76,24 @@
 
 ## Recent fixes
 
-- **2026-04-16** — Performance test suite + MLflow metrics
+- **2026-04-16** — Performance test suite + single-entry-point driver
   (`claude/add-thread-performance-tests-Xp316`). Five CTest targets
-  backed by a shared `src/tests/perf_common.h`: `thread_perf_test`
-  ([[../services/TriggerService]] / [[../services/AutofocusService]]
-  latency), `framestore_perf_test` ([[../data-model/FrameStore]]
-  push/get latency + contention), `processing_perf_test`
-  ([[../services/ProcessingService]] `computeProcessedFrame` sweep at
-  3 sizes × 2 backgrounds × 2 ROI modes), `hdf5_perf_test`
-  ([[../services/Hdf5Service]] `appendFrames` / recording throughput
-  — skips gracefully if HDF5 absent), and an extended
-  `capture_processing_test` that dumps every exposed CaptureStats /
-  ProcessingStats atomic to JSON and asserts plumbing invariants.
-  `scripts/upload_perf_results.py` (renamed from
-  `upload_thread_perf.py`) accepts repeated `--json` flags and
-  namespaces metrics by filename stem into a single MLflow run
-  (experiment `mib-studio-perf`). Task record:
+  (all labelled `perf`) covering the full metric surface:
+  `thread_perf_test` ([[../services/TriggerService]] /
+  [[../services/AutofocusService]] latency), `framestore_perf_test`
+  ([[../data-model/FrameStore]] push/get + contention),
+  `processing_perf_test` ([[../services/ProcessingService]]
+  `computeProcessedFrame` sweep at 3 sizes × 2 backgrounds × 2 ROI
+  modes), `hdf5_perf_test` ([[../services/Hdf5Service]] appendFrames
+  / recording throughput — skips if HDF5 absent), and an extended
+  `capture_processing_test` that dumps every CaptureStats /
+  ProcessingStats atomic and hard-fails if any plumbing invariant is
+  broken. Shared helpers in `src/tests/perf_common.h`.
+  **One-command driver:** `scripts/run_perf_suite.py` builds /
+  runs / aggregates into `build/perf_summary.md` +
+  `build/perf_summary.json`, with optional `--upload` to MLflow via
+  `scripts/upload_perf_results.py`. User-facing how-to at
+  `docs/howto/perf-suite.md`. Task record:
   [[../task/2026-04-16-thread-perf-tests]].
 - **2026-04-16** — Moved autofocus statistics sort onto its own thread
   (`claude/audit-thread-performance-Pr9OI`). Follow-up to the callback

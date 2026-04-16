@@ -1,9 +1,33 @@
-# 2026-04-16 — Thread performance tests + metrics
+# 2026-04-16 — Performance test suite
 
 > Follow-up to [[2026-04-16-thread-performance-audit]]. That audit
-> reasoned about latency from code inspection; this task adds an
-> executable test that measures it and emits metrics for MLflow
-> trend tracking. Branch: `claude/add-thread-performance-tests-Xp316`.
+> reasoned about latency from code inspection; this task turns the
+> reasoning into a runnable perf suite covering every published
+> metric. Branch: `claude/add-thread-performance-tests-Xp316`.
+
+## TL;DR — how to run it
+
+```bash
+# Build once:
+cmake --build build --preset windows-default-build-release --target perf_suite
+
+# Run the full suite, get a summary in build/perf_summary.md:
+python scripts/run_perf_suite.py
+
+# Run a subset:
+python scripts/run_perf_suite.py --only framestore processing hdf5
+
+# Upload the whole thing to MLflow:
+MLFLOW_TRACKING_USERNAME=... MLFLOW_TRACKING_PASSWORD=... \
+  python scripts/run_perf_suite.py --upload --tag ci=local
+```
+
+**Full how-to:** [`docs/howto/perf-suite.md`](../../docs/howto/perf-suite.md).
+
+The driver runs five CTest binaries, writes each one's JSON alongside,
+and then emits `build/perf_summary.md` + `build/perf_summary.json`
+aggregating everything. `--upload` delegates to
+`scripts/upload_perf_results.py`.
 
 ## Motivation
 
