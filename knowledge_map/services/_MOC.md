@@ -21,6 +21,8 @@
 ## Optional / specialised
 - [[YoloService]] — ONNX Runtime session (segmentation; placeholder-ish)
 - [[RecorderService]] — raw frame container writer (recording mode)
+- [[BatchMaskSources]] — adapters for offline mask regeneration
+  (`processBatch` inputs/outputs)
 
 **Up**: [[../README|Vault home]] · **See also**:
 [[../architecture/Data-Flow]], [[../architecture/Threading-Model]]

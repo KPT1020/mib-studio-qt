@@ -303,6 +303,110 @@ bool ProcessingService::isFrameEmpty(const backend::playback::Frame& frame,
     return pixelCount < config.empty_frame_pixel_threshold;
 }
 
+ProcessedFrame ProcessingService::computeProcessedFrame(
+    const cv::Mat& grayInput,
+    const cv::Mat& backgroundGray,
+    const ProcessingConfig& config,
+    const Roi& roiIn,
+    uint64_t index,
+    uint64_t timestampNs) {
+
+    ProcessedFrame out;
+    out.index = index;
+    out.timestampNs = timestampNs;
+
+    if (grayInput.empty()) {
+        SPDLOG_WARN("computeProcessedFrame: empty input image");
+        return out;
+    }
+
+    // Coerce input to CV_8UC1
+    cv::Mat gray;
+    if (grayInput.type() == CV_8UC1) {
+        gray = grayInput.clone();
+    } else if (grayInput.channels() == 3) {
+        cv::cvtColor(grayInput, gray, cv::COLOR_BGR2GRAY);
+    } else {
+        grayInput.convertTo(gray, CV_8UC1);
+    }
+    out.originalImage = gray; // clone already via above paths
+
+    // Clamp ROI (or default to full frame)
+    Roi roi = roiIn;
+    if (roi.w <= 0 || roi.h <= 0) {
+        roi.x = 0;
+        roi.y = 0;
+        roi.w = gray.cols;
+        roi.h = gray.rows;
+    }
+    roi.x = std::max(0, std::min(roi.x, gray.cols - 1));
+    roi.y = std::max(0, std::min(roi.y, gray.rows - 1));
+    roi.w = std::max(1, std::min(roi.w, gray.cols - roi.x));
+    roi.h = std::max(1, std::min(roi.h, gray.rows - roi.y));
+    const cv::Rect cvRoi(roi.x, roi.y, roi.w, roi.h);
+
+    // Kernel sizing (same rules as realtimeLoop)
+    auto toOdd = [](int v) -> int { if (v < 1) v = 1; if ((v % 2) == 0) v += 1; return v; };
+    const int blurK = toOdd(config.gaussian_blur_size);
+    const int morphK = toOdd(config.morph_kernel_size);
+    const int morphIter = std::max(1, config.morph_iterations);
+    const int threshVal = std::max(0, config.bg_subtract_threshold);
+
+    // Full-size mask; process inside ROI only
+    cv::Mat mask(gray.rows, gray.cols, CV_8UC1, cv::Scalar(0));
+    cv::Mat roiCurr = gray(cvRoi);
+    cv::Mat roiDst = mask(cvRoi);
+
+    cv::Mat blurredCurr, diffForProcessing, thresh;
+    cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(blurK, blurK), 0);
+
+    const bool hasBackground = (!backgroundGray.empty()
+                                && backgroundGray.size() == gray.size()
+                                && backgroundGray.type() == CV_8UC1);
+    if (hasBackground) {
+        cv::Mat blurredBg;
+        cv::GaussianBlur(backgroundGray(cvRoi), blurredBg, cv::Size(blurK, blurK), 0);
+        cv::subtract(blurredCurr, blurredBg, diffForProcessing);
+    } else {
+        diffForProcessing = blurredCurr;
+    }
+
+    cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+    cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
+    cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
+
+    // Validation + contour/metric extraction (same helper as realtime)
+    out.validation = filterProcessedImage(mask, cvRoi, config, gray);
+    out.processedImage = std::move(mask);
+    return out;
+}
+
+std::vector<ProcessedFrame> ProcessingService::processBatch(
+    const std::vector<cv::Mat>& grayImages,
+    const ProcessingConfig& config,
+    const cv::Mat& background,
+    const Roi& roi,
+    BatchProgressCallback progress) {
+
+    std::vector<ProcessedFrame> results;
+    results.reserve(grayImages.size());
+
+    const size_t total = grayImages.size();
+    if (progress) progress(BatchProgress{0, total});
+
+    for (size_t i = 0; i < total; ++i) {
+        ProcessedFrame pf = computeProcessedFrame(grayImages[i], background, config, roi,
+                                                  static_cast<uint64_t>(i), 0);
+        results.emplace_back(std::move(pf));
+        if (progress) progress(BatchProgress{i + 1, total});
+    }
+
+    SPDLOG_INFO("processBatch: processed {} images (roi={}x{} at {},{}, background={})",
+                total, roi.w, roi.h, roi.x, roi.y, !background.empty());
+    return results;
+}
+
 void ProcessingService::setRingRatioCallback(RingRatioCallback callback) {
     std::scoped_lock lk(ringRatioCallbackMutex_);
     ringRatioCallback_ = std::move(callback);

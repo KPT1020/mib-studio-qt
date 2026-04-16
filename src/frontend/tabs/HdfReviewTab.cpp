@@ -44,6 +44,7 @@
 #include "backend/AppBackend.h"
 #include "backend/services/Hdf5Service.h"
 #include "backend/services/ProcessingService.h"
+#include "frontend/dialogs/BatchMaskDialog.h"
 #include "frontend/dialogs/FrameViewerDialog.h"
 #include "frontend/models/HdfMetricsModel.h"
 #include "frontend/utils/OverlayRenderer.h"
@@ -122,6 +123,7 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
     connect(ui->exportMetricsBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportMetrics);
     connect(ui->exportAllBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportAll);
     connect(ui->exportChartsBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportCharts);
+    connect(ui->regenerateMasksBtn, &QPushButton::clicked, this, &HdfReviewTab::onRegenerateMasks);
     connect(ui->overlayModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &HdfReviewTab::onOverlayModeChanged);
     connect(ui->roiOverlayCheck, &QCheckBox::toggled, this, &HdfReviewTab::onToggleRoiOverlay);
@@ -566,20 +568,31 @@ void HdfReviewTab::loadThumbnailsBatch(const std::vector<backend::services::Proc
             const std::string imgPath = isValid ? "/valid_frames/images" : "/invalid_frames/images";
             const std::string maskPath = isValid ? "/valid_frames/masks"  : "/invalid_frames/masks";
 
-            // Read original image by dataset position (i), not by frame.index
+            // Read original image by dataset position (i), not by frame.index.
+            // Fall back to the in-memory ProcessedFrame when the HDF5 reader is
+            // unavailable (e.g. results came from a folder-sourced batch).
+            const auto& framesRef = isValid ? validFrames_ : invalidFrames_;
             cv::Mat original;
             if (!hdfReader_ || !hdfReader_->readImageByIndex(imgPath, i, original)) {
-                SPDLOG_WARN("HdfReviewTab: failed to read original image {}[{}]", imgPath, i);
-                // If image cannot be read, leave placeholder (already added)
-                continue;
+                if (i < framesRef.size() && !framesRef[i].originalImage.empty()) {
+                    original = framesRef[i].originalImage;
+                } else {
+                    SPDLOG_WARN("HdfReviewTab: failed to read original image {}[{}]", imgPath, i);
+                    continue;
+                }
             }
 
-            // Optional processing overlay when overlay mode is not None
-            const auto& framesRef = isValid ? validFrames_ : invalidFrames_;
+            // Optional processing overlay when overlay mode is not None.
+            // Same fallback: use in-memory mask when HDF5 is unavailable.
             const backend::services::FilterResult* validation = (i < framesRef.size()) ? &framesRef[i].validation : nullptr;
             if (overlayMode_ != OverlayMode::None) {
                 cv::Mat mask;
-                if (hdfReader_->readImageByIndex(maskPath, i, mask) && !mask.empty()) {
+                bool maskOk = hdfReader_ && hdfReader_->readImageByIndex(maskPath, i, mask) && !mask.empty();
+                if (!maskOk && i < framesRef.size() && !framesRef[i].processedImage.empty()) {
+                    mask = framesRef[i].processedImage;
+                    maskOk = true;
+                }
+                if (maskOk) {
                     thumbImage = createProcessingOverlay(original, mask, validation, overlayMode_);
                 } else {
                     SPDLOG_DEBUG("HdfReviewTab: mask not available for {}[{}] (overlay on)", maskPath, i);
@@ -792,6 +805,22 @@ void HdfReviewTab::onThumbnailDoubleClicked(int frameIndex) {
 
 void HdfReviewTab::onViewFrameDetails(int frameIndex) {
     showFrameViewer(frameIndex);
+}
+
+void HdfReviewTab::onRegenerateMasks() {
+    QString loadedPath;
+    if (hdfReader_) {
+        const QString label = ui->filePathLabel->text();
+        if (label != tr("No file selected")) loadedPath = label;
+    }
+
+    BatchMaskDialog dlg(backend_, loadedPath, this);
+    dlg.exec();
+
+    const QString savedPath = dlg.savedHdf5Path();
+    if (savedPath.isEmpty()) return;
+
+    loadHdfFile(savedPath);
 }
 
 void HdfReviewTab::onTableSelectionChanged() {

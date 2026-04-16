@@ -5,6 +5,28 @@
 
 ## Features shipped
 
+- **BatchMaskDialog always saves standard HDF5** (2026-04-16) —
+  Replaced the Output group box (Display / Save PNG / Save HDF5 checkboxes)
+  with a single auto-save path: `<source_dir>/<stem>_remasked.h5`. After Run,
+  `HdfReviewTab` reloads via `loadHdfFile()` giving full scatter plot,
+  histogram, metadata table, and thumbnail support. Overwrite is prompted.
+  Files: `BatchMaskDialog.h/cpp`, `HdfReviewTab.cpp`.
+
+- **ROI & background selection GUI in BatchMaskDialog** (2026-04-16) —
+  `BatchMaskDialog` extended with a right-hand preview panel. New
+  `RoiDrawCanvas` widget (`src/frontend/utils/RoiDrawCanvas.cpp`) renders a
+  source frame and accepts drag-to-draw ROI selection. Frame nav buttons
+  (←/→) lazy-load frames one at a time from HDF5 or folder; "Set as
+  Background" captures the current frame as the subtraction background.
+  ROI pre-populates from HDF5 `experiment_info` on open. `onRun()` now
+  uses dialog-selected ROI + background instead of live pipeline values.
+
+- **Batch mask generation from stream images** (2026-04-15) —
+  [[../services/ProcessingService]] gained `computeProcessedFrame()` and
+  `processBatch()`, enabling offline mask regeneration without driving the
+  realtime loop. New [[../services/BatchMaskSources]] adapters load from
+  HDF5 / folder and save as PNG / HDF5. [[../frontend/HdfReviewTab]] gets
+  a "Regenerate masks…" toolbar button backed by `BatchMaskDialog`.
 - **Dual syringe pump control** (PR #58) —
   [[../services/SyringePumpService]] + [[../frontend/SyringePumpTab]] +
   `SyringePumpSettingsDialog`. Modbus RTU over two COM ports (Sample +

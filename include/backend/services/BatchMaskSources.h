@@ -1,0 +1,56 @@
+#pragma once
+
+#include <string>
+#include <vector>
+
+namespace cv { class Mat; }
+
+namespace backend::services {
+
+class Hdf5Service;
+struct ProcessedFrame;
+struct ProcessingConfig;
+class ProcessingService;
+
+} // namespace backend::services
+
+namespace backend::services::batch_masks {
+
+// Load a contiguous range of images from an open Hdf5Service dataset.
+// `datasetPath` is typically one of:
+//   "/valid_frames/images", "/invalid_frames/images", "/recorded_frames/images"
+// Returned matrices are CV_8UC1. Delegates to Hdf5Service::readImagesRange().
+bool loadFromHdf5(Hdf5Service& hdf5,
+                  const std::string& datasetPath,
+                  size_t startIndex,
+                  size_t count,
+                  std::vector<cv::Mat>& outGray);
+
+// Load all TIFF/PNG/JPEG files in `folderPath`, sorted by filename, converted
+// to CV_8UC1. Returns true if the folder was scanned successfully; per-file
+// read errors are recorded in `errors` and the offending file is skipped.
+// `outFilenames` contains the basenames (no path) aligned with `outGray`.
+bool loadFromFolder(const std::string& folderPath,
+                    std::vector<cv::Mat>& outGray,
+                    std::vector<std::string>& outFilenames,
+                    std::vector<std::string>& errors);
+
+// Write one mask PNG per processed frame into `outputDir`. Filenames are
+// `<basename>_mask.png` (basename taken from `filenames[i]` if provided,
+// stripped of extension; otherwise `mask_00000.png`, `mask_00001.png`, ...).
+// Returns the number of masks written. `outputDir` is created if missing.
+size_t saveMaskImages(const std::vector<ProcessedFrame>& frames,
+                      const std::string& outputDir,
+                      const std::vector<std::string>& filenames = {});
+
+// Partition `frames` into valid/invalid based on `validation.isValid` and
+// write them to a new HDF5 file at `outputPath` via Hdf5Service::saveFrames().
+// Also writes `experiment_info` so the file round-trips through HdfReviewTab.
+// Returns true on success.
+bool saveMasksToHdf5(const std::vector<ProcessedFrame>& frames,
+                     const std::string& outputPath,
+                     const ProcessingConfig& config,
+                     int roiX, int roiY, int roiW, int roiH,
+                     const cv::Mat& background);
+
+} // namespace backend::services::batch_masks

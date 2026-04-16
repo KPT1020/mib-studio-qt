@@ -20,7 +20,8 @@ following `[[WikiLinks]]`. If you are a new agent, start here:
 - Playback: [[services/PlaybackService]]
 - Hardware I/O: [[services/CameraControlService]], [[services/AutofocusService]],
   [[services/TriggerService]], [[services/SyringePumpService]]
-- Optional: [[services/YoloService]], [[services/RecorderService]]
+- Optional: [[services/YoloService]], [[services/RecorderService]],
+  [[services/BatchMaskSources]]
 
 ### Frontend (`src/frontend/`)
 - [[frontend/_MOC|Frontend MOC]]

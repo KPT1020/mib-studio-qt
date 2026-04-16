@@ -97,6 +97,7 @@ add_library(mib_backend STATIC
     src/backend/services/CaptureService.cpp
     src/backend/services/RecorderService.cpp
     src/backend/services/ProcessingService.cpp
+    src/backend/services/BatchMaskSources.cpp
     src/backend/services/PlaybackService.cpp
     src/backend/services/AutofocusService.cpp
     src/backend/services/SyringePumpService.cpp
@@ -228,6 +229,8 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/tabs/PreviewPage.h
     resources/ui/PreviewPage.ui
     # Dialogs
+    src/frontend/dialogs/BatchMaskDialog.cpp
+    include/frontend/dialogs/BatchMaskDialog.h
     src/frontend/dialogs/BufferSaveDialog.cpp
     include/frontend/dialogs/BufferSaveDialog.h
     resources/ui/BufferSaveDialog.ui
@@ -267,6 +270,8 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/utils/JsonFlatten.h
     src/frontend/utils/RoiManager.cpp
     include/frontend/utils/RoiManager.h
+    src/frontend/utils/RoiDrawCanvas.cpp
+    include/frontend/utils/RoiDrawCanvas.h
     src/frontend/utils/SimpleImageCanvas.cpp
     include/frontend/utils/SimpleImageCanvas.h
     src/frontend/utils/StatsDisplayManager.cpp

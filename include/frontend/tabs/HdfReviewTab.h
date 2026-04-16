@@ -76,6 +76,7 @@ namespace frontend
         void onThumbnailDoubleClicked(int frameIndex);
         void onTableSelectionChanged();
         void onViewFrameDetails(int frameIndex);
+        void onRegenerateMasks();
 
     private:
         void setupCharts();
