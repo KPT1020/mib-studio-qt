@@ -65,6 +65,38 @@
       </widget>
      </item>
      <item>
+      <widget class="QPushButton" name="periodicTriggerBtn">
+       <property name="text">
+        <string>Periodic Test</string>
+       </property>
+       <property name="toolTip">
+        <string>Toggle periodic sort trigger pulses at the interval below</string>
+       </property>
+       <property name="checkable">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QSpinBox" name="periodicTriggerIntervalSpin">
+       <property name="suffix">
+        <string> ms</string>
+       </property>
+       <property name="minimum">
+        <number>10</number>
+       </property>
+       <property name="maximum">
+        <number>60000</number>
+       </property>
+       <property name="value">
+        <number>1000</number>
+       </property>
+       <property name="toolTip">
+        <string>Interval between periodic test trigger pulses</string>
+       </property>
+      </widget>
+     </item>
+     <item>
       <spacer name="horizontalSpacer">
        <property name="orientation">
         <enum>Qt::Horizontal</enum>
