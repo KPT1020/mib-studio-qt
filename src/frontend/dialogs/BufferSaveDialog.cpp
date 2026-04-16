@@ -3,14 +3,11 @@
 
 #include <QCoreApplication>
 #include <QDateTime>
-#include <QDesktopServices>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QMessageBox>
-#include <QProcess>
 #include <QPushButton>
 #include <QStandardPaths>
-#include <QUrl>
 #include <QDir>
 
 #include <climits>
@@ -363,7 +360,10 @@ void BufferSaveDialog::onSaveFrames() {
     if (success) {
         ui->statusLabel->setText(tr("Frames saved successfully to: %1").arg(outputPath));
         if (aviMode) {
-            promptOpenWithImageJ(outputPath);
+            QMessageBox::information(this, tr("Save Frames"),
+                tr("Frames saved successfully to:\n%1\n\n"
+                   "Tip: you can open this AVI in ImageJ or Fiji to inspect it.")
+                .arg(outputPath));
         } else {
             QMessageBox::information(this, tr("Save Frames"), tr("Frames saved successfully."));
         }
@@ -539,54 +539,6 @@ QString BufferSaveDialog::resolveNonCollidingPath(const QString& candidate) cons
         stem + QStringLiteral("_") +
         QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss_zzz")) +
         suffix);
-}
-
-void BufferSaveDialog::promptOpenWithImageJ(const QString& path) {
-    QMessageBox box(this);
-    box.setIcon(QMessageBox::Question);
-    box.setWindowTitle(tr("Save Frames"));
-    box.setText(tr("Saved to:\n%1\n\nOpen with ImageJ?").arg(path));
-    box.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
-    box.setDefaultButton(QMessageBox::Yes);
-    if (box.exec() != QMessageBox::Yes) {
-        return;
-    }
-
-    // Try to launch ImageJ / Fiji.
-    //  1. Explicit env var MIB_IMAGEJ_EXE (user override).
-    //  2. Common install locations on Windows.
-    //  3. Bare executable names on PATH.
-    //  4. Last resort: hand the file to the OS default associator.
-    QStringList candidates;
-    const QString envExe = QString::fromLocal8Bit(qgetenv("MIB_IMAGEJ_EXE"));
-    if (!envExe.isEmpty()) candidates << envExe;
-
-    candidates << QStringLiteral("C:/Fiji.app/ImageJ-win64.exe")
-               << QStringLiteral("C:/Program Files/Fiji.app/ImageJ-win64.exe")
-               << QStringLiteral("C:/Program Files/ImageJ/ImageJ.exe")
-               << QStringLiteral("C:/Program Files (x86)/ImageJ/ImageJ.exe")
-               << QStringLiteral("ImageJ-win64.exe")
-               << QStringLiteral("ImageJ.exe")
-               << QStringLiteral("imagej");
-
-    for (const QString& exe : candidates) {
-        if (QProcess::startDetached(exe, QStringList{path})) {
-            SPDLOG_INFO("BufferSaveDialog: launched ImageJ from {} with {}",
-                        exe.toStdString(), path.toStdString());
-            return;
-        }
-    }
-
-    // Fall back to the OS default handler for the file.
-    if (QDesktopServices::openUrl(QUrl::fromLocalFile(path))) {
-        SPDLOG_INFO("BufferSaveDialog: opened {} via default OS handler", path.toStdString());
-        return;
-    }
-
-    QMessageBox::information(this, tr("Open with ImageJ"),
-        tr("Could not locate ImageJ. Saved file:\n%1\n\n"
-           "Tip: set the MIB_IMAGEJ_EXE environment variable to your ImageJ executable path.")
-        .arg(path));
 }
 
 } // namespace frontend

@@ -15,10 +15,9 @@
   [[../frontend/Dialogs]] `BufferSaveDialog` adds an "Output Format" radio
   group — **AVI is the default** — with FPS spinner; the dialog
   auto-iterates the output path (`_1`, `_2`, ...) so it never overwrites
-  an existing file or non-empty folder, and after an AVI save it prompts
-  "Open with ImageJ?" (launches ImageJ/Fiji from common paths /
-  `MIB_IMAGEJ_EXE` env var / PATH, falls back to
-  `QDesktopServices::openUrl`). [[../services/BatchMaskSources]] gets
+  an existing file or non-empty folder, and after an AVI save the
+  confirmation dialog tells the user they can view the file with ImageJ
+  or Fiji (no auto-launcher). [[../services/BatchMaskSources]] gets
   `loadFromAvi()` and `BatchMaskDialog` grows a third "AVI video file"
   source radio. `CMakeLists.txt` links `opencv_videoio` on both targets.
   Files: `CMakeLists.txt`, `FrameStore.{h,cpp}`, `PlaybackService.{h,cpp}`,

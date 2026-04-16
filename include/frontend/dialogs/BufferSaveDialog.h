@@ -35,11 +35,6 @@ private:
     // the extension) and directories.
     QString resolveNonCollidingPath(const QString& candidate) const;
 
-    // Prompt the user to open `path` with ImageJ. On Yes, attempts to launch
-    // ImageJ or Fiji from common locations / PATH; if nothing works, shows
-    // a message with the saved path so the user can open it manually.
-    void promptOpenWithImageJ(const QString& path);
-
     Ui::BufferSaveDialog* ui;
     backend::AppBackend& backend_;
 };
