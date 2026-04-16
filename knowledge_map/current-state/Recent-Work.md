@@ -5,6 +5,25 @@
 
 ## Features shipped
 
+- **Buffer save to AVI + AVI source for mask regeneration** (2026-04-16) —
+  [[../data-model/FrameStore]] gained `saveFramesToAvi()` overloads
+  (all/index-range/timestamp-range) writing a single uncompressed AVI via
+  `cv::VideoWriter` — Y800 preferred, DIB/BGR fallback. Y800 files don't
+  play in Windows Media Player / Movies & TV (known codec support gap)
+  but play in VLC and round-trip cleanly through `cv::VideoCapture` and
+  ImageJ.
+  [[../frontend/Dialogs]] `BufferSaveDialog` adds an "Output Format" radio
+  group — **AVI is the default** — with FPS spinner; the dialog
+  auto-iterates the output path (`_1`, `_2`, ...) so it never overwrites
+  an existing file or non-empty folder, and after an AVI save the
+  confirmation dialog tells the user they can view the file with ImageJ
+  or Fiji (no auto-launcher). [[../services/BatchMaskSources]] gets
+  `loadFromAvi()` and `BatchMaskDialog` grows a third "AVI video file"
+  source radio. `CMakeLists.txt` links `opencv_videoio` on both targets.
+  Files: `CMakeLists.txt`, `FrameStore.{h,cpp}`, `PlaybackService.{h,cpp}`,
+  `BufferSaveDialog.{h,cpp,ui}`, `BatchMaskSources.{h,cpp}`,
+  `BatchMaskDialog.{h,cpp}`.
+
 - **Periodic sort-trigger test button** (2026-04-16) — Added
   `periodicTriggerBtn` (checkable) + `periodicTriggerIntervalSpin` to
   the top row of [[../frontend/ExperimentMonitoringTab]]. When armed,

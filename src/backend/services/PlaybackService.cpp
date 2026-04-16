@@ -71,6 +71,26 @@ bool PlaybackService::saveFramesToDisk(const std::string& outputDir, uint64_t st
     return store_->saveFramesToDisk(outputDir, startTimestamp, endTimestamp, useTimestamps, filterFn);
 }
 
+bool PlaybackService::saveFramesToAvi(const std::string& outputPath, double fps,
+                                      std::function<bool(const backend::playback::Frame&)> filterFn) const {
+    if (!store_) return false;
+    return store_->saveFramesToAvi(outputPath, fps, filterFn);
+}
+
+bool PlaybackService::saveFramesToAvi(const std::string& outputPath, uint64_t startIndex, uint64_t endIndex,
+                                      double fps,
+                                      std::function<bool(const backend::playback::Frame&)> filterFn) const {
+    if (!store_) return false;
+    return store_->saveFramesToAvi(outputPath, startIndex, endIndex, fps, filterFn);
+}
+
+bool PlaybackService::saveFramesToAvi(const std::string& outputPath, uint64_t startTimestamp, uint64_t endTimestamp,
+                                      bool useTimestamps, double fps,
+                                      std::function<bool(const backend::playback::Frame&)> filterFn) const {
+    if (!store_) return false;
+    return store_->saveFramesToAvi(outputPath, startTimestamp, endTimestamp, useTimestamps, fps, filterFn);
+}
+
 bool PlaybackService::resize(size_t newCapacity) {
     if (!store_) return false;
     return store_->resize(newCapacity);

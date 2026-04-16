@@ -49,6 +49,21 @@ public:
     bool saveFramesToDisk(const std::string& outputDir, uint64_t startTimestamp, uint64_t endTimestamp, bool useTimestamps,
                          std::function<bool(const backend::playback::Frame&)> filterFn = nullptr) const;
 
+    // Save frames as a single uncompressed AVI file.
+    // Tries Y800 (grayscale) first, falls back to uncompressed BGR if unavailable.
+    bool saveFramesToAvi(const std::string& outputPath, double fps = 30.0,
+                         std::function<bool(const backend::playback::Frame&)> filterFn = nullptr) const;
+
+    // Save frames to AVI by index range (inclusive).
+    bool saveFramesToAvi(const std::string& outputPath, uint64_t startIndex, uint64_t endIndex,
+                         double fps = 30.0,
+                         std::function<bool(const backend::playback::Frame&)> filterFn = nullptr) const;
+
+    // Save frames to AVI by timestamp range (inclusive).
+    bool saveFramesToAvi(const std::string& outputPath, uint64_t startTimestamp, uint64_t endTimestamp,
+                         bool useTimestamps, double fps = 30.0,
+                         std::function<bool(const backend::playback::Frame&)> filterFn = nullptr) const;
+
     // Resize buffer capacity safely
     // Preserves existing frames when possible (if new size >= current available frames)
     // Clears buffer if new size < current available frames

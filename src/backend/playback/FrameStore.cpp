@@ -9,6 +9,8 @@
 #include <fstream>
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/videoio.hpp>
 
 namespace backend::playback {
 
@@ -281,6 +283,229 @@ bool FrameStore::saveFramesToDisk(const std::string& outputDir, uint64_t startTi
     }
 
     return saveFramesToDisk(outputDir, startIndex, endIndex, filterFn);
+}
+
+bool FrameStore::saveFramesToAvi(const std::string& outputPath,
+                                 double fps,
+                                 std::function<bool(const Frame&)> filterFn) const {
+    const uint64_t earliest = earliestAvailableIndex();
+    const uint64_t latest = latestAvailableIndex();
+    if (latest < earliest) {
+        SPDLOG_WARN("FrameStore: No frames available to save to AVI");
+        return false;
+    }
+    return saveFramesToAvi(outputPath, earliest, latest, fps, filterFn);
+}
+
+bool FrameStore::saveFramesToAvi(const std::string& outputPath,
+                                 uint64_t startIndex, uint64_t endIndex,
+                                 double fps,
+                                 std::function<bool(const Frame&)> filterFn) const {
+    std::unique_lock<std::mutex> lk(mutex_);
+
+    const uint64_t earliest = earliestAvailableIndex();
+    const uint64_t latest = latestAvailableIndex();
+    const uint64_t w = totalWritten_.load();
+
+    if (w == 0 || capacity_ == 0) {
+        SPDLOG_WARN("FrameStore: No frames available to save to AVI");
+        return false;
+    }
+
+    if (startIndex > endIndex) {
+        SPDLOG_ERROR("FrameStore: Invalid range: startIndex ({}) > endIndex ({})", startIndex, endIndex);
+        return false;
+    }
+
+    if (endIndex < earliest || startIndex > latest) {
+        SPDLOG_ERROR("FrameStore: Range [{}, {}] is outside available range [{}, {}]",
+                     startIndex, endIndex, earliest, latest);
+        return false;
+    }
+
+    const uint64_t clampedStart = std::max(startIndex, earliest);
+    const uint64_t clampedEnd = std::min(endIndex, latest);
+
+    // Snapshot frames under lock, then release for encoding
+    std::vector<std::pair<uint64_t, Frame>> framesToSave;
+    framesToSave.reserve(static_cast<size_t>(clampedEnd - clampedStart + 1));
+
+    for (uint64_t idx = clampedStart; idx <= clampedEnd; ++idx) {
+        if (idx >= w) continue;
+        const size_t ringIdx = static_cast<size_t>(idx % capacity_);
+        if (ringIdx < ring_.size() && !ring_[ringIdx].data.empty()) {
+            framesToSave.emplace_back(idx, ring_[ringIdx]);
+        } else {
+            SPDLOG_WARN("FrameStore: Frame at index {} is not available", idx);
+        }
+    }
+
+    lk.unlock();
+
+    // Ensure parent directory exists
+    try {
+        const std::filesystem::path p(outputPath);
+        if (p.has_parent_path()) {
+            std::filesystem::create_directories(p.parent_path());
+        }
+    } catch (const std::exception& ex) {
+        SPDLOG_ERROR("FrameStore: Failed to create parent directory for {}: {}", outputPath, ex.what());
+        return false;
+    }
+
+    return writeFramesAsAvi(framesToSave, outputPath, fps, filterFn);
+}
+
+bool FrameStore::saveFramesToAvi(const std::string& outputPath,
+                                 uint64_t startTimestamp, uint64_t endTimestamp, bool useTimestamps,
+                                 double fps,
+                                 std::function<bool(const Frame&)> filterFn) const {
+    if (!useTimestamps) {
+        return saveFramesToAvi(outputPath, startTimestamp, endTimestamp, fps, filterFn);
+    }
+
+    uint64_t startIndex = 0;
+    uint64_t endIndex = 0;
+    if (!findIndicesByTimestampRange(startTimestamp, endTimestamp, startIndex, endIndex)) {
+        SPDLOG_ERROR("FrameStore: No frames found in timestamp range [{}, {}]", startTimestamp, endTimestamp);
+        return false;
+    }
+
+    return saveFramesToAvi(outputPath, startIndex, endIndex, fps, filterFn);
+}
+
+bool FrameStore::writeFramesAsAvi(const std::vector<std::pair<uint64_t, Frame>>& frames,
+                                  const std::string& outputPath,
+                                  double fps,
+                                  std::function<bool(const Frame&)> filterFn) const {
+    if (frames.empty()) {
+        SPDLOG_WARN("FrameStore: No frames to write to AVI");
+        return false;
+    }
+
+    if (fps <= 0.0) fps = 30.0;
+
+    // Determine frame size from the first non-empty frame
+    int frameWidth = 0;
+    int frameHeight = 0;
+    for (const auto& pair : frames) {
+        if (pair.second.width > 0 && pair.second.height > 0) {
+            frameWidth = static_cast<int>(pair.second.width);
+            frameHeight = static_cast<int>(pair.second.height);
+            break;
+        }
+    }
+    if (frameWidth <= 0 || frameHeight <= 0) {
+        SPDLOG_ERROR("FrameStore: Cannot determine frame dimensions for AVI");
+        return false;
+    }
+
+    // Try Y800 (grayscale) first, fall back to uncompressed BGR DIB.
+    cv::VideoWriter writer;
+    bool useColorFallback = false;
+    const cv::Size frameSize(frameWidth, frameHeight);
+
+    const int fourccY800 = cv::VideoWriter::fourcc('Y', '8', '0', '0');
+    try {
+        writer.open(outputPath, fourccY800, fps, frameSize, /*isColor=*/false);
+    } catch (const cv::Exception& ex) {
+        SPDLOG_DEBUG("FrameStore: Y800 VideoWriter open threw: {}", ex.what());
+    }
+
+    if (!writer.isOpened()) {
+        SPDLOG_INFO("FrameStore: Y800 AVI writer unavailable; falling back to uncompressed BGR (DIB )");
+        const int fourccDib = cv::VideoWriter::fourcc('D', 'I', 'B', ' ');
+        try {
+            writer.open(outputPath, fourccDib, fps, frameSize, /*isColor=*/true);
+        } catch (const cv::Exception& ex) {
+            SPDLOG_ERROR("FrameStore: DIB VideoWriter open threw: {}", ex.what());
+        }
+        useColorFallback = true;
+    }
+
+    if (!writer.isOpened()) {
+        SPDLOG_ERROR("FrameStore: Failed to open AVI writer for {}", outputPath);
+        return false;
+    }
+
+    SPDLOG_INFO("FrameStore: Writing AVI {} ({}x{} @ {:.2f} fps, {})",
+                outputPath, frameWidth, frameHeight, fps,
+                useColorFallback ? "DIB/BGR" : "Y800/GRAY");
+
+    size_t writtenCount = 0;
+    size_t filteredCount = 0;
+    size_t skippedCount = 0;
+
+    try {
+        for (const auto& pair : frames) {
+            const Frame& frame = pair.second;
+
+            if (filterFn && filterFn(frame)) {
+                ++filteredCount;
+                continue;
+            }
+
+            if (frame.data.empty() || frame.width == 0 || frame.height == 0) {
+                ++skippedCount;
+                continue;
+            }
+
+            if (static_cast<int>(frame.width) != frameWidth ||
+                static_cast<int>(frame.height) != frameHeight) {
+                SPDLOG_WARN("FrameStore: Frame at index {} has mismatched dimensions ({}x{} vs {}x{}); skipping",
+                            pair.first, frame.width, frame.height, frameWidth, frameHeight);
+                ++skippedCount;
+                continue;
+            }
+
+            const int w = static_cast<int>(frame.width);
+            const int h = static_cast<int>(frame.height);
+            const size_t expectedSize = static_cast<size_t>(w * h);
+            if (frame.data.size() < expectedSize) {
+                SPDLOG_WARN("FrameStore: Frame {} data too small ({} < {}); skipping",
+                            pair.first, frame.data.size(), expectedSize);
+                ++skippedCount;
+                continue;
+            }
+
+            const size_t pitch = frame.linePitch == 0 ? static_cast<size_t>(w) : frame.linePitch;
+            cv::Mat gray;
+            if (pitch == static_cast<size_t>(w)) {
+                gray = cv::Mat(h, w, CV_8UC1, const_cast<uint8_t*>(frame.data.data())).clone();
+            } else {
+                gray = cv::Mat(h, w, CV_8UC1);
+                uint8_t* dst = gray.data;
+                const uint8_t* src = frame.data.data();
+                for (int y = 0; y < h; ++y) {
+                    std::memcpy(dst + y * w, src + y * pitch, static_cast<size_t>(w));
+                }
+            }
+
+            if (useColorFallback) {
+                cv::Mat bgr;
+                cv::cvtColor(gray, bgr, cv::COLOR_GRAY2BGR);
+                writer.write(bgr);
+            } else {
+                writer.write(gray);
+            }
+            ++writtenCount;
+        }
+    } catch (const cv::Exception& ex) {
+        SPDLOG_ERROR("FrameStore: OpenCV exception during AVI write: {}", ex.what());
+        writer.release();
+        return false;
+    } catch (const std::exception& ex) {
+        SPDLOG_ERROR("FrameStore: Exception during AVI write: {}", ex.what());
+        writer.release();
+        return false;
+    }
+
+    writer.release();
+
+    SPDLOG_INFO("FrameStore: Wrote {} frames to AVI {} (filtered {}, skipped {})",
+                writtenCount, outputPath, filteredCount, skippedCount);
+
+    return writtenCount > 0;
 }
 
 bool FrameStore::resize(size_t newCapacity) {

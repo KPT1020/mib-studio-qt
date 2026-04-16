@@ -21,9 +21,75 @@
     <number>8</number>
    </property>
    <item>
+    <widget class="QGroupBox" name="formatGroup">
+     <property name="title">
+      <string>Output Format</string>
+     </property>
+     <layout class="QVBoxLayout" name="formatLayout">
+      <item>
+       <widget class="QRadioButton" name="aviFormatRadio">
+        <property name="text">
+         <string>Single AVI file (uncompressed)</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QRadioButton" name="tiffFormatRadio">
+        <property name="text">
+         <string>Individual TIFF files (folder)</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="fpsRowLayout">
+        <item>
+         <widget class="QLabel" name="fpsLabel">
+          <property name="text">
+           <string>AVI playback FPS:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QDoubleSpinBox" name="fpsSpin">
+          <property name="minimum">
+           <double>1.000000000000000</double>
+          </property>
+          <property name="maximum">
+           <double>240.000000000000000</double>
+          </property>
+          <property name="decimals">
+           <number>2</number>
+          </property>
+          <property name="value">
+           <double>30.000000000000000</double>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="fpsSpacer">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
     <widget class="QGroupBox" name="dirGroup">
      <property name="title">
-      <string>Output Directory</string>
+      <string>Output Location</string>
      </property>
      <layout class="QVBoxLayout" name="dirLayout">
       <item>
