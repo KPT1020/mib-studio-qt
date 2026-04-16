@@ -76,6 +76,17 @@
 
 ## Recent fixes
 
+- **2026-04-16** — Thread performance audit + trigger callback reorder
+  (`claude/audit-thread-performance-Pr9OI`). Swept every long-running
+  thread for UI-thread coupling to the trigger path; the 2026-04-15 fix
+  (callbacks hoisted above `monitoringFramesMutex_`) holds. Remaining
+  hot-path issue: within the hoisted block, `RingRatioCallback` fired
+  **before** `TargetGroupCallback`, so the [[../services/TriggerService]]
+  CV wake-up was serialised behind `AutofocusService::onRingRatio`, which
+  locks `ringRatioMutex_` and runs an O(n log n) sort over up to 1000
+  samples (~20–50 µs per valid frame). Reordered so target-group fires
+  first in all three realtime paths (ROI+drop, full+drop, every-frame).
+  Task record: `knowledge_map/task/2026-04-16-thread-performance-audit.md`.
 - **2026-04-15** — Trigger onset latency regression fix
   (`claude/fix-trigger-timing-bug-xGgbx`). The target-group callback
   (which wakes [[../services/TriggerService]]) was being dispatched inside
