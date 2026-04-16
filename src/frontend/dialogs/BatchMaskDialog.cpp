@@ -235,7 +235,7 @@ void BatchMaskDialog::buildUi() {
     connect(folderBrowseBtn_, &QPushButton::clicked, this, &BatchMaskDialog::onBrowseFolder);
 
     connect(runBtn_,   &QPushButton::clicked, this, &BatchMaskDialog::onRun);
-    connect(closeBtn_, &QPushButton::clicked, this, &QDialog::accept);
+    connect(closeBtn_, &QPushButton::clicked, this, &QDialog::reject);
 
     // Preview panel signals
     connect(srcHdf5_,  &QRadioButton::toggled,

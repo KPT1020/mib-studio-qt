@@ -815,7 +815,7 @@ void HdfReviewTab::onRegenerateMasks() {
     }
 
     BatchMaskDialog dlg(backend_, loadedPath, this);
-    if (dlg.exec() != QDialog::Accepted) return;
+    dlg.exec();
 
     const QString savedPath = dlg.savedHdf5Path();
     if (savedPath.isEmpty()) return;
