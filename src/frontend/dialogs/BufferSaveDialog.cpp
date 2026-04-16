@@ -2,7 +2,9 @@
 #include "ui_BufferSaveDialog.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QStandardPaths>
@@ -37,6 +39,8 @@ BufferSaveDialog::BufferSaveDialog(backend::AppBackend& backend, QWidget* parent
     connect(ui->allFramesRadio, &QRadioButton::toggled, this, &BufferSaveDialog::onRangeModeChanged);
     connect(ui->indexRangeRadio, &QRadioButton::toggled, this, &BufferSaveDialog::onRangeModeChanged);
     connect(ui->timestampRangeRadio, &QRadioButton::toggled, this, &BufferSaveDialog::onRangeModeChanged);
+    connect(ui->tiffFormatRadio, &QRadioButton::toggled, this, &BufferSaveDialog::onFormatChanged);
+    connect(ui->aviFormatRadio, &QRadioButton::toggled, this, &BufferSaveDialog::onFormatChanged);
     connect(ui->refreshRangesBtn, &QPushButton::clicked, this, &BufferSaveDialog::onRefreshRanges);
     connect(ui->applyResizeBtn, &QPushButton::clicked, this, &BufferSaveDialog::onApplyResize);
     connect(ui->newCapacitySpin, QOverload<int>::of(&QSpinBox::valueChanged), this, &BufferSaveDialog::updateMemoryDisplay);
@@ -62,6 +66,7 @@ BufferSaveDialog::BufferSaveDialog(backend::AppBackend& backend, QWidget* parent
 
     // Initial update
     updateAvailableRanges();
+    onFormatChanged();
     updateUIState();
 }
 
@@ -71,12 +76,67 @@ BufferSaveDialog::~BufferSaveDialog() {
 
 void BufferSaveDialog::onBrowseDirectory() {
     const QString current = ui->outputDirEdit->text().trimmed();
-    QString selected = QFileDialog::getExistingDirectory(this,
-                                                         tr("Select output directory"),
-                                                         current.isEmpty() ? QDir::currentPath() : current);
-    if (!selected.isEmpty()) {
-        ui->outputDirEdit->setText(QDir(selected).absolutePath());
+    const bool aviMode = ui->aviFormatRadio && ui->aviFormatRadio->isChecked();
+
+    if (aviMode) {
+        // Suggest a default filename based on current timestamp
+        QString startDir = current;
+        QString suggestedName;
+        const QFileInfo currentInfo(current);
+        if (current.isEmpty()) {
+            startDir = QDir::currentPath();
+        } else if (currentInfo.isDir() || current.endsWith('/') || current.endsWith('\\')) {
+            startDir = currentInfo.absoluteFilePath();
+        } else if (currentInfo.suffix().compare("avi", Qt::CaseInsensitive) == 0) {
+            startDir = currentInfo.absolutePath();
+            suggestedName = currentInfo.fileName();
+        } else {
+            startDir = currentInfo.absolutePath();
+        }
+        if (suggestedName.isEmpty()) {
+            suggestedName = QStringLiteral("buffer_") +
+                            QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")) +
+                            QStringLiteral(".avi");
+        }
+        const QString defaultPath = QDir(startDir).absoluteFilePath(suggestedName);
+
+        QString selected = QFileDialog::getSaveFileName(this,
+                                                        tr("Save AVI file"),
+                                                        defaultPath,
+                                                        tr("AVI Video (*.avi)"));
+        if (!selected.isEmpty()) {
+            if (!selected.endsWith(QStringLiteral(".avi"), Qt::CaseInsensitive)) {
+                selected += QStringLiteral(".avi");
+            }
+            ui->outputDirEdit->setText(QDir::toNativeSeparators(selected));
+        }
+    } else {
+        QString selected = QFileDialog::getExistingDirectory(this,
+                                                             tr("Select output directory"),
+                                                             current.isEmpty() ? QDir::currentPath() : current);
+        if (!selected.isEmpty()) {
+            ui->outputDirEdit->setText(QDir(selected).absolutePath());
+        }
     }
+}
+
+void BufferSaveDialog::onFormatChanged() {
+    const bool aviMode = ui->aviFormatRadio && ui->aviFormatRadio->isChecked();
+    if (ui->fpsSpin) ui->fpsSpin->setEnabled(aviMode);
+    if (ui->fpsLabel) ui->fpsLabel->setEnabled(aviMode);
+
+    if (ui->dirGroup) {
+        ui->dirGroup->setTitle(aviMode ? tr("Output File") : tr("Output Directory"));
+    }
+    if (ui->outputDirEdit) {
+        ui->outputDirEdit->setPlaceholderText(aviMode
+            ? tr("Select output AVI file path")
+            : tr("Select output directory for saved frames"));
+    }
+    if (ui->browseBtn) {
+        ui->browseBtn->setText(aviMode ? tr("Choose File...") : tr("Browse..."));
+    }
+    updateUIState();
 }
 
 void BufferSaveDialog::onRangeModeChanged() {
@@ -206,10 +266,16 @@ void BufferSaveDialog::onSaveFrames() {
         return;
     }
 
-    const QString outputDir = ui->outputDirEdit->text().trimmed();
-    if (outputDir.isEmpty()) {
-        QMessageBox::warning(this, tr("Save Frames"), tr("Please select an output directory."));
+    QString outputPath = ui->outputDirEdit->text().trimmed();
+    if (outputPath.isEmpty()) {
+        QMessageBox::warning(this, tr("Save Frames"), tr("Please select an output location."));
         return;
+    }
+
+    const bool aviMode = ui->aviFormatRadio && ui->aviFormatRadio->isChecked();
+    if (aviMode && !outputPath.endsWith(QStringLiteral(".avi"), Qt::CaseInsensitive)) {
+        outputPath += QStringLiteral(".avi");
+        ui->outputDirEdit->setText(outputPath);
     }
 
     ui->statusLabel->setText(tr("Saving frames..."));
@@ -217,7 +283,7 @@ void BufferSaveDialog::onSaveFrames() {
     QCoreApplication::processEvents();
 
     bool success = false;
-    std::string outputDirStd = outputDir.toStdString();
+    std::string outputPathStd = outputPath.toStdString();
 
     // Create filter function if empty frame filtering is enabled
     std::function<bool(const backend::playback::Frame&)> filterFn = nullptr;
@@ -230,22 +296,38 @@ void BufferSaveDialog::onSaveFrames() {
         };
     }
 
-    if (ui->allFramesRadio->isChecked()) {
-        success = backend_.playback().saveFramesToDisk(outputDirStd, filterFn);
-    } else if (ui->indexRangeRadio->isChecked()) {
-        const uint64_t start = static_cast<uint64_t>(ui->startIndexSpin->value());
-        const uint64_t end = static_cast<uint64_t>(ui->endIndexSpin->value());
-        success = backend_.playback().saveFramesToDisk(outputDirStd, start, end, filterFn);
-    } else if (ui->timestampRangeRadio->isChecked()) {
-        const uint64_t start = static_cast<uint64_t>(ui->startTimestampSpin->value());
-        const uint64_t end = static_cast<uint64_t>(ui->endTimestampSpin->value());
-        success = backend_.playback().saveFramesToDisk(outputDirStd, start, end, true, filterFn);
+    if (aviMode) {
+        const double fps = ui->fpsSpin ? ui->fpsSpin->value() : 30.0;
+
+        if (ui->allFramesRadio->isChecked()) {
+            success = backend_.playback().saveFramesToAvi(outputPathStd, fps, filterFn);
+        } else if (ui->indexRangeRadio->isChecked()) {
+            const uint64_t start = static_cast<uint64_t>(ui->startIndexSpin->value());
+            const uint64_t end = static_cast<uint64_t>(ui->endIndexSpin->value());
+            success = backend_.playback().saveFramesToAvi(outputPathStd, start, end, fps, filterFn);
+        } else if (ui->timestampRangeRadio->isChecked()) {
+            const uint64_t start = static_cast<uint64_t>(ui->startTimestampSpin->value());
+            const uint64_t end = static_cast<uint64_t>(ui->endTimestampSpin->value());
+            success = backend_.playback().saveFramesToAvi(outputPathStd, start, end, true, fps, filterFn);
+        }
+    } else {
+        if (ui->allFramesRadio->isChecked()) {
+            success = backend_.playback().saveFramesToDisk(outputPathStd, filterFn);
+        } else if (ui->indexRangeRadio->isChecked()) {
+            const uint64_t start = static_cast<uint64_t>(ui->startIndexSpin->value());
+            const uint64_t end = static_cast<uint64_t>(ui->endIndexSpin->value());
+            success = backend_.playback().saveFramesToDisk(outputPathStd, start, end, filterFn);
+        } else if (ui->timestampRangeRadio->isChecked()) {
+            const uint64_t start = static_cast<uint64_t>(ui->startTimestampSpin->value());
+            const uint64_t end = static_cast<uint64_t>(ui->endTimestampSpin->value());
+            success = backend_.playback().saveFramesToDisk(outputPathStd, start, end, true, filterFn);
+        }
     }
 
     ui->buttons->button(QDialogButtonBox::Save)->setEnabled(true);
 
     if (success) {
-        ui->statusLabel->setText(tr("Frames saved successfully to: %1").arg(outputDir));
+        ui->statusLabel->setText(tr("Frames saved successfully to: %1").arg(outputPath));
         QMessageBox::information(this, tr("Save Frames"), tr("Frames saved successfully."));
     } else {
         ui->statusLabel->setText(tr("Failed to save frames. Check logs for details."));

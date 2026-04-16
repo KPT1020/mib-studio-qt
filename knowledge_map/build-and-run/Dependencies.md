@@ -8,7 +8,7 @@
 | spdlog | 1.17.0 | | Logging ([[../conventions/Logging]]) |
 | sqlite3 | 3.51.0 | | [[../services/SqliteService]] |
 | hdf5 | 1.14.6 | ✓ | C++ API enabled — [[../services/Hdf5Service]] |
-| opencv | 4.12.0 | ✓ | dnn=False, openexr=False — [[../services/ProcessingService]] |
+| opencv | 4.12.0 | ✓ | dnn=False, openexr=False. Linked modules: `core`, `imgproc`, `imgcodecs`, `videoio` (AVI read/write by [[../data-model/FrameStore]] and [[../services/BatchMaskSources]]) — [[../services/ProcessingService]] |
 | onnxruntime | 1.18.1 | | [[../services/YoloService]] |
 | nlohmann_json | 3.11.3 | | Config parsing / serialization |
 

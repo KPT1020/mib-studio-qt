@@ -23,6 +23,11 @@
   directory for TIFF/PNG/JPEG/BMP files, sorts by filename, loads as
   grayscale via `cv::imread(..., IMREAD_GRAYSCALE)`. Per-file failures are
   recorded in `errors`; the offending file is skipped, not aborted.
+- `loadFromAvi(aviPath, outGray, outFilenames, errors)` — opens an AVI
+  with `cv::VideoCapture`, decodes every frame, coerces to `CV_8UC1`
+  (BGR→GRAY / BGRA→GRAY as needed). `outFilenames` are synthetic
+  `frame_00000`, `frame_00001`, ... Pairs naturally with the AVI written
+  by `FrameStore::saveFramesToAvi`.
 
 ### Outputs
 

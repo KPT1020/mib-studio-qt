@@ -8,6 +8,7 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/videoio.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -96,6 +97,81 @@ bool loadFromFolder(const std::string& folderPath,
     }
     SPDLOG_INFO("loadFromFolder: loaded {} images from {} ({} errors)",
                 outGray.size(), folderPath, errors.size());
+    return true;
+}
+
+bool loadFromAvi(const std::string& aviPath,
+                 std::vector<cv::Mat>& outGray,
+                 std::vector<std::string>& outFilenames,
+                 std::vector<std::string>& errors) {
+    outGray.clear();
+    outFilenames.clear();
+    errors.clear();
+
+    std::error_code ec;
+    if (!fs::exists(aviPath, ec) || !fs::is_regular_file(aviPath, ec)) {
+        errors.push_back("Not a file: " + aviPath);
+        SPDLOG_ERROR("loadFromAvi: not a file: {}", aviPath);
+        return false;
+    }
+
+    cv::VideoCapture cap(aviPath);
+    if (!cap.isOpened()) {
+        errors.push_back("Failed to open AVI: " + aviPath);
+        SPDLOG_ERROR("loadFromAvi: failed to open {}", aviPath);
+        return false;
+    }
+
+    const int hintedCount = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_COUNT));
+    if (hintedCount > 0) {
+        outGray.reserve(static_cast<size_t>(hintedCount));
+        outFilenames.reserve(static_cast<size_t>(hintedCount));
+    }
+
+    size_t idx = 0;
+    cv::Mat frame;
+    while (true) {
+        if (!cap.read(frame) || frame.empty()) break;
+
+        cv::Mat gray;
+        if (frame.channels() == 1) {
+            gray = frame.clone();
+            if (gray.type() != CV_8UC1) {
+                cv::Mat tmp;
+                gray.convertTo(tmp, CV_8UC1);
+                gray = std::move(tmp);
+            }
+        } else if (frame.channels() == 3) {
+            cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
+        } else if (frame.channels() == 4) {
+            cv::cvtColor(frame, gray, cv::COLOR_BGRA2GRAY);
+        } else {
+            std::ostringstream oss;
+            oss << "Unsupported channel count (" << frame.channels()
+                << ") at frame " << idx;
+            errors.push_back(oss.str());
+            SPDLOG_WARN("loadFromAvi: {}", oss.str());
+            ++idx;
+            continue;
+        }
+
+        std::ostringstream oss;
+        oss << "frame_" << std::setw(5) << std::setfill('0') << idx;
+        outGray.push_back(std::move(gray));
+        outFilenames.push_back(oss.str());
+        ++idx;
+    }
+
+    cap.release();
+
+    if (outGray.empty()) {
+        errors.push_back("No frames decoded from: " + aviPath);
+        SPDLOG_WARN("loadFromAvi: decoded 0 frames from {}", aviPath);
+        return false;
+    }
+
+    SPDLOG_INFO("loadFromAvi: loaded {} frames from {} ({} errors)",
+                outGray.size(), aviPath, errors.size());
     return true;
 }
 

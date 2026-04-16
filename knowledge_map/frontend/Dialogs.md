@@ -9,11 +9,11 @@
 | `MockConfigDialog` | Pick mock camera folder, interval, loop | [[ConnectTab]] |
 | `ProcessingSettingsDialog` | Edit `ProcessingConfig` (full form) | [[ConfigTabs]] / menu |
 | `MonitoringSettingsDialog` | Chart bin counts, axis ranges, refresh rate | [[ExperimentMonitoringTab]] |
-| `BufferSaveDialog` | Save FrameStore frames to TIFF (range selection) | [[PreviewPage]] |
+| `BufferSaveDialog` | Save FrameStore frames to disk. Output Format group chooses TIFF folder (one `frame_NNNNNN.tiff` per frame) or single uncompressed AVI file. AVI mode swaps the browse button to a `getSaveFileName` flow with `.avi` filter and surfaces an FPS spinner (30 default, playback metadata only). Range selection (all/index/timestamp) and empty-frame filter apply to both formats. | [[PreviewPage]] |
 | `ConversionFactorDialog` | Set pixel→μm conversion factor | [[PreviewPage]] |
 | `FrameViewerDialog` | Popout frame inspector with overlay toggles | [[HdfReviewTab]], [[PreviewPage]] |
 | `SyringePumpSettingsDialog` | Per-pump COM port, baud, Modbus address | [[SyringePumpTab]] |
-| `BatchMaskDialog` | Re-generate masks from HDF5 range or image folder via [[../services/ProcessingService]]'s `processBatch`. Two-panel layout: controls on left, preview canvas on right. Uses `RoiDrawCanvas` for drag-to-draw ROI selection; ROI pre-populated from HDF5 `experiment_info`. Frame nav buttons (←/→) lazy-load one frame at a time for background selection. Overrides live pipeline ROI/background with dialog-selected values. | [[HdfReviewTab]] |
+| `BatchMaskDialog` | Re-generate masks from HDF5 range, image folder, or AVI file via [[../services/ProcessingService]]'s `processBatch`. Two-panel layout: controls on left, preview canvas on right. Uses `RoiDrawCanvas` for drag-to-draw ROI selection; ROI pre-populated from HDF5 `experiment_info`. Frame nav buttons (←/→) lazy-load one frame at a time for background selection. AVI source uses a cached `cv::VideoCapture` for preview seeks. Overrides live pipeline ROI/background with dialog-selected values. | [[HdfReviewTab]] |
 | `RoiDrawCanvas` (util widget) | Displays a `QImage` scaled to fit and lets the user drag a rectangle to define an ROI in image coordinates. Emits `roiChanged(QRect)` on release. Owned by `BatchMaskDialog`. Source: `src/frontend/utils/RoiDrawCanvas.cpp` | `BatchMaskDialog` |
 
 ## Conventions

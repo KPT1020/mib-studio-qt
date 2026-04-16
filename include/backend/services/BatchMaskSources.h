@@ -35,6 +35,16 @@ bool loadFromFolder(const std::string& folderPath,
                     std::vector<std::string>& outFilenames,
                     std::vector<std::string>& errors);
 
+// Load all frames from an AVI file (written by FrameStore::saveFramesToAvi or
+// any AVI readable by cv::VideoCapture). Frames are decoded sequentially and
+// converted to CV_8UC1. Returns true if the file was opened and at least one
+// frame was read; per-frame decode errors are appended to `errors`.
+// `outFilenames` is populated with synthetic names `frame_00000`, ...
+bool loadFromAvi(const std::string& aviPath,
+                 std::vector<cv::Mat>& outGray,
+                 std::vector<std::string>& outFilenames,
+                 std::vector<std::string>& errors);
+
 // Write one mask PNG per processed frame into `outputDir`. Filenames are
 // `<basename>_mask.png` (basename taken from `filenames[i]` if provided,
 // stripped of extension; otherwise `mask_00000.png`, `mask_00001.png`, ...).

@@ -47,13 +47,29 @@ bool getByWriteIndex(uint64_t idx, Frame& out) const;
 bool getByWriteIndexROI(uint64_t idx, int roiX, int roiY, int roiW, int roiH,
                         Frame& out) const;  // avoids full-frame copy
 
-bool saveFramesToDisk(dir, filterFn = nullptr) const;       // all frames
+bool saveFramesToDisk(dir, filterFn = nullptr) const;       // all frames (TIFF)
 bool saveFramesToDisk(dir, startIdx, endIdx, filterFn);     // by index
 bool saveFramesToDisk(dir, startTs, endTs, /*useTs=*/true, filterFn);
+
+// Single-file uncompressed AVI export. fps only affects playback
+// metadata, not the captured frame rate. Per-frame timestamps are
+// NOT preserved in AVI.
+bool saveFramesToAvi(path, fps = 30.0, filterFn = nullptr) const;
+bool saveFramesToAvi(path, startIdx, endIdx, fps, filterFn);
+bool saveFramesToAvi(path, startTs, endTs, /*useTs=*/true, fps, filterFn);
 
 bool resize(size_t newCapacity);
 size_t estimateMemoryBytesForCapacity(size_t capacity) const;
 ```
+
+### AVI codec choice
+
+`saveFramesToAvi` tries `fourcc('Y','8','0','0')` (single-channel Mono8)
+first. If the backend can't open that codec it falls back to
+`fourcc('D','I','B',' ')` (uncompressed BGR) and per-frame
+`cv::cvtColor(GRAY2BGR)`. The fallback triples file size. Which path
+actually runs depends on the platform's OpenCV backend (FFmpeg / VFW /
+MSMF) — check the log line `"Writing AVI ... ({Y800/GRAY|DIB/BGR})"`.
 
 ## Frame filter (recording mode)
 
@@ -82,3 +98,9 @@ free, but per-frame work is a `std::vector<uint8_t>` move.
   may fall off the available range.
 - `pushFrame` copies bytes — if you profile and see allocator pressure,
   investigate here first.
+- `saveFramesToAvi` serialises frames while holding the mutex only long
+  enough to snapshot the range; the VideoWriter loop runs outside the
+  lock. Same pattern as `saveFramesToDisk`.
+- With the empty-frame filter enabled, AVI frame count is smaller than
+  the requested buffer range — 1:1 buffer-index-to-AVI-index mapping is
+  lost. Acceptable for mask regen; don't depend on it elsewhere.

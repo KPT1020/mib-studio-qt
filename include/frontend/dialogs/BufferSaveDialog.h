@@ -16,6 +16,7 @@ public:
 private slots:
     void onBrowseDirectory();
     void onRangeModeChanged();
+    void onFormatChanged();
     void onRefreshRanges();
     void onApplyResize();
     void onSaveFrames();

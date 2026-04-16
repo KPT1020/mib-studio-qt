@@ -28,6 +28,7 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/videoio.hpp>
 
 #include <spdlog/spdlog.h>
 
@@ -91,6 +92,17 @@ void BatchMaskDialog::buildUi() {
     folderBrowseBtn_ = new QPushButton(tr("Browse..."), srcGroup);
     folderRow->addWidget(folderBrowseBtn_);
     srcLayout->addLayout(folderRow);
+
+    srcAvi_ = new QRadioButton(tr("AVI video file"), srcGroup);
+    srcLayout->addWidget(srcAvi_);
+
+    auto* aviRow = new QHBoxLayout();
+    aviRow->addSpacing(20);
+    aviEdit_ = new QLineEdit(srcGroup);
+    aviRow->addWidget(aviEdit_);
+    aviBrowseBtn_ = new QPushButton(tr("Browse..."), srcGroup);
+    aviRow->addWidget(aviBrowseBtn_);
+    srcLayout->addLayout(aviRow);
 
     leftCol->addWidget(srcGroup);
 
@@ -232,7 +244,9 @@ void BatchMaskDialog::buildUi() {
     // -----------------------------------------------------------------------
     connect(srcHdf5_,    &QRadioButton::toggled, this, &BatchMaskDialog::onSourceChanged);
     connect(srcFolder_,  &QRadioButton::toggled, this, &BatchMaskDialog::onSourceChanged);
+    connect(srcAvi_,     &QRadioButton::toggled, this, &BatchMaskDialog::onSourceChanged);
     connect(folderBrowseBtn_, &QPushButton::clicked, this, &BatchMaskDialog::onBrowseFolder);
+    connect(aviBrowseBtn_,    &QPushButton::clicked, this, &BatchMaskDialog::onBrowseAvi);
 
     connect(runBtn_,   &QPushButton::clicked, this, &BatchMaskDialog::onRun);
     connect(closeBtn_, &QPushButton::clicked, this, &QDialog::reject);
@@ -242,7 +256,11 @@ void BatchMaskDialog::buildUi() {
             this, &BatchMaskDialog::onPreviewSourceChanged);
     connect(srcFolder_,&QRadioButton::toggled,
             this, &BatchMaskDialog::onPreviewSourceChanged);
+    connect(srcAvi_,   &QRadioButton::toggled,
+            this, &BatchMaskDialog::onPreviewSourceChanged);
     connect(folderEdit_, &QLineEdit::editingFinished,
+            this, &BatchMaskDialog::onPreviewSourceChanged);
+    connect(aviEdit_,    &QLineEdit::editingFinished,
             this, &BatchMaskDialog::onPreviewSourceChanged);
     connect(startIdxSpin_, qOverload<int>(&QSpinBox::valueChanged),
             this, &BatchMaskDialog::onPreviewSourceChanged);
@@ -281,11 +299,15 @@ void BatchMaskDialog::buildUi() {
 // ---------------------------------------------------------------------------
 
 void BatchMaskDialog::onSourceChanged() {
-    const bool hdf5 = srcHdf5_->isChecked();
+    const bool hdf5   = srcHdf5_->isChecked();
+    const bool folder = srcFolder_->isChecked();
+    const bool avi    = srcAvi_->isChecked();
     startIdxSpin_->setEnabled(hdf5);
     countSpin_->setEnabled(hdf5);
-    folderEdit_->setEnabled(!hdf5);
-    folderBrowseBtn_->setEnabled(!hdf5);
+    folderEdit_->setEnabled(folder);
+    folderBrowseBtn_->setEnabled(folder);
+    aviEdit_->setEnabled(avi);
+    aviBrowseBtn_->setEnabled(avi);
 }
 
 void BatchMaskDialog::onBrowseFolder() {
@@ -294,6 +316,17 @@ void BatchMaskDialog::onBrowseFolder() {
         folderEdit_->text());
     if (!dir.isEmpty()) {
         folderEdit_->setText(dir);
+        onPreviewSourceChanged();
+    }
+}
+
+void BatchMaskDialog::onBrowseAvi() {
+    const QString file = QFileDialog::getOpenFileName(
+        this, tr("Select AVI file"),
+        aviEdit_->text(),
+        tr("AVI Video (*.avi);;All Files (*)"));
+    if (!file.isEmpty()) {
+        aviEdit_->setText(file);
         onPreviewSourceChanged();
     }
 }
@@ -341,6 +374,24 @@ int BatchMaskDialog::getSourceFrameCount() const {
         if (start >= count) return 0;
         const size_t requested = static_cast<size_t>(countSpin_->value());
         return static_cast<int>(std::min(requested, count - start));
+    } else if (srcAvi_->isChecked()) {
+        const QString path = aviEdit_->text().trimmed();
+        if (path.isEmpty() || !QFileInfo(path).isFile()) return 0;
+
+        // Reuse cached cap if same path; otherwise open.
+        if (path != previewAviPath_ || !previewAviCap_.isOpened()) {
+            if (previewAviCap_.isOpened()) previewAviCap_.release();
+            if (!previewAviCap_.open(path.toStdString())) {
+                previewAviPath_.clear();
+                previewAviTotal_ = 0;
+                return 0;
+            }
+            previewAviPath_ = path;
+            previewAviTotal_ = static_cast<int>(
+                previewAviCap_.get(cv::CAP_PROP_FRAME_COUNT));
+            if (previewAviTotal_ < 0) previewAviTotal_ = 0;
+        }
+        return previewAviTotal_;
     } else {
         const QString folder = folderEdit_->text().trimmed();
         if (folder.isEmpty()) return 0;
@@ -375,6 +426,26 @@ void BatchMaskDialog::loadPreviewFrame(int index) {
                 static_cast<size_t>(startIdxSpin_->value()) + previewFrameIndex_;
             reader.readImageByIndex("/valid_frames/images", absIdx, mat);
         }
+    } else if (srcAvi_->isChecked()) {
+        if (previewAviCap_.isOpened()) {
+            previewAviCap_.set(cv::CAP_PROP_POS_FRAMES,
+                               static_cast<double>(previewFrameIndex_));
+            cv::Mat raw;
+            if (previewAviCap_.read(raw) && !raw.empty()) {
+                if (raw.channels() == 1) {
+                    mat = raw.clone();
+                    if (mat.type() != CV_8UC1) {
+                        cv::Mat tmp;
+                        mat.convertTo(tmp, CV_8UC1);
+                        mat = std::move(tmp);
+                    }
+                } else if (raw.channels() == 3) {
+                    cv::cvtColor(raw, mat, cv::COLOR_BGR2GRAY);
+                } else if (raw.channels() == 4) {
+                    cv::cvtColor(raw, mat, cv::COLOR_BGRA2GRAY);
+                }
+            }
+        }
     } else {
         QDir dir(folderEdit_->text().trimmed());
         QStringList files = dir.entryList(
@@ -405,6 +476,21 @@ void BatchMaskDialog::onSetBackground() {
             const size_t absIdx =
                 static_cast<size_t>(startIdxSpin_->value()) + previewFrameIndex_;
             reader.readImageByIndex("/valid_frames/images", absIdx, mat);
+        }
+    } else if (srcAvi_->isChecked()) {
+        if (previewAviCap_.isOpened()) {
+            previewAviCap_.set(cv::CAP_PROP_POS_FRAMES,
+                               static_cast<double>(previewFrameIndex_));
+            cv::Mat raw;
+            if (previewAviCap_.read(raw) && !raw.empty()) {
+                if (raw.channels() == 1) {
+                    mat = raw.clone();
+                } else if (raw.channels() == 3) {
+                    cv::cvtColor(raw, mat, cv::COLOR_BGR2GRAY);
+                } else if (raw.channels() == 4) {
+                    cv::cvtColor(raw, mat, cv::COLOR_BGRA2GRAY);
+                }
+            }
         }
     } else {
         QDir dir(folderEdit_->text().trimmed());
@@ -493,6 +579,31 @@ bool BatchMaskDialog::loadInputs(std::vector<cv::Mat>& outGray,
             outNames[i] = "frame_" + std::to_string(start + i);
         }
         return true;
+    } else if (srcAvi_->isChecked()) {
+        const QString path = aviEdit_->text().trimmed();
+        if (path.isEmpty()) {
+            errorOut = tr("Please pick an AVI file.");
+            return false;
+        }
+        std::vector<std::string> errors;
+        if (!backend::services::batch_masks::loadFromAvi(
+                path.toStdString(), outGray, outNames, errors)) {
+            errorOut = tr("Failed to load AVI file.");
+            for (const auto& e : errors) {
+                logView_->appendPlainText(QString::fromStdString(e));
+            }
+            return false;
+        }
+        if (!errors.empty()) {
+            for (const auto& e : errors) {
+                logView_->appendPlainText(QString::fromStdString(e));
+            }
+        }
+        if (outGray.empty()) {
+            errorOut = tr("No frames decoded from AVI file.");
+            return false;
+        }
+        return true;
     } else {
         const QString folder = folderEdit_->text().trimmed();
         if (folder.isEmpty()) {
@@ -526,7 +637,9 @@ void BatchMaskDialog::setRunning(bool running) {
     runBtn_->setEnabled(!running);
     srcHdf5_->setEnabled(!running && !hdf5LoadedPath_.isEmpty());
     srcFolder_->setEnabled(!running);
+    srcAvi_->setEnabled(!running);
     folderBrowseBtn_->setEnabled(!running && srcFolder_->isChecked());
+    aviBrowseBtn_->setEnabled(!running && srcAvi_->isChecked());
     prevFrameBtn_->setEnabled(!running && previewFrameIndex_ > 0);
     nextFrameBtn_->setEnabled(!running && previewFrameIndex_ < previewFrameTotal_ - 1);
     setBgBtn_->setEnabled(!running);
@@ -618,6 +731,12 @@ QString BatchMaskDialog::computeAutoOutputPath() const {
     if (srcHdf5_->isChecked() && !hdf5LoadedPath_.isEmpty()) {
         const QFileInfo fi(hdf5LoadedPath_);
         return fi.dir().filePath(fi.baseName() + "_remasked.h5");
+    }
+    if (srcAvi_->isChecked()) {
+        const QString path = aviEdit_->text().trimmed();
+        if (path.isEmpty()) return {};
+        const QFileInfo fi(path);
+        return fi.dir().filePath(fi.completeBaseName() + "_remasked.h5");
     }
     const QString folder = folderEdit_->text().trimmed();
     if (folder.isEmpty()) return {};

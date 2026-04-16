@@ -5,6 +5,19 @@
 
 ## Features shipped
 
+- **Buffer save to AVI + AVI source for mask regeneration** (2026-04-16) —
+  [[../data-model/FrameStore]] gained `saveFramesToAvi()` overloads
+  (all/index-range/timestamp-range) writing a single uncompressed AVI via
+  `cv::VideoWriter` — Y800 preferred, DIB/BGR fallback.
+  [[../frontend/Dialogs]] `BufferSaveDialog` adds an "Output Format" radio
+  group (TIFF folder vs single AVI file) with FPS spinner. The empty-frame
+  filter applies to both formats. [[../services/BatchMaskSources]] gets
+  `loadFromAvi()` and `BatchMaskDialog` grows a third "AVI video file"
+  source radio. `CMakeLists.txt` links `opencv_videoio` on both targets.
+  Files: `CMakeLists.txt`, `FrameStore.{h,cpp}`, `PlaybackService.{h,cpp}`,
+  `BufferSaveDialog.{h,cpp,ui}`, `BatchMaskSources.{h,cpp}`,
+  `BatchMaskDialog.{h,cpp}`.
+
 - **BatchMaskDialog always saves standard HDF5** (2026-04-16) —
   Replaced the Output group box (Display / Save PNG / Save HDF5 checkboxes)
   with a single auto-save path: `<source_dir>/<stem>_remasked.h5`. After Run,

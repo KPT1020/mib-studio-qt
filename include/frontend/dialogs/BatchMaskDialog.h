@@ -8,6 +8,8 @@
 #include <memory>
 #include <vector>
 
+#include <opencv2/videoio.hpp>
+
 #include "backend/services/ProcessingService.h"
 #include "frontend/utils/RoiDrawCanvas.h"
 
@@ -53,6 +55,7 @@ public:
 private slots:
     void onSourceChanged();
     void onBrowseFolder();
+    void onBrowseAvi();
     void onRun();
 
     void onPreviewSourceChanged();
@@ -80,8 +83,11 @@ private:
     // Source selection
     QRadioButton* srcHdf5_ = nullptr;
     QRadioButton* srcFolder_ = nullptr;
+    QRadioButton* srcAvi_ = nullptr;
     QLineEdit* folderEdit_ = nullptr;
     QPushButton* folderBrowseBtn_ = nullptr;
+    QLineEdit* aviEdit_ = nullptr;
+    QPushButton* aviBrowseBtn_ = nullptr;
     QSpinBox* startIdxSpin_ = nullptr;
     QSpinBox* countSpin_ = nullptr;
 
@@ -105,6 +111,12 @@ private:
     int     previewFrameIndex_ = 0;
     int     previewFrameTotal_ = 0;
     cv::Mat backgroundMat_;   // empty = no background subtraction
+
+    // AVI preview cache (kept open for preview navigation).
+    // Mutable because getSourceFrameCount() is const but lazily opens the cap.
+    mutable cv::VideoCapture previewAviCap_;
+    mutable QString previewAviPath_;
+    mutable int     previewAviTotal_ = 0;
 
     // Config panel
     QSpinBox*       blurSpin_        = nullptr;
