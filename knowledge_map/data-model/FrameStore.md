@@ -72,11 +72,11 @@ actually runs depends on the platform's OpenCV backend (FFmpeg / VFW /
 MSMF) — check the log line `"Writing AVI ... ({Y800/GRAY|DIB/BGR})"`.
 
 Y800 is compact and bit-exact but **not playable in Windows Media
-Player / Movies & TV** — most consumer decoders don't support 8-bit
-grayscale AVIs and can crash trying. It does round-trip cleanly through
-`cv::VideoCapture`, so mask regeneration and VLC (on some builds) still
-work. Use a player that handles raw AVI codecs if you need to preview
-the file visually.
+Player / Movies & TV** — those consumer decoders don't support 8-bit
+grayscale AVIs and can crash trying. Confirmed to play in **VLC**, and
+it round-trips cleanly through `cv::VideoCapture` and ImageJ, so mask
+regeneration is unaffected. Use VLC (or ImageJ) to preview saved
+buffers visually.
 
 ## Frame filter (recording mode)
 

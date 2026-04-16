@@ -9,8 +9,9 @@
   [[../data-model/FrameStore]] gained `saveFramesToAvi()` overloads
   (all/index-range/timestamp-range) writing a single uncompressed AVI via
   `cv::VideoWriter` — Y800 preferred, DIB/BGR fallback. Y800 files don't
-  play in Windows Media Player / Movies & TV (known codec support gap) but
-  round-trip cleanly through `cv::VideoCapture` and ImageJ.
+  play in Windows Media Player / Movies & TV (known codec support gap)
+  but play in VLC and round-trip cleanly through `cv::VideoCapture` and
+  ImageJ.
   [[../frontend/Dialogs]] `BufferSaveDialog` adds an "Output Format" radio
   group — **AVI is the default** — with FPS spinner; the dialog
   auto-iterates the output path (`_1`, `_2`, ...) so it never overwrites
