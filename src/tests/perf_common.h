@@ -11,24 +11,40 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <numeric>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#else
+#include <unistd.h>
+#endif
 
 #include <spdlog/spdlog.h>
 
 namespace mib::perf {
+
+// ---------------------------------------------------------------------------
+// LatencyStats — extended with stddev and coefficient of variation (CV%).
+// ---------------------------------------------------------------------------
 
 struct LatencyStats {
     std::size_t n{0};
     double minUs{0.0};
     double meanUs{0.0};
     double medianUs{0.0};
+    double stddevUs{0.0};
+    double cvPct{0.0}; // coefficient of variation = (stddev / mean) * 100
     double p95Us{0.0};
     double p99Us{0.0};
     double maxUs{0.0};
@@ -48,13 +64,67 @@ inline LatencyStats summarise(std::vector<double> samplesUs) {
     s.p99Us = samplesUs[p99Idx];
     s.meanUs = std::accumulate(samplesUs.begin(), samplesUs.end(), 0.0)
                / static_cast<double>(s.n);
+    double sumSqDiff = 0.0;
+    for (double x : samplesUs) sumSqDiff += (x - s.meanUs) * (x - s.meanUs);
+    s.stddevUs = std::sqrt(sumSqDiff / static_cast<double>(s.n));
+    s.cvPct = (s.meanUs > 0.0) ? (s.stddevUs / s.meanUs * 100.0) : 0.0;
     return s;
 }
 
 inline void logStats(const std::string& label, const LatencyStats& s) {
-    SPDLOG_INFO("{} | n={} min={:.3f}us median={:.3f}us mean={:.3f}us "
-                "p95={:.3f}us p99={:.3f}us max={:.3f}us",
-                label, s.n, s.minUs, s.medianUs, s.meanUs, s.p95Us, s.p99Us, s.maxUs);
+    SPDLOG_INFO("{} | n={} mean={:.3f}±{:.3f}us (CV {:.1f}%) "
+                "median={:.3f}us p99={:.3f}us max={:.3f}us",
+                label, s.n, s.meanUs, s.stddevUs, s.cvPct,
+                s.medianUs, s.p99Us, s.maxUs);
+}
+
+// ---------------------------------------------------------------------------
+// Memory helpers — peak RSS for before/after tracking.
+// ---------------------------------------------------------------------------
+
+inline std::size_t peakRssBytes() {
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS pmc{};
+    if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc)))
+        return pmc.PeakWorkingSetSize;
+    return 0;
+#else
+    std::ifstream f("/proc/self/status");
+    std::string line;
+    while (std::getline(f, line)) {
+        if (line.rfind("VmHWM:", 0) == 0) {
+            std::size_t kb = 0;
+            std::sscanf(line.c_str(), "VmHWM: %zu kB", &kb);
+            return kb * 1024;
+        }
+    }
+    return 0;
+#endif
+}
+
+inline double peakRssMB() {
+    return static_cast<double>(peakRssBytes()) / (1024.0 * 1024.0);
+}
+
+// ---------------------------------------------------------------------------
+// Machine info — logged once per test for CI-runner attribution.
+// ---------------------------------------------------------------------------
+
+inline std::string machineInfoJson() {
+    std::ostringstream o;
+    o << "{\"hw_threads\":" << std::thread::hardware_concurrency()
+      << ",\"peak_rss_mb\":" << std::fixed << std::setprecision(1) << peakRssMB()
+      << "}";
+    return o.str();
+}
+
+// ---------------------------------------------------------------------------
+// Warmup helper — run a callable N times, discarding results.
+// ---------------------------------------------------------------------------
+
+template <typename Fn>
+inline void warmUp(Fn&& fn, std::size_t n = 10) {
+    for (std::size_t i = 0; i < n; ++i) fn();
 }
 
 inline std::size_t envSizeOr(const char* key, std::size_t fallback) {
@@ -72,6 +142,8 @@ inline std::string statsJson(const LatencyStats& s) {
       << ",\"min_us\":" << s.minUs
       << ",\"median_us\":" << s.medianUs
       << ",\"mean_us\":" << s.meanUs
+      << ",\"stddev_us\":" << s.stddevUs
+      << ",\"cv_pct\":" << s.cvPct
       << ",\"p95_us\":" << s.p95Us
       << ",\"p99_us\":" << s.p99Us
       << ",\"max_us\":" << s.maxUs

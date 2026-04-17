@@ -1,11 +1,13 @@
 #include "backend/services/AutofocusService.h"
 #include "backend/Tools.h"
 
+#ifdef MIB_HAS_EGRABBER
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
 #endif
 #include <Coremor/XMT_DLL_SER.h>
+#endif
 
 #include <spdlog/spdlog.h>
 #include <algorithm>
@@ -40,10 +42,14 @@ AutofocusService::~AutofocusService() {
 }
 
 bool AutofocusService::connect(int comPort, int baudRate, unsigned char deviceAddress) {
+#ifndef MIB_HAS_EGRABBER
+    (void)comPort; (void)baudRate; (void)deviceAddress;
+    SPDLOG_WARN("AutofocusService: hardware support not compiled in");
+    return false;
+#else
     if (connected_.load()) {
         disconnect();
     }
-    // Ensure port is closed before opening (e.g. after force-close or failed probe)
     CloseSer();
 
     comPort_ = comPort;
@@ -63,7 +69,6 @@ bool AutofocusService::connect(int comPort, int baudRate, unsigned char deviceAd
     SPDLOG_INFO("AutofocusService: COM port {} opened successfully", comPort);
     connected_.store(true);
 
-    // Initialize voltage
     {
         std::scoped_lock cfgLock(configMutex_);
         double initialVoltage = config_.initialVoltage;
@@ -82,6 +87,7 @@ bool AutofocusService::connect(int comPort, int baudRate, unsigned char deviceAd
     }
 
     return true;
+#endif // MIB_HAS_EGRABBER
 }
 
 void AutofocusService::disconnect() {
@@ -97,7 +103,7 @@ void AutofocusService::disconnect() {
         }
     }
 
-    // Set safe shutdown voltage
+#ifdef MIB_HAS_EGRABBER
     {
         std::scoped_lock cfgLock(configMutex_);
         double safeVoltage = config_.safeShutdownVoltage;
@@ -105,9 +111,8 @@ void AutofocusService::disconnect() {
             XMT_COMMAND_SinglePoint(deviceAddress_, 0, 0, 0, safeVoltage);
         }
     }
-
-    // Close COM port
     CloseSer();
+#endif
     connected_.store(false);
 
     // Clear buffers (both pending inbox and ring-ratio buffer) so a later
@@ -129,7 +134,10 @@ void AutofocusService::disconnect() {
 }
 
 bool AutofocusService::probeComPort(int comPort, int baudRate, unsigned char deviceAddress) {
-    // Caller must not be connected (SDK uses a single global COM handle).
+#ifndef MIB_HAS_EGRABBER
+    (void)comPort; (void)baudRate; (void)deviceAddress;
+    return false;
+#else
     CloseSer();
     int result = OpenComConnectRS232(comPort, baudRate);
     if (result == 0) {
@@ -142,6 +150,7 @@ bool AutofocusService::probeComPort(int comPort, int baudRate, unsigned char dev
         SPDLOG_DEBUG("AutofocusService: COM{} probe OK (read {:.2f} V)", comPort, val);
     }
     return plausible;
+#endif
 }
 
 void AutofocusService::setEnabled(bool enabled) {
@@ -293,13 +302,17 @@ void AutofocusService::statsLoop() {
 void AutofocusService::controlLoop() {
     SPDLOG_INFO("AutofocusService: Control loop started");
 
+#ifndef MIB_HAS_EGRABBER
+    while (running_.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+#else
     while (running_.load()) {
         if (!connected_.load()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue;
         }
 
-        // Handle manual voltage control requests
         {
             std::scoped_lock controlLock(controlMutex_);
             Config cfg;
@@ -416,9 +429,9 @@ void AutofocusService::controlLoop() {
             }
         }
 
-        // Sleep briefly to avoid busy waiting
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
+#endif // MIB_HAS_EGRABBER
 
     SPDLOG_INFO("AutofocusService: Control loop stopped");
 }

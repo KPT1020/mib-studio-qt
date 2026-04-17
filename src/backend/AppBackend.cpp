@@ -7,7 +7,9 @@
 #include "backend/services/ProcessingService.h"
 #include "backend/services/PlaybackService.h"
 #include "backend/playback/FrameStore.h"
+#ifdef MIB_HAS_EGRABBER
 #include "camera/common/EGrabberCamera.h"
+#endif
 #include "camera/mock/MockCamera.h"
 #include "backend/services/CameraControlService.h"
 #include "backend/services/AutofocusService.h"
@@ -220,9 +222,13 @@ namespace backend
         }
         else
         {
+#ifdef MIB_HAS_EGRABBER
             SPDLOG_INFO("AppBackend: configuring hardware EGrabber camera");
             captureService_->setCameraFactory([]()
                                               { return std::make_unique<camera::common::EGrabberCamera>(); });
+#else
+            SPDLOG_WARN("AppBackend: EGrabber not available — hardware camera disabled");
+#endif
             mockCameraConfigured_ = false;
         }
         playbackService_->setFrameStore(frameStore_);
@@ -266,8 +272,10 @@ namespace backend
         selectedLabel_ = label;
         mockCameraConfigured_ = false;
 
+#ifdef MIB_HAS_EGRABBER
         captureService_->setCameraFactory([interfaceIndex, deviceIndex]()
                                           { return std::make_unique<camera::common::EGrabberCamera>(interfaceIndex, deviceIndex); });
+#endif
         SPDLOG_INFO("Hardware camera selected: {} (if={}, dev={})",
                     label, interfaceIndex, deviceIndex);
     }

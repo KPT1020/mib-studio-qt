@@ -1,0 +1,29 @@
+# Stripped-down dependencies for CI perf test builds.
+# Omits onnxruntime (YOLO — not used by any perf test) to avoid
+# transitive dependency conflicts on Linux (cpuinfo version clash).
+# Full builds should use conanfile.txt.
+
+[requires]
+qt/6.7.3
+spdlog/1.17.0
+sqlite3/3.51.0
+hdf5/1.14.6
+opencv/4.12.0
+nlohmann_json/3.11.3
+
+[generators]
+CMakeDeps
+CMakeToolchain
+
+[options]
+qt/*:shared=True
+qt/*:qtcharts=True
+qt/*:qtserialport=True
+qt/*:with_imageformats=True
+opencv/*:shared=True
+opencv/*:with_openexr=False
+opencv/*:with_gtk=False
+opencv/*:with_wayland=False
+hdf5/*:shared=True
+hdf5/*:enable_cxx=True
+opencv/*:dnn=False

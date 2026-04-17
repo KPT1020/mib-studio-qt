@@ -29,6 +29,20 @@ and then emits `build/perf_summary.md` + `build/perf_summary.json`
 aggregating everything. `--upload` delegates to
 `scripts/upload_perf_results.py`.
 
+## Windows decoupling (MIB_HAS_EGRABBER)
+
+`mib_backend` now compiles on Linux. A CMake option `MIB_HAS_EGRABBER`
+(defaults to `${WIN32}`) gates EGrabber + Coremor compilation. When OFF,
+`EGrabberCamera.cpp` and `CameraControlService.cpp` are excluded from
+the `mib_backend` source list, Coremor calls in `AutofocusService` are
+compiled out (connect/probe return false), and `CaptureService`'s
+default factory returns `nullptr` instead of an `EGrabberCamera`. All
+perf tests build and run on Linux as mock-camera-only. Full hardware
+camera support on Windows is unchanged.
+
+Linux CI preset `linux-ci` in `CMakePresets.json`; CI workflow at
+`.github/workflows/test-linux.yml` runs the perf suite on every PR.
+
 ## Motivation
 
 The audit made three concrete claims:

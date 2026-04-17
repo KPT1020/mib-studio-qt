@@ -1,8 +1,9 @@
 #pragma once
 
+#ifdef MIB_HAS_EGRABBER
 #include <EGrabber.h>
+#endif
 
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -14,8 +15,8 @@ struct DiscoveredCamera {
     std::string interfaceID;
     std::string deviceID;
     std::string modelName;
-    std::string firmwareVersion; // "Unknown" if not available
-    std::string label; // interfaceID/deviceID (model) [Firmware: version]
+    std::string firmwareVersion;
+    std::string label;
 };
 
 struct DiscoveredFramegrabber {
@@ -26,21 +27,15 @@ struct DiscoveredFramegrabber {
     std::string deviceID;
     std::string streamID;
     std::string modelName;
-    std::string label; // interfaceID/deviceID/streamID (model)
+    std::string label;
 };
 
-/**
- * Camera utility service for:
- *  - Enumerating available cameras
- *  - Applying a JS configuration script to a specific device
- *
- * Note: This service does not own or interact with the CaptureService thread.
- */
 class CameraControlService {
 public:
     CameraControlService() = default;
     ~CameraControlService() = default;
 
+#ifdef MIB_HAS_EGRABBER
     std::vector<DiscoveredCamera> discoverCameras();
     std::vector<DiscoveredFramegrabber> discoverFramegrabbers();
 
@@ -49,11 +44,16 @@ public:
                              const std::string& scriptPath,
                              std::string* errorOut = nullptr);
 
-    // Issue GenICam SFNC DeviceReset to a specific device.
-    // Best effort stops acquisition first; returns true on success.
     bool deviceReset(int interfaceIndex,
                      int deviceIndex,
                      std::string* errorOut = nullptr);
+#else
+    std::vector<DiscoveredCamera> discoverCameras() { return {}; }
+    std::vector<DiscoveredFramegrabber> discoverFramegrabbers() { return {}; }
+
+    bool applyScriptToDevice(int, int, const std::string&, std::string* = nullptr) { return false; }
+    bool deviceReset(int, int, std::string* = nullptr) { return false; }
+#endif
 };
 
 } // namespace backend::services

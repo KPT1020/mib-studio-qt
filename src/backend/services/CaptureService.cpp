@@ -1,7 +1,9 @@
 #include "backend/services/CaptureService.h"
 #include "backend/Tools.h"
 #include "backend/playback/FrameStore.h"
+#ifdef MIB_HAS_EGRABBER
 #include "camera/common/EGrabberCamera.h"
+#endif
 #include "camera/common/ICamera.h"
 
 #include <spdlog/spdlog.h>
@@ -13,9 +15,13 @@
 namespace backend::services {
 
 CaptureService::CaptureService() {
+#ifdef MIB_HAS_EGRABBER
     cameraFactory_ = []() {
         return std::make_unique<camera::common::EGrabberCamera>();
     };
+#else
+    cameraFactory_ = []() -> std::unique_ptr<camera::common::ICamera> { return nullptr; };
+#endif
 }
 
 CaptureService::~CaptureService() { stop(); }

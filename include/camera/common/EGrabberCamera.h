@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef MIB_HAS_EGRABBER
+
 #include "camera/common/ICamera.h"
 
 #include <EGrabber.h>
@@ -61,4 +63,4 @@ private:
 
 } // namespace camera::common
 
-
+#endif // MIB_HAS_EGRABBER

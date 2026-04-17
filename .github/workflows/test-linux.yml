@@ -1,0 +1,82 @@
+name: Perf Tests (Linux)
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: perf-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  perf:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libgl1-mesa-dev libglu1-mesa-dev \
+            libx11-xcb-dev libfontenc-dev libice-dev libsm-dev libxaw7-dev \
+            libxcomposite-dev libxcursor-dev libxdamage-dev libxext-dev \
+            libxfixes-dev libxi-dev libxinerama-dev libxkbfile-dev libxmu-dev \
+            libxmuu-dev libxpm-dev libxrandr-dev libxrender-dev libxres-dev \
+            libxss-dev libxt-dev libxtst-dev libxv-dev libxxf86vm-dev
+
+      - name: Setup Python & Conan
+        run: |
+          pip install conan
+          conan profile detect --force
+
+      - name: Cache Conan packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.conan2
+          key: conan-linux-${{ hashFiles('conanfile_ci.txt') }}
+          restore-keys: |
+            conan-linux-
+
+      - name: Conan install
+        run: >
+          conan install conanfile_ci.txt -of build --build=missing
+          -s build_type=Release -s compiler.cppstd=17
+          -c tools.system.package_manager:mode=install
+          -c tools.system.package_manager:sudo=True
+
+      - name: Configure CMake
+        run: cmake --preset linux-ci
+
+      - name: Build perf suite
+        run: cmake --build build --target perf_suite
+
+      - name: Run perf tests
+        run: ctest --test-dir build -L perf --output-on-failure --timeout 120
+        env:
+          MIB_CAMERA_MODE: mock
+          QT_QPA_PLATFORM: offscreen
+
+      - name: Generate summary
+        if: always()
+        run: python scripts/run_perf_suite.py --build-dir build --no-run
+
+      - name: Post summary to PR
+        if: always()
+        run: |
+          if [ -f build/perf_summary.md ]; then
+            cat build/perf_summary.md >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-results
+          path: |
+            build/perf_summary.md
+            build/perf_summary.json
+            build/*_results.json
+          retention-days: 30

@@ -1,3 +1,4 @@
+#ifdef MIB_HAS_EGRABBER
 #include "camera/common/EGrabberCamera.h"
 
 #include <spdlog/spdlog.h>
@@ -333,4 +334,4 @@ bool EGrabberCamera::setTriggerOutput(bool high) {
 
 } // namespace camera::common
 
-
+#endif // MIB_HAS_EGRABBER

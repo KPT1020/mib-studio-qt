@@ -78,13 +78,21 @@ if(NOT HDF5_FOUND)
     find_package(HDF5 MODULE QUIET)
 endif()
 
-# Include directories (EGrabber headers on Windows install path)
-include_directories("C:/Program Files/Euresys/eGrabber/include")
+# Hardware camera support (EGrabber SDK + Coremor nanopositioner).
+# ON by default on Windows where the SDKs are available; OFF elsewhere.
+# When OFF, mib_backend still builds — EGrabberCamera, CameraControlService,
+# and Coremor calls in AutofocusService are compiled out.
+option(MIB_HAS_EGRABBER "Build with Euresys EGrabber + Coremor support" ${WIN32})
+
+# Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor)
+if(MIB_HAS_EGRABBER)
+    include_directories("C:/Program Files/Euresys/eGrabber/include")
+    include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor)
+endif()
 
 # Backend library (services, APIs)
-add_library(mib_backend STATIC
+set(MIB_BACKEND_SOURCES
     src/backend/AppBackend.cpp
     src/backend/BackgroundCaptureNotifier.cpp
     include/backend/BackgroundCaptureNotifier.h
@@ -92,7 +100,6 @@ add_library(mib_backend STATIC
     src/backend/EModulusLut.cpp
     src/backend/services/Logger.cpp
     src/backend/services/SqliteService.cpp
-    src/backend/services/CameraControlService.cpp
     src/backend/services/Hdf5Service.cpp
     src/backend/services/CaptureService.cpp
     src/backend/services/RecorderService.cpp
@@ -104,31 +111,52 @@ add_library(mib_backend STATIC
     src/backend/services/TriggerService.cpp
     src/backend/services/YoloService.cpp
     src/backend/playback/FrameStore.cpp
-    src/camera/common/EGrabberCamera.cpp
     src/camera/mock/MockCamera.cpp
 )
+if(MIB_HAS_EGRABBER)
+    list(APPEND MIB_BACKEND_SOURCES
+        src/camera/common/EGrabberCamera.cpp
+        src/backend/services/CameraControlService.cpp
+    )
+endif()
+
+add_library(mib_backend STATIC ${MIB_BACKEND_SOURCES})
 
 # Explicitly enable AUTOMOC for this target to ensure MOC files are generated
 set_target_properties(mib_backend PROPERTIES AUTOMOC ON)
 target_compile_definitions(mib_backend PUBLIC
     $<$<CONFIG:Debug>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG>
+    $<$<BOOL:${MIB_HAS_EGRABBER}>:MIB_HAS_EGRABBER>
 )
 
 target_include_directories(mib_backend PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor
-    "C:/Program Files/Euresys/eGrabber/include"
 )
+if(MIB_HAS_EGRABBER)
+    target_include_directories(mib_backend PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor
+        "C:/Program Files/Euresys/eGrabber/include"
+    )
+endif()
 
-# Coremor library
-set(COREMOR_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor)
-target_link_libraries(mib_backend PUBLIC
-    spdlog::spdlog
-    Qt6::Core
-    Qt6::Gui
-    Qt6::SerialPort
-    ${COREMOR_LIB_DIR}/XMT_DLL_SER.lib
-)
+# Coremor library (Windows-only nanopositioner DLL)
+if(MIB_HAS_EGRABBER)
+    set(COREMOR_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor)
+    target_link_libraries(mib_backend PUBLIC
+        spdlog::spdlog
+        Qt6::Core
+        Qt6::Gui
+        Qt6::SerialPort
+        ${COREMOR_LIB_DIR}/XMT_DLL_SER.lib
+    )
+else()
+    target_link_libraries(mib_backend PUBLIC
+        spdlog::spdlog
+        Qt6::Core
+        Qt6::Gui
+        Qt6::SerialPort
+    )
+endif()
 
 if(TARGET opencv_world)
     target_link_libraries(mib_backend PUBLIC opencv_world)
@@ -312,8 +340,12 @@ set_target_properties(mib_studio_qt PROPERTIES
 
 target_include_directories(mib_studio_qt PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    "C:/Program Files/Euresys/eGrabber/include"
 )
+if(MIB_HAS_EGRABBER)
+    target_include_directories(mib_studio_qt PRIVATE
+        "C:/Program Files/Euresys/eGrabber/include"
+    )
+endif()
 
 target_link_libraries(mib_studio_qt PRIVATE
     Qt6::Widgets

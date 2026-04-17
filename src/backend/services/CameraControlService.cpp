@@ -1,3 +1,4 @@
+#ifdef MIB_HAS_EGRABBER
 #include "backend/services/CameraControlService.h"
 
 #include <spdlog/spdlog.h>
@@ -244,3 +245,5 @@ namespace backend::services
     }
 
 } // namespace backend::services
+
+#endif // MIB_HAS_EGRABBER
