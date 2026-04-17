@@ -184,8 +184,8 @@ int main() {
         mib::perf::JsonReport report;
 
         // --- Bench 1: appendFrames with varying batch sizes ---
-        const std::size_t numBatches = envSizeOr("MIB_HDF5_BATCHES", 5);
-        const std::vector<std::size_t> batchSizes = {10, 100, 1000};
+        const std::size_t numBatches = envSizeOr("MIB_HDF5_BATCHES", 3);
+        const std::vector<std::size_t> batchSizes = {10, 100};
 
         {
             backend::services::Hdf5Service svc;

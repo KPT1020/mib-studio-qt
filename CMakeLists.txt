@@ -64,7 +64,7 @@ find_package(Qt6 COMPONENTS Core Widgets Gui Charts Network Concurrent SerialPor
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG QUIET)
 find_package(OpenCV CONFIG REQUIRED)
-find_package(onnxruntime CONFIG REQUIRED)
+find_package(onnxruntime CONFIG QUIET)
 
 # Prefer official SQLite3 package; fallback to unofficial config if needed
 find_package(SQLite3 QUIET)

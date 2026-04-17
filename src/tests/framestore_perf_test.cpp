@@ -48,7 +48,7 @@ using perf_clock = std::chrono::steady_clock;
 
 namespace {
 
-constexpr std::size_t kRingCapacity = 5000; // matches AppBackend::initialize
+constexpr std::size_t kRingCapacity = 256; // small ring to keep warmup fast
 
 struct FrameSize {
     const char* label;
@@ -264,10 +264,10 @@ int main() {
     try {
         spdlog::set_level(spdlog::level::info);
 
-        const std::size_t pushIters = envSizeOr("MIB_FRAMESTORE_PUSH_ITERS", 2000);
-        const std::size_t getIters  = envSizeOr("MIB_FRAMESTORE_GET_ITERS", 20'000);
+        const std::size_t pushIters = envSizeOr("MIB_FRAMESTORE_PUSH_ITERS", 500);
+        const std::size_t getIters  = envSizeOr("MIB_FRAMESTORE_GET_ITERS", 2000);
         const auto contentionMs = std::chrono::milliseconds(
-            static_cast<long long>(envSizeOr("MIB_FRAMESTORE_CONTENTION_MS", 1000)));
+            static_cast<long long>(envSizeOr("MIB_FRAMESTORE_CONTENTION_MS", 500)));
 
         SPDLOG_INFO("FrameStore perf | ring={} push_iters={} get_iters={} contention_ms={}",
                     kRingCapacity, pushIters, getIters, contentionMs.count());

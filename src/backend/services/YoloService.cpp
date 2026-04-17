@@ -1,7 +1,14 @@
 #include "backend/services/YoloService.h"
 
 #include <spdlog/spdlog.h>
+
+#if __has_include(<onnxruntime_cxx_api.h>)
+#define MIB_HAS_ONNXRUNTIME 1
 #include <onnxruntime_cxx_api.h>
+#else
+#define MIB_HAS_ONNXRUNTIME 0
+namespace Ort { class Env {}; class Session {}; }
+#endif
 
 #include <filesystem>
 #include <fstream>
@@ -16,8 +23,10 @@ namespace backend::services {
 YoloService::YoloService() = default;
 
 YoloService::~YoloService() {
+#if MIB_HAS_ONNXRUNTIME
     session_.reset();
     env_.reset();
+#endif
 }
 
 std::string YoloService::resolveModelPath(const std::string& basePath) {
@@ -64,31 +73,30 @@ std::string YoloService::resolveModelPath(const std::string& basePath) {
 }
 
 bool YoloService::initialize(const std::string& modelPath) {
+#if !MIB_HAS_ONNXRUNTIME
+    (void)modelPath;
+    SPDLOG_WARN("YoloService: ONNX Runtime not available — YOLO disabled");
+    return false;
+#else
     if (isLoaded_) {
         SPDLOG_WARN("YoloService: Model already loaded, skipping initialization");
         return true;
     }
 
-    // Resolve model path
     std::string resolvedPath = resolveModelPath(modelPath);
-    
+
     if (!std::filesystem::exists(resolvedPath)) {
         SPDLOG_WARN("YoloService: Model file not found at: {}", resolvedPath);
-        SPDLOG_WARN("YoloService: Tried paths relative to executable and development paths");
         return false;
     }
 
     try {
-        // Initialize ONNX Runtime environment
         env_ = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "YoloService");
-        
-        // Create session options
+
         Ort::SessionOptions sessionOptions;
         sessionOptions.SetIntraOpNumThreads(1);
         sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 
-        // Create session
-        // On Windows, ONNX Runtime requires wide string (wchar_t*) for the model path
 #ifdef _WIN32
         int size_needed = MultiByteToWideChar(CP_UTF8, 0, resolvedPath.c_str(), -1, NULL, 0);
         std::wstring wpath(size_needed, 0);
@@ -101,7 +109,7 @@ bool YoloService::initialize(const std::string& modelPath) {
         modelPath_ = resolvedPath;
         isLoaded_ = true;
 
-        SPDLOG_INFO("YoloService: Successfully loaded YOLO 11 seg nano model from: {}", resolvedPath);
+        SPDLOG_INFO("YoloService: Successfully loaded YOLO model from: {}", resolvedPath);
         return true;
     }
     catch (const Ort::Exception& e) {
@@ -116,10 +124,15 @@ bool YoloService::initialize(const std::string& modelPath) {
         SPDLOG_ERROR("YoloService: Unknown error loading model");
         return false;
     }
+#endif // MIB_HAS_ONNXRUNTIME
 }
 
 Ort::Session* YoloService::getSession() const {
+#if MIB_HAS_ONNXRUNTIME
     return session_.get();
+#else
+    return nullptr;
+#endif
 }
 
 Ort::Env* YoloService::getEnv() const {
