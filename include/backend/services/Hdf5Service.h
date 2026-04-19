@@ -122,6 +122,15 @@ public:
     bool writeRecordingInfo(uint64_t startTimeNs, uint64_t endTimeNs,
                             uint64_t totalFrames, uint64_t filteredFrames);
 
+    // Recording-mode readers (counterparts to the write* functions above).
+    // isRecordingFile() detects a recording-mode file via the presence of
+    // /recording_info. readRecordingMetadata fills only index + timestampNs
+    // on each ProcessedFrame; other fields remain default.
+    bool isRecordingFile() const;
+    bool readRecordingMetadata(std::vector<ProcessedFrame>& frames);
+    bool readRecordingInfo(uint64_t& startTimeNs, uint64_t& endTimeNs,
+                           uint64_t& totalFrames, uint64_t& filteredFrames);
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

@@ -27,6 +27,25 @@
   see `git log` entry
   "fix: add Close File button and fix dangling pointer crash in review tab").
 
+## Recording-mode files
+
+When a file has `/recording_info` present, [[../services/Hdf5Service]]'s
+`isRecordingFile()` returns true and the tab branches into a single-view
+layout:
+
+- The "Invalid Frames" tab is hidden and "Valid Frames" is relabelled to
+  "Frames"; all recorded frames populate `validFrames_`.
+- Metadata comes from `readRecordingMetadata` (only `index` + `timestampNs`
+  populated); status text uses `readRecordingInfo`.
+- Dataset reads go through `imagesPath(bool)` / `masksPath(bool)` helpers
+  that route to `/recorded_frames/images` (and return `""` for masks,
+  since recording files have none).
+- Disabled in recording mode: overlay combo, ROI overlay, Regenerate
+  Masks, Export Metrics (no per-frame metrics), Export Charts (no
+  metrics to chart). Export All still writes the raw TIFF images.
+- `clearDisplay()` restores default tab labels/visibility so loading an
+  experiment file after a recording file works correctly.
+
 ## Regenerate masks button
 
 Toolbar action **"Regenerate masks…"** opens [[Dialogs|BatchMaskDialog]]

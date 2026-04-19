@@ -2466,6 +2466,142 @@ namespace backend::services {
 
     // --- Frame recording mode implementation ---
 
+    bool Hdf5Service::isRecordingFile() const
+    {
+        if (!isFileOpen())
+            return false;
+        return H5Lexists(impl_->fileId_, "/recording_info", H5P_DEFAULT) > 0;
+    }
+
+    bool Hdf5Service::readRecordingMetadata(std::vector<ProcessedFrame>& frames)
+    {
+        if (!isFileOpen())
+        {
+            SPDLOG_ERROR("readRecordingMetadata: HDF5 file is not open");
+            return false;
+        }
+        frames.clear();
+
+        const char* datasetPath = "/recorded_frames/metadata";
+        htri_t exists = H5Lexists(impl_->fileId_, datasetPath, H5P_DEFAULT);
+        if (exists <= 0)
+        {
+            SPDLOG_WARN("Dataset {} does not exist", datasetPath);
+            return false;
+        }
+
+        hid_t datasetId = H5Dopen2(impl_->fileId_, datasetPath, H5P_DEFAULT);
+        if (datasetId < 0)
+        {
+            SPDLOG_ERROR("Failed to open recording metadata dataset {}", datasetPath);
+            return false;
+        }
+
+        hid_t dataspaceId = H5Dget_space(datasetId);
+        hsize_t dims[1] = {0};
+        H5Sget_simple_extent_dims(dataspaceId, dims, nullptr);
+        H5Sclose(dataspaceId);
+
+        hsize_t numFrames = dims[0];
+        if (numFrames == 0)
+        {
+            H5Dclose(datasetId);
+            SPDLOG_INFO("readRecordingMetadata: 0 entries");
+            return true;
+        }
+
+        // Matches the RecMeta compound written in appendRecordingFrames.
+        // Build the in-memory read type explicitly (don't rely on the file's
+        // compound definition) so member ordering stays fixed.
+        struct RecMeta
+        {
+            uint64_t index;
+            uint64_t timestampNs;
+            uint64_t width;
+            uint64_t height;
+        };
+
+        hid_t compTypeId = H5Tcreate(H5T_COMPOUND, sizeof(RecMeta));
+        H5Tinsert(compTypeId, "index", HOFFSET(RecMeta, index), H5T_NATIVE_UINT64);
+        H5Tinsert(compTypeId, "timestampNs", HOFFSET(RecMeta, timestampNs), H5T_NATIVE_UINT64);
+        H5Tinsert(compTypeId, "width", HOFFSET(RecMeta, width), H5T_NATIVE_UINT64);
+        H5Tinsert(compTypeId, "height", HOFFSET(RecMeta, height), H5T_NATIVE_UINT64);
+
+        std::vector<RecMeta> entries(numFrames);
+        herr_t status = H5Dread(datasetId, compTypeId, H5S_ALL, H5S_ALL, H5P_DEFAULT, entries.data());
+        H5Tclose(compTypeId);
+        H5Dclose(datasetId);
+
+        if (status < 0)
+        {
+            SPDLOG_ERROR("Failed to read recording metadata dataset {}", datasetPath);
+            return false;
+        }
+
+        frames.reserve(numFrames);
+        for (const auto& e : entries)
+        {
+            ProcessedFrame frame;
+            frame.index = e.index;
+            frame.timestampNs = e.timestampNs;
+            // width/height are implicit in the images dataset; other
+            // ProcessedFrame fields (validation, masks, images) remain default.
+            frames.push_back(std::move(frame));
+        }
+
+        SPDLOG_INFO("readRecordingMetadata: {} entries", frames.size());
+        return true;
+    }
+
+    bool Hdf5Service::readRecordingInfo(uint64_t& startTimeNs, uint64_t& endTimeNs,
+                                        uint64_t& totalFrames, uint64_t& filteredFrames)
+    {
+        startTimeNs = 0;
+        endTimeNs = 0;
+        totalFrames = 0;
+        filteredFrames = 0;
+
+        if (!isFileOpen())
+        {
+            SPDLOG_ERROR("readRecordingInfo: HDF5 file is not open");
+            return false;
+        }
+
+        htri_t exists = H5Lexists(impl_->fileId_, "/recording_info", H5P_DEFAULT);
+        if (exists <= 0)
+        {
+            SPDLOG_WARN("readRecordingInfo: /recording_info group not found");
+            return false;
+        }
+
+        hid_t groupId = H5Gopen2(impl_->fileId_, "/recording_info", H5P_DEFAULT);
+        if (groupId < 0)
+        {
+            SPDLOG_ERROR("readRecordingInfo: failed to open /recording_info");
+            return false;
+        }
+
+        auto readAttr = [&](const char* name, uint64_t& out) -> bool {
+            if (H5Aexists(groupId, name) <= 0)
+                return false;
+            hid_t attr = H5Aopen(groupId, name, H5P_DEFAULT);
+            if (attr < 0)
+                return false;
+            herr_t s = H5Aread(attr, H5T_NATIVE_UINT64, &out);
+            H5Aclose(attr);
+            return s >= 0;
+        };
+
+        readAttr("start_time_ns", startTimeNs);
+        readAttr("end_time_ns", endTimeNs);
+        readAttr("total_recorded_frames", totalFrames);
+        readAttr("total_filtered_empty_frames", filteredFrames);
+
+        H5Gclose(groupId);
+        SPDLOG_INFO("readRecordingInfo: recorded={}, filtered={}", totalFrames, filteredFrames);
+        return true;
+    }
+
     bool Hdf5Service::initializeRecordingDatasets()
     {
         if (!isFileOpen())
