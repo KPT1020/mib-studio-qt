@@ -4,9 +4,13 @@
 
 #include <chrono>
 #include <filesystem>
+#include <string>
 #include <vector>
 
 namespace camera::mock {
+
+bool isSupportedMockImageFile(const std::filesystem::path& path);
+bool validateMockImageFolder(const std::filesystem::path& folder, std::string& errorMessage, bool requireAllReadable = true);
 
 struct MockCameraOptions {
     std::filesystem::path folder;
@@ -44,6 +48,7 @@ private:
     bool running_{false};
     std::chrono::steady_clock::time_point lastFrameTime_{};
     mutable camera::common::CameraStats stats_{};
+    std::string lastError_;
 };
 
 } // namespace camera::mock

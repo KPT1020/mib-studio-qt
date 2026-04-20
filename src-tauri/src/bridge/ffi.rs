@@ -55,7 +55,7 @@ pub mod ffi_inner {
             dir: &str,
             interval_ms: u32,
             loop_files: bool,
-        ) -> bool;
+        ) -> String;
         fn bridge_start_capture(shim: &AppBackendShim) -> bool;
         fn bridge_stop_capture(shim: &AppBackendShim);
         fn bridge_is_capture_running(shim: &AppBackendShim) -> bool;
@@ -82,6 +82,7 @@ pub mod ffi_inner {
             algo_avg_us: f64,
             total_valid_flushed: u64,
         );
+        fn mib_emit_background(frame_index: u64, png_bytes: Vec<u8>);
     }
 }
 
@@ -116,4 +117,8 @@ fn mib_emit_stats(
         algo_avg_us,
         total_valid_flushed,
     );
+}
+
+fn mib_emit_background(frame_index: u64, png_bytes: Vec<u8>) {
+    crate::bridge::emit_background_from_cpp(frame_index, png_bytes);
 }

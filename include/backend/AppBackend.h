@@ -1,12 +1,12 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <opencv2/core.hpp>
 #include <string>
 #include <thread>
-
-namespace backend { class BackgroundCaptureNotifier; }
 
 namespace backend::services
 {
@@ -87,8 +87,8 @@ namespace backend
         void setLastConfigJson(const std::string& json);
         std::string getLastConfigJson() const;
 
-        // Get background capture notifier for Qt signal connections
-        BackgroundCaptureNotifier* backgroundCaptureNotifier() const;
+        /// Called when auto-background capture fires (processing thread). Qt/Tauri register via this.
+        void setBackgroundCaptureCallback(std::function<void(const cv::Mat&, uint64_t frameIndex)> cb);
 
     private:
         std::unique_ptr<services::SqliteService> sqliteService_;
@@ -116,8 +116,8 @@ namespace backend
         std::atomic<uint64_t> frameRecordingFiltered_{0};
         std::string frameRecordingPath_;
 
-        // Background capture notifier for Qt signals
-        std::unique_ptr<BackgroundCaptureNotifier> backgroundCaptureNotifier_;
+        std::mutex background_capture_cb_mutex_;
+        std::function<void(const cv::Mat&, uint64_t)> background_capture_cb_;
 
         // Raw config JSON for HDF5 metadata persistence
         mutable std::mutex configJsonMutex_;

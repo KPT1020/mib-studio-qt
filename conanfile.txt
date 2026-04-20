@@ -10,11 +10,12 @@ nlohmann_json/3.11.3
 [generators]
 CMakeDeps
 CMakeToolchain
+VirtualRunEnv
 
 [options]
 qt/*:shared=True
 qt/*:qtcharts=True
-qt/*:qtserialport=True
+qt/*:qtserialport=False
 qt/*:with_imageformats=True
 opencv/*:shared=True
 opencv/*:with_openexr=False

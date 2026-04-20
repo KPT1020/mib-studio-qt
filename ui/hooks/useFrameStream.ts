@@ -7,12 +7,25 @@ export function useFrameStream() {
   const setCurrentFrame = usePlaybackStore((s) => s.setCurrentFrame);
 
   useEffect(() => {
-    const unlisten = listen<FrameNewEvent>("frame:new", (event) => {
-      setCurrentFrame(event.payload.imageBase64, event.payload.index);
-    });
+    let cancelled = false;
+    const unlistenFns: Array<() => void> = [];
+
+    const register = async () => {
+      const fn = await listen<FrameNewEvent>("frame:new", (event) => {
+        setCurrentFrame(event.payload.imageBase64, event.payload.index);
+      });
+      if (cancelled) {
+        fn();
+        return;
+      }
+      unlistenFns.push(fn);
+    };
+
+    register();
 
     return () => {
-      unlisten.then((fn) => fn());
+      cancelled = true;
+      unlistenFns.forEach((fn) => fn());
     };
   }, [setCurrentFrame]);
 }

@@ -8,8 +8,12 @@ import { Play, Square } from "lucide-react";
 
 export function PreviewPage() {
   const isRunning = useCaptureStore((s) => s.isRunning);
+  const cameraConfigured = useCaptureStore((s) => s.cameraConfigured);
 
   const handlePlay = async () => {
+    if (!cameraConfigured) {
+      return;
+    }
     try {
       await startCapture();
       useCaptureStore.getState().setRunning(true);
@@ -38,7 +42,12 @@ export function PreviewPage() {
           {!isRunning && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="flex items-center gap-3 pointer-events-auto">
-                <Button size="lg" onClick={handlePlay} className="min-w-[120px] min-h-[48px] text-base gap-2">
+                <Button
+                  size="lg"
+                  onClick={handlePlay}
+                  disabled={!cameraConfigured}
+                  className="min-w-[120px] min-h-[48px] text-base gap-2"
+                >
                   <Play className="h-5 w-5" />
                   Play
                 </Button>

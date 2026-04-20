@@ -10,19 +10,36 @@ export function useProcessingStats() {
   const setBackgroundImage = useProcessingStore((s) => s.setBackgroundImage);
 
   useEffect(() => {
-    const unlistenStats = listen<StatsUpdateEvent>("stats:update", (event) => {
-      const p = event.payload;
-      setStats(p.captureFrameRate, p.captureDataRateMBps, 0);
-      setProcessingStats(p.algoFps, p.validFps, p.invalidFps, p.algoAvgUs, p.totalValidFlushed);
-    });
+    let cancelled = false;
+    const unlistenFns: Array<() => void> = [];
 
-    const unlistenBg = listen<BackgroundCapturedEvent>("background:captured", (event) => {
-      setBackgroundImage(event.payload.imageBase64);
-    });
+    const register = async () => {
+      const statsFn = await listen<StatsUpdateEvent>("stats:update", (event) => {
+        const p = event.payload;
+        setStats(p.captureFrameRate, p.captureDataRateMbps, 0);
+        setProcessingStats(p.algoFps, p.validFps, p.invalidFps, p.algoAvgUs, p.totalValidFlushed);
+      });
+      if (cancelled) {
+        statsFn();
+      } else {
+        unlistenFns.push(statsFn);
+      }
+
+      const bgFn = await listen<BackgroundCapturedEvent>("background:captured", (event) => {
+        setBackgroundImage(event.payload.imageBase64);
+      });
+      if (cancelled) {
+        bgFn();
+      } else {
+        unlistenFns.push(bgFn);
+      }
+    };
+
+    register();
 
     return () => {
-      unlistenStats.then((fn) => fn());
-      unlistenBg.then((fn) => fn());
+      cancelled = true;
+      unlistenFns.forEach((fn) => fn());
     };
   }, [setStats, setProcessingStats, setBackgroundImage]);
 }

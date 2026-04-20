@@ -8,7 +8,7 @@ export interface FrameNewEvent {
 
 export interface StatsUpdateEvent {
   captureFrameRate: number;
-  captureDataRateMBps: number;
+  captureDataRateMbps: number;
   algoFps: number;
   validFps: number;
   invalidFps: number;

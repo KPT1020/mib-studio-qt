@@ -7,7 +7,10 @@ use base64::Engine;
 use parking_lot::Mutex;
 use tauri::{AppHandle, Emitter};
 
-use crate::events::{FrameNewPayload, StatsUpdatePayload, FRAME_NEW, STATS_UPDATE};
+use crate::events::{
+    BackgroundCapturedPayload, FrameNewPayload, StatsUpdatePayload, BACKGROUND_CAPTURED, FRAME_NEW,
+    STATS_UPDATE,
+};
 
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 
@@ -72,12 +75,15 @@ impl Backend {
 
     pub fn configure_mock(&self, dir: &str, interval_ms: u32, loop_files: bool) -> Result<()> {
         let guard = self.shim.lock();
-        ffi::bridge_configure_mock(
+        let err = ffi::bridge_configure_mock(
             guard.as_ref().expect("shim null"),
             dir,
             interval_ms,
             loop_files,
         );
+        if !err.is_empty() {
+            return Err(anyhow!("{err}"));
+        }
         Ok(())
     }
 
@@ -134,6 +140,18 @@ pub(crate) fn emit_frame_from_cpp(
         timestamp_ns,
     };
     let _ = app.emit(FRAME_NEW, payload);
+}
+
+pub(crate) fn emit_background_from_cpp(frame_index: u64, png_bytes: Vec<u8>) {
+    let Some(app) = APP_HANDLE.get() else {
+        return;
+    };
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+    let payload = BackgroundCapturedPayload {
+        image_base64: b64,
+        frame_index,
+    };
+    let _ = app.emit(BACKGROUND_CAPTURED, payload);
 }
 
 pub(crate) fn emit_stats_from_cpp(

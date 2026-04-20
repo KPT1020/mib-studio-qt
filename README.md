@@ -67,12 +67,18 @@ Requires **Node.js** (for `npm`) and a **Rust** toolchain (`rustup`) with `cargo
    ```bash
    cmake --build build --preset windows-default-build-release --target mib_backend
    ```
-3. **Runtime `PATH` (Windows):** include `build/Release` and the Conan package `bin` folders for Qt, OpenCV, HDF5, etc., or you may get missing-DLL failures (e.g. `0xC0000135`) at startup.
+3. **Runtime DLLs (Windows):** `mib-studio.exe` loads OpenCV, HDF5, ONNX Runtime, etc. **`src-tauri/build.rs` copies Conan `bin\\*.dll` and `XMT_DLL_SER.dll` into `src-tauri/target/<profile>/` after linking**, so a plain `cargo run --release` usually works without setting `PATH`. If you still see **`0xC0000135`**, run `cargo build` again (or use Conan’s run env below). The Qt app still needs Qt on `PATH`; the Tauri binary does **not** need Qt DLLs for `mib_backend`.
+   - Optional: after `conan install`, Conan’s **VirtualRunEnv** can provide `build/conanrun.bat` for a PATH-only workflow:
+   ```powershell
+   .\scripts\run-tauri-with-conan-path.ps1
+   ```
+   Or: `cmd /c "call build\conanrun.bat && cd src-tauri && cargo run --release"`.
 4. Build or run the Tauri app from the **repository root** (where `package.json` lives):
    ```bash
    npm install
    npm run tauri:dev
    ```
+   (Ensure `PATH` includes Conan bins as in step 3, or use `run-tauri-with-conan-path.ps1` / `conanrun.bat` when invoking `cargo`.)
    Or build the binary only:
    ```bash
    cd src-tauri

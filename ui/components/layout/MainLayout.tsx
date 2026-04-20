@@ -22,15 +22,24 @@ export function MainLayout() {
   const activeTab = useAppStore((s) => s.activeTab);
   const setActiveTab = useAppStore((s) => s.setActiveTab);
   const isRunning = useCaptureStore((s) => s.isRunning);
+  const cameraConfigured = useCaptureStore((s) => s.cameraConfigured);
+  const setStatusText = useAppStore((s) => s.setStatusText);
   const isExperimentActive = useExperimentStore((s) => s.isActive);
 
   const handleStartCamera = async () => {
+    if (!cameraConfigured) {
+      setStatusText("Configure a camera before starting capture");
+      return;
+    }
     try {
       await startCapture();
       useCaptureStore.getState().setRunning(true);
-      useAppStore.getState().setStatusText("Camera running");
+      setStatusText("Camera running");
     } catch (e) {
       console.error("Failed to start capture:", e);
+      const message = e instanceof Error ? e.message : String(e);
+      useCaptureStore.getState().setRunning(false);
+      setStatusText(`Camera start failed: ${message}`);
     }
   };
 
@@ -38,9 +47,11 @@ export function MainLayout() {
     try {
       await stopCapture();
       useCaptureStore.getState().setRunning(false);
-      useAppStore.getState().setStatusText("Camera stopped");
+      setStatusText("Camera stopped");
     } catch (e) {
       console.error("Failed to stop capture:", e);
+      const message = e instanceof Error ? e.message : String(e);
+      setStatusText(`Camera stop failed: ${message}`);
     }
   };
 
@@ -65,7 +76,7 @@ export function MainLayout() {
 
             {/* Corner widget: camera controls */}
             <div className="ml-auto flex items-center gap-1 px-2 pb-1">
-              <Button size="sm" onClick={handleStartCamera} disabled={isRunning}>
+              <Button size="sm" onClick={handleStartCamera} disabled={isRunning || !cameraConfigured}>
                 Start Camera
               </Button>
               <Button size="sm" variant="outline" onClick={handleStopCamera} disabled={!isRunning}>

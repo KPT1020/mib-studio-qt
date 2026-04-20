@@ -98,10 +98,10 @@ void bridge_set_hardware_camera(const AppBackendShim& shim,
                                 std::int32_t interface_index,
                                 std::int32_t device_index,
                                 rust::Str label);
-bool bridge_configure_mock(const AppBackendShim& shim,
-                           rust::Str dir,
-                           std::uint32_t interval_ms,
-                           bool loop_files);
+rust::String bridge_configure_mock(const AppBackendShim& shim,
+                                   rust::Str dir,
+                                   std::uint32_t interval_ms,
+                                   bool loop_files);
 bool bridge_start_capture(const AppBackendShim& shim);
 void bridge_stop_capture(const AppBackendShim& shim);
 bool bridge_is_capture_running(const AppBackendShim& shim);

@@ -69,7 +69,7 @@ export function ImageCanvas({ alwaysShowRoi, roi: externalRoi, onRoiChange }: Im
     img.onload = () => {
       imageRef.current = img;
     };
-    img.src = `data:image/jpeg;base64,${currentFrameBase64}`;
+    img.src = `data:image/png;base64,${currentFrameBase64}`;
   }, [currentFrameBase64]);
 
   // Load mask image when base64 changes

@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { configureMock } from "../../hooks/useBackend";
 import { useCaptureStore } from "../../stores/captureStore";
+import { useAppStore } from "../../stores/appStore";
 import {
   Dialog,
   DialogContent,
@@ -19,22 +21,52 @@ interface Props {
 
 export function MockConfigDialog({ onClose }: Props) {
   const [directory, setDirectory] = useState("");
-  const [intervalMs, setIntervalMs] = useState(33);
+  const [fps, setFps] = useState(30);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const setStatusText = useAppStore((s) => s.setStatusText);
 
   const handleBrowse = async () => {
-    // TODO: Use Tauri dialog.open to select directory
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "Select Mock Frame Folder",
+      });
+      if (typeof selected === "string") {
+        setDirectory(selected);
+        setErrorMessage(null);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setErrorMessage(`Failed to open folder picker: ${message}`);
+    }
   };
 
   const handleOk = async () => {
-    const options = { directory, intervalMs, loop: true };
+    const trimmedDirectory = directory.trim();
+    if (!trimmedDirectory) {
+      setErrorMessage("Please select a folder containing mock frame images.");
+      return;
+    }
+    if (!Number.isFinite(fps) || fps < 1 || fps > 1000) {
+      setErrorMessage("FPS must be between 1 and 1000.");
+      return;
+    }
+
+    const intervalMs = Math.max(1, Math.round(1000 / fps));
+    const options = { directory: trimmedDirectory, intervalMs, loop: true };
     try {
       await configureMock(options);
       useCaptureStore.getState().setMockOptions(options);
       useCaptureStore.getState().setCameraConfigured(true);
+      setStatusText(`Mock camera configured (${fps} fps)`);
+      setErrorMessage(null);
+      onClose();
     } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
       console.error("Failed to configure mock camera:", e);
+      setErrorMessage(`Failed to configure mock camera: ${message}`);
     }
-    onClose();
   };
 
   return (
@@ -51,7 +83,12 @@ export function MockConfigDialog({ onClose }: Props) {
             <Input
               type="text"
               value={directory}
-              onChange={(e) => setDirectory(e.target.value)}
+              onChange={(e) => {
+                setDirectory(e.target.value);
+                if (errorMessage) {
+                  setErrorMessage(null);
+                }
+              }}
               placeholder="Select a folder containing image frames"
               className="flex-1"
             />
@@ -62,18 +99,26 @@ export function MockConfigDialog({ onClose }: Props) {
             <Input
               type="number"
               min={1}
-              max={10000}
-              value={Math.round(1000 / intervalMs)}
-              onChange={(e) => setIntervalMs(Math.round(1000 / Number(e.target.value)))}
+              max={1000}
+              value={fps}
+              onChange={(e) => {
+                setFps(Number(e.target.value));
+                if (errorMessage) {
+                  setErrorMessage(null);
+                }
+              }}
               className="flex-1"
             />
             <span className="text-xs text-muted-foreground">fps</span>
           </div>
         </div>
+        {errorMessage && (
+          <p className="text-xs text-destructive">{errorMessage}</p>
+        )}
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleOk}>OK</Button>
+          <Button onClick={handleOk} disabled={!directory.trim()}>OK</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

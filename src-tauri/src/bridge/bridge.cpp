@@ -9,6 +9,7 @@
 #include "backend/services/ProcessingService.h"
 #include "camera/mock/MockCamera.h"
 
+#include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
 
 #include <chrono>
@@ -105,6 +106,7 @@ AppBackendShim::~AppBackendShim() {
         stats_thread_.join();
     }
     if (backend_) {
+        backend_->setBackgroundCaptureCallback({});
         backend_->capture().setFrameCallback(nullptr);
         backend_->processing().stopRealtime();
         if (backend_->capture().isRunning()) {
@@ -164,6 +166,22 @@ void AppBackendShim::install_emitters_impl() {
         return;
     }
 
+    backend_->setBackgroundCaptureCallback([](const cv::Mat& bg, std::uint64_t frameIndex) {
+        if (bg.empty()) {
+            return;
+        }
+        std::vector<std::uint8_t> buf;
+        if (!cv::imencode(".png", bg, buf)) {
+            return;
+        }
+        rust::Vec<std::uint8_t> png;
+        png.reserve(buf.size());
+        for (std::uint8_t b : buf) {
+            png.push_back(b);
+        }
+        mib_emit_background(frameIndex, std::move(png));
+    });
+
     backend_->processing().startRealtime(backend_->getFrameStore());
 
     backend_->capture().setFrameCallback(
@@ -218,19 +236,27 @@ void bridge_set_hardware_camera(const AppBackendShim& shim,
     shim.app_backend().setHardwareCameraSelection(interface_index, device_index, lbl);
 }
 
-bool bridge_configure_mock(const AppBackendShim& shim,
-                           rust::Str dir,
-                           std::uint32_t interval_ms,
-                           bool loop_files) {
+rust::String bridge_configure_mock(const AppBackendShim& shim,
+                                   rust::Str dir,
+                                   std::uint32_t interval_ms,
+                                   bool loop_files) {
     if (!shim.app_backend_ptr()) {
-        return false;
+        return rust::String("Backend is not initialized");
     }
     camera::mock::MockCameraOptions options;
     options.folder = std::filesystem::path(std::string(dir.data(), dir.size()));
-    options.frameInterval = std::chrono::milliseconds(interval_ms > 0 ? interval_ms : 33);
+    if (interval_ms == 0) {
+        return rust::String("Frame interval must be >= 1 ms");
+    }
+    options.frameInterval = std::chrono::milliseconds(interval_ms);
     options.loopFiles = loop_files;
+
+    std::string validationError;
+    if (!camera::mock::validateMockImageFolder(options.folder, validationError, true)) {
+        return rust::String(validationError);
+    }
     shim.app_backend().configureMockCamera(options);
-    return true;
+    return rust::String();
 }
 
 bool bridge_start_capture(const AppBackendShim& shim) {

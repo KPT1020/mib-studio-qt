@@ -29,6 +29,7 @@ pub struct DiscoveredFramegrabber {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MockCameraOptions {
     pub directory: String,
     pub interval_ms: u32,
@@ -100,6 +101,12 @@ pub async fn configure_mock(
     state: tauri::State<'_, AppState>,
     options: MockCameraOptions,
 ) -> Result<(), String> {
+    if options.directory.trim().is_empty() {
+        return Err("Mock directory cannot be empty".to_string());
+    }
+    if options.interval_ms == 0 {
+        return Err("Mock frame interval must be at least 1 ms".to_string());
+    }
     state
         .backend
         .configure_mock(&options.directory, options.interval_ms, options.r#loop)

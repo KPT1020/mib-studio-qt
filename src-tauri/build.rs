@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn main() {
     tauri_build::build();
@@ -21,6 +21,7 @@ fn main() {
     // Harvest Conan package include dirs (OpenCV, etc.) + link dirs/libs from *-release-x86_64-data.cmake.
     let mut cxx_includes: BTreeSet<PathBuf> = BTreeSet::new();
     let mut link_search: BTreeSet<PathBuf> = BTreeSet::new();
+    let mut package_bins: BTreeSet<PathBuf> = BTreeSet::new();
     let mut link_libs: Vec<String> = Vec::new();
     let mut system_libs: BTreeSet<String> = BTreeSet::new();
     let mut seen_libs: BTreeSet<String> = BTreeSet::new();
@@ -32,6 +33,11 @@ fn main() {
         let Some(name) = path.file_name().and_then(|s| s.to_str()) else { continue; };
         if !name.ends_with("-release-x86_64-data.cmake") { continue; }
         if name.starts_with("module-") { continue; }
+        // mib_backend is Qt-free; do not link Qt from Conan (would load Qt6 DLLs at runtime).
+        let name_lower = name.to_ascii_lowercase();
+        if name_lower.starts_with("qt6") || name_lower.starts_with("qt-") {
+            continue;
+        }
 
         let Ok(contents) = std::fs::read_to_string(&path) else { continue; };
 
@@ -46,6 +52,10 @@ fn main() {
                             cxx_includes.insert(inc);
                         }
                         link_search.insert(pkg.join("lib"));
+                        let bin_dir = pkg.join("bin");
+                        if bin_dir.is_dir() {
+                            package_bins.insert(bin_dir);
+                        }
                     } else if var.ends_with("_LIBS_RELEASE") && !var.contains("SYSTEM_LIBS") {
                         for lib in value.split_whitespace() {
                             let lib = lib.trim();
@@ -91,6 +101,12 @@ fn main() {
         }
     }
     for lib in &link_libs {
+        if lib.to_ascii_lowercase().starts_with("qt6") {
+            panic!(
+                "Qt6 library leaked into Tauri link line: {} — check Conan data file filtering",
+                lib
+            );
+        }
         println!("cargo:rustc-link-lib={}", lib);
     }
     for lib in &system_libs {
@@ -106,6 +122,69 @@ fn main() {
     println!("cargo:rerun-if-changed=src/bridge/bridge.cpp");
     println!("cargo:rerun-if-changed=src/bridge/bridge.h");
     println!("cargo:rerun-if-changed={}", mib_backend_lib.display());
+
+    #[cfg(windows)]
+    copy_windows_runtime_dlls(&manifest_dir, &root, &package_bins);
+}
+
+/// Copy Conan `bin\\*.dll` and Coremor `XMT_DLL_SER.dll` next to `mib-studio.exe` so `cargo run` works
+/// without manually setting `PATH` (avoids `0xC0000135` STATUS_DLL_NOT_FOUND).
+#[cfg(windows)]
+fn copy_windows_runtime_dlls(manifest_dir: &Path, repo_root: &Path, package_bins: &BTreeSet<PathBuf>) {
+    let profile = match std::env::var("PROFILE") {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let target_root = std::env::var("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| manifest_dir.join("target"));
+    let dest = target_root.join(&profile);
+    if let Err(e) = std::fs::create_dir_all(&dest) {
+        println!(
+            "cargo:warning=Could not create {} for runtime DLL copy: {}",
+            dest.display(),
+            e
+        );
+        return;
+    }
+
+    let mut copied: usize = 0;
+    let coremor_dll = repo_root.join("include").join("Coremor").join("XMT_DLL_SER.dll");
+    if coremor_dll.is_file() {
+        let out = dest.join("XMT_DLL_SER.dll");
+        if std::fs::copy(&coremor_dll, &out).is_ok() {
+            copied += 1;
+        }
+    }
+
+    for bin_dir in package_bins {
+        let Ok(entries) = std::fs::read_dir(bin_dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map_or(false, |e| e.eq_ignore_ascii_case("dll"))
+            {
+                if let Some(name) = path.file_name() {
+                    let out = dest.join(name);
+                    if std::fs::copy(&path, &out).is_ok() {
+                        copied += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    if copied > 0 {
+        println!(
+            "cargo:warning=Copied {} runtime DLL(s) to {} (for `cargo run` without Conan PATH)",
+            copied,
+            dest.display()
+        );
+    }
 }
 
 fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
