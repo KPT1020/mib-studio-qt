@@ -1,8 +1,8 @@
 # Run Modes
 
-> Three executables, two camera sources, a handful of env vars.
+> Four binaries, two camera sources, a handful of env vars.
 
-**Related:** [[../camera/MockCamera]], [[../frontend/ConnectTab]]
+**Related:** [[../camera/MockCamera]], [[../frontend/ConnectTab]], [[../architecture/Tauri-Bridge]]
 
 ## Executables
 
@@ -10,6 +10,10 @@
   [[../camera/EGrabberCamera]]. No mock option in the UI.
 - **`mock_studio_qt.exe`** — development. Same UI, but lets the user
   select a mock folder from the [[../frontend/ConnectTab]].
+- **`mib-studio.exe`** — Tauri desktop shell (`src-tauri/`). Uses the same
+  `mib_backend` service layer through the Rust/cxx bridge (see
+  [[../architecture/Tauri-Bridge]]) and stores data under the Tauri app data
+  directory.
 - **`capture_processing_test.exe`** — console harness
   (`src/tests/capture_processing_test.cpp`). Uses
   [[../camera/MockCamera]] to exercise capture + processing without

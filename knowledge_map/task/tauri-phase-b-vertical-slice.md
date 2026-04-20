@@ -1,5 +1,7 @@
 # Tauri Phase B vertical slice (done)
 
+Canonical architecture note: [[../architecture/Tauri-Bridge]].
+
 ## Scope
 
 - cxx bridge: free functions `bridge_*` + shared POD structs matching `ffi.rs` (also declared in `bridge.h` with `CXXBRIDGE1_*` guards).

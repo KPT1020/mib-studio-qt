@@ -1,5 +1,7 @@
 # mib_backend decoupled from Qt (2026-04-20)
 
+Canonical architecture note: [[../architecture/Tauri-Bridge]].
+
 ## Summary
 
 - `mib_backend` no longer links Qt6. Syringe pump Modbus RTU uses Win32 `CreateFile`/`ReadFile`/`WriteFile`/`SetCommState` (planned `libserialport` Conan dep was dropped: recipe not on ConanCenter; Win32 avoids extra dependencies).

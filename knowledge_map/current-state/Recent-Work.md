@@ -5,6 +5,12 @@
 
 ## Features shipped
 
+- **Tauri + backend bridge distilled into architecture notes** (2026-04-20) —
+  Added canonical [[../architecture/Tauri-Bridge]] and cross-linked it from
+  onboarding/build/run docs; updated [[../architecture/AppBackend]] background
+  callback wiring to reflect shell-agnostic behavior (Qt adapter vs Tauri
+  emitter path).
+
 - **Release windeployqt Conan alignment** (2026-04-20) — `CMakeLists.txt`
   picks `windeployqt` and per-config `PATH` from `qt_PACKAGE_FOLDER_DEBUG` /
   `qt_PACKAGE_FOLDER_RELEASE` (CMakeDeps) instead of a cached `find_program`

@@ -6,5 +6,6 @@
 - [[AppBackend]] — composition root, owns + wires all services
 - [[Threading-Model]] — main, capture, processing, realtime, autofocus, etc.
 - [[Data-Flow]] — camera → FrameStore → processing → HDF5
+- [[Tauri-Bridge]] — Rust/cxx shell reusing `mib_backend`
 
 **Up**: [[../README|Vault home]] · **See also**: [[../services/_MOC|Services MOC]]
