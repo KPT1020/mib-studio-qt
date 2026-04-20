@@ -14,8 +14,13 @@
 #include <cctype>
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
 #include <optional>
 #include <thread>
+#ifdef __linux__
+#include <pthread.h>
+#include <sched.h>
+#endif
 
 namespace camera::mock
 {
@@ -23,6 +28,10 @@ namespace camera::mock
     namespace
     {
         constexpr uint64_t kPfncMono8 = 0x01080001;
+        constexpr auto kSpinOnlyThreshold = std::chrono::microseconds(500);
+        constexpr auto kCoarseGuard = std::chrono::microseconds(100);
+        constexpr auto kSleepFineThreshold = std::chrono::microseconds(200);
+        constexpr auto kYieldFineThreshold = std::chrono::microseconds(20);
 
         bool hasSupportedExtension(const std::filesystem::path &path)
         {
@@ -41,6 +50,28 @@ namespace camera::mock
 #else
             return QString::fromUtf8(path.u8string().c_str());
 #endif
+        }
+
+        std::optional<int> parseOptionalCpuIndex(const char *value)
+        {
+            if (!value)
+            {
+                return std::nullopt;
+            }
+
+            try
+            {
+                const int parsed = std::stoi(value);
+                if (parsed < 0)
+                {
+                    return std::nullopt;
+                }
+                return parsed;
+            }
+            catch (const std::exception &)
+            {
+                return std::nullopt;
+            }
         }
     } // namespace
 
@@ -82,6 +113,9 @@ namespace camera::mock
         lastFrameTime_ = std::chrono::steady_clock::now();
         stats_ = {};
 
+        configurePacingFromEnv();
+        affinityAttempted_ = false;
+
         SPDLOG_INFO("MockCamera started with {} files from {} (preloaded {} frames)",
                     files_.size(), options_.folder.string(), preloadedFrames_.size());
         return true;
@@ -114,27 +148,38 @@ namespace camera::mock
             const auto elapsed = now - lastFrameTime_;
             if (elapsed < interval)
             {
-                // Keep timing reasonably stable without pinning a full core.
                 const auto target = lastFrameTime_ + interval;
-                auto remaining = target - now;
-                constexpr auto kCoarseGuard = std::chrono::microseconds(100);
-                if (remaining > kCoarseGuard)
-                {
-                    const auto coarse = remaining - kCoarseGuard;
-                    std::this_thread::sleep_for(coarse);
-                    remaining = target - std::chrono::steady_clock::now();
-                }
+                applyThreadAffinityIfRequested();
 
-                while (std::chrono::steady_clock::now() < target)
+                if (forceSpinPacing_ || interval <= spinOnlyThreshold_)
                 {
-                    const auto fineRemaining = target - std::chrono::steady_clock::now();
-                    if (fineRemaining > std::chrono::microseconds(200))
+                    // For sub-500 us pacing, pure spin avoids scheduler wakeup jitter.
+                    while (std::chrono::steady_clock::now() < target)
                     {
-                        std::this_thread::sleep_for(std::chrono::microseconds(50));
                     }
-                    else if (fineRemaining > std::chrono::microseconds(20))
+                }
+                else
+                {
+                    // For larger intervals, cooperate with scheduler first, then spin tail.
+                    auto remaining = target - now;
+                    if (remaining > kCoarseGuard)
                     {
-                        std::this_thread::yield();
+                        const auto coarse = remaining - kCoarseGuard;
+                        std::this_thread::sleep_for(coarse);
+                        remaining = target - std::chrono::steady_clock::now();
+                    }
+
+                    while (std::chrono::steady_clock::now() < target)
+                    {
+                        const auto fineRemaining = target - std::chrono::steady_clock::now();
+                        if (fineRemaining > kSleepFineThreshold)
+                        {
+                            std::this_thread::sleep_for(std::chrono::microseconds(50));
+                        }
+                        else if (fineRemaining > kYieldFineThreshold)
+                        {
+                            std::this_thread::yield();
+                        }
                     }
                 }
             }
@@ -405,6 +450,79 @@ namespace camera::mock
             return false;
         }
         return true;
+    }
+
+    void MockCamera::configurePacingFromEnv()
+    {
+        forceSpinPacing_ = false;
+        spinOnlyThreshold_ = kSpinOnlyThreshold;
+        pinnedCpu_ = -1;
+
+        if (const char *envSpin = std::getenv("MIB_MOCK_CAMERA_FORCE_SPIN"))
+        {
+            std::string value = envSpin;
+            std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c)
+                           { return static_cast<char>(std::tolower(c)); });
+            if (value == "1" || value == "true" || value == "yes" || value == "on")
+            {
+                forceSpinPacing_ = true;
+            }
+        }
+
+        if (const char *envThreshold = std::getenv("MIB_MOCK_CAMERA_SPIN_THRESHOLD_US"))
+        {
+            try
+            {
+                const int parsed = std::stoi(envThreshold);
+                if (parsed > 0)
+                {
+                    spinOnlyThreshold_ = std::chrono::microseconds(parsed);
+                }
+            }
+            catch (const std::exception &)
+            {
+                SPDLOG_WARN("MockCamera: invalid MIB_MOCK_CAMERA_SPIN_THRESHOLD_US value: {}", envThreshold);
+            }
+        }
+
+        if (const auto parsedCpuLegacy = parseOptionalCpuIndex(std::getenv("MIB_MOCK_CAMERA_PIN_CPU")); parsedCpuLegacy.has_value())
+        {
+            pinnedCpu_ = *parsedCpuLegacy;
+        }
+
+        SPDLOG_INFO("MockCamera pacing config: spin_only_threshold_us={} force_spin={} pin_cpu={}",
+                    spinOnlyThreshold_.count(),
+                    forceSpinPacing_ ? 1 : 0,
+                    pinnedCpu_);
+    }
+
+    void MockCamera::applyThreadAffinityIfRequested()
+    {
+        if (affinityAttempted_)
+        {
+            return;
+        }
+        affinityAttempted_ = true;
+
+        if (pinnedCpu_ < 0)
+        {
+            return;
+        }
+
+#ifdef __linux__
+        cpu_set_t set;
+        CPU_ZERO(&set);
+        CPU_SET(pinnedCpu_, &set);
+        const int rc = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &set);
+        if (rc != 0)
+        {
+            SPDLOG_WARN("MockCamera: failed to pin capture thread to cpu {} (errno={})", pinnedCpu_, rc);
+            return;
+        }
+        SPDLOG_INFO("MockCamera: capture thread pinned to cpu {}", pinnedCpu_);
+#else
+        SPDLOG_WARN("MockCamera: MIB_MOCK_CAMERA_PIN_CPU is set but CPU affinity is only supported on Linux in this build");
+#endif
     }
 
 } // namespace camera::mock

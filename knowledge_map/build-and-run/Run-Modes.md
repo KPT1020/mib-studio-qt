@@ -19,8 +19,11 @@ Read at startup (see `main.cpp` and [[../architecture/AppBackend]]):
 |---|---|---|
 | `MIB_CAMERA_MODE=mock` | unset | Force mock (bypasses ConnectTab) |
 | `MIB_MOCK_CAMERA_DIR=<path>` | — | Folder with PNG/TIFF/JPEG frames |
-| `MIB_MOCK_CAMERA_INTERVAL_MS=<ms>` | 33 | Frame cadence in milliseconds (integer parse in current build) |
+| `MIB_MOCK_CAMERA_INTERVAL_MS=<ms>` | 33 | Frame cadence in milliseconds (integer parse) |
 | `MIB_MOCK_CAMERA_LOOP=true\|false` | true | Loop or stop at end |
+| `MIB_MOCK_CAMERA_SPIN_THRESHOLD_US=<us>` | 500 | Intervals at or below this use pure spin pacing |
+| `MIB_MOCK_CAMERA_FORCE_SPIN=true\|false` | false | Force pure-spin pacing for all intervals |
+| `MIB_MOCK_CAMERA_PIN_CPU=<core>` | unset | Optional CPU affinity pin for mock capture thread (Linux) |
 
 Sample frames ship at `data/mock_frames/frame_00000.tiff`.
 

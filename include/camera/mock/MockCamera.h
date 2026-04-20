@@ -34,6 +34,8 @@ private:
     void refreshFileList();
     bool loadFrameFromPath(const std::filesystem::path& path, camera::common::Frame& frame);
     bool preloadFrames();
+    void configurePacingFromEnv();
+    void applyThreadAffinityIfRequested();
 
     MockCameraOptions options_;
     camera::common::CameraConfig config_{};
@@ -44,6 +46,10 @@ private:
     bool running_{false};
     std::chrono::steady_clock::time_point lastFrameTime_{};
     mutable camera::common::CameraStats stats_{};
+    std::chrono::microseconds spinOnlyThreshold_{500};
+    bool forceSpinPacing_{false};
+    int pinnedCpu_{-1};
+    bool affinityAttempted_{false};
 };
 
 } // namespace camera::mock

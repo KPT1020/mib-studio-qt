@@ -217,7 +217,6 @@ namespace backend
                 const std::string loopValue = toLower(envLoop);
                 options.loopFiles = (loopValue != "false" && loopValue != "0" && loopValue != "no");
             }
-
             const auto intervalUs = options.frameInterval.count();
             const double configuredFps = intervalUs > 0 ? 1'000'000.0 / static_cast<double>(intervalUs) : 0.0;
             SPDLOG_INFO("AppBackend: configuring MockCamera (folder={}, interval={} us, ~{:.1f} fps, loop={})",

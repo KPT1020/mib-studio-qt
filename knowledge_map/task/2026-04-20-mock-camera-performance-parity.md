@@ -17,6 +17,16 @@ Changes implemented
 - `grabFrame()` now fills the output frame buffer in-place to avoid extra temporary frame construction/move churn.
 - Existing mock env vars and cadence semantics are unchanged by this patch.
 
+Follow-up revision after scheduler-granularity review
+- For very high rates (`frameInterval <= 500 us`), pacing now switches to pure spin-to-deadline (no sleep calls) to avoid scheduler wakeup overshoot dominating the frame budget.
+- Added optional Linux CPU affinity pinning for the mock capture thread via:
+  - `MIB_MOCK_CAMERA_PIN_CPU=<coreIndex>`
+  - disabled by default (`-1`), with invalid values logged and ignored.
+- Added optional pacing controls read directly by `MockCamera`:
+  - `MIB_MOCK_CAMERA_FORCE_SPIN=1|true|yes|on`
+  - `MIB_MOCK_CAMERA_SPIN_THRESHOLD_US=<us>` (default `500`)
+- For intervals above `500 us`, pacing remains cooperative sleep/yield.
+
 Measured local benchmark (same synthetic 500-frame TIFF set)
 - Baseline (`main`) startup: ~154–164 ms.
 - Updated startup: ~45–52 ms.
