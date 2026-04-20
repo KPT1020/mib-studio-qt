@@ -19,7 +19,7 @@
 - [[SyringePumpService]] — dual-pump Modbus RTU over serial
 
 ## Optional / specialised
-- [[YoloService]] — ONNX Runtime session (segmentation; placeholder-ish)
+- [[YoloService]] — ONNX Runtime loader + lightweight segmentation inference
 - [[RecorderService]] — raw frame container writer (recording mode)
 - [[BatchMaskSources]] — adapters for offline mask regeneration
   (`processBatch` inputs/outputs)

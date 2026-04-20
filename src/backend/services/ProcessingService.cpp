@@ -371,10 +371,35 @@ ProcessedFrame ProcessingService::computeProcessedFrame(
         diffForProcessing = blurredCurr;
     }
 
-    cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
-    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
-    cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
-    cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
+    bool usedUnetMask = false;
+    if (config.use_lightweight_unet) {
+        SegmentationMaskCallback segCb;
+        {
+            std::scoped_lock segLk(segmentationCallbackMutex_);
+            segCb = segmentationMaskCallback_;
+        }
+        if (segCb) {
+            cv::Mat unetMask;
+            if (segCb(roiCurr, unetMask, config.lightweight_unet_threshold) && !unetMask.empty()) {
+                cv::Mat resizedMask = unetMask;
+                if (resizedMask.size() != roiDst.size()) {
+                    cv::resize(resizedMask, resizedMask, roiDst.size(), 0, 0, cv::INTER_NEAREST);
+                }
+                if (resizedMask.type() != CV_8UC1) {
+                    resizedMask.convertTo(resizedMask, CV_8UC1);
+                }
+                cv::threshold(resizedMask, roiDst, 127, 255, cv::THRESH_BINARY);
+                usedUnetMask = true;
+            }
+        }
+    }
+
+    if (!usedUnetMask) {
+        cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+        cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+        cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
+        cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
+    }
 
     // Validation + contour/metric extraction (same helper as realtime)
     out.validation = filterProcessedImage(mask, cvRoi, config, gray);
@@ -420,6 +445,11 @@ void ProcessingService::setTargetGroupCallback(TargetGroupCallback callback) {
 void ProcessingService::setBackgroundCaptureCallback(BackgroundCaptureCallback callback) {
     std::scoped_lock lk(backgroundCaptureCallbackMutex_);
     backgroundCaptureCallback_ = std::move(callback);
+}
+
+void ProcessingService::setSegmentationMaskCallback(SegmentationMaskCallback callback) {
+    std::scoped_lock lk(segmentationCallbackMutex_);
+    segmentationMaskCallback_ = std::move(callback);
 }
 
 size_t ProcessingService::flushBufferedFrames(class Hdf5Service& hdf5) {
@@ -953,11 +983,34 @@ void ProcessingService::realtimeLoop() {
                     previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
                 }
                 
-                // Use background subtraction diff for actual processing (morphology, contours, etc.)
-                cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
-                cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
-                cv::morphologyEx(thresh, mask, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
-                cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
+                bool usedUnetMask = false;
+                if (config.use_lightweight_unet) {
+                    SegmentationMaskCallback segCb;
+                    {
+                        std::scoped_lock segLk(segmentationCallbackMutex_);
+                        segCb = segmentationMaskCallback_;
+                    }
+                    if (segCb) {
+                        cv::Mat unetMask;
+                        if (segCb(grayROI, unetMask, config.lightweight_unet_threshold) && !unetMask.empty()) {
+                            if (unetMask.size() != mask.size()) {
+                                cv::resize(unetMask, unetMask, mask.size(), 0, 0, cv::INTER_NEAREST);
+                            }
+                            if (unetMask.type() != CV_8UC1) {
+                                unetMask.convertTo(unetMask, CV_8UC1);
+                            }
+                            cv::threshold(unetMask, mask, 127, 255, cv::THRESH_BINARY);
+                            usedUnetMask = true;
+                        }
+                    }
+                }
+                if (!usedUnetMask) {
+                    // Use background subtraction diff for classical morphology path.
+                    cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+                    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+                    cv::morphologyEx(thresh, mask, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
+                    cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
+                }
 
                 // Always run validation for monitoring (even without experiment)
                 // mask is ROI-sized so contour coords are 0-based; use local roi for border check
@@ -1321,18 +1374,41 @@ void ProcessingService::realtimeLoop() {
                     previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
                 }
                 
-                // Use background subtraction diff for actual processing (morphology, contours, etc.)
-                cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
-                
-                // Update previous frame for frame-to-frame comparison (when no background and auto-capture enabled)
-                if (!hasBackground && config.auto_background_enabled && !experimentActive_.load()) {
-                    std::scoped_lock prevFrameLk(previousFrameMutex_);
-                    previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
+                bool usedUnetMask = false;
+                if (config.use_lightweight_unet) {
+                    SegmentationMaskCallback segCb;
+                    {
+                        std::scoped_lock segLk(segmentationCallbackMutex_);
+                        segCb = segmentationMaskCallback_;
+                    }
+                    if (segCb) {
+                        cv::Mat unetMask;
+                        if (segCb(roiCurr, unetMask, config.lightweight_unet_threshold) && !unetMask.empty()) {
+                            if (unetMask.size() != roiDst.size()) {
+                                cv::resize(unetMask, unetMask, roiDst.size(), 0, 0, cv::INTER_NEAREST);
+                            }
+                            if (unetMask.type() != CV_8UC1) {
+                                unetMask.convertTo(unetMask, CV_8UC1);
+                            }
+                            cv::threshold(unetMask, roiDst, 127, 255, cv::THRESH_BINARY);
+                            usedUnetMask = true;
+                        }
+                    }
                 }
-                
-                cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
-                cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
-                cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
+                if (!usedUnetMask) {
+                    // Use background subtraction diff for classical morphology path.
+                    cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+
+                    // Update previous frame for frame-to-frame comparison (when no background and auto-capture enabled)
+                    if (!hasBackground && config.auto_background_enabled && !experimentActive_.load()) {
+                        std::scoped_lock prevFrameLk(previousFrameMutex_);
+                        previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
+                    }
+
+                    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+                    cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
+                    cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
+                }
 
                 FilterResult validation = filterProcessedImage(mask, cvRoi, config, gray);
                 
@@ -1694,18 +1770,41 @@ void ProcessingService::realtimeLoop() {
                     previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
                 }
 
-                // Use background subtraction diff for actual processing (morphology, contours, etc.)
-                cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
-
-                // Update previous frame for frame-to-frame comparison (when no background and auto-capture enabled)
-                if (!hasBackground && config.auto_background_enabled && !experimentActive_.load()) {
-                    std::scoped_lock prevFrameLk(previousFrameMutex_);
-                    previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
+                bool usedUnetMask = false;
+                if (config.use_lightweight_unet) {
+                    SegmentationMaskCallback segCb;
+                    {
+                        std::scoped_lock segLk(segmentationCallbackMutex_);
+                        segCb = segmentationMaskCallback_;
+                    }
+                    if (segCb) {
+                        cv::Mat unetMask;
+                        if (segCb(roiCurr, unetMask, config.lightweight_unet_threshold) && !unetMask.empty()) {
+                            if (unetMask.size() != roiDst.size()) {
+                                cv::resize(unetMask, unetMask, roiDst.size(), 0, 0, cv::INTER_NEAREST);
+                            }
+                            if (unetMask.type() != CV_8UC1) {
+                                unetMask.convertTo(unetMask, CV_8UC1);
+                            }
+                            cv::threshold(unetMask, roiDst, 127, 255, cv::THRESH_BINARY);
+                            usedUnetMask = true;
+                        }
+                    }
                 }
+                if (!usedUnetMask) {
+                    // Use background subtraction diff for classical morphology path.
+                    cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
 
-                cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
-                cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
-                cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
+                    // Update previous frame for frame-to-frame comparison (when no background and auto-capture enabled)
+                    if (!hasBackground && config.auto_background_enabled && !experimentActive_.load()) {
+                        std::scoped_lock prevFrameLk(previousFrameMutex_);
+                        previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
+                    }
+
+                    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+                    cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
+                    cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
+                }
 
                 // Always run validation for monitoring (even without experiment)
                 // Use ROI-only data for validation (avoids O(frame_size) findContours/brightness scan)

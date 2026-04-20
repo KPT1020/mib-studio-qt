@@ -5,6 +5,18 @@
 
 ## Features shipped
 
+- **Lightweight U-Net segmentation path in realtime processing** (2026-04-20) —
+  `YoloService` now records model IO metadata and exposes
+  `inferSegmentationMask(gray, outMask, threshold)` for ONNX segmentation
+  inference (supports common binary and multi-class output layouts).  
+  `ProcessingService` gained optional config flags
+  `use_lightweight_unet` + `lightweight_unet_threshold` and a
+  segmentation callback hook wired by `AppBackend`; when enabled, realtime
+  and batch mask generation use ONNX masks first and fall back to the
+  existing Gaussian/threshold/morphology pipeline if inference is unavailable.
+  `AppConfigWatcher` and `resources/defaults/config.json` now include a
+  `image_processing.lightweight_unet` block.
+
 - **Release windeployqt Conan alignment** (2026-04-20) — `CMakeLists.txt`
   picks `windeployqt` and per-config `PATH` from `qt_PACKAGE_FOLDER_DEBUG` /
   `qt_PACKAGE_FOLDER_RELEASE` (CMakeDeps) instead of a cached `find_program`

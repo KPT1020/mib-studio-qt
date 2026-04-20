@@ -66,6 +66,8 @@ struct ProcessingConfig {
     // Metrics are computed only from the first (trigger) frame
     bool multi_image_enabled{false};
     int multi_image_count{1}; // Number of images per series (1 = disabled, >1 = series)
+    bool use_lightweight_unet{false};
+    float lightweight_unet_threshold{0.5f};
 };
 
 struct FilterResult {
@@ -102,6 +104,7 @@ struct ProcessedFrame {
 class ProcessingService {
 public:
     using Job = std::function<void()>;
+    using SegmentationMaskCallback = std::function<bool(const cv::Mat&, cv::Mat&, float)>;
 
     struct Roi {
         int x{0}, y{0}, w{0}, h{0};
@@ -252,6 +255,7 @@ public:
     // Background capture callback for auto-capture (called when background is auto-captured)
     using BackgroundCaptureCallback = std::function<void(const cv::Mat& background, uint64_t frameIndex)>;
     void setBackgroundCaptureCallback(BackgroundCaptureCallback callback);
+    void setSegmentationMaskCallback(SegmentationMaskCallback callback);
 
 private:
     void workerLoop();
@@ -359,6 +363,8 @@ private:
     // Background capture callback for auto-capture
     mutable std::mutex backgroundCaptureCallbackMutex_;
     BackgroundCaptureCallback backgroundCaptureCallback_;
+    mutable std::mutex segmentationCallbackMutex_;
+    SegmentationMaskCallback segmentationMaskCallback_;
     
     // Auto-capture state tracking
     std::atomic<uint64_t> consecutiveEmptyFrames_{0};

@@ -38,6 +38,10 @@
         "multi_image": {
             "enabled": false,
             "count": 1
+        },
+        "lightweight_unet": {
+            "enabled": false,
+            "threshold": 0.5
         }
     },
     "save_directory": "testing",
