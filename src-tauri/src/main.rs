@@ -1,19 +1,27 @@
 // Prevents additional console window on Windows in release
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+#[cfg(windows)]
 mod bridge;
+#[cfg(windows)]
 mod commands;
+#[cfg(windows)]
 mod events;
+#[cfg(windows)]
 mod state;
 
+#[cfg(windows)]
 use state::AppState;
+#[cfg(windows)]
 use tauri::Manager;
 
+#[cfg(windows)]
 #[tauri::command]
 fn get_backend_version(state: tauri::State<'_, AppState>) -> String {
     state.backend.version()
 }
 
+#[cfg(windows)]
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -90,4 +98,9 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(not(windows))]
+fn main() {
+    eprintln!("mib-studio tauri shell is only supported on Windows in this repository.");
 }

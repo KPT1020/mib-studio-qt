@@ -1,16 +1,17 @@
+#[cfg(windows)]
 use std::collections::BTreeSet;
+#[cfg(windows)]
 use std::path::{Path, PathBuf};
 
+#[cfg(not(windows))]
 fn main() {
-    #[cfg(not(windows))]
-    {
-        // Tauri desktop runtime dependencies are platform-specific and not
-        // available in the default Linux cloud image; skip native bridge build.
-        println!("cargo:warning=Non-Windows build: skipping native mib bridge compilation");
-        tauri_build::build();
-        return;
-    }
+    // Tauri desktop runtime dependencies are platform-specific and not
+    // available in the default Linux cloud image; skip native bridge build.
+    println!("cargo:warning=Non-Windows build: skipping native mib bridge compilation");
+}
 
+#[cfg(windows)]
+fn main() {
     tauri_build::build();
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -220,6 +221,7 @@ fn copy_windows_runtime_dlls(
     }
 }
 
+#[cfg(windows)]
 fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
     if s.len() >= prefix.len() && s[..prefix.len()].eq_ignore_ascii_case(prefix) {
         Some(&s[prefix.len()..])
@@ -230,6 +232,7 @@ fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
 
 // Parse `VAR "value"` or `VAR value1 value2 ...)` from a set(...) body.
 // Input already has the leading `set(` stripped; trailing `)` may be present.
+#[cfg(windows)]
 fn split_set(body: &str) -> Option<(&str, String)> {
     let body = body.trim_end_matches(')').trim();
     let (var, rest) = body.split_once(char::is_whitespace)?;

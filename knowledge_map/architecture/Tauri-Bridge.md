@@ -118,6 +118,18 @@ This keeps Tauri runtime free from Conan Qt DLL requirements while still
 requiring other native dependencies (OpenCV, HDF5, Coremor, EGrabber-side DLLs
 as applicable) to be deployable beside the executable or on `PATH`.
 
+## Platform dependency gating (Cargo)
+
+- `src-tauri/Cargo.toml` now makes Tauri desktop crates Windows-only:
+  - `tauri`
+  - `tauri-plugin-dialog`
+  - `tauri-plugin-fs`
+- `src-tauri/src/main.rs` gates Tauri runtime modules under `#[cfg(windows)]`
+  and provides a non-Windows fallback `main()` so Linux/cloud `cargo check`
+  succeeds without GTK/WebKit system packages.
+- `src-tauri/build.rs` also uses a non-Windows early-return path and skips
+  native bridge linking outside Windows.
+
 ## Gotchas
 
 - Rebuild `mib_backend` after changing capture callback/FFI signatures; stale
