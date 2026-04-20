@@ -76,6 +76,18 @@
 
 ## Recent fixes
 
+- **2026-04-20** — Guarded Windows-only hardware SDK dependencies so Linux
+  cloud builds can still compile non-hardware code paths
+  (`cursor/guard-windows-deps-linux-build-fb9e`). `CMakeLists.txt` now sets
+  `MIB_HAS_EGRABBER` (`ON` on Windows, `OFF` elsewhere), gates EGrabber/Coremor
+  include+link paths, and compiles `AutofocusService.cpp` only on Windows
+  (with `AutofocusService.stub.cpp` on non-Windows). Runtime paths now default
+  to mock-camera behavior when hardware SDKs are unavailable:
+  `AppBackend` forces mock mode on non-Windows and `CaptureService` default
+  factory uses `MockCamera`. `CameraControlService` and `EGrabberCamera` gained
+  non-Windows stubs so Linux builds no longer require EGrabber headers/libs.
+  Task record:
+  `knowledge_map/task/2026-04-20-linux-build-windows-hardware-guards.md`.
 - **2026-04-16** — Moved autofocus statistics sort onto its own thread
   (`claude/audit-thread-performance-Pr9OI`). Follow-up to the callback
   reorder below: instead of just running ring-ratio second on the

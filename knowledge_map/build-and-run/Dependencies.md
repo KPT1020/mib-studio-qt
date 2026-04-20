@@ -28,6 +28,10 @@
   `windeployqt.exe` in a post-build step.
 - OpenCV and HDF5 DLLs are also copied next to the exe (see
   `docs/howto/windows-deploy.md`).
+- Windows-only hardware SDK linkage is gated by `MIB_HAS_EGRABBER`
+  (`WIN32` => `ON`, otherwise `OFF`):
+  - EGrabber headers/system path are only added when `MIB_HAS_EGRABBER=1`.
+  - Coremor include/lib wiring is only added when `MIB_HAS_EGRABBER=1`.
 
 ## Related
 

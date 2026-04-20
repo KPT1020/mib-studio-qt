@@ -66,6 +66,12 @@ find_package(nlohmann_json CONFIG QUIET)
 find_package(OpenCV CONFIG REQUIRED)
 find_package(onnxruntime CONFIG REQUIRED)
 
+# Hardware SDKs (EGrabber/Coremor) are Windows-only in this project.
+set(MIB_HAS_EGRABBER OFF)
+if(WIN32)
+    set(MIB_HAS_EGRABBER ON)
+endif()
+
 # Prefer official SQLite3 package; fallback to unofficial config if needed
 find_package(SQLite3 QUIET)
 if(NOT SQLite3_FOUND)
@@ -78,10 +84,11 @@ if(NOT HDF5_FOUND)
     find_package(HDF5 MODULE QUIET)
 endif()
 
-# Include directories (EGrabber headers on Windows install path)
-include_directories("C:/Program Files/Euresys/eGrabber/include")
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor)
+if(MIB_HAS_EGRABBER)
+    include_directories("C:/Program Files/Euresys/eGrabber/include")
+    include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor)
+endif()
 
 # Backend library (services, APIs)
 add_library(mib_backend STATIC
@@ -99,7 +106,6 @@ add_library(mib_backend STATIC
     src/backend/services/ProcessingService.cpp
     src/backend/services/BatchMaskSources.cpp
     src/backend/services/PlaybackService.cpp
-    src/backend/services/AutofocusService.cpp
     src/backend/services/SyringePumpService.cpp
     src/backend/services/TriggerService.cpp
     src/backend/services/YoloService.cpp
@@ -107,18 +113,36 @@ add_library(mib_backend STATIC
     src/camera/common/EGrabberCamera.cpp
     src/camera/mock/MockCamera.cpp
 )
+if(MIB_HAS_EGRABBER)
+    target_sources(mib_backend PRIVATE
+        src/backend/services/AutofocusService.cpp
+    )
+else()
+    target_sources(mib_backend PRIVATE
+        src/backend/services/AutofocusService.stub.cpp
+    )
+endif()
 
 # Explicitly enable AUTOMOC for this target to ensure MOC files are generated
 set_target_properties(mib_backend PROPERTIES AUTOMOC ON)
 target_compile_definitions(mib_backend PUBLIC
     $<$<CONFIG:Debug>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG>
 )
+if(MIB_HAS_EGRABBER)
+    target_compile_definitions(mib_backend PUBLIC MIB_HAS_EGRABBER=1)
+else()
+    target_compile_definitions(mib_backend PUBLIC MIB_HAS_EGRABBER=0)
+endif()
 
 target_include_directories(mib_backend PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor
-    "C:/Program Files/Euresys/eGrabber/include"
 )
+if(MIB_HAS_EGRABBER)
+    target_include_directories(mib_backend PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor
+        "C:/Program Files/Euresys/eGrabber/include"
+    )
+endif()
 
 # Coremor library
 set(COREMOR_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor)
@@ -127,8 +151,12 @@ target_link_libraries(mib_backend PUBLIC
     Qt6::Core
     Qt6::Gui
     Qt6::SerialPort
-    ${COREMOR_LIB_DIR}/XMT_DLL_SER.lib
 )
+if(MIB_HAS_EGRABBER)
+    target_link_libraries(mib_backend PUBLIC
+        ${COREMOR_LIB_DIR}/XMT_DLL_SER.lib
+    )
+endif()
 
 if(TARGET opencv_world)
     target_link_libraries(mib_backend PUBLIC opencv_world)
@@ -300,11 +328,21 @@ set(FRONTEND_COMMON_SOURCES
     resources/defaults.qrc
 )
 
-add_executable(mib_studio_qt WIN32
-    src/frontend/core/main.cpp
-    ${FRONTEND_COMMON_SOURCES}
-    resources/app_icon.rc
-)
+set(MIB_STUDIO_QT_EXTRA_SOURCES)
+if(WIN32)
+    list(APPEND MIB_STUDIO_QT_EXTRA_SOURCES resources/app_icon.rc)
+    add_executable(mib_studio_qt WIN32
+        src/frontend/core/main.cpp
+        ${FRONTEND_COMMON_SOURCES}
+        ${MIB_STUDIO_QT_EXTRA_SOURCES}
+    )
+else()
+    add_executable(mib_studio_qt
+        src/frontend/core/main.cpp
+        ${FRONTEND_COMMON_SOURCES}
+        ${MIB_STUDIO_QT_EXTRA_SOURCES}
+    )
+endif()
 
 set_target_properties(mib_studio_qt PROPERTIES
     AUTOUIC_SEARCH_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/resources/ui"
@@ -312,8 +350,12 @@ set_target_properties(mib_studio_qt PROPERTIES
 
 target_include_directories(mib_studio_qt PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    "C:/Program Files/Euresys/eGrabber/include"
 )
+if(MIB_HAS_EGRABBER)
+    target_include_directories(mib_studio_qt PRIVATE
+        "C:/Program Files/Euresys/eGrabber/include"
+    )
+endif()
 
 target_link_libraries(mib_studio_qt PRIVATE
     Qt6::Widgets

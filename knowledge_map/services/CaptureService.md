@@ -44,3 +44,7 @@ realtime loop shuts down.
   `docs/howto/safe-start-stop-egrabber.md`.
 - `setCameraReadyCallback` fires from this thread; [[TriggerService]] uses
   it to grab a live `ICamera*` and start itself.
+- Platform default factory:
+  - Windows (`MIB_HAS_EGRABBER=1`) defaults to [[../camera/EGrabberCamera]].
+  - Non-Windows defaults to [[../camera/MockCamera]] (`data/mock_frames`) so
+    cloud/Linux builds can exercise non-hardware pipeline paths.
