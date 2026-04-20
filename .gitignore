@@ -27,5 +27,12 @@ scripts/kedro_frame_detection/conf/local/
 **/__pycache__/
 **/*.egg-info/
 
+# Node.js / React frontend
+node_modules/
+dist/
+
+# Tauri / Rust
+src-tauri/target/
+
 # MCU firmware subproject (not part of Qt app release)
 mcu/

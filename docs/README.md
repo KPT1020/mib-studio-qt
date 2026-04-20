@@ -14,6 +14,7 @@ This folder hosts living documentation as we build functionality. Keep content c
 - When adding a guide, consider if a brief ADR is needed in `decisions/`.
 
 ## Quick Links
+- Tauri shell + cxx bridge — see [howto/tauri-backend-bridge.md](howto/tauri-backend-bridge.md)
 - Integration: EGrabber — see `integration/egrabber.md`
 - Tasks/issues live in `knowledge_map/task/`
 - Post-processing tools (export, reanalyse) — see [howto/tools.md](howto/tools.md)

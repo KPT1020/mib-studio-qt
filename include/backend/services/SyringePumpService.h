@@ -8,9 +8,6 @@
 #include <string>
 #include <vector>
 
-class QByteArray;
-class QSerialPort;
-
 namespace backend::services {
 
 class SyringePumpService {
@@ -80,22 +77,25 @@ public:
 private:
     // Modbus RTU helpers
     static uint16_t crc16(const uint8_t* data, size_t len);
-    QByteArray buildReadRequest(uint8_t addr, uint16_t startReg, uint16_t count);
-    QByteArray buildWriteSingleRequest(uint8_t addr, uint16_t reg, uint16_t value);
-    QByteArray buildWriteMultipleRequest(uint8_t addr, uint16_t startReg, const QByteArray& regData);
-    bool sendRequest(int pumpIdx, const QByteArray& request, QByteArray& response, int expectedBytes);
+    static std::vector<uint8_t> buildReadRequest(uint8_t addr, uint16_t startReg, uint16_t count);
+    static std::vector<uint8_t> buildWriteSingleRequest(uint8_t addr, uint16_t reg, uint16_t value);
+    static std::vector<uint8_t> buildWriteMultipleRequest(uint8_t addr, uint16_t startReg,
+                                                          const std::vector<uint8_t>& regData);
+    bool sendRequest(int pumpIdx, const std::vector<uint8_t>& request, std::vector<uint8_t>& response,
+                     int expectedBytes);
 
     // Float32 <-> register conversion (big-endian / ABCD word order)
-    static QByteArray floatToRegisters(float value);
+    static std::vector<uint8_t> floatToRegisters(float value);
     static float registersToFloat(const uint8_t* data);
 
     // Read helpers
-    bool readHoldingRegisters(int pumpIdx, uint16_t startReg, uint16_t count, QByteArray& data);
+    bool readHoldingRegisters(int pumpIdx, uint16_t startReg, uint16_t count, std::vector<uint8_t>& data);
     bool writeSingleRegister(int pumpIdx, uint16_t reg, uint16_t value);
-    bool writeMultipleRegisters(int pumpIdx, uint16_t startReg, const QByteArray& regData);
+    bool writeMultipleRegisters(int pumpIdx, uint16_t startReg, const std::vector<uint8_t>& regData);
 
     struct PumpConnection {
-        QSerialPort* serial{nullptr};
+        /// Win32 HANDLE to serial port (opaque; nullptr when closed)
+        void* serial_handle{nullptr};
         PumpConfig config;
         PumpStatus status;
         mutable std::mutex mutex;

@@ -41,8 +41,10 @@ See `src/backend/AppBackend.cpp` around lines 79–200.
    - `ProcessingService::TargetGroupCallback` → `TriggerService::onTargetGroupResult`
    - `CaptureService::CameraReadyCallback` → starts/stops `TriggerService`
      and hands it the live `ICamera*`
-   - `ProcessingService::BackgroundCaptureCallback` → emits Qt signal via
-     [[../frontend/System-Utilities]] `BackgroundCaptureNotifier`
+   - `ProcessingService::BackgroundCaptureCallback` → forwards through
+     `AppBackend::setBackgroundCaptureCallback(...)` so the UI shell decides
+     how to consume it (Qt uses `BackgroundCaptureAdapter`; Tauri emits
+     `background:captured` via [[Tauri-Bridge]]).
 
 ## Camera selection
 

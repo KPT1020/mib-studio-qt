@@ -29,6 +29,8 @@ public:
                                              size_t size,
                                              uint64_t width,
                                              uint64_t height,
+                                             size_t linePitch,
+                                             uint64_t pixelFormat,
                                              uint64_t timestampNs)>;
 
     using CameraFactory = std::function<std::unique_ptr<camera::common::ICamera>()>;

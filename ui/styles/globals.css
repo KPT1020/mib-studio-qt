@@ -1,0 +1,129 @@
+@import "tailwindcss";
+
+@theme inline {
+  /* shadcn/ui design tokens using neutral palette */
+  --color-background: oklch(1 0 0);
+  --color-foreground: oklch(0.145 0 0);
+  --color-card: oklch(1 0 0);
+  --color-card-foreground: oklch(0.145 0 0);
+  --color-popover: oklch(1 0 0);
+  --color-popover-foreground: oklch(0.145 0 0);
+  --color-primary: oklch(0.205 0 0);
+  --color-primary-foreground: oklch(0.985 0 0);
+  --color-secondary: oklch(0.965 0 0);
+  --color-secondary-foreground: oklch(0.205 0 0);
+  --color-muted: oklch(0.965 0 0);
+  --color-muted-foreground: oklch(0.556 0 0);
+  --color-accent: oklch(0.965 0 0);
+  --color-accent-foreground: oklch(0.205 0 0);
+  --color-destructive: oklch(0.577 0.245 27.325);
+  --color-destructive-foreground: oklch(0.985 0 0);
+  --color-border: oklch(0.898 0 0);
+  --color-input: oklch(0.898 0 0);
+  --color-ring: oklch(0.708 0 0);
+
+  --radius: 0.5rem;
+}
+
+:root {
+  /* Layout dimensions (kept from original) */
+  --sidebar-collapsed-width: 30px;
+  --sidebar-expanded-width: 300px;
+  --status-bar-height: 22px;
+  --control-bar-height: 40px;
+  --thumbnail-size: 100px;
+  --grid-columns: 5;
+  --splitter-handle-width: 10px;
+
+  /* Semantic colors for domain-specific elements */
+  --color-indicator-active: #22c55e;
+  --color-indicator-idle: #a1a1aa;
+  --color-unsaved: #f59e0b;
+  --color-target: #3b82f6;
+  --color-valid: #22c55e;
+  --color-invalid: #ef4444;
+  --color-roi: #eab308;
+  --color-selection: #3b82f6;
+  --color-record-active: #ef4444;
+}
+
+body {
+  font-family: "Inter", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  color: var(--color-foreground);
+  background: var(--color-background);
+}
+
+/* Allotment splitter styling */
+.allotment-module_splitView__MGzYj {
+  height: 100% !important;
+}
+.allotment-module_sash__dUHxJ {
+  background: oklch(0.87 0 0) !important;
+}
+.allotment-module_sash__dUHxJ:hover {
+  background: oklch(0.75 0 0) !important;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: oklch(0.8 0 0);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.65 0 0);
+}
+
+/* Form grid layout utility (replaces qt-form) */
+.form-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  align-items: center;
+}
+.form-grid > label {
+  text-align: right;
+  white-space: nowrap;
+  font-size: 0.8125rem;
+  color: var(--color-muted-foreground);
+}
+
+/* Native select styling to match shadcn inputs */
+select.select-styled {
+  height: 2rem;
+  width: 100%;
+  border-radius: 0.375rem;
+  border: 1px solid var(--color-input);
+  background: transparent;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.875rem;
+  transition: border-color 0.15s;
+}
+select.select-styled:focus {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--color-ring);
+}
+select.select-styled:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Overlay legend */
+.overlay-legend {
+  font-size: 0.75rem;
+}
+.overlay-legend .swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}

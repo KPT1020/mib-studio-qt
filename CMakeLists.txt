@@ -60,7 +60,7 @@ if(MSVC)
     add_compile_options(/wd4828)
 endif()
 
-find_package(Qt6 COMPONENTS Core Widgets Gui Charts Network Concurrent SerialPort REQUIRED)
+find_package(Qt6 COMPONENTS Core Widgets Gui Charts Network Concurrent REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG QUIET)
 find_package(OpenCV CONFIG REQUIRED)
@@ -98,8 +98,6 @@ endif()
 # Backend library (services, APIs)
 add_library(mib_backend STATIC
     src/backend/AppBackend.cpp
-    src/backend/BackgroundCaptureNotifier.cpp
-    include/backend/BackgroundCaptureNotifier.h
     src/backend/Tools.cpp
     src/backend/EModulusLut.cpp
     src/backend/services/Logger.cpp
@@ -136,8 +134,8 @@ else()
     )
 endif()
 
-# Explicitly enable AUTOMOC for this target to ensure MOC files are generated
-set_target_properties(mib_backend PROPERTIES AUTOMOC ON)
+# mib_backend is Qt-free; do not run MOC on backend sources
+set_target_properties(mib_backend PROPERTIES AUTOMOC OFF)
 target_compile_definitions(mib_backend PUBLIC
     $<$<CONFIG:Debug>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG>
 )
@@ -166,9 +164,6 @@ endif()
 set(COREMOR_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor)
 target_link_libraries(mib_backend PUBLIC
     spdlog::spdlog
-    Qt6::Core
-    Qt6::Gui
-    Qt6::SerialPort
 )
 if(MIB_HAS_EGRABBER)
     target_link_libraries(mib_backend PUBLIC
@@ -247,6 +242,8 @@ set(FRONTEND_COMMON_SOURCES
     # Core
     src/frontend/core/MainWindow.cpp
     include/frontend/core/MainWindow.h
+    src/frontend/adapters/BackgroundCaptureAdapter.cpp
+    include/frontend/adapters/BackgroundCaptureAdapter.h
     resources/ui/MainWindow.ui
     # Tabs
     src/frontend/tabs/ConnectTab.cpp

@@ -25,6 +25,9 @@ From `CMakePresets.json`:
 `mib_backend` is linked by all three executables. Source is in
 `src/backend/`, `src/camera/`, and `src/backend/playback/`.
 
+Tauri desktop (`src-tauri/`) also links `mib_backend`, but it is built via
+Cargo + `src-tauri/build.rs` instead of CMake target generation.
+
 ## Commands
 
 ```bash
@@ -39,7 +42,14 @@ cmake --build build --preset windows-default-build-release
 
 # Deploy Qt runtime (CMake auto-triggers post-build; can run manually)
 windeployqt.exe --release build/Release/mib_studio_qt.exe
+
+# Build Tauri desktop shell (after mib_backend Release exists)
+cd src-tauri
+cargo build --release
 ```
+
+See [[../architecture/Tauri-Bridge]] for bridge details and link-time/runtime
+constraints (Qt libs filtered out for the Tauri binary).
 
 ## Conan
 

@@ -12,6 +12,7 @@ following `[[WikiLinks]]`. If you are a new agent, start here:
 - [[architecture/AppBackend]] — composition root
 - [[architecture/Threading-Model]]
 - [[architecture/Data-Flow]]
+- [[architecture/Tauri-Bridge]] — Tauri shell and Rust/cxx backend bridge
 
 ### Services (`src/backend/services/`)
 - [[services/_MOC|Services MOC]]

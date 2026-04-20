@@ -1,5 +1,6 @@
 #include "backend/services/CameraControlService.h"
 
+#include <EGrabber.h>
 #include <spdlog/spdlog.h>
 
 #include <sstream>

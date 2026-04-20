@@ -14,9 +14,6 @@
 #include "backend/services/TriggerService.h"
 #include "backend/services/YoloService.h"
 #include "backend/services/SyringePumpService.h"
-#include "backend/BackgroundCaptureNotifier.h"
-#include <QImage>
-#include <QTimer>
 
 #include <algorithm>
 #include <chrono>
@@ -73,9 +70,7 @@ namespace backend
         }
     }
 
-    AppBackend::AppBackend() {
-        backgroundCaptureNotifier_ = std::make_unique<BackgroundCaptureNotifier>();
-    }
+    AppBackend::AppBackend() = default;
     AppBackend::~AppBackend() {
         stopFrameRecording();
     }
@@ -147,16 +142,15 @@ namespace backend
             }
         });
 
-        // Wire background capture callback to emit Qt signal
+        // Wire background capture callback (UI layers register via setBackgroundCaptureCallback)
         processingService_->setBackgroundCaptureCallback([this](const cv::Mat& bg, uint64_t frameIndex) {
-            if (backgroundCaptureNotifier_) {
-                // Convert cv::Mat to QImage
-                QImage qimg(bg.data, bg.cols, bg.rows, static_cast<int>(bg.step), QImage::Format_Grayscale8);
-                QImage qimgCopy = qimg.copy(); // Ensure we own the data
-                // Use QTimer::singleShot to ensure we're in the Qt event loop thread
-                QTimer::singleShot(0, backgroundCaptureNotifier_.get(), [this, qimgCopy, frameIndex]() {
-                    emit backgroundCaptureNotifier_->backgroundAutoCaptured(qimgCopy, frameIndex);
-                });
+            std::function<void(const cv::Mat&, uint64_t)> cb;
+            {
+                std::lock_guard<std::mutex> lk(background_capture_cb_mutex_);
+                cb = background_capture_cb_;
+            }
+            if (cb) {
+                cb(bg, frameIndex);
             }
             SPDLOG_INFO("Background auto-captured at frame {}", frameIndex);
         });
@@ -516,8 +510,9 @@ namespace backend
         return frameRecordingFiltered_.load();
     }
 
-    BackgroundCaptureNotifier* AppBackend::backgroundCaptureNotifier() const {
-        return backgroundCaptureNotifier_.get();
+    void AppBackend::setBackgroundCaptureCallback(std::function<void(const cv::Mat&, uint64_t)> cb) {
+        std::lock_guard<std::mutex> lk(background_capture_cb_mutex_);
+        background_capture_cb_ = std::move(cb);
     }
 
     void AppBackend::setLastConfigJson(const std::string& json) {
