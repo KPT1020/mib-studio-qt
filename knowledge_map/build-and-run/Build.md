@@ -45,7 +45,11 @@ windeployqt.exe --release build/Release/mib_studio_qt.exe
 
 Dependencies resolved via Conan (not vcpkg — despite old comments). See
 [[Dependencies]] and `conanfile.txt`. Post-build hooks call
-`windeployqt.exe` to copy Qt plugins and DLLs next to the exe.
+`windeployqt.exe` to copy Qt plugins and DLLs next to the exe. CMake resolves
+`windeployqt` and the `PATH` prefix from Conan CMakeDeps’ `qt_PACKAGE_FOLDER_*`
+so Release/Debug tools stay aligned with the linked Qt package (stale
+`find_program` cache or cache-wide `Qt6Core.dll` globs could otherwise mix
+different Conan package IDs after reinstalls).
 
 ## Platform guards (hardware SDKs)
 

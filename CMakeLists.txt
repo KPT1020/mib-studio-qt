@@ -460,21 +460,39 @@ if(WIN32)
     
     set(CONAN_QT_DEBUG_BIN_DIR "${CONAN_QT_BIN_DIR}")  # Debug and Release DLLs in same directory
     set(CONAN_QT_TOOLS_DIR "${QT6_ROOT}/tools/qt6/bin")
-    
-    # Find windeployqt
-    find_program(WINDEPLOYQT_RELEASE windeployqt.exe
-        PATHS "${CONAN_QT_TOOLS_DIR}" "${CONAN_QT_BIN_DIR}"
-        NO_DEFAULT_PATH
-    )
-    find_program(WINDEPLOYQT_DEBUG windeployqt.debug.bat
-        PATHS "${CONAN_QT_TOOLS_DIR}" "${CONAN_QT_BIN_DIR}"
-        NO_DEFAULT_PATH
-    )
-    
-    # If not found in tools, try bin directory
-    if(NOT WINDEPLOYQT_RELEASE)
+
+    # Find windeployqt: prefer the exact Conan package trees (CMakeDeps sets qt_PACKAGE_FOLDER_*).
+    # A cached find_program result can keep pointing at an older qt/*/p folder after `conan install`,
+    # which then mismatches the Qt DLLs we link (different package IDs).
+    unset(WINDEPLOYQT_RELEASE CACHE)
+    unset(WINDEPLOYQT_DEBUG CACHE)
+    set(_WINDEPLOYQT_RELEASE_CAND "")
+    set(_WINDEPLOYQT_DEBUG_CAND "")
+    if(DEFINED qt_PACKAGE_FOLDER_RELEASE AND EXISTS "${qt_PACKAGE_FOLDER_RELEASE}/bin/windeployqt.exe")
+        set(_WINDEPLOYQT_RELEASE_CAND "${qt_PACKAGE_FOLDER_RELEASE}/bin/windeployqt.exe")
+    endif()
+    if(DEFINED qt_PACKAGE_FOLDER_DEBUG AND EXISTS "${qt_PACKAGE_FOLDER_DEBUG}/bin/windeployqt.exe")
+        set(_WINDEPLOYQT_DEBUG_CAND "${qt_PACKAGE_FOLDER_DEBUG}/bin/windeployqt.exe")
+    endif()
+    if(_WINDEPLOYQT_RELEASE_CAND)
+        set(WINDEPLOYQT_RELEASE "${_WINDEPLOYQT_RELEASE_CAND}" CACHE FILEPATH "windeployqt for Release deployment" FORCE)
+    else()
         find_program(WINDEPLOYQT_RELEASE windeployqt.exe
-            PATHS "${CONAN_QT_BIN_DIR}" "${CMAKE_PREFIX_PATH}/bin"
+            PATHS "${CONAN_QT_TOOLS_DIR}" "${CONAN_QT_BIN_DIR}"
+            NO_DEFAULT_PATH
+        )
+        if(NOT WINDEPLOYQT_RELEASE)
+            find_program(WINDEPLOYQT_RELEASE windeployqt.exe
+                PATHS "${CONAN_QT_BIN_DIR}" "${CMAKE_PREFIX_PATH}/bin"
+            )
+        endif()
+    endif()
+    if(_WINDEPLOYQT_DEBUG_CAND)
+        set(WINDEPLOYQT_DEBUG "${_WINDEPLOYQT_DEBUG_CAND}" CACHE FILEPATH "windeployqt for Debug deployment" FORCE)
+    else()
+        find_program(WINDEPLOYQT_DEBUG windeployqt.debug.bat
+            PATHS "${CONAN_QT_TOOLS_DIR}" "${CONAN_QT_BIN_DIR}"
+            NO_DEFAULT_PATH
         )
     endif()
     
@@ -511,6 +529,24 @@ if(WIN32)
     endforeach()
     list(REMOVE_DUPLICATES _EXTRA_CODEC_DLLS)
 
+    # #region agent log
+    set(_MIB_AGENT_LOG "${CMAKE_SOURCE_DIR}/debug-ea2ba5.log")
+    set(_MIB_REL_ROOT "")
+    if(DEFINED qt_PACKAGE_FOLDER_RELEASE)
+        set(_MIB_REL_ROOT "${qt_PACKAGE_FOLDER_RELEASE}")
+    endif()
+    set(_MIB_CHARTS_OK "n/a")
+    if(_MIB_REL_ROOT AND EXISTS "${_MIB_REL_ROOT}/bin/Qt6Charts.dll")
+        set(_MIB_CHARTS_OK "yes")
+    elseif(_MIB_REL_ROOT)
+        set(_MIB_CHARTS_OK "no")
+    endif()
+    string(TIMESTAMP _MIB_TS_UTC UTC)
+    file(APPEND "${_MIB_AGENT_LOG}"
+        "{\"sessionId\":\"ea2ba5\",\"runId\":\"configure\",\"hypothesisId\":\"H1\",\"location\":\"CMakeLists.txt:qt-deploy\",\"message\":\"qt deploy resolution\",\"data\":{\"qt_PACKAGE_FOLDER_RELEASE\":\"${_MIB_REL_ROOT}\",\"WINDEPLOYQT_RELEASE\":\"${WINDEPLOYQT_RELEASE}\",\"charts_in_release_bin\":\"${_MIB_CHARTS_OK}\"},\"timestamp\":\"${_MIB_TS_UTC}\"}\n"
+    )
+    # #endregion
+
     foreach(app_target IN ITEMS mib_studio_qt)
         # Use different windeployqt for Debug vs Release
         if(WINDEPLOYQT_RELEASE)
@@ -520,44 +556,55 @@ if(WIN32)
             set(_QT_RELEASE_DLL_FOUND FALSE)
             set(_QT_DEBUG_BIN_DIR "")
             set(_QT_RELEASE_BIN_DIR "")
-            
-            # Check Debug package location using imported target
+
+            # Prefer CMakeDeps package roots (unique per build type). Avoids cache-wide globs picking a
+            # random Qt6Core.dll when several Conan package folders exist.
+            if(DEFINED qt_PACKAGE_FOLDER_DEBUG AND EXISTS "${qt_PACKAGE_FOLDER_DEBUG}/bin/Qt6Cored.dll")
+                set(_QT_DEBUG_BIN_DIR "${qt_PACKAGE_FOLDER_DEBUG}/bin")
+                set(_QT_DEBUG_DLL_FOUND TRUE)
+            endif()
+            if(DEFINED qt_PACKAGE_FOLDER_RELEASE AND EXISTS "${qt_PACKAGE_FOLDER_RELEASE}/bin/Qt6Core.dll")
+                set(_QT_RELEASE_BIN_DIR "${qt_PACKAGE_FOLDER_RELEASE}/bin")
+                set(_QT_RELEASE_DLL_FOUND TRUE)
+            endif()
+
+            # Check Debug / Release locations using imported target (non-Conan or unusual layouts)
             if(TARGET Qt6::Core)
-                get_target_property(_QT_CORE_LOCATION_DEBUG Qt6::Core IMPORTED_LOCATION_DEBUG)
-                if(_QT_CORE_LOCATION_DEBUG)
-                    get_filename_component(_QT_DEBUG_BIN_DIR "${_QT_CORE_LOCATION_DEBUG}" DIRECTORY)
-                    if(EXISTS "${_QT_DEBUG_BIN_DIR}/Qt6Cored.dll")
-                        set(_QT_DEBUG_DLL_FOUND TRUE)
-                    endif()
-                else()
-                    # Fallback: derive bin dir from debug import library
-                    get_target_property(_QT_CORE_IMPLIB_DEBUG Qt6::Core IMPORTED_IMPLIB_DEBUG)
-                    if(_QT_CORE_IMPLIB_DEBUG)
-                        get_filename_component(_QT_DEBUG_LIB_DIR "${_QT_CORE_IMPLIB_DEBUG}" DIRECTORY)
-                        get_filename_component(_QT_DEBUG_PREFIX "${_QT_DEBUG_LIB_DIR}" DIRECTORY)
-                        set(_QT_DEBUG_BIN_DIR "${_QT_DEBUG_PREFIX}/bin")
+                if(NOT _QT_DEBUG_DLL_FOUND)
+                    get_target_property(_QT_CORE_LOCATION_DEBUG Qt6::Core IMPORTED_LOCATION_DEBUG)
+                    if(_QT_CORE_LOCATION_DEBUG)
+                        get_filename_component(_QT_DEBUG_BIN_DIR "${_QT_CORE_LOCATION_DEBUG}" DIRECTORY)
                         if(EXISTS "${_QT_DEBUG_BIN_DIR}/Qt6Cored.dll")
                             set(_QT_DEBUG_DLL_FOUND TRUE)
                         endif()
+                    else()
+                        get_target_property(_QT_CORE_IMPLIB_DEBUG Qt6::Core IMPORTED_IMPLIB_DEBUG)
+                        if(_QT_CORE_IMPLIB_DEBUG)
+                            get_filename_component(_QT_DEBUG_LIB_DIR "${_QT_CORE_IMPLIB_DEBUG}" DIRECTORY)
+                            get_filename_component(_QT_DEBUG_PREFIX "${_QT_DEBUG_LIB_DIR}" DIRECTORY)
+                            set(_QT_DEBUG_BIN_DIR "${_QT_DEBUG_PREFIX}/bin")
+                            if(EXISTS "${_QT_DEBUG_BIN_DIR}/Qt6Cored.dll")
+                                set(_QT_DEBUG_DLL_FOUND TRUE)
+                            endif()
+                        endif()
                     endif()
                 endif()
-                
-                # Check Release package location using imported target
-                get_target_property(_QT_CORE_LOCATION_RELEASE Qt6::Core IMPORTED_LOCATION_RELEASE)
-                if(_QT_CORE_LOCATION_RELEASE)
-                    get_filename_component(_QT_RELEASE_BIN_DIR "${_QT_CORE_LOCATION_RELEASE}" DIRECTORY)
-                    if(EXISTS "${_QT_RELEASE_BIN_DIR}/Qt6Core.dll")
-                        set(_QT_RELEASE_DLL_FOUND TRUE)
-                    endif()
-                else()
-                    # Fallback: derive bin dir from release import library
-                    get_target_property(_QT_CORE_IMPLIB_RELEASE Qt6::Core IMPORTED_IMPLIB_RELEASE)
-                    if(_QT_CORE_IMPLIB_RELEASE)
-                        get_filename_component(_QT_RELEASE_LIB_DIR "${_QT_CORE_IMPLIB_RELEASE}" DIRECTORY)
-                        get_filename_component(_QT_RELEASE_PREFIX "${_QT_RELEASE_LIB_DIR}" DIRECTORY)
-                        set(_QT_RELEASE_BIN_DIR "${_QT_RELEASE_PREFIX}/bin")
+                if(NOT _QT_RELEASE_DLL_FOUND)
+                    get_target_property(_QT_CORE_LOCATION_RELEASE Qt6::Core IMPORTED_LOCATION_RELEASE)
+                    if(_QT_CORE_LOCATION_RELEASE)
+                        get_filename_component(_QT_RELEASE_BIN_DIR "${_QT_CORE_LOCATION_RELEASE}" DIRECTORY)
                         if(EXISTS "${_QT_RELEASE_BIN_DIR}/Qt6Core.dll")
                             set(_QT_RELEASE_DLL_FOUND TRUE)
+                        endif()
+                    else()
+                        get_target_property(_QT_CORE_IMPLIB_RELEASE Qt6::Core IMPORTED_IMPLIB_RELEASE)
+                        if(_QT_CORE_IMPLIB_RELEASE)
+                            get_filename_component(_QT_RELEASE_LIB_DIR "${_QT_CORE_IMPLIB_RELEASE}" DIRECTORY)
+                            get_filename_component(_QT_RELEASE_PREFIX "${_QT_RELEASE_LIB_DIR}" DIRECTORY)
+                            set(_QT_RELEASE_BIN_DIR "${_QT_RELEASE_PREFIX}/bin")
+                            if(EXISTS "${_QT_RELEASE_BIN_DIR}/Qt6Core.dll")
+                                set(_QT_RELEASE_DLL_FOUND TRUE)
+                            endif()
                         endif()
                     endif()
                 endif()
@@ -575,23 +622,25 @@ if(WIN32)
                 endif()
             endif()
 
-            # Last resort: search Conan cache for Qt6 debug/release DLLs
-            if(NOT _QT_DEBUG_BIN_DIR OR NOT _QT_RELEASE_BIN_DIR)
+            # Last resort: search Conan cache (non-deterministic; only when still unknown)
+            if(NOT _QT_DEBUG_DLL_FOUND OR NOT _QT_RELEASE_DLL_FOUND)
                 set(_CONAN_CACHE_ROOT "$ENV{USERPROFILE}/.conan2")
                 if(EXISTS "${_CONAN_CACHE_ROOT}")
-                    if(NOT _QT_DEBUG_BIN_DIR)
+                    if(NOT _QT_DEBUG_DLL_FOUND)
                         file(GLOB _qt_debug_dll_candidates "${_CONAN_CACHE_ROOT}/p/b/*/p/bin/Qt6Cored.dll")
                         list(LENGTH _qt_debug_dll_candidates _qt_debug_count)
                         if(_qt_debug_count GREATER 0)
+                            list(SORT _qt_debug_dll_candidates)
                             list(GET _qt_debug_dll_candidates 0 _qt_debug_dll)
                             get_filename_component(_QT_DEBUG_BIN_DIR "${_qt_debug_dll}" DIRECTORY)
                             set(_QT_DEBUG_DLL_FOUND TRUE)
                         endif()
                     endif()
-                    if(NOT _QT_RELEASE_BIN_DIR)
+                    if(NOT _QT_RELEASE_DLL_FOUND)
                         file(GLOB _qt_release_dll_candidates "${_CONAN_CACHE_ROOT}/p/b/*/p/bin/Qt6Core.dll")
                         list(LENGTH _qt_release_dll_candidates _qt_release_count)
                         if(_qt_release_count GREATER 0)
+                            list(SORT _qt_release_dll_candidates)
                             list(GET _qt_release_dll_candidates 0 _qt_release_dll)
                             get_filename_component(_QT_RELEASE_BIN_DIR "${_qt_release_dll}" DIRECTORY)
                             set(_QT_RELEASE_DLL_FOUND TRUE)

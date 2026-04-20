@@ -5,6 +5,12 @@
 
 ## Features shipped
 
+- **Release windeployqt Conan alignment** (2026-04-20) — `CMakeLists.txt`
+  picks `windeployqt` and per-config `PATH` from `qt_PACKAGE_FOLDER_DEBUG` /
+  `qt_PACKAGE_FOLDER_RELEASE` (CMakeDeps) instead of a cached `find_program`
+  result and non-deterministic Conan-cache globs, fixing MSB3073 when those
+  pointed at a different Qt package than the one linked for Release.
+
 - **Buffer save to AVI + AVI source for mask regeneration** (2026-04-16) —
   [[../data-model/FrameStore]] gained `saveFramesToAvi()` overloads
   (all/index-range/timestamp-range) writing a single uncompressed AVI via
