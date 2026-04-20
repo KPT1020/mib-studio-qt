@@ -529,24 +529,6 @@ if(WIN32)
     endforeach()
     list(REMOVE_DUPLICATES _EXTRA_CODEC_DLLS)
 
-    # #region agent log
-    set(_MIB_AGENT_LOG "${CMAKE_SOURCE_DIR}/debug-ea2ba5.log")
-    set(_MIB_REL_ROOT "")
-    if(DEFINED qt_PACKAGE_FOLDER_RELEASE)
-        set(_MIB_REL_ROOT "${qt_PACKAGE_FOLDER_RELEASE}")
-    endif()
-    set(_MIB_CHARTS_OK "n/a")
-    if(_MIB_REL_ROOT AND EXISTS "${_MIB_REL_ROOT}/bin/Qt6Charts.dll")
-        set(_MIB_CHARTS_OK "yes")
-    elseif(_MIB_REL_ROOT)
-        set(_MIB_CHARTS_OK "no")
-    endif()
-    string(TIMESTAMP _MIB_TS_UTC UTC)
-    file(APPEND "${_MIB_AGENT_LOG}"
-        "{\"sessionId\":\"ea2ba5\",\"runId\":\"configure\",\"hypothesisId\":\"H1\",\"location\":\"CMakeLists.txt:qt-deploy\",\"message\":\"qt deploy resolution\",\"data\":{\"qt_PACKAGE_FOLDER_RELEASE\":\"${_MIB_REL_ROOT}\",\"WINDEPLOYQT_RELEASE\":\"${WINDEPLOYQT_RELEASE}\",\"charts_in_release_bin\":\"${_MIB_CHARTS_OK}\"},\"timestamp\":\"${_MIB_TS_UTC}\"}\n"
-    )
-    # #endregion
-
     foreach(app_target IN ITEMS mib_studio_qt)
         # Use different windeployqt for Debug vs Release
         if(WINDEPLOYQT_RELEASE)
