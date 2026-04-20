@@ -10,10 +10,6 @@
   [[../camera/EGrabberCamera]]. No mock option in the UI.
 - **`mock_studio_qt.exe`** — development. Same UI, but lets the user
   select a mock folder from the [[../frontend/ConnectTab]].
-- **`capture_processing_test.exe`** — console harness
-  (`src/tests/capture_processing_test.cpp`). Uses
-  [[../camera/MockCamera]] to exercise capture + processing without
-  the UI.
 
 ## Mock camera env vars
 

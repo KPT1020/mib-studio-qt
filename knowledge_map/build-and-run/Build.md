@@ -20,9 +20,8 @@ From `CMakePresets.json`:
 | `mib_backend` | STATIC library | Core: services, camera abstraction, processing |
 | `mib_studio_qt` | executable (`WIN32` on Windows) | Production app |
 | `mock_studio_qt` | executable | Dev app with mock-camera GUI selector |
-| `capture_processing_test` | executable | Console test harness (`src/tests/capture_processing_test.cpp`) |
 
-`mib_backend` is linked by all three executables. Source is in
+`mib_backend` is linked by both executables. Source is in
 `src/backend/`, `src/camera/`, and `src/backend/playback/`.
 
 ## Commands

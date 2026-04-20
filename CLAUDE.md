@@ -83,7 +83,6 @@ windeployqt.exe --release build/Release/mib_studio_qt.exe
 
 - `mib_studio_qt.exe` — Production app (hardware camera)
 - `mock_studio_qt.exe` — Development app with GUI mock camera selector
-- `capture_processing_test.exe` — Console test harness
 
 ### Mock Camera Environment Variables
 
