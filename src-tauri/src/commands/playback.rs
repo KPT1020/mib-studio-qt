@@ -45,11 +45,25 @@ pub async fn fetch_latest_frame(
 
 #[tauri::command]
 pub async fn fetch_frame_by_index(
-    _state: tauri::State<'_, AppState>,
-    _index: u64,
+    state: tauri::State<'_, AppState>,
+    index: u64,
 ) -> Result<Option<FrameData>, String> {
-    // Deferred: bridge would expose fetch_by_index PNG + meta.
-    Ok(None)
+    let png = state.backend.fetch_frame_by_index_png(index);
+    if png.is_empty() {
+        return Ok(None);
+    }
+    let meta = state.backend.fetch_frame_by_index_meta(index);
+    if meta.width == 0 {
+        return Ok(None);
+    }
+    let image_base64 = base64::engine::general_purpose::STANDARD.encode(&png);
+    Ok(Some(FrameData {
+        index: meta.index,
+        width: meta.width,
+        height: meta.height,
+        image_base64,
+        timestamp_ns: meta.timestamp_ns,
+    }))
 }
 
 #[tauri::command]
