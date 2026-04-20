@@ -80,21 +80,27 @@ public slots:
     bool exportHistogramAsTiff(const QString& filePath) const;
     bool exportScatterPlotAsTiff(const QString& filePath) const;
 
+signals:
+    void processingConfigApplied();
+
 private slots:
     void onUpdate();
     void onToggleOverlay(bool enabled);
     void onClearBuffer();
     void onApplyParams();
     void onSortTrigger();
+    void onPeriodicTriggerToggled(bool checked);
 
 protected:
     void showEvent(QShowEvent* event) override;
     void hideEvent(QHideEvent* event) override;
 
+public slots:
+    void loadCurrentConfig();
+
 private:
     void setupCharts();
     void setupTuneParamsPanel();
-    void loadCurrentConfig();
     void loadIsoelasticCurves();
     void updateScatterplot(const std::vector<backend::services::ProcessedFrame>& validFrames);
     void updateHistogram(const std::vector<backend::services::ProcessedFrame>& validFrames);
@@ -110,6 +116,8 @@ private:
     Ui::ExperimentMonitoringTab* ui;
     backend::AppBackend& backend_;
     QTimer* updateTimer_ = nullptr;
+    QTimer* periodicTriggerTimer_ = nullptr;
+    uint64_t periodicTriggerPulseCount_ = 0;
     QLabel* roiLabel_ = nullptr;
 
     // Panel 1: Scatterplot
@@ -179,12 +187,15 @@ private:
     QDoubleSpinBox* deformMinSpin_ = nullptr;
     QDoubleSpinBox* deformMaxSpin_ = nullptr;
     QDoubleSpinBox* areaRatioMaxSpin_ = nullptr;
+    QDoubleSpinBox* ringMinSpin_ = nullptr;
+    QDoubleSpinBox* ringMaxSpin_ = nullptr;
 
     // Filter enables
     QCheckBox* borderCheckBox_ = nullptr;
     QCheckBox* areaRangeCheckBox_ = nullptr;
     QCheckBox* deformRangeCheckBox_ = nullptr;
     QCheckBox* areaRatioCheckBox_ = nullptr;
+    QCheckBox* ringRatioCheckBox_ = nullptr;
     QCheckBox* singleInnerCheckBox_ = nullptr;
 
     // Target group
@@ -193,6 +204,10 @@ private:
     QSpinBox* targetAreaMaxSpin_ = nullptr;
     QDoubleSpinBox* targetDeformMinSpin_ = nullptr;
     QDoubleSpinBox* targetDeformMaxSpin_ = nullptr;
+
+    // Multi-image acquisition
+    QCheckBox* multiImageEnableBox_ = nullptr;
+    QSpinBox* multiImageCountSpin_ = nullptr;
 };
 
 } // namespace frontend

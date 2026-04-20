@@ -36,6 +36,16 @@
       </widget>
      </item>
      <item>
+      <widget class="QPushButton" name="closeFileBtn">
+       <property name="text">
+        <string>Close File</string>
+       </property>
+       <property name="enabled">
+        <bool>false</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
       <widget class="QPushButton" name="exportMetricsBtn">
        <property name="text">
         <string>Export Metrics to CSV...</string>
@@ -62,6 +72,16 @@
        </property>
        <property name="enabled">
         <bool>false</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="regenerateMasksBtn">
+       <property name="text">
+        <string>Regenerate masks...</string>
+       </property>
+       <property name="toolTip">
+        <string>Re-run the processing pipeline on a batch of stream images (HDF5 range or folder) to generate masks.</string>
        </property>
       </widget>
      </item>

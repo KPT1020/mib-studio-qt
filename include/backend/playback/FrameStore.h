@@ -87,6 +87,24 @@ namespace backend::playback
         bool saveFramesToDisk(const std::string& outputDir, uint64_t startTimestamp, uint64_t endTimestamp, bool useTimestamps,
                               std::function<bool(const Frame&)> filterFn = nullptr) const;
 
+        // Save frames to a single uncompressed AVI file.
+        // Tries Y800 (grayscale) FourCC first, falls back to uncompressed BGR ("DIB ")
+        // if the Y800 writer fails to open. Per-frame timestamps are NOT preserved.
+        // filterFn: optional function that returns true if frame should be skipped.
+        // fps: playback frame rate embedded in the AVI header (does not affect content).
+        bool saveFramesToAvi(const std::string& outputPath, double fps = 30.0,
+                             std::function<bool(const Frame&)> filterFn = nullptr) const;
+
+        // Save frames to AVI by index range (inclusive).
+        bool saveFramesToAvi(const std::string& outputPath, uint64_t startIndex, uint64_t endIndex,
+                             double fps = 30.0,
+                             std::function<bool(const Frame&)> filterFn = nullptr) const;
+
+        // Save frames to AVI by timestamp range (inclusive).
+        bool saveFramesToAvi(const std::string& outputPath, uint64_t startTimestamp, uint64_t endTimestamp,
+                             bool useTimestamps, double fps = 30.0,
+                             std::function<bool(const Frame&)> filterFn = nullptr) const;
+
         // Resize buffer capacity safely
         // Preserves existing frames when possible (if new size >= current available frames)
         // Clears buffer if new size < current available frames
@@ -128,6 +146,14 @@ namespace backend::playback
 
         // Internal helper to save a single frame as TIFF
         bool saveFrameAsTiff(const Frame& frame, const std::string& filepath) const;
+
+        // Internal helper: write already-collected frames to an AVI file.
+        // Opens cv::VideoWriter once, writes sequentially, closes on return.
+        // Must be called WITHOUT holding mutex_.
+        bool writeFramesAsAvi(const std::vector<std::pair<uint64_t, Frame>>& frames,
+                              const std::string& outputPath,
+                              double fps,
+                              std::function<bool(const Frame&)> filterFn) const;
 
         // Internal helper to find frame indices by timestamp range
         bool findIndicesByTimestampRange(uint64_t startTimestamp, uint64_t endTimestamp, uint64_t& startIndex, uint64_t& endIndex) const;

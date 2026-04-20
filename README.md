@@ -112,12 +112,12 @@ After building installers, use `publish-update.ps1` to upload them to RustFS (S3
 
 **Publish update package (for auto-updates):**
 ```powershell
-.\publish-update.ps1 -Installer "build\dist\MIB_Studio_Qt_Update_v0.2.0.exe" -Profile rustfs
+.\publish-update.ps1 -Installer "resources\build\dist\MIB_Studio_Qt_Update_v0.2.0.exe" -Profile rustfs
 ```
 
 **Publish full installer (optional, for manual downloads):**
 ```powershell
-.\publish-update.ps1 -Installer "build\dist\MIB_Studio_Qt_Setup_v0.2.0.exe" -Profile rustfs
+.\publish-update.ps1 -Installer "resources\build\dist\MIB_Studio_Qt_Setup_v0.2.0.exe" -Profile rustfs
 ```
 
 The script auto-detects version from filename, computes SHA-256, generates a manifest, and uploads files with public-read ACL.

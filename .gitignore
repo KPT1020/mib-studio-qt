@@ -33,3 +33,6 @@ dist/
 
 # Tauri / Rust
 src-tauri/target/
+
+# MCU firmware subproject (not part of Qt app release)
+mcu/

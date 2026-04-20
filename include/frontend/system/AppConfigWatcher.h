@@ -25,6 +25,8 @@ public:
 	void setWatchedPath(const QString& path);
 	// Try to restore pending ROI if image dimensions are now available
 	void tryRestorePendingRoi();
+	// Write current ProcessingConfig back to the watched config.json file
+	void writeBackProcessingConfig();
 
 signals:
 	// Emitted when the watched config file changes

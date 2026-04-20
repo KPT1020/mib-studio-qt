@@ -17,6 +17,19 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Restore-ChecksumEnvVar {
+    param(
+        [string]$Name,
+        [string]$PreviousValue
+    )
+
+    if ($null -eq $PreviousValue) {
+        Remove-Item "Env:$Name" -ErrorAction SilentlyContinue
+    } else {
+        Set-Item "Env:$Name" $PreviousValue
+    }
+}
+
 # Default zip path: tools/dist/MIB_Studio_Tools_vX.Y.Z_windows.zip (use latest if single zip)
 if (-not $Zip) {
     $toolsDist = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "tools\dist"
@@ -82,13 +95,28 @@ $manifestJson | Out-File -FilePath $manifestPath -Encoding UTF8 -NoNewline
 $awsArgs = @("--endpoint-url", $Endpoint)
 if ($Profile) { $awsArgs += @("--profile", $Profile) }
 
+# Force AWS CLI checksum behavior that is compatible with S3-compatible endpoints.
+$previousRequestChecksumCalculation = $env:AWS_REQUEST_CHECKSUM_CALCULATION
+$previousResponseChecksumValidation = $env:AWS_RESPONSE_CHECKSUM_VALIDATION
+$env:AWS_REQUEST_CHECKSUM_CALCULATION = "when_required"
+$env:AWS_RESPONSE_CHECKSUM_VALIDATION = "when_required"
+
 Write-Host "`n3. Uploading zip..." -ForegroundColor Yellow
-$uploadArgs = $awsArgs + @("s3", "cp", $Zip, "s3://$Bucket/$zipKey", "--content-type", "application/zip", "--acl", "public-read")
+$uploadArgs = $awsArgs + @(
+    "s3api", "put-object",
+    "--bucket", $Bucket,
+    "--key", $zipKey,
+    "--body", $Zip,
+    "--content-type", "application/zip",
+    "--acl", "public-read"
+)
 $result = & aws $uploadArgs 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: Zip upload failed!" -ForegroundColor Red
     Write-Host $result -ForegroundColor Red
     Remove-Item $manifestPath -ErrorAction SilentlyContinue
+    Restore-ChecksumEnvVar -Name "AWS_REQUEST_CHECKSUM_CALCULATION" -PreviousValue $previousRequestChecksumCalculation
+    Restore-ChecksumEnvVar -Name "AWS_RESPONSE_CHECKSUM_VALIDATION" -PreviousValue $previousResponseChecksumValidation
     exit 1
 }
 Write-Host "   Zip uploaded successfully" -ForegroundColor Green
@@ -100,9 +128,14 @@ Remove-Item $manifestPath -ErrorAction SilentlyContinue
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: Manifest upload failed!" -ForegroundColor Red
     Write-Host $result -ForegroundColor Red
+    Restore-ChecksumEnvVar -Name "AWS_REQUEST_CHECKSUM_CALCULATION" -PreviousValue $previousRequestChecksumCalculation
+    Restore-ChecksumEnvVar -Name "AWS_RESPONSE_CHECKSUM_VALIDATION" -PreviousValue $previousResponseChecksumValidation
     exit 1
 }
 Write-Host "   Manifest uploaded successfully" -ForegroundColor Green
+
+Restore-ChecksumEnvVar -Name "AWS_REQUEST_CHECKSUM_CALCULATION" -PreviousValue $previousRequestChecksumCalculation
+Restore-ChecksumEnvVar -Name "AWS_RESPONSE_CHECKSUM_VALIDATION" -PreviousValue $previousResponseChecksumValidation
 
 Write-Host "`n=== Publish Complete ===" -ForegroundColor Cyan
 Write-Host "Manifest URL: $endpointNoSlash/$Bucket/$manifestKey" -ForegroundColor Green

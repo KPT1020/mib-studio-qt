@@ -1,7 +1,6 @@
 #pragma once
 
 #include "backend/services/CameraControlTypes.h"
-
 #include <optional>
 #include <string>
 #include <vector>

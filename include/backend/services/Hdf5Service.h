@@ -29,6 +29,7 @@ public:
     bool openFile(const std::string& filePath);
     bool loadFile(const std::string& filePath); // Open existing file for reading
     void closeFile();
+    bool flush(); // Explicit global flush — call before metadata writes to protect frame data on crash
     bool isFileOpen() const;
     
     // Frame saving (batch write - for final save or periodic flush)

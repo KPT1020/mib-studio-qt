@@ -9,10 +9,17 @@
 #include <chrono>
 #include <mutex>
 
+#ifndef MIB_HAS_EGRABBER
+#define MIB_HAS_EGRABBER 0
+#endif
+
+#if MIB_HAS_EGRABBER
 using namespace Euresys;
+#endif
 
 namespace camera::common {
 
+#if MIB_HAS_EGRABBER
 EGrabberCamera::EGrabberCamera() = default;
 
 EGrabberCamera::EGrabberCamera(int interfaceIndex, int deviceIndex)
@@ -330,6 +337,61 @@ bool EGrabberCamera::setTriggerOutput(bool high) {
         return false;
     }
 }
+
+#else
+
+EGrabberCamera::EGrabberCamera() = default;
+
+EGrabberCamera::EGrabberCamera(int interfaceIndex, int deviceIndex)
+    : hasSelection_(true),
+      selectedInterfaceIndex_(interfaceIndex),
+      selectedDeviceIndex_(deviceIndex) {}
+
+EGrabberCamera::~EGrabberCamera() {
+    stop();
+}
+
+void EGrabberCamera::applyConfig(const CameraConfig& config) {
+    config_ = config;
+}
+
+bool EGrabberCamera::start() {
+    SPDLOG_WARN("EGrabberCamera::start unavailable on this platform (EGrabber SDK is Windows-only)");
+    running_ = false;
+    return false;
+}
+
+void EGrabberCamera::stop() {
+    running_ = false;
+    pendingFrames_.clear();
+}
+
+bool EGrabberCamera::grabFrame(Frame& out) {
+    (void)out;
+    return false;
+}
+
+bool EGrabberCamera::pollStats(CameraStats& out) const {
+    (void)out;
+    return false;
+}
+
+void EGrabberCamera::replenishPendingFrames() {}
+
+bool EGrabberCamera::checkDeviceHealth() const {
+    return false;
+}
+
+void EGrabberCamera::configureTriggerOutput(const std::string& lineSelector) {
+    (void)lineSelector;
+}
+
+bool EGrabberCamera::setTriggerOutput(bool high) {
+    (void)high;
+    return false;
+}
+
+#endif
 
 } // namespace camera::common
 

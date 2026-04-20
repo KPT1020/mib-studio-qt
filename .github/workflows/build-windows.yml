@@ -91,7 +91,7 @@ jobs:
 
       - name: Install Conan
         run: |
-          pip install conan
+          pip install conan boto3
           conan profile detect --force
           # Create CI profile pinned to msvc 194 to match prebuilt binaries on conancenter
           @"
@@ -202,9 +202,8 @@ jobs:
           $installers = Get-ChildItem "build\dist\*.exe"
 
           if ($channel -eq "beta") {
-            # Beta: pre-release, create lightweight tag on current commit
-            git tag $tag
-            gh release create $tag $installers --title "v$version" --generate-notes --prerelease
+            # Beta: pre-release; gh creates the tag server-side on this commit
+            gh release create $tag $installers --title "v$version" --generate-notes --prerelease --target ${{ github.sha }}
           } else {
             # Release: full release (tag already pushed in version step)
             gh release create $tag $installers --title "v$version" --generate-notes
@@ -216,6 +215,7 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          S3_UPLOAD_DEBUG: "1"
         run: |
           $version = "${{ steps.version.outputs.version }}"
           $channel = "${{ steps.version.outputs.channel }}"

@@ -217,20 +217,14 @@ if ($Push) {
     if (-not $SkipBuild) {
         Write-Host "`n--- Step 6: Create GitHub Release ---" -ForegroundColor Cyan
 
-        $setupExe = Get-ChildItem "build\dist\MIB_Studio_Qt_Setup_v*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
         $updateExe = Get-ChildItem "build\dist\MIB_Studio_Qt_Update_v*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
 
-        if (-not $setupExe -and -not $updateExe) {
-            Write-Host "WARNING: No installer files found in build\dist\, skipping GitHub Release" -ForegroundColor Yellow
+        if (-not $updateExe) {
+            Write-Host "WARNING: No update installer found in build\dist\, skipping GitHub Release" -ForegroundColor Yellow
         } else {
             # Build checksums for release body
             $checksumLines = ""
             $releaseFiles = @()
-            if ($setupExe) {
-                $setupHash = (Get-FileHash -Algorithm SHA256 $setupExe.FullName).Hash.ToLower()
-                $checksumLines += "$setupHash  $($setupExe.Name)`n"
-                $releaseFiles += $setupExe.FullName
-            }
             if ($updateExe) {
                 $updateHash = (Get-FileHash -Algorithm SHA256 $updateExe.FullName).Hash.ToLower()
                 $checksumLines += "$updateHash  $($updateExe.Name)`n"
@@ -243,8 +237,7 @@ if ($Push) {
 **Channel:** ``$channel``
 
 ### Downloads
-- **Full Installer** - For first-time installations (includes eGrabber SDK + VC++ Redistributable)
-- **Update Package** - For existing installations (app files only, smaller download)
+- **Update Package** - For existing installations (app files only)
 
 ### Checksums (SHA-256)
 ``````

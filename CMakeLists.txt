@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 # Default version (fallback if git is not available or no tags exist)
-set(DEFAULT_VERSION "0.2.2")
+set(DEFAULT_VERSION "1.0.0")
 
 # Try to get version from git tags
 set(GIT_VERSION "")
@@ -64,7 +64,18 @@ find_package(Qt6 COMPONENTS Core Widgets Gui Charts Network Concurrent REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG QUIET)
 find_package(OpenCV CONFIG REQUIRED)
-find_package(onnxruntime CONFIG REQUIRED)
+find_package(onnxruntime CONFIG QUIET)
+
+# Hardware SDKs (EGrabber/Coremor) are Windows-only in this project.
+set(MIB_HAS_EGRABBER OFF)
+if(WIN32)
+    set(MIB_HAS_EGRABBER ON)
+endif()
+
+set(MIB_HAS_ONNXRUNTIME OFF)
+if(TARGET onnxruntime::onnxruntime)
+    set(MIB_HAS_ONNXRUNTIME ON)
+endif()
 
 # Prefer official SQLite3 package; fallback to unofficial config if needed
 find_package(SQLite3 QUIET)
@@ -78,10 +89,11 @@ if(NOT HDF5_FOUND)
     find_package(HDF5 MODULE QUIET)
 endif()
 
-# Include directories (EGrabber headers on Windows install path)
-include_directories("C:/Program Files/Euresys/eGrabber/include")
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor)
+if(MIB_HAS_EGRABBER)
+    include_directories("C:/Program Files/Euresys/eGrabber/include")
+    include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor)
+endif()
 
 # Backend library (services, APIs)
 add_library(mib_backend STATIC
@@ -95,39 +107,74 @@ add_library(mib_backend STATIC
     src/backend/services/CaptureService.cpp
     src/backend/services/RecorderService.cpp
     src/backend/services/ProcessingService.cpp
+    src/backend/services/BatchMaskSources.cpp
     src/backend/services/PlaybackService.cpp
-    src/backend/services/AutofocusService.cpp
     src/backend/services/SyringePumpService.cpp
     src/backend/services/TriggerService.cpp
-    src/backend/services/YoloService.cpp
     src/backend/playback/FrameStore.cpp
     src/camera/common/EGrabberCamera.cpp
     src/camera/mock/MockCamera.cpp
 )
+if(MIB_HAS_EGRABBER)
+    target_sources(mib_backend PRIVATE
+        src/backend/services/AutofocusService.cpp
+    )
+else()
+    target_sources(mib_backend PRIVATE
+        src/backend/services/AutofocusService.stub.cpp
+    )
+endif()
+if(MIB_HAS_ONNXRUNTIME)
+    target_sources(mib_backend PRIVATE
+        src/backend/services/YoloService.cpp
+    )
+else()
+    target_sources(mib_backend PRIVATE
+        src/backend/services/YoloService.stub.cpp
+    )
+endif()
 
 # mib_backend is Qt-free; do not run MOC on backend sources
 set_target_properties(mib_backend PROPERTIES AUTOMOC OFF)
 target_compile_definitions(mib_backend PUBLIC
     $<$<CONFIG:Debug>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG>
 )
+if(MIB_HAS_EGRABBER)
+    target_compile_definitions(mib_backend PUBLIC MIB_HAS_EGRABBER=1)
+else()
+    target_compile_definitions(mib_backend PUBLIC MIB_HAS_EGRABBER=0)
+endif()
+if(MIB_HAS_ONNXRUNTIME)
+    target_compile_definitions(mib_backend PUBLIC MIB_HAS_ONNXRUNTIME=1)
+else()
+    target_compile_definitions(mib_backend PUBLIC MIB_HAS_ONNXRUNTIME=0)
+endif()
 
 target_include_directories(mib_backend PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor
-    "C:/Program Files/Euresys/eGrabber/include"
 )
+if(MIB_HAS_EGRABBER)
+    target_include_directories(mib_backend PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor
+        "C:/Program Files/Euresys/eGrabber/include"
+    )
+endif()
 
 # Coremor library
 set(COREMOR_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor)
 target_link_libraries(mib_backend PUBLIC
     spdlog::spdlog
-    ${COREMOR_LIB_DIR}/XMT_DLL_SER.lib
 )
+if(MIB_HAS_EGRABBER)
+    target_link_libraries(mib_backend PUBLIC
+        ${COREMOR_LIB_DIR}/XMT_DLL_SER.lib
+    )
+endif()
 
 if(TARGET opencv_world)
     target_link_libraries(mib_backend PUBLIC opencv_world)
 elseif(TARGET opencv_core)
-    target_link_libraries(mib_backend PUBLIC opencv_core opencv_imgproc opencv_imgcodecs)
+    target_link_libraries(mib_backend PUBLIC opencv_core opencv_imgproc opencv_imgcodecs opencv_videoio)
 elseif(DEFINED OpenCV_LIBS)
     target_include_directories(mib_backend PUBLIC ${OpenCV_INCLUDE_DIRS})
     target_link_libraries(mib_backend PUBLIC ${OpenCV_LIBS})
@@ -141,7 +188,7 @@ endif()
 if(TARGET onnxruntime::onnxruntime)
     target_link_libraries(mib_backend PUBLIC onnxruntime::onnxruntime)
 else()
-    message(WARNING "onnxruntime::onnxruntime target not found - YOLO service will not be available")
+    message(WARNING "onnxruntime::onnxruntime target not found - building with YoloService stub")
 endif()
 
 # SQLite linking (whichever is available)
@@ -225,6 +272,8 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/tabs/PreviewPage.h
     resources/ui/PreviewPage.ui
     # Dialogs
+    src/frontend/dialogs/BatchMaskDialog.cpp
+    include/frontend/dialogs/BatchMaskDialog.h
     src/frontend/dialogs/BufferSaveDialog.cpp
     include/frontend/dialogs/BufferSaveDialog.h
     resources/ui/BufferSaveDialog.ui
@@ -264,6 +313,8 @@ set(FRONTEND_COMMON_SOURCES
     include/frontend/utils/JsonFlatten.h
     src/frontend/utils/RoiManager.cpp
     include/frontend/utils/RoiManager.h
+    src/frontend/utils/RoiDrawCanvas.cpp
+    include/frontend/utils/RoiDrawCanvas.h
     src/frontend/utils/SimpleImageCanvas.cpp
     include/frontend/utils/SimpleImageCanvas.h
     src/frontend/utils/StatsDisplayManager.cpp
@@ -292,11 +343,21 @@ set(FRONTEND_COMMON_SOURCES
     resources/defaults.qrc
 )
 
-add_executable(mib_studio_qt WIN32
-    src/frontend/core/main.cpp
-    ${FRONTEND_COMMON_SOURCES}
-    resources/app_icon.rc
-)
+set(MIB_STUDIO_QT_EXTRA_SOURCES)
+if(WIN32)
+    list(APPEND MIB_STUDIO_QT_EXTRA_SOURCES resources/app_icon.rc)
+    add_executable(mib_studio_qt WIN32
+        src/frontend/core/main.cpp
+        ${FRONTEND_COMMON_SOURCES}
+        ${MIB_STUDIO_QT_EXTRA_SOURCES}
+    )
+else()
+    add_executable(mib_studio_qt
+        src/frontend/core/main.cpp
+        ${FRONTEND_COMMON_SOURCES}
+        ${MIB_STUDIO_QT_EXTRA_SOURCES}
+    )
+endif()
 
 set_target_properties(mib_studio_qt PROPERTIES
     AUTOUIC_SEARCH_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/resources/ui"
@@ -304,8 +365,12 @@ set_target_properties(mib_studio_qt PROPERTIES
 
 target_include_directories(mib_studio_qt PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    "C:/Program Files/Euresys/eGrabber/include"
 )
+if(MIB_HAS_EGRABBER)
+    target_include_directories(mib_studio_qt PRIVATE
+        "C:/Program Files/Euresys/eGrabber/include"
+    )
+endif()
 
 target_link_libraries(mib_studio_qt PRIVATE
     Qt6::Widgets
@@ -325,7 +390,7 @@ target_compile_definitions(mib_studio_qt PRIVATE
 if(TARGET opencv_world)
     target_link_libraries(mib_studio_qt PRIVATE opencv_world)
 elseif(TARGET opencv_core)
-    target_link_libraries(mib_studio_qt PRIVATE opencv_core opencv_imgproc opencv_imgcodecs)
+    target_link_libraries(mib_studio_qt PRIVATE opencv_core opencv_imgproc opencv_imgcodecs opencv_videoio)
 elseif(DEFINED OpenCV_LIBS)
     target_include_directories(mib_studio_qt PRIVATE ${OpenCV_INCLUDE_DIRS})
     target_link_libraries(mib_studio_qt PRIVATE ${OpenCV_LIBS})
@@ -392,21 +457,39 @@ if(WIN32)
     
     set(CONAN_QT_DEBUG_BIN_DIR "${CONAN_QT_BIN_DIR}")  # Debug and Release DLLs in same directory
     set(CONAN_QT_TOOLS_DIR "${QT6_ROOT}/tools/qt6/bin")
-    
-    # Find windeployqt
-    find_program(WINDEPLOYQT_RELEASE windeployqt.exe
-        PATHS "${CONAN_QT_TOOLS_DIR}" "${CONAN_QT_BIN_DIR}"
-        NO_DEFAULT_PATH
-    )
-    find_program(WINDEPLOYQT_DEBUG windeployqt.debug.bat
-        PATHS "${CONAN_QT_TOOLS_DIR}" "${CONAN_QT_BIN_DIR}"
-        NO_DEFAULT_PATH
-    )
-    
-    # If not found in tools, try bin directory
-    if(NOT WINDEPLOYQT_RELEASE)
+
+    # Find windeployqt: prefer the exact Conan package trees (CMakeDeps sets qt_PACKAGE_FOLDER_*).
+    # A cached find_program result can keep pointing at an older qt/*/p folder after `conan install`,
+    # which then mismatches the Qt DLLs we link (different package IDs).
+    unset(WINDEPLOYQT_RELEASE CACHE)
+    unset(WINDEPLOYQT_DEBUG CACHE)
+    set(_WINDEPLOYQT_RELEASE_CAND "")
+    set(_WINDEPLOYQT_DEBUG_CAND "")
+    if(DEFINED qt_PACKAGE_FOLDER_RELEASE AND EXISTS "${qt_PACKAGE_FOLDER_RELEASE}/bin/windeployqt.exe")
+        set(_WINDEPLOYQT_RELEASE_CAND "${qt_PACKAGE_FOLDER_RELEASE}/bin/windeployqt.exe")
+    endif()
+    if(DEFINED qt_PACKAGE_FOLDER_DEBUG AND EXISTS "${qt_PACKAGE_FOLDER_DEBUG}/bin/windeployqt.exe")
+        set(_WINDEPLOYQT_DEBUG_CAND "${qt_PACKAGE_FOLDER_DEBUG}/bin/windeployqt.exe")
+    endif()
+    if(_WINDEPLOYQT_RELEASE_CAND)
+        set(WINDEPLOYQT_RELEASE "${_WINDEPLOYQT_RELEASE_CAND}" CACHE FILEPATH "windeployqt for Release deployment" FORCE)
+    else()
         find_program(WINDEPLOYQT_RELEASE windeployqt.exe
-            PATHS "${CONAN_QT_BIN_DIR}" "${CMAKE_PREFIX_PATH}/bin"
+            PATHS "${CONAN_QT_TOOLS_DIR}" "${CONAN_QT_BIN_DIR}"
+            NO_DEFAULT_PATH
+        )
+        if(NOT WINDEPLOYQT_RELEASE)
+            find_program(WINDEPLOYQT_RELEASE windeployqt.exe
+                PATHS "${CONAN_QT_BIN_DIR}" "${CMAKE_PREFIX_PATH}/bin"
+            )
+        endif()
+    endif()
+    if(_WINDEPLOYQT_DEBUG_CAND)
+        set(WINDEPLOYQT_DEBUG "${_WINDEPLOYQT_DEBUG_CAND}" CACHE FILEPATH "windeployqt for Debug deployment" FORCE)
+    else()
+        find_program(WINDEPLOYQT_DEBUG windeployqt.debug.bat
+            PATHS "${CONAN_QT_TOOLS_DIR}" "${CONAN_QT_BIN_DIR}"
+            NO_DEFAULT_PATH
         )
     endif()
     
@@ -452,44 +535,55 @@ if(WIN32)
             set(_QT_RELEASE_DLL_FOUND FALSE)
             set(_QT_DEBUG_BIN_DIR "")
             set(_QT_RELEASE_BIN_DIR "")
-            
-            # Check Debug package location using imported target
+
+            # Prefer CMakeDeps package roots (unique per build type). Avoids cache-wide globs picking a
+            # random Qt6Core.dll when several Conan package folders exist.
+            if(DEFINED qt_PACKAGE_FOLDER_DEBUG AND EXISTS "${qt_PACKAGE_FOLDER_DEBUG}/bin/Qt6Cored.dll")
+                set(_QT_DEBUG_BIN_DIR "${qt_PACKAGE_FOLDER_DEBUG}/bin")
+                set(_QT_DEBUG_DLL_FOUND TRUE)
+            endif()
+            if(DEFINED qt_PACKAGE_FOLDER_RELEASE AND EXISTS "${qt_PACKAGE_FOLDER_RELEASE}/bin/Qt6Core.dll")
+                set(_QT_RELEASE_BIN_DIR "${qt_PACKAGE_FOLDER_RELEASE}/bin")
+                set(_QT_RELEASE_DLL_FOUND TRUE)
+            endif()
+
+            # Check Debug / Release locations using imported target (non-Conan or unusual layouts)
             if(TARGET Qt6::Core)
-                get_target_property(_QT_CORE_LOCATION_DEBUG Qt6::Core IMPORTED_LOCATION_DEBUG)
-                if(_QT_CORE_LOCATION_DEBUG)
-                    get_filename_component(_QT_DEBUG_BIN_DIR "${_QT_CORE_LOCATION_DEBUG}" DIRECTORY)
-                    if(EXISTS "${_QT_DEBUG_BIN_DIR}/Qt6Cored.dll")
-                        set(_QT_DEBUG_DLL_FOUND TRUE)
-                    endif()
-                else()
-                    # Fallback: derive bin dir from debug import library
-                    get_target_property(_QT_CORE_IMPLIB_DEBUG Qt6::Core IMPORTED_IMPLIB_DEBUG)
-                    if(_QT_CORE_IMPLIB_DEBUG)
-                        get_filename_component(_QT_DEBUG_LIB_DIR "${_QT_CORE_IMPLIB_DEBUG}" DIRECTORY)
-                        get_filename_component(_QT_DEBUG_PREFIX "${_QT_DEBUG_LIB_DIR}" DIRECTORY)
-                        set(_QT_DEBUG_BIN_DIR "${_QT_DEBUG_PREFIX}/bin")
+                if(NOT _QT_DEBUG_DLL_FOUND)
+                    get_target_property(_QT_CORE_LOCATION_DEBUG Qt6::Core IMPORTED_LOCATION_DEBUG)
+                    if(_QT_CORE_LOCATION_DEBUG)
+                        get_filename_component(_QT_DEBUG_BIN_DIR "${_QT_CORE_LOCATION_DEBUG}" DIRECTORY)
                         if(EXISTS "${_QT_DEBUG_BIN_DIR}/Qt6Cored.dll")
                             set(_QT_DEBUG_DLL_FOUND TRUE)
                         endif()
+                    else()
+                        get_target_property(_QT_CORE_IMPLIB_DEBUG Qt6::Core IMPORTED_IMPLIB_DEBUG)
+                        if(_QT_CORE_IMPLIB_DEBUG)
+                            get_filename_component(_QT_DEBUG_LIB_DIR "${_QT_CORE_IMPLIB_DEBUG}" DIRECTORY)
+                            get_filename_component(_QT_DEBUG_PREFIX "${_QT_DEBUG_LIB_DIR}" DIRECTORY)
+                            set(_QT_DEBUG_BIN_DIR "${_QT_DEBUG_PREFIX}/bin")
+                            if(EXISTS "${_QT_DEBUG_BIN_DIR}/Qt6Cored.dll")
+                                set(_QT_DEBUG_DLL_FOUND TRUE)
+                            endif()
+                        endif()
                     endif()
                 endif()
-                
-                # Check Release package location using imported target
-                get_target_property(_QT_CORE_LOCATION_RELEASE Qt6::Core IMPORTED_LOCATION_RELEASE)
-                if(_QT_CORE_LOCATION_RELEASE)
-                    get_filename_component(_QT_RELEASE_BIN_DIR "${_QT_CORE_LOCATION_RELEASE}" DIRECTORY)
-                    if(EXISTS "${_QT_RELEASE_BIN_DIR}/Qt6Core.dll")
-                        set(_QT_RELEASE_DLL_FOUND TRUE)
-                    endif()
-                else()
-                    # Fallback: derive bin dir from release import library
-                    get_target_property(_QT_CORE_IMPLIB_RELEASE Qt6::Core IMPORTED_IMPLIB_RELEASE)
-                    if(_QT_CORE_IMPLIB_RELEASE)
-                        get_filename_component(_QT_RELEASE_LIB_DIR "${_QT_CORE_IMPLIB_RELEASE}" DIRECTORY)
-                        get_filename_component(_QT_RELEASE_PREFIX "${_QT_RELEASE_LIB_DIR}" DIRECTORY)
-                        set(_QT_RELEASE_BIN_DIR "${_QT_RELEASE_PREFIX}/bin")
+                if(NOT _QT_RELEASE_DLL_FOUND)
+                    get_target_property(_QT_CORE_LOCATION_RELEASE Qt6::Core IMPORTED_LOCATION_RELEASE)
+                    if(_QT_CORE_LOCATION_RELEASE)
+                        get_filename_component(_QT_RELEASE_BIN_DIR "${_QT_CORE_LOCATION_RELEASE}" DIRECTORY)
                         if(EXISTS "${_QT_RELEASE_BIN_DIR}/Qt6Core.dll")
                             set(_QT_RELEASE_DLL_FOUND TRUE)
+                        endif()
+                    else()
+                        get_target_property(_QT_CORE_IMPLIB_RELEASE Qt6::Core IMPORTED_IMPLIB_RELEASE)
+                        if(_QT_CORE_IMPLIB_RELEASE)
+                            get_filename_component(_QT_RELEASE_LIB_DIR "${_QT_CORE_IMPLIB_RELEASE}" DIRECTORY)
+                            get_filename_component(_QT_RELEASE_PREFIX "${_QT_RELEASE_LIB_DIR}" DIRECTORY)
+                            set(_QT_RELEASE_BIN_DIR "${_QT_RELEASE_PREFIX}/bin")
+                            if(EXISTS "${_QT_RELEASE_BIN_DIR}/Qt6Core.dll")
+                                set(_QT_RELEASE_DLL_FOUND TRUE)
+                            endif()
                         endif()
                     endif()
                 endif()
@@ -507,23 +601,25 @@ if(WIN32)
                 endif()
             endif()
 
-            # Last resort: search Conan cache for Qt6 debug/release DLLs
-            if(NOT _QT_DEBUG_BIN_DIR OR NOT _QT_RELEASE_BIN_DIR)
+            # Last resort: search Conan cache (non-deterministic; only when still unknown)
+            if(NOT _QT_DEBUG_DLL_FOUND OR NOT _QT_RELEASE_DLL_FOUND)
                 set(_CONAN_CACHE_ROOT "$ENV{USERPROFILE}/.conan2")
                 if(EXISTS "${_CONAN_CACHE_ROOT}")
-                    if(NOT _QT_DEBUG_BIN_DIR)
+                    if(NOT _QT_DEBUG_DLL_FOUND)
                         file(GLOB _qt_debug_dll_candidates "${_CONAN_CACHE_ROOT}/p/b/*/p/bin/Qt6Cored.dll")
                         list(LENGTH _qt_debug_dll_candidates _qt_debug_count)
                         if(_qt_debug_count GREATER 0)
+                            list(SORT _qt_debug_dll_candidates)
                             list(GET _qt_debug_dll_candidates 0 _qt_debug_dll)
                             get_filename_component(_QT_DEBUG_BIN_DIR "${_qt_debug_dll}" DIRECTORY)
                             set(_QT_DEBUG_DLL_FOUND TRUE)
                         endif()
                     endif()
-                    if(NOT _QT_RELEASE_BIN_DIR)
+                    if(NOT _QT_RELEASE_DLL_FOUND)
                         file(GLOB _qt_release_dll_candidates "${_CONAN_CACHE_ROOT}/p/b/*/p/bin/Qt6Core.dll")
                         list(LENGTH _qt_release_dll_candidates _qt_release_count)
                         if(_qt_release_count GREATER 0)
+                            list(SORT _qt_release_dll_candidates)
                             list(GET _qt_release_dll_candidates 0 _qt_release_dll)
                             get_filename_component(_QT_RELEASE_BIN_DIR "${_qt_release_dll}" DIRECTORY)
                             set(_QT_RELEASE_DLL_FOUND TRUE)
@@ -694,7 +790,7 @@ if(WIN32)
             COMMAND ${CMAKE_COMMAND} -E echo "Checking for ${CMAKE_BINARY_DIR}/Release/mib_studio_qt.exe..."
             # Build installer
             COMMAND ${CMAKE_COMMAND} -E echo "Compiling InnoSetup script..."
-            COMMAND "${ISCC_EXE}" "/DAppVersion=${PROJECT_VERSION}" "${INNOSETUP_SCRIPT}"
+            COMMAND "${ISCC_EXE}" "/DAppVersion=${PROJECT_VERSION}" "/O${INSTALLER_OUTPUT_DIR}" "${INNOSETUP_SCRIPT}"
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             COMMENT "Building Windows installer with InnoSetup"
             DEPENDS mib_studio_qt
@@ -709,7 +805,7 @@ if(WIN32)
             COMMAND ${CMAKE_COMMAND} -E echo "Checking for ${CMAKE_BINARY_DIR}/Release/mib_studio_qt.exe..."
             # Build update package
             COMMAND ${CMAKE_COMMAND} -E echo "Compiling InnoSetup update script..."
-            COMMAND "${ISCC_EXE}" "/DAppVersion=${PROJECT_VERSION}" "${INNOSETUP_UPDATE_SCRIPT}"
+            COMMAND "${ISCC_EXE}" "/DAppVersion=${PROJECT_VERSION}" "/O${INSTALLER_OUTPUT_DIR}" "${INNOSETUP_UPDATE_SCRIPT}"
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             COMMENT "Building Windows update package with InnoSetup"
             DEPENDS mib_studio_qt

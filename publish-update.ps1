@@ -21,6 +21,13 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "=== Publishing MIB Studio Qt Update ===" -ForegroundColor Cyan
 
+# Locate boto3 uploader helper
+$s3UploadScript = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "scripts\s3_upload.py"
+if (-not (Test-Path $s3UploadScript)) {
+    Write-Host "ERROR: Cannot find $s3UploadScript" -ForegroundColor Red
+    exit 1
+}
+
 # Validate installer exists
 if (-not (Test-Path $Installer)) {
     Write-Host "ERROR: Installer file does not exist: $Installer" -ForegroundColor Red
@@ -91,52 +98,53 @@ $manifestJson | Out-File -FilePath $manifestPath -Encoding UTF8 -NoNewline
 
 Write-Host "   Manifest created: $manifestPath" -ForegroundColor Green
 
-# Build AWS CLI base args
-$awsArgs = @("--endpoint-url", $Endpoint)
-if ($Profile) {
-    $awsArgs += @("--profile", $Profile)
+function Invoke-S3Upload {
+    param(
+        [string]$File,
+        [string]$Key,
+        [string]$ContentType
+    )
+
+    $uploadArgs = @(
+        $s3UploadScript,
+        "--endpoint", $Endpoint,
+        "--bucket", $Bucket,
+        "--key", $Key,
+        "--file", $File,
+        "--content-type", $ContentType,
+        "--acl", "public-read"
+    )
+    if ($Profile) { $uploadArgs += @("--profile", $Profile) }
+    if ($env:S3_UPLOAD_DEBUG) { $uploadArgs += @("--debug") }
+
+    Write-Host "   Command: python $($uploadArgs -join ' ')" -ForegroundColor Gray
+    # Pipe stdout through Write-Host so it goes to the console, not the
+    # success stream. Otherwise callers that assign `$var = Invoke-S3Upload`
+    # capture ["uploaded: ...", 0] and the `-ne 0` array-filter returns the
+    # string element, making every successful upload look like a failure.
+    & python $uploadArgs | Write-Host
+    return $LASTEXITCODE
 }
 
-# Upload installer (always use public-read ACL)
+# Upload installer (boto3 handles multipart with correct Content-Length headers)
 Write-Host "`n3. Uploading installer..." -ForegroundColor Yellow
-$installerArgs = $awsArgs + @("s3", "cp", $Installer, "s3://$Bucket/$installerKey", "--content-type", "application/octet-stream", "--acl", "public-read")
-
-Write-Host "   Command: aws $($installerArgs -join ' ')" -ForegroundColor Gray
-$result = & aws $installerArgs 2>&1
-
-if ($LASTEXITCODE -ne 0) {
+$uploadExit = Invoke-S3Upload -File $Installer -Key $installerKey -ContentType "application/octet-stream"
+if ($uploadExit -ne 0) {
     Write-Host "ERROR: Installer upload failed!" -ForegroundColor Red
-    Write-Host $result -ForegroundColor Red
     Remove-Item $manifestPath -ErrorAction SilentlyContinue
     exit 1
-}
-
-if ($result) {
-    Write-Host "   $result" -ForegroundColor Gray
 }
 Write-Host "   Installer uploaded successfully" -ForegroundColor Green
 
-# Upload manifest (always use public-read ACL)
+# Upload manifest
 Write-Host "`n4. Uploading manifest..." -ForegroundColor Yellow
-$manifestArgs = $awsArgs + @("s3", "cp", $manifestPath, "s3://$Bucket/$manifestKey", "--content-type", "application/json", "--acl", "public-read")
-
-Write-Host "   Command: aws $($manifestArgs -join ' ')" -ForegroundColor Gray
-$result = & aws $manifestArgs 2>&1
-
-if ($LASTEXITCODE -ne 0) {
+$uploadExit = Invoke-S3Upload -File $manifestPath -Key $manifestKey -ContentType "application/json"
+Remove-Item $manifestPath -ErrorAction SilentlyContinue
+if ($uploadExit -ne 0) {
     Write-Host "ERROR: Manifest upload failed!" -ForegroundColor Red
-    Write-Host $result -ForegroundColor Red
-    Remove-Item $manifestPath -ErrorAction SilentlyContinue
     exit 1
 }
-
-if ($result) {
-    Write-Host "   $result" -ForegroundColor Gray
-}
 Write-Host "   Manifest uploaded successfully" -ForegroundColor Green
-
-# Cleanup
-Remove-Item $manifestPath -ErrorAction SilentlyContinue
 
 Write-Host "`n=== Publish Complete ===" -ForegroundColor Cyan
 Write-Host "Manifest URL: $endpointNoSlash/$Bucket/$manifestKey" -ForegroundColor Green

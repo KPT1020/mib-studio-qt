@@ -44,6 +44,7 @@
 #include "backend/AppBackend.h"
 #include "backend/services/Hdf5Service.h"
 #include "backend/services/ProcessingService.h"
+#include "frontend/dialogs/BatchMaskDialog.h"
 #include "frontend/dialogs/FrameViewerDialog.h"
 #include "frontend/models/HdfMetricsModel.h"
 #include "frontend/utils/OverlayRenderer.h"
@@ -118,9 +119,11 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
 
     // Connect button signals
     connect(ui->selectFileBtn, &QPushButton::clicked, this, &HdfReviewTab::onSelectFile);
+    connect(ui->closeFileBtn, &QPushButton::clicked, this, &HdfReviewTab::onCloseFile);
     connect(ui->exportMetricsBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportMetrics);
     connect(ui->exportAllBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportAll);
     connect(ui->exportChartsBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportCharts);
+    connect(ui->regenerateMasksBtn, &QPushButton::clicked, this, &HdfReviewTab::onRegenerateMasks);
     connect(ui->overlayModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &HdfReviewTab::onOverlayModeChanged);
     connect(ui->roiOverlayCheck, &QCheckBox::toggled, this, &HdfReviewTab::onToggleRoiOverlay);
@@ -261,6 +264,19 @@ void HdfReviewTab::onSelectFile() {
     }
 }
 
+void HdfReviewTab::onCloseFile() {
+    clearDisplay();
+    hdfReader_.reset();
+    ui->filePathLabel->setText(tr("No file selected"));
+    ui->statusLabel->setText(tr("Ready"));
+    ui->closeFileBtn->setEnabled(false);
+    ui->overlayModeLabel->setEnabled(false);
+    ui->overlayModeCombo->setEnabled(false);
+    ui->overlayModeCombo->setCurrentIndex(0);
+    overlayMode_ = OverlayMode::None;
+    SPDLOG_INFO("HdfReviewTab: file closed by user");
+}
+
 void HdfReviewTab::loadHdfFile(const QString& filePath) {
     ui->statusLabel->setText(tr("Loading..."));
     ui->filePathLabel->setText(filePath);
@@ -271,8 +287,15 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
     hdfReader_.reset();
     hdfReader_ = std::make_unique<backend::services::Hdf5Service>();
     if (!hdfReader_->loadFile(filePath.toStdString())) {
-        QMessageBox::critical(this, tr("Error"), 
-                             tr("Failed to open HDF file:\n%1").arg(filePath));
+        const bool exists = QFile::exists(filePath);
+        const QString detail = exists
+            ? tr("The file exists but its HDF5 metadata is corrupt, likely caused by "
+                 "an interrupted write (crash or forced close during an experiment).\n\n"
+                 "Frame data may be partially recoverable using the h5recover tool "
+                 "from the HDF5 utilities package.")
+            : tr("File not found.");
+        QMessageBox::critical(this, tr("Cannot Open HDF5 File"),
+                              tr("Failed to open:\n%1\n\n%2").arg(filePath).arg(detail));
         ui->statusLabel->setText(tr("Error loading file"));
         return;
     }
@@ -338,6 +361,7 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
     ui->exportMetricsBtn->setEnabled(hasData);
     ui->exportAllBtn->setEnabled(hasData);
     ui->exportChartsBtn->setEnabled(hasData);
+    ui->closeFileBtn->setEnabled(hasData);
     
     // Enable overlay controls if we have frames
     if (hasData) {
@@ -544,20 +568,31 @@ void HdfReviewTab::loadThumbnailsBatch(const std::vector<backend::services::Proc
             const std::string imgPath = isValid ? "/valid_frames/images" : "/invalid_frames/images";
             const std::string maskPath = isValid ? "/valid_frames/masks"  : "/invalid_frames/masks";
 
-            // Read original image by dataset position (i), not by frame.index
+            // Read original image by dataset position (i), not by frame.index.
+            // Fall back to the in-memory ProcessedFrame when the HDF5 reader is
+            // unavailable (e.g. results came from a folder-sourced batch).
+            const auto& framesRef = isValid ? validFrames_ : invalidFrames_;
             cv::Mat original;
             if (!hdfReader_ || !hdfReader_->readImageByIndex(imgPath, i, original)) {
-                SPDLOG_WARN("HdfReviewTab: failed to read original image {}[{}]", imgPath, i);
-                // If image cannot be read, leave placeholder (already added)
-                continue;
+                if (i < framesRef.size() && !framesRef[i].originalImage.empty()) {
+                    original = framesRef[i].originalImage;
+                } else {
+                    SPDLOG_WARN("HdfReviewTab: failed to read original image {}[{}]", imgPath, i);
+                    continue;
+                }
             }
 
-            // Optional processing overlay when overlay mode is not None
-            const auto& framesRef = isValid ? validFrames_ : invalidFrames_;
+            // Optional processing overlay when overlay mode is not None.
+            // Same fallback: use in-memory mask when HDF5 is unavailable.
             const backend::services::FilterResult* validation = (i < framesRef.size()) ? &framesRef[i].validation : nullptr;
             if (overlayMode_ != OverlayMode::None) {
                 cv::Mat mask;
-                if (hdfReader_->readImageByIndex(maskPath, i, mask) && !mask.empty()) {
+                bool maskOk = hdfReader_ && hdfReader_->readImageByIndex(maskPath, i, mask) && !mask.empty();
+                if (!maskOk && i < framesRef.size() && !framesRef[i].processedImage.empty()) {
+                    mask = framesRef[i].processedImage;
+                    maskOk = true;
+                }
+                if (maskOk) {
                     thumbImage = createProcessingOverlay(original, mask, validation, overlayMode_);
                 } else {
                     SPDLOG_DEBUG("HdfReviewTab: mask not available for {}[{}] (overlay on)", maskPath, i);
@@ -770,6 +805,22 @@ void HdfReviewTab::onThumbnailDoubleClicked(int frameIndex) {
 
 void HdfReviewTab::onViewFrameDetails(int frameIndex) {
     showFrameViewer(frameIndex);
+}
+
+void HdfReviewTab::onRegenerateMasks() {
+    QString loadedPath;
+    if (hdfReader_) {
+        const QString label = ui->filePathLabel->text();
+        if (label != tr("No file selected")) loadedPath = label;
+    }
+
+    BatchMaskDialog dlg(backend_, loadedPath, this);
+    dlg.exec();
+
+    const QString savedPath = dlg.savedHdf5Path();
+    if (savedPath.isEmpty()) return;
+
+    loadHdfFile(savedPath);
 }
 
 void HdfReviewTab::onTableSelectionChanged() {
@@ -1259,11 +1310,10 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
     // Store current index in a way that can be modified by lambdas
     struct NavigationState {
         int currentIndex;
-        const std::vector<backend::services::ProcessedFrame>* framesPtr;
         bool isValidSet;
     };
-    
-    auto* navState = new NavigationState{frameIndex, &framesMeta, isShowingValid_};
+
+    auto* navState = new NavigationState{frameIndex, isShowingValid_};
     
     // Connect navigation signals
     // Helper lambda to load series images for a frame
@@ -1277,13 +1327,15 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
     };
 
     connect(dialog, &FrameViewerDialog::requestPreviousFrame, this, [this, dialog, navState, loadSeriesImages]() {
+        const auto& frames = navState->isValidSet ? validFrames_ : invalidFrames_;
+        if (frames.empty()) return;
         navState->currentIndex = navState->currentIndex - 1;
         if (navState->currentIndex < 0) {
-            navState->currentIndex = static_cast<int>(navState->framesPtr->size()) - 1; // Wrap to last
+            navState->currentIndex = static_cast<int>(frames.size()) - 1; // Wrap to last
         }
-        if (navState->currentIndex >= 0 && navState->currentIndex < static_cast<int>(navState->framesPtr->size())) {
+        if (navState->currentIndex >= 0 && navState->currentIndex < static_cast<int>(frames.size())) {
             // Fetch images on demand
-            backend::services::ProcessedFrame pf = (*navState->framesPtr)[navState->currentIndex];
+            backend::services::ProcessedFrame pf = frames[navState->currentIndex];
             const std::string imgPath2 = navState->isValidSet ? "/valid_frames/images" : "/invalid_frames/images";
             const std::string maskPath2 = navState->isValidSet ? "/valid_frames/masks"  : "/invalid_frames/masks";
             if (hdfReader_) {
@@ -1303,12 +1355,14 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
     });
 
     connect(dialog, &FrameViewerDialog::requestNextFrame, this, [this, dialog, navState, loadSeriesImages]() {
+        const auto& frames = navState->isValidSet ? validFrames_ : invalidFrames_;
+        if (frames.empty()) return;
         navState->currentIndex = navState->currentIndex + 1;
-        if (navState->currentIndex >= static_cast<int>(navState->framesPtr->size())) {
+        if (navState->currentIndex >= static_cast<int>(frames.size())) {
             navState->currentIndex = 0; // Wrap to first
         }
-        if (navState->currentIndex >= 0 && navState->currentIndex < static_cast<int>(navState->framesPtr->size())) {
-            backend::services::ProcessedFrame pf = (*navState->framesPtr)[navState->currentIndex];
+        if (navState->currentIndex >= 0 && navState->currentIndex < static_cast<int>(frames.size())) {
+            backend::services::ProcessedFrame pf = frames[navState->currentIndex];
             const std::string imgPath2 = navState->isValidSet ? "/valid_frames/images" : "/invalid_frames/images";
             const std::string maskPath2 = navState->isValidSet ? "/valid_frames/masks"  : "/invalid_frames/masks";
             if (hdfReader_) {
@@ -1714,11 +1768,12 @@ void HdfReviewTab::generateScatterPlot(const std::vector<backend::services::Proc
 }
 
 void HdfReviewTab::generateHistogram(const std::vector<backend::services::ProcessedFrame>& validFrames) {
-    // Use fixed range for consistent comparison across datasets
-    constexpr double HISTOGRAM_MIN = 15.0;
-    constexpr double HISTOGRAM_MAX = 25.0;
+    // Use config range so the histogram matches the current ring ratio thresholds
+    auto cfg = backend_.processing().getProcessingConfig();
+    const double HISTOGRAM_MIN = cfg.ring_ratio_min;
+    const double HISTOGRAM_MAX = cfg.ring_ratio_max;
     constexpr double HISTOGRAM_BIN_WIDTH = 0.5;
-    constexpr int HISTOGRAM_BINS = static_cast<int>((HISTOGRAM_MAX - HISTOGRAM_MIN) / HISTOGRAM_BIN_WIDTH);
+    const int HISTOGRAM_BINS = std::max(1, static_cast<int>((HISTOGRAM_MAX - HISTOGRAM_MIN) / HISTOGRAM_BIN_WIDTH));
 
     // Reset series
 #if MIB_HAS_QHISTOGRAMSERIES

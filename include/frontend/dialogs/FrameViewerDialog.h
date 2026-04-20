@@ -65,7 +65,7 @@ private:
     void updateFrameInfo();
     void updateSeriesControls();
 
-    const backend::services::ProcessedFrame* frame_;
+    backend::services::ProcessedFrame frame_;
     backend::services::ProcessingService::Roi roi_;
     OverlayMode overlayMode_;
     bool showRoiOverlay_;

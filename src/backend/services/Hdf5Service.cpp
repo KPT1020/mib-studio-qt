@@ -13,6 +13,7 @@
 #include <vector>
 #include <cstring>
 #include <stdexcept>
+#include <chrono>
 
 namespace backend::services
 {
@@ -82,18 +83,40 @@ namespace backend::services
     {
         if (impl_->fileId_ != H5I_INVALID_HID && impl_->isOpen_)
         {
+            // stop-lag diagnostic: H5Fclose implicitly flushes dirty buffers,
+            // which on large multi-image payloads can dominate the shutdown
+            // time. Time it explicitly so it shows up in the log.
+            const auto t0 = std::chrono::steady_clock::now();
             herr_t status = H5Fclose(impl_->fileId_);
+            const double ms = std::chrono::duration<double, std::milli>(
+                                  std::chrono::steady_clock::now() - t0)
+                                  .count();
             if (status < 0)
             {
-                SPDLOG_ERROR("Error closing HDF5 file");
+                SPDLOG_ERROR("Error closing HDF5 file (after {:.3f} ms)", ms);
             }
             else
             {
-                SPDLOG_INFO("HDF5 file closed: {}", impl_->filePath_);
+                SPDLOG_INFO("HDF5 file closed: {} (H5Fclose took {:.3f} ms)",
+                            impl_->filePath_, ms);
             }
             impl_->fileId_ = H5I_INVALID_HID;
             impl_->isOpen_ = false;
         }
+    }
+
+    bool Hdf5Service::flush()
+    {
+        if (!isFileOpen())
+            return false;
+        herr_t s = H5Fflush(impl_->fileId_, H5F_SCOPE_GLOBAL);
+        if (s < 0)
+        {
+            SPDLOG_ERROR("H5Fflush failed for {}", impl_->filePath_);
+            return false;
+        }
+        SPDLOG_DEBUG("H5Fflush completed for {}", impl_->filePath_);
+        return true;
     }
 
     bool Hdf5Service::isFileOpen() const
@@ -761,6 +784,12 @@ namespace backend::services
         std::vector<uint8_t> scratch;
         const size_t seriesFrameBytes = static_cast<size_t>(height) * width;
 
+        // stop-lag diagnostic: this nested loop issues N*seriesCount
+        // H5Dwrite calls, each with its own hyperslab setup. It is the
+        // leading suspect for the stop-lag when multi-image is enabled.
+        const auto tLoopStart = std::chrono::steady_clock::now();
+        size_t writesDone = 0;
+
         for (size_t n = 0; n < seriesFrames.size(); ++n) {
             const auto &frame = *seriesFrames[n];
             for (size_t s = 0; s < seriesCount && s < frame.seriesImages.size(); ++s) {
@@ -792,8 +821,18 @@ namespace backend::services
                     H5Dclose(datasetId);
                     return false;
                 }
+                ++writesDone;
             }
         }
+
+        const double loopMs = std::chrono::duration<double, std::milli>(
+                                  std::chrono::steady_clock::now() - tLoopStart)
+                                  .count();
+        const double avgMs = writesDone > 0 ? loopMs / static_cast<double>(writesDone) : 0.0;
+        SPDLOG_INFO("stop-lag/hdf5: appendSeriesImageDataset wrote {} images "
+                    "({} frames x {} series, {}x{}) in {:.3f} ms (avg {:.3f} ms/write)",
+                    writesDone, seriesFrames.size(), seriesCount, height, width,
+                    loopMs, avgMs);
 
         H5Dclose(datasetId);
         currentSize = currentDims[0] + seriesFrames.size();
@@ -836,6 +875,17 @@ namespace backend::services
             return false;
         }
 
+        // stop-lag diagnostic: time each major section (valid images/masks/
+        // metadata, series images, invalid frames). Useful for isolating
+        // which part of the write dominates, especially under multi-image.
+        using lag_clock = std::chrono::steady_clock;
+        const auto tAppendStart = lag_clock::now();
+        auto elapsedMs = [](lag_clock::time_point t0) {
+            return std::chrono::duration<double, std::milli>(lag_clock::now() - t0).count();
+        };
+        double msValidImages = 0.0, msSeries = 0.0, msInvalid = 0.0;
+        size_t seriesFramesCount = 0;
+
         // Initialize datasets if needed
         if (!impl_->datasetsInitialized_)
         {
@@ -845,6 +895,7 @@ namespace backend::services
         // Append valid frames
         if (!validFrames.empty())
         {
+            const auto tVS = lag_clock::now();
             // Create datasets if they don't exist
             if (impl_->validFramesWritten_ == 0)
             {
@@ -878,13 +929,18 @@ namespace backend::services
                 if (!appendMetadataDataset(impl_->fileId_, "/valid_frames/metadata", validFrames, impl_->validFramesWritten_))
                     return false;
             }
+            msValidImages = elapsedMs(tVS);
 
             // Write multi-image series data if any frames have series images
             bool hasSeriesImages = false;
             for (const auto &frame : validFrames) {
-                if (!frame.seriesImages.empty()) { hasSeriesImages = true; break; }
+                if (!frame.seriesImages.empty()) {
+                    hasSeriesImages = true;
+                    ++seriesFramesCount;
+                }
             }
             if (hasSeriesImages) {
+                const auto tSeries = lag_clock::now();
                 if (impl_->seriesImagesWritten_ == 0) {
                     if (!writeSeriesImageDataset(impl_->fileId_, "/valid_frames/series_images", validFrames)) {
                         SPDLOG_WARN("Failed to write series_images dataset (non-fatal)");
@@ -899,12 +955,14 @@ namespace backend::services
                         SPDLOG_WARN("Failed to append series_images dataset (non-fatal)");
                     }
                 }
+                msSeries = elapsedMs(tSeries);
             }
         }
 
         // Append invalid frames
         if (!invalidFrames.empty())
         {
+            const auto tInv = lag_clock::now();
             if (impl_->invalidFramesWritten_ == 0)
             {
                 std::vector<cv::Mat> invalidImages, invalidMasks;
@@ -936,7 +994,17 @@ namespace backend::services
                 if (!appendMetadataDataset(impl_->fileId_, "/invalid_frames/metadata", invalidFrames, impl_->invalidFramesWritten_))
                     return false;
             }
+            msInvalid = elapsedMs(tInv);
         }
+
+        const double msTotal = elapsedMs(tAppendStart);
+        SPDLOG_INFO("stop-lag/hdf5: appendFrames total {:.3f} ms "
+                    "(valid={} [{:.3f} ms], seriesFrames={} [{:.3f} ms], "
+                    "invalid={} [{:.3f} ms])",
+                    msTotal,
+                    validFrames.size(), msValidImages,
+                    seriesFramesCount, msSeries,
+                    invalidFrames.size(), msInvalid);
 
         return true;
     }

@@ -65,6 +65,7 @@ namespace frontend
 
     private slots:
         void onSelectFile();
+        void onCloseFile();
         void onExportMetrics();
         void onExportAll();
         void onExportCharts();
@@ -75,6 +76,7 @@ namespace frontend
         void onThumbnailDoubleClicked(int frameIndex);
         void onTableSelectionChanged();
         void onViewFrameDetails(int frameIndex);
+        void onRegenerateMasks();
 
     private:
         void setupCharts();

@@ -222,6 +222,10 @@ namespace frontend
 					pcfg.deformability_threshold_max = ip.value("deformability_threshold_max").toDouble(pcfg.deformability_threshold_max);
 				if (ip.contains("area_ratio_threshold_max"))
 					pcfg.area_ratio_threshold_max = ip.value("area_ratio_threshold_max").toDouble(pcfg.area_ratio_threshold_max);
+				if (ip.contains("ring_ratio_min"))
+					pcfg.ring_ratio_min = ip.value("ring_ratio_min").toDouble(pcfg.ring_ratio_min);
+				if (ip.contains("ring_ratio_max"))
+					pcfg.ring_ratio_max = ip.value("ring_ratio_max").toDouble(pcfg.ring_ratio_max);
 				if (ip.contains("empty_frame_pixel_threshold"))
 					pcfg.empty_frame_pixel_threshold = ip.value("empty_frame_pixel_threshold").toInt(pcfg.empty_frame_pixel_threshold);
 				if (ip.contains("auto_background_enabled"))
@@ -241,6 +245,8 @@ namespace frontend
 						pcfg.enable_deformability_range_check = fl.value("enable_deformability_range_check").toBool(pcfg.enable_deformability_range_check);
 					if (fl.contains("enable_area_ratio_check"))
 						pcfg.enable_area_ratio_check = fl.value("enable_area_ratio_check").toBool(pcfg.enable_area_ratio_check);
+					if (fl.contains("enable_ring_ratio_check"))
+						pcfg.enable_ring_ratio_check = fl.value("enable_ring_ratio_check").toBool(pcfg.enable_ring_ratio_check);
 					if (fl.contains("require_single_inner_contour"))
 						pcfg.require_single_inner_contour = fl.value("require_single_inner_contour").toBool(pcfg.require_single_inner_contour);
 				}
@@ -276,11 +282,12 @@ namespace frontend
 			}
 		}
 		backend_.processing().setProcessingConfig(pcfg);
-		SPDLOG_INFO("AppConfigWatcher: applied ProcessingConfig (blur={}, thresh={}, morph={}x{}, area=[{},{} um2], deform=[{:.2f},{:.2f}] enabled={}, areaRatio_max={:.2f} enabled={}, empty_px={})",
+		SPDLOG_INFO("AppConfigWatcher: applied ProcessingConfig (blur={}, thresh={}, morph={}x{}, area=[{},{} um2], deform=[{:.2f},{:.2f}] enabled={}, areaRatio_max={:.2f} enabled={}, ring=[{:.1f},{:.1f}] enabled={}, empty_px={})",
 					pcfg.gaussian_blur_size, pcfg.bg_subtract_threshold, pcfg.morph_kernel_size, pcfg.morph_iterations,
 					pcfg.area_threshold_min, pcfg.area_threshold_max,
 					pcfg.deformability_threshold_min, pcfg.deformability_threshold_max, pcfg.enable_deformability_range_check,
 					pcfg.area_ratio_threshold_max, pcfg.enable_area_ratio_check,
+					pcfg.ring_ratio_min, pcfg.ring_ratio_max, pcfg.enable_ring_ratio_check,
 					pcfg.empty_frame_pixel_threshold);
 		SPDLOG_INFO("AppConfigWatcher: target_group enabled={}, area=[{},{} um2], deform=[{:.2f},{:.2f}], emod_enabled={}, emod=[{:.1f},{:.1f}]",
 					pcfg.enable_target_group, pcfg.target_group_area_min, pcfg.target_group_area_max,
@@ -459,6 +466,81 @@ namespace frontend
 				}
 			}
 		}
+	}
+
+	void AppConfigWatcher::writeBackProcessingConfig()
+	{
+		if (watchedPath_.isEmpty())
+		{
+			SPDLOG_DEBUG("AppConfigWatcher: no watched path, skipping write-back");
+			return;
+		}
+
+		QFile file(watchedPath_);
+		if (!file.exists())
+		{
+			SPDLOG_DEBUG("AppConfigWatcher: config file does not exist, skipping write-back");
+			return;
+		}
+
+		if (!file.open(QIODevice::ReadWrite | QIODevice::Text))
+		{
+			SPDLOG_WARN("AppConfigWatcher: failed to open {} for write-back: {}", watchedPath_.toStdString(), file.errorString().toStdString());
+			return;
+		}
+
+		QByteArray data = file.readAll();
+		QJsonParseError parseError;
+		QJsonDocument doc = QJsonDocument::fromJson(data, &parseError);
+		if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+		{
+			SPDLOG_WARN("AppConfigWatcher: failed to parse config for write-back");
+			file.close();
+			return;
+		}
+
+		QJsonObject root = doc.object();
+		const auto pcfg = backend_.processing().getProcessingConfig();
+
+		// Update image_processing section
+		QJsonObject ip = root.value("image_processing").toObject();
+		ip.insert("area_threshold_min", pcfg.area_threshold_min);
+		ip.insert("area_threshold_max", pcfg.area_threshold_max);
+		ip.insert("deformability_threshold_min", pcfg.deformability_threshold_min);
+		ip.insert("deformability_threshold_max", pcfg.deformability_threshold_max);
+		ip.insert("area_ratio_threshold_max", pcfg.area_ratio_threshold_max);
+		ip.insert("ring_ratio_min", pcfg.ring_ratio_min);
+		ip.insert("ring_ratio_max", pcfg.ring_ratio_max);
+
+		// Update filters sub-object
+		QJsonObject fl = ip.value("filters").toObject();
+		fl.insert("enable_border_check", pcfg.enable_border_check);
+		fl.insert("enable_area_range_check", pcfg.enable_area_range_check);
+		fl.insert("enable_deformability_range_check", pcfg.enable_deformability_range_check);
+		fl.insert("enable_area_ratio_check", pcfg.enable_area_ratio_check);
+		fl.insert("enable_ring_ratio_check", pcfg.enable_ring_ratio_check);
+		fl.insert("require_single_inner_contour", pcfg.require_single_inner_contour);
+		ip.insert("filters", fl);
+
+		// Update target_group sub-object
+		QJsonObject tg = ip.value("target_group").toObject();
+		tg.insert("enabled", pcfg.enable_target_group);
+		tg.insert("area_min", pcfg.target_group_area_min);
+		tg.insert("area_max", pcfg.target_group_area_max);
+		tg.insert("deformability_min", pcfg.target_group_deformability_min);
+		tg.insert("deformability_max", pcfg.target_group_deformability_max);
+		ip.insert("target_group", tg);
+
+		root.insert("image_processing", ip);
+		doc.setObject(root);
+
+		file.resize(0);
+		file.seek(0);
+		QTextStream out(&file);
+		out << doc.toJson(QJsonDocument::Indented);
+		file.close();
+
+		SPDLOG_INFO("AppConfigWatcher: wrote back processing config to {}", watchedPath_.toStdString());
 	}
 
 } // namespace frontend

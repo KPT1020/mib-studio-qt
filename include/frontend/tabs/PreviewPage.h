@@ -26,6 +26,7 @@ public:
     ~PreviewPage();
     PlaybackPanel* getPlaybackPanel() const { return playback_; }
     ConfigTabs* getConfigTabs() const { return configTabs_; }
+    AppConfigWatcher* getConfigWatcher() const { return configWatcher_; }
 
 private slots:
     void onPlay();

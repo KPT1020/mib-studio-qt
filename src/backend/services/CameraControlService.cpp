@@ -5,10 +5,18 @@
 
 #include <sstream>
 
+#ifndef MIB_HAS_EGRABBER
+#define MIB_HAS_EGRABBER 0
+#endif
+
+#if MIB_HAS_EGRABBER
+#include <EGrabber.h>
 using namespace Euresys;
+#endif
 
 namespace backend::services
 {
+#if MIB_HAS_EGRABBER
 
     std::vector<DiscoveredCamera> CameraControlService::discoverCameras()
     {
@@ -244,4 +252,57 @@ namespace backend::services
         }
     }
 
+#else
+    namespace
+    {
+        bool reportUnsupported(const char *operation, std::string *errorOut)
+        {
+            static bool loggedOnce = false;
+            if (!loggedOnce)
+            {
+                SPDLOG_WARN("CameraControlService hardware operations unavailable on this platform (EGrabber SDK is Windows-only)");
+                loggedOnce = true;
+            }
+            if (errorOut)
+            {
+                *errorOut = "EGrabber SDK is unavailable on this platform";
+            }
+            (void)operation;
+            return false;
+        }
+    } // namespace
+
+    std::vector<DiscoveredCamera> CameraControlService::discoverCameras()
+    {
+        reportUnsupported("discoverCameras", nullptr);
+        return {};
+    }
+
+    std::vector<DiscoveredFramegrabber> CameraControlService::discoverFramegrabbers()
+    {
+        reportUnsupported("discoverFramegrabbers", nullptr);
+        return {};
+    }
+
+    bool CameraControlService::applyScriptToDevice(int interfaceIndex,
+                                                   int deviceIndex,
+                                                   const std::string &scriptPath,
+                                                   std::string *errorOut)
+    {
+        (void)interfaceIndex;
+        (void)deviceIndex;
+        (void)scriptPath;
+        return reportUnsupported("applyScriptToDevice", errorOut);
+    }
+
+    bool CameraControlService::deviceReset(int interfaceIndex,
+                                           int deviceIndex,
+                                           std::string *errorOut)
+    {
+        (void)interfaceIndex;
+        (void)deviceIndex;
+        return reportUnsupported("deviceReset", errorOut);
+    }
+
+#endif
 } // namespace backend::services

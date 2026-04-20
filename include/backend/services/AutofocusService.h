@@ -73,6 +73,7 @@ public:
 
 private:
     void controlLoop();
+    void statsLoop();
     void updateStatistics();
     double calculateMedian(const std::vector<double>& sorted) const;
 
@@ -91,7 +92,23 @@ private:
     mutable std::mutex configMutex_;
     Config config_;
 
-    // Ring ratio buffer
+    // Incoming samples (producer: ProcessingService realtime thread via
+    // onRingRatio; consumer: statsThread_). onRingRatio does NOT touch the
+    // ring-ratio buffer / stats / sort — that work is deferred to statsLoop
+    // so the realtime thread only pays an atomic update + one push_back +
+    // notify_one per valid frame.
+    struct PendingSample {
+        double ringRatio{0.0};
+        int64_t timestampNs{0};
+    };
+    mutable std::mutex pendingSamplesMutex_;
+    std::condition_variable pendingSamplesCV_;
+    std::vector<PendingSample> pendingSamples_;
+    std::thread statsThread_;
+    std::atomic<bool> statsRunning_{false};
+
+    // Ring ratio buffer (owned by statsLoop; read by controlLoop under
+    // ringRatioMutex_; never touched from the realtime thread).
     mutable std::mutex ringRatioMutex_;
     std::deque<double> ringRatioBuffer_;
     std::deque<int64_t> ringRatioTimestamps_;
