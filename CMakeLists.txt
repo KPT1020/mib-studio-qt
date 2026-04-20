@@ -64,12 +64,17 @@ find_package(Qt6 COMPONENTS Core Widgets Gui Charts Network Concurrent SerialPor
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG QUIET)
 find_package(OpenCV CONFIG REQUIRED)
-find_package(onnxruntime CONFIG REQUIRED)
+find_package(onnxruntime CONFIG QUIET)
 
 # Hardware SDKs (EGrabber/Coremor) are Windows-only in this project.
 set(MIB_HAS_EGRABBER OFF)
 if(WIN32)
     set(MIB_HAS_EGRABBER ON)
+endif()
+
+set(MIB_HAS_ONNXRUNTIME OFF)
+if(TARGET onnxruntime::onnxruntime)
+    set(MIB_HAS_ONNXRUNTIME ON)
 endif()
 
 # Prefer official SQLite3 package; fallback to unofficial config if needed
@@ -108,7 +113,6 @@ add_library(mib_backend STATIC
     src/backend/services/PlaybackService.cpp
     src/backend/services/SyringePumpService.cpp
     src/backend/services/TriggerService.cpp
-    src/backend/services/YoloService.cpp
     src/backend/playback/FrameStore.cpp
     src/camera/common/EGrabberCamera.cpp
     src/camera/mock/MockCamera.cpp
@@ -122,6 +126,15 @@ else()
         src/backend/services/AutofocusService.stub.cpp
     )
 endif()
+if(MIB_HAS_ONNXRUNTIME)
+    target_sources(mib_backend PRIVATE
+        src/backend/services/YoloService.cpp
+    )
+else()
+    target_sources(mib_backend PRIVATE
+        src/backend/services/YoloService.stub.cpp
+    )
+endif()
 
 # Explicitly enable AUTOMOC for this target to ensure MOC files are generated
 set_target_properties(mib_backend PROPERTIES AUTOMOC ON)
@@ -132,6 +145,11 @@ if(MIB_HAS_EGRABBER)
     target_compile_definitions(mib_backend PUBLIC MIB_HAS_EGRABBER=1)
 else()
     target_compile_definitions(mib_backend PUBLIC MIB_HAS_EGRABBER=0)
+endif()
+if(MIB_HAS_ONNXRUNTIME)
+    target_compile_definitions(mib_backend PUBLIC MIB_HAS_ONNXRUNTIME=1)
+else()
+    target_compile_definitions(mib_backend PUBLIC MIB_HAS_ONNXRUNTIME=0)
 endif()
 
 target_include_directories(mib_backend PUBLIC
@@ -175,7 +193,7 @@ endif()
 if(TARGET onnxruntime::onnxruntime)
     target_link_libraries(mib_backend PUBLIC onnxruntime::onnxruntime)
 else()
-    message(WARNING "onnxruntime::onnxruntime target not found - YOLO service will not be available")
+    message(WARNING "onnxruntime::onnxruntime target not found - building with YoloService stub")
 endif()
 
 # SQLite linking (whichever is available)

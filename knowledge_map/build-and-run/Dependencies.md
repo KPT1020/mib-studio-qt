@@ -9,7 +9,7 @@
 | sqlite3 | 3.51.0 | | [[../services/SqliteService]] |
 | hdf5 | 1.14.6 | ✓ | C++ API enabled — [[../services/Hdf5Service]] |
 | opencv | 4.12.0 | ✓ | dnn=False, openexr=False. Linked modules: `core`, `imgproc`, `imgcodecs`, `videoio` (AVI read/write by [[../data-model/FrameStore]] and [[../services/BatchMaskSources]]) — [[../services/ProcessingService]] |
-| onnxruntime | 1.18.1 | | [[../services/YoloService]] |
+| onnxruntime | 1.18.1 | | Optional in Linux cloud builds; when unavailable the build uses `YoloService.stub.cpp` and disables YOLO runtime features while keeping the rest of the app buildable — [[../services/YoloService]] |
 | nlohmann_json | 3.11.3 | | Config parsing / serialization |
 
 ## Vendored / checked-in
@@ -32,6 +32,16 @@
   (`WIN32` => `ON`, otherwise `OFF`):
   - EGrabber headers/system path are only added when `MIB_HAS_EGRABBER=1`.
   - Coremor include/lib wiring is only added when `MIB_HAS_EGRABBER=1`.
+
+## Linux cloud build notes
+
+- If CMake fails before project checks with
+  `/usr/bin/ld: cannot find -lstdc++`, verify which compiler `/usr/bin/c++`
+  resolves to. Some images pin `c++` to a clang alternative while missing the
+  matching unversioned `libstdc++.so` path for that toolchain.
+- In those environments, switching `c++` to `g++` resolves the runtime linker
+  path issue:
+  - `sudo update-alternatives --set c++ /usr/bin/g++`
 
 ## Related
 

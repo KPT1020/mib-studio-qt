@@ -60,6 +60,42 @@ Dependencies resolved via Conan (not vcpkg — despite old comments). See
 - Non-Windows uses `src/backend/services/AutofocusService.stub.cpp` so Linux
   cloud builds can compile and run mock/non-hardware workflows.
 
+## Linux cloud toolchain note (`cannot find -lstdc++`)
+
+Some cloud images can fail during compiler smoke-test before project
+configuration with:
+
+`/usr/bin/ld: cannot find -lstdc++`
+
+In those cases, `/usr/bin/c++` is often set to `clang++` via alternatives while
+the image lacks the expected unversioned `libstdc++.so` path for that clang
+setup.
+
+Workaround:
+
+```bash
+sudo update-alternatives --set c++ /usr/bin/g++
+printf 'int main(){return 0;}' | c++ -x c++ - -o /tmp/cxx-link-test
+```
+
+If this succeeds, rerun CMake/Conan. Any next failure is likely dependency
+resolution/provisioning, not the runtime linker.
+
+## Linux cloud dependency fallback (ONNX Runtime optional)
+
+Linux cloud images may not have a discoverable CMake package for ONNX Runtime
+(`onnxruntimeConfig.cmake`), and Conan graph resolution can fail because of
+upstream version conflicts (`qt/opencv/onnxruntime` transitive deps).
+
+To keep non-hardware workflows buildable in cloud:
+
+- `find_package(onnxruntime CONFIG QUIET)` is optional.
+- `MIB_HAS_ONNXRUNTIME` is set from `TARGET onnxruntime::onnxruntime`.
+- When ONNX Runtime is unavailable:
+  - build uses `src/backend/services/YoloService.stub.cpp`
+  - compile definition `MIB_HAS_ONNXRUNTIME=0` is exported
+  - CMake emits a warning and continues.
+
 ## Related how-tos
 
 - `docs/howto/build-installer.md`
