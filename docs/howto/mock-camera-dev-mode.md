@@ -11,14 +11,12 @@ You can enable mock camera mode in two ways:
 
 ## Enabling the mock via environment variables
 
-Set the following environment variables before launching `mib_studio_qt` or the console test harness:
+Set the following environment variables before launching `mib_studio_qt`:
 
 - `MIB_CAMERA_MODE=mock` &mdash; selects the folder-backed camera. Any other value (or unset) keeps the hardware path.
 - `MIB_MOCK_CAMERA_DIR=<absolute-or-relative-path>` &mdash; directory containing the images to stream. Defaults to `<data>/mock_frames`.
 - `MIB_MOCK_CAMERA_INTERVAL_MS` (optional) &mdash; delay between frames in milliseconds, default `33` (~30 fps). For finer control use the mock config dialog or set options programmatically (microsecond precision).
 - `MIB_MOCK_CAMERA_LOOP` (optional) &mdash; set to `false`, `0`, or `no` to stop after the last frame. Otherwise the sequence loops.
-
-The console test `capture_processing_test` still seeds `data/mock_frames/frame_000.png` automatically and forces `MIB_CAMERA_MODE=mock`, so it can be used to sanity-check the mock flow.
 
 ## Image requirements
 
