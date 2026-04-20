@@ -2,10 +2,22 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 fn main() {
+    #[cfg(not(windows))]
+    {
+        // Tauri desktop runtime dependencies are platform-specific and not
+        // available in the default Linux cloud image; skip native bridge build.
+        println!("cargo:warning=Non-Windows build: skipping native mib bridge compilation");
+        tauri_build::build();
+        return;
+    }
+
     tauri_build::build();
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let root = manifest_dir.parent().expect("src-tauri has a parent").to_path_buf();
+    let root = manifest_dir
+        .parent()
+        .expect("src-tauri has a parent")
+        .to_path_buf();
     let build_dir = root.join("build");
     let lib_dir = build_dir.join("Release");
     let include_dir = root.join("include");
@@ -30,16 +42,24 @@ fn main() {
         .expect("build/ missing — run cmake --preset windows-default first");
     for entry in data_files.flatten() {
         let path = entry.path();
-        let Some(name) = path.file_name().and_then(|s| s.to_str()) else { continue; };
-        if !name.ends_with("-release-x86_64-data.cmake") { continue; }
-        if name.starts_with("module-") { continue; }
+        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if !name.ends_with("-release-x86_64-data.cmake") {
+            continue;
+        }
+        if name.starts_with("module-") {
+            continue;
+        }
         // mib_backend is Qt-free; do not link Qt from Conan (would load Qt6 DLLs at runtime).
         let name_lower = name.to_ascii_lowercase();
         if name_lower.starts_with("qt6") || name_lower.starts_with("qt-") {
             continue;
         }
 
-        let Ok(contents) = std::fs::read_to_string(&path) else { continue; };
+        let Ok(contents) = std::fs::read_to_string(&path) else {
+            continue;
+        };
 
         for line in contents.lines() {
             let line = line.trim();
@@ -59,7 +79,9 @@ fn main() {
                     } else if var.ends_with("_LIBS_RELEASE") && !var.contains("SYSTEM_LIBS") {
                         for lib in value.split_whitespace() {
                             let lib = lib.trim();
-                            if lib.is_empty() { continue; }
+                            if lib.is_empty() {
+                                continue;
+                            }
                             if seen_libs.insert(lib.to_string()) {
                                 link_libs.push(lib.to_string());
                             }
@@ -67,7 +89,9 @@ fn main() {
                     } else if var.ends_with("_SYSTEM_LIBS_RELEASE") {
                         for lib in value.split_whitespace() {
                             let lib = lib.trim();
-                            if lib.is_empty() { continue; }
+                            if lib.is_empty() {
+                                continue;
+                            }
                             system_libs.insert(lib.to_string());
                         }
                     }
@@ -114,7 +138,9 @@ fn main() {
     }
 
     // Windows system libs that Qt/OpenSSL/etc commonly need even if not listed.
-    for lib in ["ws2_32", "crypt32", "secur32", "userenv", "iphlpapi", "bcrypt", "ncrypt"] {
+    for lib in [
+        "ws2_32", "crypt32", "secur32", "userenv", "iphlpapi", "bcrypt", "ncrypt",
+    ] {
         println!("cargo:rustc-link-lib={}", lib);
     }
 
@@ -130,7 +156,11 @@ fn main() {
 /// Copy Conan `bin\\*.dll` and Coremor `XMT_DLL_SER.dll` next to `mib-studio.exe` so `cargo run` works
 /// without manually setting `PATH` (avoids `0xC0000135` STATUS_DLL_NOT_FOUND).
 #[cfg(windows)]
-fn copy_windows_runtime_dlls(manifest_dir: &Path, repo_root: &Path, package_bins: &BTreeSet<PathBuf>) {
+fn copy_windows_runtime_dlls(
+    manifest_dir: &Path,
+    repo_root: &Path,
+    package_bins: &BTreeSet<PathBuf>,
+) {
     let profile = match std::env::var("PROFILE") {
         Ok(p) => p,
         Err(_) => return,
@@ -149,7 +179,10 @@ fn copy_windows_runtime_dlls(manifest_dir: &Path, repo_root: &Path, package_bins
     }
 
     let mut copied: usize = 0;
-    let coremor_dll = repo_root.join("include").join("Coremor").join("XMT_DLL_SER.dll");
+    let coremor_dll = repo_root
+        .join("include")
+        .join("Coremor")
+        .join("XMT_DLL_SER.dll");
     if coremor_dll.is_file() {
         let out = dest.join("XMT_DLL_SER.dll");
         if std::fs::copy(&coremor_dll, &out).is_ok() {

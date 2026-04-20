@@ -5,6 +5,14 @@
 
 ## Features shipped
 
+- **Tauri bridge command surface completed** (2026-04-20) —
+  `src-tauri/src/bridge/{ffi.rs,bridge.h,bridge.cpp,mod.rs}` now exposes and
+  wires backend operations for playback-by-index, processing config/ROI/bg,
+  monitoring frame snapshots, experiment/HDF5 lifecycle, CSV metrics export,
+  frame recording, autofocus, syringe pumps, trigger, app config/script, and
+  buffer-save APIs. Stubbed command modules in `src-tauri/src/commands/` were
+  replaced with real backend bridge calls.
+
 - **Tauri + backend bridge distilled into architecture notes** (2026-04-20) —
   Added canonical [[../architecture/Tauri-Bridge]] and cross-linked it from
   onboarding/build/run docs; updated [[../architecture/AppBackend]] background
