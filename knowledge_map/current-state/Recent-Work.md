@@ -11,6 +11,21 @@
   result and non-deterministic Conan-cache globs, fixing MSB3073 when those
   pointed at a different Qt package than the one linked for Release.
 
+- **Recording-mode HDF5 files now open in the Review tab** (2026-04-19) —
+  The "Record" button (PlaybackPanel → `AppBackend::startFrameRecording`)
+  writes raw frames to `/recorded_frames/{images,metadata}` with a
+  `/recording_info` group; the Review tab was hardcoded to
+  `/valid_frames/*` and `/invalid_frames/*` and showed nothing.
+  [[../services/Hdf5Service]] grew three reader APIs: `isRecordingFile()`,
+  `readRecordingMetadata(frames)`, `readRecordingInfo(start, end, total,
+  filtered)`. [[../frontend/HdfReviewTab]] now detects recording files on
+  load, hides the "Invalid Frames" tab, relabels "Valid Frames" as
+  "Frames", and routes all thumbnail/viewer/export reads through new
+  `imagesPath(bool)` / `masksPath(bool)` helpers. Masks, overlay modes,
+  ROI overlay, Regenerate Masks, Export Metrics CSV and Export Charts are
+  disabled for recording files (no per-frame metrics exist); Export All
+  still writes TIFFs. Files: `Hdf5Service.{h,cpp}`, `HdfReviewTab.{h,cpp}`.
+
 - **Buffer save to AVI + AVI source for mask regeneration** (2026-04-16) —
   [[../data-model/FrameStore]] gained `saveFramesToAvi()` overloads
   (all/index-range/timestamp-range) writing a single uncompressed AVI via

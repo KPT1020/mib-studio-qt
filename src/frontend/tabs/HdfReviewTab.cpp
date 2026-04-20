@@ -300,52 +300,88 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
         return;
     }
 
-    // Read experiment info and ROI
-    uint64_t startTimeNs = 0, endTimeNs = 0;
-    size_t totalValid = 0, totalInvalid = 0;
-    backend::services::ProcessingService::Roi loadedRoi{0, 0, 0, 0};
-    if (hdfReader_->readExperimentInfo(startTimeNs, endTimeNs, totalValid, totalInvalid, &loadedRoi)) {
-        ui->statusLabel->setText(QString("Valid: %1, Invalid: %2")
-                             .arg(totalValid).arg(totalInvalid));
-        roi_ = loadedRoi;
-        SPDLOG_INFO("Loaded ROI from HDF5: x={}, y={}, w={}, h={}", roi_.x, roi_.y, roi_.w, roi_.h);
-        // Enable overlay checkbox if we have frames (for processing overlay) or valid ROI
-        ui->roiOverlayCheck->setEnabled(true);
-    } else {
-        roi_ = {0, 0, 0, 0};
-        SPDLOG_WARN("Failed to read experiment info or ROI not found in HDF5 file");
-        // Still enable overlay checkbox if we have frames (for processing overlay)
-        ui->roiOverlayCheck->setEnabled(false);
-    }
+    // Detect recording-mode file. Recording files have no valid/invalid
+    // categorization, no masks, no per-frame metrics — just raw frames
+    // with index/timestamp metadata.
+    isRecordingMode_ = hdfReader_->isRecordingFile();
 
-    // Log datasets info for debugging
-    size_t count = 0; int h = 0, w = 0, c = 0;
     size_t validImagesCount = 0;
     size_t invalidImagesCount = 0;
-    if (hdfReader_->getDatasetInfo("/valid_frames/images", count, h, w, c)) {
-        SPDLOG_INFO("Dataset /valid_frames/images: count={}, H={}, W={}, C={}", count, h, w, c);
-        validImagesCount = count;
-    }
-    if (hdfReader_->getDatasetInfo("/valid_frames/masks", count, h, w, c)) {
-        SPDLOG_INFO("Dataset /valid_frames/masks:  count={}, H={}, W={}, C={}", count, h, w, c);
-    }
-    if (hdfReader_->getDatasetInfo("/invalid_frames/images", count, h, w, c)) {
-        SPDLOG_INFO("Dataset /invalid_frames/images: count={}, H={}, W={}, C={}", count, h, w, c);
-        invalidImagesCount = count;
-    }
-    if (hdfReader_->getDatasetInfo("/invalid_frames/masks", count, h, w, c)) {
-        SPDLOG_INFO("Dataset /invalid_frames/masks:  count={}, H={}, W={}, C={}", count, h, w, c);
-    }
+    size_t totalValid = 0, totalInvalid = 0;
 
-    // Read metadata only (images/masks will be fetched on-demand)
-    if (!hdfReader_->readValidMetadata(validFrames_)) {
-        SPDLOG_WARN("Failed to read valid metadata or none found");
-        validFrames_.clear();
-    }
+    if (isRecordingMode_) {
+        // Recording mode: hide the invalid tab, relabel the valid tab as "Frames".
+        ui->frameTypeTabs->setTabText(0, tr("Frames"));
+        ui->frameTypeTabs->setTabVisible(1, false);
+        ui->frameTypeTabs->setCurrentIndex(0);
+        isShowingValid_ = true;
+        roi_ = {0, 0, 0, 0};
+        ui->roiOverlayCheck->setEnabled(false);
 
-    if (!hdfReader_->readInvalidMetadata(invalidFrames_)) {
-        SPDLOG_WARN("Failed to read invalid metadata or none found");
+        uint64_t startTimeNs = 0, endTimeNs = 0;
+        uint64_t totalFrames = 0, filteredFrames = 0;
+        if (hdfReader_->readRecordingInfo(startTimeNs, endTimeNs, totalFrames, filteredFrames)) {
+            ui->statusLabel->setText(tr("Recording: %1 frames, %2 empty skipped")
+                                     .arg(static_cast<qulonglong>(totalFrames))
+                                     .arg(static_cast<qulonglong>(filteredFrames)));
+        }
+
+        size_t count = 0; int h = 0, w = 0, c = 0;
+        if (hdfReader_->getDatasetInfo("/recorded_frames/images", count, h, w, c)) {
+            SPDLOG_INFO("Dataset /recorded_frames/images: count={}, H={}, W={}, C={}", count, h, w, c);
+            validImagesCount = count;
+        }
+
+        if (!hdfReader_->readRecordingMetadata(validFrames_)) {
+            SPDLOG_WARN("Failed to read recording metadata");
+            validFrames_.clear();
+        }
         invalidFrames_.clear();
+    } else {
+        // Experiment mode: restore default tab labels/visibility in case a
+        // recording file was previously loaded in this session.
+        ui->frameTypeTabs->setTabText(0, tr("Valid Frames"));
+        ui->frameTypeTabs->setTabVisible(1, true);
+
+        uint64_t startTimeNs = 0, endTimeNs = 0;
+        backend::services::ProcessingService::Roi loadedRoi{0, 0, 0, 0};
+        if (hdfReader_->readExperimentInfo(startTimeNs, endTimeNs, totalValid, totalInvalid, &loadedRoi)) {
+            ui->statusLabel->setText(QString("Valid: %1, Invalid: %2")
+                                 .arg(totalValid).arg(totalInvalid));
+            roi_ = loadedRoi;
+            SPDLOG_INFO("Loaded ROI from HDF5: x={}, y={}, w={}, h={}", roi_.x, roi_.y, roi_.w, roi_.h);
+            ui->roiOverlayCheck->setEnabled(true);
+        } else {
+            roi_ = {0, 0, 0, 0};
+            SPDLOG_WARN("Failed to read experiment info or ROI not found in HDF5 file");
+            ui->roiOverlayCheck->setEnabled(false);
+        }
+
+        size_t count = 0; int h = 0, w = 0, c = 0;
+        if (hdfReader_->getDatasetInfo("/valid_frames/images", count, h, w, c)) {
+            SPDLOG_INFO("Dataset /valid_frames/images: count={}, H={}, W={}, C={}", count, h, w, c);
+            validImagesCount = count;
+        }
+        if (hdfReader_->getDatasetInfo("/valid_frames/masks", count, h, w, c)) {
+            SPDLOG_INFO("Dataset /valid_frames/masks:  count={}, H={}, W={}, C={}", count, h, w, c);
+        }
+        if (hdfReader_->getDatasetInfo("/invalid_frames/images", count, h, w, c)) {
+            SPDLOG_INFO("Dataset /invalid_frames/images: count={}, H={}, W={}, C={}", count, h, w, c);
+            invalidImagesCount = count;
+        }
+        if (hdfReader_->getDatasetInfo("/invalid_frames/masks", count, h, w, c)) {
+            SPDLOG_INFO("Dataset /invalid_frames/masks:  count={}, H={}, W={}, C={}", count, h, w, c);
+        }
+
+        if (!hdfReader_->readValidMetadata(validFrames_)) {
+            SPDLOG_WARN("Failed to read valid metadata or none found");
+            validFrames_.clear();
+        }
+
+        if (!hdfReader_->readInvalidMetadata(invalidFrames_)) {
+            SPDLOG_WARN("Failed to read invalid metadata or none found");
+            invalidFrames_.clear();
+        }
     }
 
     // Keep file open in hdfReader_ for subsequent on-demand reads (thumbnails/viewer)
@@ -356,25 +392,32 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
     updateImageGrid(invalidFrames_);
     updateMetricsTable(invalidFrames_);
 
-    // Enable export buttons if we have any data
+    // Enable export buttons if we have any data. Recording files have no
+    // metrics or charts, so the metrics/charts exports and mask regeneration
+    // are meaningless — disable them.
     bool hasData = !validFrames_.empty() || !invalidFrames_.empty();
-    ui->exportMetricsBtn->setEnabled(hasData);
+    ui->exportMetricsBtn->setEnabled(hasData && !isRecordingMode_);
     ui->exportAllBtn->setEnabled(hasData);
-    ui->exportChartsBtn->setEnabled(hasData);
+    ui->exportChartsBtn->setEnabled(hasData && !isRecordingMode_);
     ui->closeFileBtn->setEnabled(hasData);
-    
-    // Enable overlay controls if we have frames
-    if (hasData) {
+    ui->regenerateMasksBtn->setEnabled(hasData && !isRecordingMode_);
+
+    // Enable overlay controls if we have frames (not in recording mode — no masks/ROI)
+    if (hasData && !isRecordingMode_) {
         ui->overlayModeLabel->setEnabled(true);
         ui->overlayModeCombo->setEnabled(true);
         ui->roiOverlayCheck->setEnabled(true);
+    } else if (isRecordingMode_) {
+        ui->overlayModeLabel->setEnabled(false);
+        ui->overlayModeCombo->setEnabled(false);
+        ui->roiOverlayCheck->setEnabled(false);
     }
 
     // Update charts tab with snapshots from HDF5
     updateCharts();
 
     // Prefer actual dataset/metadata counts for status display (experiment info may be stale)
-    {
+    if (!isRecordingMode_) {
         const size_t shownValid = !validFrames_.empty() ? validFrames_.size()
                                  : (validImagesCount > 0 ? validImagesCount : totalValid);
         const size_t shownInvalid = !invalidFrames_.empty() ? invalidFrames_.size()
@@ -413,11 +456,18 @@ void HdfReviewTab::clearDisplay() {
     thumbnailCache_.clear();
     validScrollValue_ = 0;
     invalidScrollValue_ = 0;
-    
+    isRecordingMode_ = false;
+
+    // Restore the default tab labels/visibility that recording-mode loads
+    // may have overridden.
+    ui->frameTypeTabs->setTabText(0, tr("Valid Frames"));
+    ui->frameTypeTabs->setTabVisible(1, true);
+
     // Disable export buttons and ROI overlay when no data
     ui->exportMetricsBtn->setEnabled(false);
     ui->exportAllBtn->setEnabled(false);
     ui->exportChartsBtn->setEnabled(false);
+    ui->regenerateMasksBtn->setEnabled(false);
     ui->roiOverlayCheck->setEnabled(false);
     ui->roiOverlayCheck->setChecked(false);
 
@@ -564,9 +614,9 @@ void HdfReviewTab::loadThumbnailsBatch(const std::vector<backend::services::Proc
         if (cached) {
             thumbImage = *cached;
         } else {
-            // Dataset paths
-            const std::string imgPath = isValid ? "/valid_frames/images" : "/invalid_frames/images";
-            const std::string maskPath = isValid ? "/valid_frames/masks"  : "/invalid_frames/masks";
+            // Dataset paths (routed to /recorded_frames/* when in recording mode)
+            const std::string imgPath = imagesPath(isValid);
+            const std::string maskPath = masksPath(isValid);
 
             // Read original image by dataset position (i), not by frame.index.
             // Fall back to the in-memory ProcessedFrame when the HDF5 reader is
@@ -582,10 +632,9 @@ void HdfReviewTab::loadThumbnailsBatch(const std::vector<backend::services::Proc
                 }
             }
 
-            // Optional processing overlay when overlay mode is not None.
-            // Same fallback: use in-memory mask when HDF5 is unavailable.
+            // Optional processing overlay when overlay mode is not None and masks exist.
             const backend::services::FilterResult* validation = (i < framesRef.size()) ? &framesRef[i].validation : nullptr;
-            if (overlayMode_ != OverlayMode::None) {
+            if (overlayMode_ != OverlayMode::None && !maskPath.empty()) {
                 cv::Mat mask;
                 bool maskOk = hdfReader_ && hdfReader_->readImageByIndex(maskPath, i, mask) && !mask.empty();
                 if (!maskOk && i < framesRef.size() && !framesRef[i].processedImage.empty()) {
@@ -732,6 +781,16 @@ void HdfReviewTab::updateMetricsTable(const std::vector<backend::services::Proce
     }
 }
 
+std::string HdfReviewTab::imagesPath(bool isValid) const {
+    if (isRecordingMode_) return "/recorded_frames/images";
+    return isValid ? "/valid_frames/images" : "/invalid_frames/images";
+}
+
+std::string HdfReviewTab::masksPath(bool isValid) const {
+    if (isRecordingMode_) return {};
+    return isValid ? "/valid_frames/masks" : "/invalid_frames/masks";
+}
+
 QImage HdfReviewTab::matToQImage(const cv::Mat& mat) const {
     if (mat.empty()) {
         return QImage();
@@ -808,6 +867,12 @@ void HdfReviewTab::onViewFrameDetails(int frameIndex) {
 }
 
 void HdfReviewTab::onRegenerateMasks() {
+    if (isRecordingMode_) {
+        QMessageBox::information(this, tr("Not Available"),
+            tr("Mask regeneration is not available for recording-mode files."));
+        return;
+    }
+
     QString loadedPath;
     if (hdfReader_) {
         const QString label = ui->filePathLabel->text();
@@ -1088,8 +1153,8 @@ QImage HdfReviewTab::buildThumbnailForIndex(size_t index, bool isValid) {
         return *cached;
     }
 
-    const std::string imgPath = isValid ? "/valid_frames/images" : "/invalid_frames/images";
-    const std::string maskPath = isValid ? "/valid_frames/masks"  : "/invalid_frames/masks";
+    const std::string imgPath = imagesPath(isValid);
+    const std::string maskPath = masksPath(isValid);
 
     QImage thumbImage;
     cv::Mat original;
@@ -1100,7 +1165,7 @@ QImage HdfReviewTab::buildThumbnailForIndex(size_t index, bool isValid) {
 
     const auto& framesRef = isValid ? validFrames_ : invalidFrames_;
     const backend::services::FilterResult* validation = (index < framesRef.size()) ? &framesRef[index].validation : nullptr;
-    if (overlayMode_ != OverlayMode::None) {
+    if (overlayMode_ != OverlayMode::None && !maskPath.empty()) {
         cv::Mat mask;
         if (hdfReader_->readImageByIndex(maskPath, index, mask) && !mask.empty()) {
             thumbImage = createProcessingOverlay(original, mask, validation, overlayMode_);
@@ -1279,8 +1344,8 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
 
     // Build a full ProcessedFrame by fetching images on demand
     backend::services::ProcessedFrame initialFrame = framesMeta[frameIndex];
-    const std::string imgPath = isShowingValid_ ? "/valid_frames/images" : "/invalid_frames/images";
-    const std::string maskPath = isShowingValid_ ? "/valid_frames/masks"  : "/invalid_frames/masks";
+    const std::string imgPath = imagesPath(isShowingValid_);
+    const std::string maskPath = masksPath(isShowingValid_);
 
     if (hdfReader_) {
         cv::Mat original, mask;
@@ -1289,13 +1354,13 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
             SPDLOG_TRACE("HdfReviewTab: viewer loaded original {}[{}] ({}x{}x{})",
                          imgPath, frameIndex, original.cols, original.rows, original.channels());
         }
-        if (hdfReader_->readImageByIndex(maskPath, static_cast<size_t>(frameIndex), mask)) {
+        if (!maskPath.empty() && hdfReader_->readImageByIndex(maskPath, static_cast<size_t>(frameIndex), mask)) {
             initialFrame.processedImage = mask;
             SPDLOG_TRACE("HdfReviewTab: viewer loaded mask {}[{}] ({}x{}x{})",
                          maskPath, frameIndex, mask.cols, mask.rows, mask.channels());
         }
-        // Load multi-image series data if available (valid frames only)
-        if (isShowingValid_) {
+        // Load multi-image series data if available (valid frames only; skip in recording mode)
+        if (isShowingValid_ && !isRecordingMode_) {
             std::vector<cv::Mat> seriesImages;
             if (hdfReader_->readSeriesImagesByIndex(static_cast<size_t>(frameIndex), seriesImages) && !seriesImages.empty()) {
                 initialFrame.seriesImages = std::move(seriesImages);
@@ -1316,9 +1381,9 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
     auto* navState = new NavigationState{frameIndex, isShowingValid_};
     
     // Connect navigation signals
-    // Helper lambda to load series images for a frame
+    // Helper lambda to load series images for a frame (skipped in recording mode — no series)
     auto loadSeriesImages = [this, navState](backend::services::ProcessedFrame& pf, int idx) {
-        if (navState->isValidSet && hdfReader_) {
+        if (navState->isValidSet && hdfReader_ && !isRecordingMode_) {
             std::vector<cv::Mat> seriesImages;
             if (hdfReader_->readSeriesImagesByIndex(static_cast<size_t>(idx), seriesImages) && !seriesImages.empty()) {
                 pf.seriesImages = std::move(seriesImages);
@@ -1336,14 +1401,14 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
         if (navState->currentIndex >= 0 && navState->currentIndex < static_cast<int>(frames.size())) {
             // Fetch images on demand
             backend::services::ProcessedFrame pf = frames[navState->currentIndex];
-            const std::string imgPath2 = navState->isValidSet ? "/valid_frames/images" : "/invalid_frames/images";
-            const std::string maskPath2 = navState->isValidSet ? "/valid_frames/masks"  : "/invalid_frames/masks";
+            const std::string imgPath2 = imagesPath(navState->isValidSet);
+            const std::string maskPath2 = masksPath(navState->isValidSet);
             if (hdfReader_) {
                 cv::Mat original2, mask2;
                 if (hdfReader_->readImageByIndex(imgPath2, static_cast<size_t>(navState->currentIndex), original2)) {
                     pf.originalImage = original2;
                 }
-                if (hdfReader_->readImageByIndex(maskPath2, static_cast<size_t>(navState->currentIndex), mask2)) {
+                if (!maskPath2.empty() && hdfReader_->readImageByIndex(maskPath2, static_cast<size_t>(navState->currentIndex), mask2)) {
                     pf.processedImage = mask2;
                 }
             }
@@ -1363,14 +1428,14 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
         }
         if (navState->currentIndex >= 0 && navState->currentIndex < static_cast<int>(frames.size())) {
             backend::services::ProcessedFrame pf = frames[navState->currentIndex];
-            const std::string imgPath2 = navState->isValidSet ? "/valid_frames/images" : "/invalid_frames/images";
-            const std::string maskPath2 = navState->isValidSet ? "/valid_frames/masks"  : "/invalid_frames/masks";
+            const std::string imgPath2 = imagesPath(navState->isValidSet);
+            const std::string maskPath2 = masksPath(navState->isValidSet);
             if (hdfReader_) {
                 cv::Mat original2, mask2;
                 if (hdfReader_->readImageByIndex(imgPath2, static_cast<size_t>(navState->currentIndex), original2)) {
                     pf.originalImage = original2;
                 }
-                if (hdfReader_->readImageByIndex(maskPath2, static_cast<size_t>(navState->currentIndex), mask2)) {
+                if (!maskPath2.empty() && hdfReader_->readImageByIndex(maskPath2, static_cast<size_t>(navState->currentIndex), mask2)) {
                     pf.processedImage = mask2;
                 }
             }
@@ -1496,16 +1561,20 @@ void HdfReviewTab::exportAllImagesToTiff(const QString& baseDir) {
     int seriesExportedCount = 0;
     int totalCount = static_cast<int>(validFrames_.size() + invalidFrames_.size());
 
-    // Check if series images are available
+    // Check if series images are available (recording files have none)
     size_t seriesCount = 0, seriesRecords = 0;
     int seriesH = 0, seriesW = 0;
-    bool hasSeriesImages = hdfReader_->getSeriesImageInfo(seriesRecords, seriesCount, seriesH, seriesW);
+    bool hasSeriesImages = !isRecordingMode_
+        && hdfReader_->getSeriesImageInfo(seriesRecords, seriesCount, seriesH, seriesW);
 
-    // Export valid frames
+    // Export valid frames (in recording mode, these are the only frames)
+    const std::string validImgPath = imagesPath(true);
+    const QString validPrefix = isRecordingMode_ ? QStringLiteral("frame_") : QStringLiteral("valid_frame_");
     for (size_t i = 0; i < validFrames_.size(); ++i) {
         cv::Mat image;
-        if (hdfReader_->readImageByIndex("/valid_frames/images", i, image)) {
-            QString fileName = QString("valid_frame_%1.tiff").arg(validFrames_[i].index, 6, 10, QChar('0'));
+        if (hdfReader_->readImageByIndex(validImgPath, i, image)) {
+            QString fileName = QStringLiteral("%1%2.tiff").arg(validPrefix)
+                                 .arg(validFrames_[i].index, 6, 10, QChar('0'));
             QString filePath = dir.filePath(fileName);
 
             // Export without compression
@@ -1531,10 +1600,11 @@ void HdfReviewTab::exportAllImagesToTiff(const QString& baseDir) {
         }
     }
 
-    // Export invalid frames
+    // Export invalid frames (empty in recording mode)
+    const std::string invalidImgPath = imagesPath(false);
     for (size_t i = 0; i < invalidFrames_.size(); ++i) {
         cv::Mat image;
-        if (hdfReader_->readImageByIndex("/invalid_frames/images", i, image)) {
+        if (hdfReader_->readImageByIndex(invalidImgPath, i, image)) {
             QString fileName = QString("invalid_frame_%1.tiff").arg(invalidFrames_[i].index, 6, 10, QChar('0'));
             QString filePath = dir.filePath(fileName);
 
@@ -1591,19 +1661,24 @@ void HdfReviewTab::exportAllData(const QString& baseDir) {
     int exportedImages = 0;
     int totalImages = static_cast<int>(validFrames_.size() + invalidFrames_.size());
     bool csvExported = false;
-    bool chartsExported = true;
+    bool chartsExported = !isRecordingMode_;   // N/A for recording files
 
-    // Export CSV metrics
-    QString csvPath = dir.filePath("metrics.csv");
-    exportMetricsToCsv(csvPath);
-    csvExported = QFile::exists(csvPath);
+    // Export CSV metrics (recording files have no per-frame metrics)
+    if (!isRecordingMode_) {
+        QString csvPath = dir.filePath("metrics.csv");
+        exportMetricsToCsv(csvPath);
+        csvExported = QFile::exists(csvPath);
+    }
 
     // Export all images
-    // Export valid frames
+    // Export valid frames (in recording mode, the only frames — use a plain "frame_" prefix)
+    const std::string validImgPath = imagesPath(true);
+    const QString validPrefix = isRecordingMode_ ? QStringLiteral("frame_") : QStringLiteral("valid_frame_");
     for (size_t i = 0; i < validFrames_.size(); ++i) {
         cv::Mat image;
-        if (hdfReader_->readImageByIndex("/valid_frames/images", i, image)) {
-            QString fileName = QString("valid_frame_%1.tiff").arg(validFrames_[i].index, 6, 10, QChar('0'));
+        if (hdfReader_->readImageByIndex(validImgPath, i, image)) {
+            QString fileName = QStringLiteral("%1%2.tiff").arg(validPrefix)
+                                 .arg(validFrames_[i].index, 6, 10, QChar('0'));
             QString filePath = dir.filePath(fileName);
 
             // Export without compression
@@ -1613,10 +1688,11 @@ void HdfReviewTab::exportAllData(const QString& baseDir) {
         }
     }
 
-    // Export invalid frames
+    // Export invalid frames (empty in recording mode)
+    const std::string invalidImgPath = imagesPath(false);
     for (size_t i = 0; i < invalidFrames_.size(); ++i) {
         cv::Mat image;
-        if (hdfReader_->readImageByIndex("/invalid_frames/images", i, image)) {
+        if (hdfReader_->readImageByIndex(invalidImgPath, i, image)) {
             QString fileName = QString("invalid_frame_%1.tiff").arg(invalidFrames_[i].index, 6, 10, QChar('0'));
             QString filePath = dir.filePath(fileName);
 
@@ -1627,7 +1703,15 @@ void HdfReviewTab::exportAllData(const QString& baseDir) {
         }
     }
 
-    // Generate and export charts from current data
+    // Generate and export charts from current data (skip in recording mode — no metrics)
+    if (isRecordingMode_) {
+        QString message = tr("Export complete:\n- Images: %1 of %2\n\nLocation: %3")
+            .arg(exportedImages).arg(totalImages).arg(baseDir);
+        QMessageBox::information(this, tr("Export Complete"), message);
+        SPDLOG_INFO("Exported recording data: Images={}/{}, Location={}",
+                    exportedImages, totalImages, baseDir.toStdString());
+        return;
+    }
     generateScatterPlot(validFrames_);
     generateHistogram(validFrames_);
     
@@ -1685,6 +1769,13 @@ void HdfReviewTab::exportAllData(const QString& baseDir) {
 void HdfReviewTab::updateCharts() {
     if (!scatterPlotChart_ || !histogramChart_) {
         SPDLOG_WARN("HdfReviewTab::updateCharts: chart widgets are null");
+        return;
+    }
+
+    // Recording-mode files have no per-frame metrics; clear any residual
+    // chart content from a previous experiment file and bail out.
+    if (isRecordingMode_) {
+        if (scatterSeries_) scatterSeries_->clear();
         return;
     }
 

@@ -27,6 +27,10 @@
 - **Frame recording mode** (raw frames, no contours):
   `initializeRecordingDatasets`, `appendRecordingFrames`, `writeRecordingInfo`
   with `RecordingFrameMeta` (index, timestampNs, width, height).
+  Matching readers: `isRecordingFile()` (probes `/recording_info`),
+  `readRecordingMetadata(frames)` (fills only index + timestampNs on each
+  `ProcessedFrame`), `readRecordingInfo(start, end, total, filtered)`.
+  Used by [[../frontend/HdfReviewTab]] to present recording files.
 
 ## Threading
 
