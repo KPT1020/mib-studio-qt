@@ -4,6 +4,7 @@
 > using ring-ratio feedback from [[ProcessingService]].
 
 **Source:** `src/backend/services/AutofocusService.cpp`,
+`src/backend/services/AutofocusService.stub.cpp`,
 `include/backend/services/AutofocusService.h`
 **Related:** [[ProcessingService]], [[../frontend/NanopositionerTab]],
 [[../domain/Glossary]] (ring ratio)
@@ -74,3 +75,12 @@ statistics. Same pattern on `disconnect()`.
 ## Third-party
 
 See `include/Coremor/` for the XMT_DLL_SER DLL shipped with the repo.
+
+## Platform behavior
+
+- **Windows (`MIB_HAS_EGRABBER=1`)**: full Coremor-backed implementation
+  (`AutofocusService.cpp`) is compiled.
+- **Non-Windows (`MIB_HAS_EGRABBER=0`)**: `AutofocusService.stub.cpp` is
+  compiled instead. It keeps the public API shape but `connect()`/probe
+  operations are unsupported and return failure, which allows cloud/Linux
+  builds to compile and exercise non-hardware features.

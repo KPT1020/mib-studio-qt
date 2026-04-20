@@ -22,6 +22,14 @@
 
 Synchronous, called from main thread.
 
+## Platform behavior
+
+- **Windows (`MIB_HAS_EGRABBER=1`)**: full EGrabber-backed discovery, script
+  apply, and device reset.
+- **Non-Windows (`MIB_HAS_EGRABBER=0`)**: methods compile as safe fallbacks:
+  discovery returns empty vectors; mutating operations return `false` and can
+  populate `errorOut`.
+
 ## Gotchas
 
 - Applying a script **stops capture** as a side effect (done in

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <EGrabber.h>
-
 #include <optional>
 #include <string>
 #include <vector>

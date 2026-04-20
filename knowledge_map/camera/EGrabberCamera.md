@@ -15,6 +15,8 @@
 - Expose `configureTriggerOutput` + `setTriggerOutput` for
   [[../services/TriggerService]].
 - Surface `checkDeviceHealth()` to detect camera disappearance.
+- On non-Windows builds (`MIB_HAS_EGRABBER=0`), compile as a safe stub that
+  logs unsupported hardware start and returns `false`/no-op for camera I/O.
 
 ## Key reference material
 
@@ -36,3 +38,5 @@
   device handle — [[../services/CameraControlService]] handles this.
 - Pixel format mapping: EGrabber PFNC codes flow through unchanged in
   `Frame::pixelFormat`.
+- Header and source are guarded by `MIB_HAS_EGRABBER`; non-Windows compile must
+  not include `EGrabber.h`.

@@ -3,19 +3,29 @@
 #include "backend/playback/FrameStore.h"
 #include "camera/common/EGrabberCamera.h"
 #include "camera/common/ICamera.h"
+#include "camera/mock/MockCamera.h"
 
 #include <spdlog/spdlog.h>
 
 #include <chrono>
+#include <filesystem>
 #include <stdexcept>
 #include <thread>
 
 namespace backend::services {
 
 CaptureService::CaptureService() {
+#if MIB_HAS_EGRABBER
     cameraFactory_ = []() {
         return std::make_unique<camera::common::EGrabberCamera>();
     };
+#else
+    cameraFactory_ = []() {
+        camera::mock::MockCameraOptions options;
+        options.folder = std::filesystem::path("data") / "mock_frames";
+        return std::make_unique<camera::mock::MockCamera>(options);
+    };
+#endif
 }
 
 CaptureService::~CaptureService() { stop(); }
