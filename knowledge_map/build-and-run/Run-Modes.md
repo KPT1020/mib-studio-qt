@@ -19,8 +19,7 @@ Read at startup (see `main.cpp` and [[../architecture/AppBackend]]):
 |---|---|---|
 | `MIB_CAMERA_MODE=mock` | unset | Force mock (bypasses ConnectTab) |
 | `MIB_MOCK_CAMERA_DIR=<path>` | — | Folder with PNG/TIFF/JPEG frames |
-| `MIB_MOCK_CAMERA_INTERVAL_MS=<ms>` | 33 | Frame cadence (accepts fractional ms, e.g. `0.2`) |
-| `MIB_MOCK_CAMERA_INTERVAL_US=<us>` | unset | Frame cadence in microseconds (preferred for high-FPS parity tuning) |
+| `MIB_MOCK_CAMERA_INTERVAL_MS=<ms>` | 33 | Frame cadence in milliseconds (integer parse in current build) |
 | `MIB_MOCK_CAMERA_LOOP=true\|false` | true | Loop or stop at end |
 
 Sample frames ship at `data/mock_frames/frame_00000.tiff`.

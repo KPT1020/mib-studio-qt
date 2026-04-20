@@ -7,7 +7,7 @@ Context
 Findings
 1) Startup latency was dominated by single-threaded `preloadFrames()` decode/conversion over the full folder.
 2) Per-frame pacing in `grabFrame()` used a coarse+busy spin strategy that could burn CPU and contend with realtime processing thread scheduling.
-3) Env var parsing for `MIB_MOCK_CAMERA_INTERVAL_MS` only accepted integer milliseconds, but docs/examples used fractional ms values (e.g. `0.2`), causing config mismatch.
+3) Frame delivery in `grabFrame()` built a temporary output frame each call, adding avoidable allocator/copy churn at high fps.
 
 Changes implemented
 - Mock preload is now parallelized with a worker pool (`hardware_concurrency` bounded by file count), preserving lexical frame order in `preloadedFrames_`.
@@ -15,9 +15,7 @@ Changes implemented
   - coarse sleep to near target
   - short sleep/yield in the final window instead of full busy-spin.
 - `grabFrame()` now fills the output frame buffer in-place to avoid extra temporary frame construction/move churn.
-- `AppBackend` mock interval env parsing now supports:
-  - `MIB_MOCK_CAMERA_INTERVAL_US` (preferred explicit microseconds)
-  - fractional `MIB_MOCK_CAMERA_INTERVAL_MS`.
+- Existing mock env vars and cadence semantics are unchanged by this patch.
 
 Measured local benchmark (same synthetic 500-frame TIFF set)
 - Baseline (`main`) startup: ~154–164 ms.

@@ -11,11 +11,8 @@
   order while reducing startup latency on large mock datasets. Runtime pacing
   in `MockCamera::grabFrame` was adjusted from a mostly spin-based wait to a
   cooperative staged wait (coarse sleep + short sleeps/yield near deadline) to
-  reduce capture-thread CPU burn while preserving high-fps cadence. Added
-  support for `MIB_MOCK_CAMERA_INTERVAL_US` (preferred) and fractional
-  `MIB_MOCK_CAMERA_INTERVAL_MS` parsing in [[../architecture/AppBackend]] so
-  sub-millisecond cadences can be configured without precision loss. Files:
-  `src/camera/mock/MockCamera.cpp`, `src/backend/AppBackend.cpp`,
+  reduce capture-thread CPU burn while preserving high-fps cadence. Files:
+  `src/camera/mock/MockCamera.cpp`,
   `docs/howto/mock-camera-dev-mode.md`.
 
 - **Release windeployqt Conan alignment** (2026-04-20) — `CMakeLists.txt`

@@ -15,8 +15,7 @@ Set the following environment variables before launching `mib_studio_qt`:
 
 - `MIB_CAMERA_MODE=mock` &mdash; selects the folder-backed camera. Any other value (or unset) keeps the hardware path.
 - `MIB_MOCK_CAMERA_DIR=<absolute-or-relative-path>` &mdash; directory containing the images to stream. Defaults to `<data>/mock_frames`.
-- `MIB_MOCK_CAMERA_INTERVAL_MS` (optional) &mdash; delay between frames in milliseconds, default `33` (~30 fps). Fractional values are supported (e.g. `0.2` = 200 us).
-- `MIB_MOCK_CAMERA_INTERVAL_US` (optional) &mdash; delay between frames in microseconds. If set, this overrides `MIB_MOCK_CAMERA_INTERVAL_MS`.
+- `MIB_MOCK_CAMERA_INTERVAL_MS` (optional) &mdash; delay between frames in milliseconds, default `33` (~30 fps).
 - `MIB_MOCK_CAMERA_LOOP` (optional) &mdash; set to `false`, `0`, or `no` to stop after the last frame. Otherwise the sequence loops.
 
 ## Image requirements
@@ -33,7 +32,7 @@ Images are streamed in lexical order by filename. For deterministic playback, us
 
 To confirm 5000 fps playback:
 
-1. Launch `mib_studio_qt.exe` and use the ConnectTab to configure mock camera with your frame folder and set the frame rate to `5000`, or set `MIB_MOCK_CAMERA_INTERVAL_US=200` (preferred) via environment variables.
+1. Launch `mib_studio_qt.exe` and use the ConnectTab to configure mock camera with your frame folder and set the frame rate to `5000`, or set `MIB_MOCK_CAMERA_INTERVAL_MS=1` for an approximate high-rate run via environment variables.
 2. Start capture and let it run for a few seconds. The backend log prints `interval=200 us (~5000.0 fps)` for the mock camera.
 3. Open the capture stats panel (or tail the log) — `CaptureService` should report a frame rate close to 5000 fps once steady.
 4. Pause playback; frames remain buffered at the configured rate, so you can scrub without waiting for rendering.

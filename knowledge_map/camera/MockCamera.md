@@ -20,8 +20,7 @@ bool loopFiles{true};
 
 - `MIB_CAMERA_MODE=mock` — force mock (bypasses ConnectTab selection)
 - `MIB_MOCK_CAMERA_DIR=<path>` — folder source
-- `MIB_MOCK_CAMERA_INTERVAL_MS=<ms>` — overrides `frameInterval` (fractional milliseconds allowed, e.g. `0.2`)
-- `MIB_MOCK_CAMERA_INTERVAL_US=<us>` — explicit microsecond cadence override
+- `MIB_MOCK_CAMERA_INTERVAL_MS=<ms>` — overrides `frameInterval`
 - `MIB_MOCK_CAMERA_LOOP=true|false` — overrides `loopFiles`
 
 ## Responsibility
@@ -31,10 +30,10 @@ bool loopFiles{true};
   (so `grabFrame` is fast and deterministic). Since 2026-04-20 it decodes in
   parallel (up to `hardware_concurrency`) and preserves lexical frame order.
 - `grabFrame(out)` returns the next preloaded frame, sleeping as needed
-  to hit `frameInterval`. Since 2026-04-20, pacing uses a hybrid
-  coarse-sleep + fine-yield loop to reduce capture-thread CPU burn while
-  keeping cadence tight. Returns false when `loopFiles == false` and
-  the list is exhausted.
+  to hit `frameInterval`. Since 2026-04-20, pacing uses a cooperative staged
+  wait (coarse sleep with short sleep/yield near the target) to reduce
+  capture-thread CPU burn while keeping cadence tight. Returns false when
+  `loopFiles == false` and the list is exhausted.
 
 ## Gotchas
 
