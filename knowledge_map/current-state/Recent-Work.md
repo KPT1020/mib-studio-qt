@@ -5,6 +5,19 @@
 
 ## Features shipped
 
+- **Mock camera load/runtime parity improvements** (2026-04-20) —
+  [[../camera/MockCamera]] preload now runs in parallel across available CPU
+  cores (up to `hardware_concurrency()` workers), preserving lexical frame
+  order while reducing startup latency on large mock datasets. Runtime pacing
+  in `MockCamera::grabFrame` was adjusted from a mostly spin-based wait to a
+  cooperative staged wait (coarse sleep + short sleeps/yield near deadline) to
+  reduce capture-thread CPU burn while preserving high-fps cadence. Added
+  support for `MIB_MOCK_CAMERA_INTERVAL_US` (preferred) and fractional
+  `MIB_MOCK_CAMERA_INTERVAL_MS` parsing in [[../architecture/AppBackend]] so
+  sub-millisecond cadences can be configured without precision loss. Files:
+  `src/camera/mock/MockCamera.cpp`, `src/backend/AppBackend.cpp`,
+  `docs/howto/mock-camera-dev-mode.md`.
+
 - **Release windeployqt Conan alignment** (2026-04-20) — `CMakeLists.txt`
   picks `windeployqt` and per-config `PATH` from `qt_PACKAGE_FOLDER_DEBUG` /
   `qt_PACKAGE_FOLDER_RELEASE` (CMakeDeps) instead of a cached `find_program`

@@ -10,9 +10,11 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstring>
+#include <optional>
 #include <thread>
 
 namespace camera::mock
@@ -108,41 +110,53 @@ namespace camera::mock
         const auto interval = options_.frameInterval;
         if (interval > std::chrono::microseconds::zero())
         {
-            // Hybrid wait: coarse sleep for long intervals, busy-wait for sub-millisecond precision
-            auto now = std::chrono::steady_clock::now();
-            auto elapsed = now - lastFrameTime_;
+            const auto now = std::chrono::steady_clock::now();
+            const auto elapsed = now - lastFrameTime_;
             if (elapsed < interval)
             {
-                auto remaining = interval - elapsed;
-                // For >=2 ms, do a coarse sleep first to reduce CPU
-                constexpr auto kCoarseThreshold = std::chrono::microseconds(2000);
-                if (remaining >= kCoarseThreshold)
-                {
-                    // Leave ~1 ms for the fine wait to avoid oversleep on Windows
-                    const auto coarse = remaining - std::chrono::milliseconds(1);
-                    std::this_thread::sleep_for(coarse);
-                }
-                // Fine wait: busy-spin until target time
+                // Keep timing reasonably stable without pinning a full core.
                 const auto target = lastFrameTime_ + interval;
-                do
+                auto remaining = target - now;
+                constexpr auto kCoarseGuard = std::chrono::microseconds(100);
+                if (remaining > kCoarseGuard)
                 {
-                    // Only yield when far from target; yielding too close can jitter
-                    if ((target - std::chrono::steady_clock::now()) > std::chrono::microseconds(1000))
+                    const auto coarse = remaining - kCoarseGuard;
+                    std::this_thread::sleep_for(coarse);
+                    remaining = target - std::chrono::steady_clock::now();
+                }
+
+                while (std::chrono::steady_clock::now() < target)
+                {
+                    const auto fineRemaining = target - std::chrono::steady_clock::now();
+                    if (fineRemaining > std::chrono::microseconds(200))
+                    {
+                        std::this_thread::sleep_for(std::chrono::microseconds(50));
+                    }
+                    else if (fineRemaining > std::chrono::microseconds(20))
                     {
                         std::this_thread::yield();
                     }
-                } while (std::chrono::steady_clock::now() < target);
+                }
             }
         }
 
         const camera::common::Frame &cached = preloadedFrames_[nextIndex_];
 
         const auto delivered = std::chrono::steady_clock::now();
-        camera::common::Frame frameOut = cached;
-        frameOut.timestamp = static_cast<uint64_t>(
+        out.width = cached.width;
+        out.height = cached.height;
+        out.linePitch = cached.linePitch;
+        out.pixelFormat = cached.pixelFormat;
+        if (out.data.size() != cached.data.size())
+        {
+            out.data.resize(cached.data.size());
+        }
+        if (!cached.data.empty())
+        {
+            std::memcpy(out.data.data(), cached.data.data(), cached.data.size());
+        }
+        out.timestamp = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(delivered.time_since_epoch()).count());
-
-        out = std::move(frameOut);
 
         nextIndex_ += 1;
         if (nextIndex_ >= preloadedFrames_.size())
@@ -316,24 +330,81 @@ namespace camera::mock
 
     bool MockCamera::preloadFrames()
     {
-        // Load and convert all images once to maximize grab throughput
-        preloadedFrames_.reserve(files_.size());
-
-        size_t loadedCount = 0;
-        for (const auto &path : files_)
+        // Load and convert all images once to maximize grab throughput.
+        if (files_.empty())
         {
-            camera::common::Frame f;
-            if (loadFrameFromPath(path, f))
+            preloadedFrames_.clear();
+            return false;
+        }
+
+        const auto preloadStart = std::chrono::steady_clock::now();
+
+        const size_t maxWorkers = std::max<size_t>(1, std::thread::hardware_concurrency());
+        const size_t workerCount = std::min(files_.size(), maxWorkers);
+        std::vector<std::optional<camera::common::Frame>> loaded(files_.size());
+        std::atomic<size_t> nextFile{0};
+        std::atomic<size_t> loadedCount{0};
+        std::atomic<size_t> failedCount{0};
+
+        auto worker = [&]()
+        {
+            for (;;)
             {
-                preloadedFrames_.push_back(std::move(f));
-                ++loadedCount;
+                const size_t i = nextFile.fetch_add(1, std::memory_order_relaxed);
+                if (i >= files_.size())
+                {
+                    break;
+                }
+
+                camera::common::Frame frame;
+                if (loadFrameFromPath(files_[i], frame))
+                {
+                    loaded[i] = std::move(frame);
+                    loadedCount.fetch_add(1, std::memory_order_relaxed);
+                }
+                else
+                {
+                    failedCount.fetch_add(1, std::memory_order_relaxed);
+                }
             }
-            else
+        };
+
+        std::vector<std::thread> workers;
+        workers.reserve(workerCount);
+        for (size_t i = 0; i < workerCount; ++i)
+        {
+            workers.emplace_back(worker);
+        }
+        for (auto &thread : workers)
+        {
+            thread.join();
+        }
+
+        preloadedFrames_.clear();
+        preloadedFrames_.reserve(loadedCount.load(std::memory_order_relaxed));
+        for (size_t i = 0; i < loaded.size(); ++i)
+        {
+            if (loaded[i].has_value())
             {
-                // Warning already emitted by loadFrameFromPath; continue
+                preloadedFrames_.push_back(std::move(*loaded[i]));
             }
         }
-        return loadedCount > 0;
+
+        const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   std::chrono::steady_clock::now() - preloadStart)
+                                   .count();
+        SPDLOG_INFO("MockCamera preload: loaded={} failed={} workers={} elapsed_ms={}",
+                    preloadedFrames_.size(),
+                    failedCount.load(std::memory_order_relaxed),
+                    workerCount,
+                    elapsedMs);
+
+        if (preloadedFrames_.empty())
+        {
+            SPDLOG_WARN("MockCamera preload produced zero usable frames");
+            return false;
+        }
+        return true;
     }
 
 } // namespace camera::mock
