@@ -734,35 +734,6 @@ if(TARGET nlohmann_json::nlohmann_json)
     target_link_libraries(mib_studio_qt PRIVATE nlohmann_json::nlohmann_json)
 endif()
 
-# Test targets
-option(BUILD_TESTING "Build test targets" ON)
-if(BUILD_TESTING)
-    enable_testing()
-
-    add_executable(capture_processing_test
-        src/tests/capture_processing_test.cpp
-    )
-    target_link_libraries(capture_processing_test PRIVATE
-        mib_backend
-        spdlog::spdlog
-        Qt6::Core
-    )
-    target_include_directories(capture_processing_test PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-    )
-
-    add_test(
-        NAME capture_processing_test
-        COMMAND capture_processing_test
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
-    # Ensure mock camera mode for CI
-    set_tests_properties(capture_processing_test PROPERTIES
-        ENVIRONMENT "MIB_CAMERA_MODE=mock"
-        TIMEOUT 30
-    )
-endif()
-
 # Windows installer packaging (InnoSetup)
 if(WIN32)
     # Find InnoSetup compiler

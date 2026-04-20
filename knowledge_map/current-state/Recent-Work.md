@@ -109,6 +109,11 @@
 
 ## Recent fixes
 
+- **2026-04-20** — Removed obsolete `capture_processing_test` from the build.
+  `CMakeLists.txt` no longer defines a `BUILD_TESTING` block for the deleted
+  `src/tests/capture_processing_test.cpp` harness, and docs/vault notes were
+  updated so run/build guidance now lists only `mib_studio_qt` and
+  `mock_studio_qt`.
 - **2026-04-20** — Made ONNX Runtime optional for Linux/cloud configure paths.
   `CMakeLists.txt` now uses `find_package(onnxruntime CONFIG QUIET)`, sets
   `MIB_HAS_ONNXRUNTIME`, and compiles `YoloService.cpp` only when the

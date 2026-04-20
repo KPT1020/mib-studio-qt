@@ -42,8 +42,8 @@ usable for non-hardware/non-YOLO workflows:
 
 - The original host linker error (`cannot find -lstdc++`) was resolved.
 - Linux CMake configure now succeeds even when ONNX Runtime is not installed.
-- `cmake --build build-linux` succeeds for `mib_backend`, `capture_processing_test`,
-  and `mib_studio_qt` with the YOLO stub path.
+- `cmake --build build-linux` succeeds for `mib_backend` and `mib_studio_qt`
+  with the YOLO stub path.
 - `ctest` currently fails due to an invalid mock frame payload (`CRC error` in
   `data/mock_frames/frame_000.png`), unrelated to toolchain/ONNX availability.
 - On this cloud image, `onnxruntime` CMake package metadata was unavailable
