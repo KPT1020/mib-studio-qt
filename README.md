@@ -11,6 +11,7 @@ When running algorithm experiments (reanalysis, parameter sweeps, pipeline compa
 ## Post-processing tools
 
 Standalone tools for working with HDF5 files after recording (export, reanalyse) are built and distributed separately. See [docs/howto/tools.md](docs/howto/tools.md) for download location, quickstart, and compatibility.
+
 ## Building
 
 ### Prerequisites
@@ -41,21 +42,57 @@ Standalone tools for working with HDF5 files after recording (export, reanalyse)
    cmake --preset windows-default
    ```
 
-3. **Build the project**:
+3. **Build native targets** (from repo root):
+
+   **Release** (recommended for installers and day-to-day use):
    ```bash
-    Build Release configuration: `cmake --build build --config Release`
-   
-   Or for Debug:
-   
-### Building Windows Installer
+   cmake --build build --preset windows-default-build-release
+   ```
+
+   **Debug**:
+   ```bash
+   cmake --build build --config Debug
+   ```
+
+   Outputs land under `build/Release/` or `build/Debug/` (e.g. `mib_studio_qt.exe`, `mock_studio_qt.exe`). For Qt Release runs, deploy Qt DLLs (CMake may run this post-build; otherwise run `windeployqt.exe --release build/Release/mib_studio_qt.exe`).
+
+### Tauri desktop shell (`src-tauri/`)
+
+Requires **Node.js** (for `npm`) and a **Rust** toolchain (`rustup`) with `cargo`. The app links the static **`mib_backend`** library and a cxx bridge; it does **not** replace the CMake configure step—Conan must still populate `build/` so `build.rs` can read `*-release-x86_64-data.cmake` and find `mib_backend.lib`.
+
+**Workflow:**
+
+1. Complete **Prerequisites** and **Setup** above (`conan install`, `cmake --preset windows-default`).
+2. Build the backend library (Release):
+   ```bash
+   cmake --build build --preset windows-default-build-release --target mib_backend
+   ```
+3. **Runtime `PATH` (Windows):** include `build/Release` and the Conan package `bin` folders for Qt, OpenCV, HDF5, etc., or you may get missing-DLL failures (e.g. `0xC0000135`) at startup.
+4. Build or run the Tauri app from the **repository root** (where `package.json` lives):
+   ```bash
+   npm install
+   npm run tauri:dev
+   ```
+   Or build the binary only:
+   ```bash
+   cd src-tauri
+   cargo build --release
+   ```
+
+**After changing C++ ABI used by the bridge** (e.g. `CaptureService::FrameCallback`), rebuild `mib_backend` before `cargo build`.
+
+More detail: [docs/howto/tauri-backend-bridge.md](docs/howto/tauri-backend-bridge.md). Mock camera env vars: see `CLAUDE.md` / **Running**.
+
+### Windows installer (Qt app)
 
 To create a Windows installer for distribution, see [docs/howto/build-installer.md](docs/howto/build-installer.md).
 
 Quick start:
-1. Build Release configuration: `cmake --build build --config Release`
+
+1. Build Release: `cmake --build build --config Release` (or the Release preset above).
 2. Build installer: `cmake --build build --target package_installer`
 3. Build update package: `cmake --build build --target package_installer_update`
-4. Find installer at: `build/dist/MIB_Studio_Qt_Setup_v0.1.0.exe`
+4. Find installer at: `build/dist/MIB_Studio_Qt_Setup_v0.1.0.exe` (version in filename may differ).
 
 After building installers, see [Publishing Updates](#publishing-updates) below to publish them for distribution.
 
