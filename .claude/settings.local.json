@@ -66,7 +66,18 @@
       "Bash(for dir:*)",
       "Bash(do echo:*)",
       "Read(//c/Users/gavin/Developer/mib-studio-qt/**)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(cargo build *)",
+      "Bash(cmd //c \"start /B src-tauri\\\\\\\\target\\\\\\\\release\\\\\\\\mib-studio.exe\")",
+      "Bash(tasklist //FI \"IMAGENAME eq mib-studio.exe\")",
+      "Bash(cmd //c \"src-tauri\\\\\\\\target\\\\\\\\release\\\\\\\\mib-studio.exe\")",
+      "Read(//c/Users/gavin/.conan2/p/b/qtd632f7a3c80dc/p/bin/**)",
+      "Bash(cmd //c \"call build\\\\\\\\conanrunenv-release-x86_64.bat && start /B src-tauri\\\\\\\\target\\\\\\\\release\\\\\\\\mib-studio.exe\")",
+      "Bash(powershell -NoProfile -Command \"cmd /c 'call build\\\\\\\\conanrunenv-release-x86_64.bat && src-tauri\\\\\\\\target\\\\\\\\debug\\\\\\\\mib-studio.exe' 2>&1 | Out-File -FilePath app-stderr.log -Encoding utf8\")",
+      "Bash(powershell -NoProfile -Command '& { $env:Path = '\\\\''C:\\\\Users\\\\gavin\\\\.conan2\\\\p\\\\b\\\\qtd632f7a3c80dc\\\\p\\\\bin;C:\\\\Users\\\\gavin\\\\.conan2\\\\p\\\\b\\\\hdf518dc2d1021c99\\\\p\\\\bin;C:\\\\Users\\\\gavin\\\\.conan2\\\\p\\\\b\\\\opencb7ed1e8e5719a\\\\p\\\\bin;'\\\\'' + $env:Path; $env:QT_PLUGIN_PATH = '\\\\''C:\\\\Users\\\\gavin\\\\.conan2\\\\p\\\\b\\\\qtd632f7a3c80dc\\\\p\\\\plugins'\\\\''; $p = Start-Process -FilePath '\\\\''src-tauri\\\\target\\\\debug\\\\mib-studio.exe'\\\\'' -PassThru -RedirectStandardOutput app-stdout.log -RedirectStandardError app-stderr.log; Start-Sleep -Seconds 8; if \\($p.HasExited\\) { Write-Host \\('\\\\''EXITED code='\\\\'' + $p.ExitCode\\) } else { Write-Host '\\\\''RUNNING'\\\\''; Stop-Process -Id $p.Id } }')",
+      "Bash(powershell -NoProfile -Command '& { $env:Path = '\\\\''C:\\\\Users\\\\gavin\\\\.conan2\\\\p\\\\b\\\\qtd632f7a3c80dc\\\\p\\\\bin;'\\\\'' + $env:Path; $p = Start-Process -FilePath '\\\\''src-tauri\\\\target\\\\debug\\\\mib-studio.exe'\\\\'' -PassThru -Wait -RedirectStandardOutput app-stdout.log -RedirectStandardError app-stderr.log; Write-Host \\('\\\\''ExitCode='\\\\'' + $p.ExitCode\\) }')",
+      "Bash(powershell -NoProfile -Command '& { $env:Path = '\\\\''C:\\\\Users\\\\gavin\\\\Developer\\\\mib-studio-qt\\\\build\\\\Release;'\\\\'' + $env:Path; $p = Start-Process -FilePath '\\\\''src-tauri\\\\target\\\\debug\\\\mib-studio.exe'\\\\'' -PassThru -Wait -RedirectStandardOutput app-stdout.log -RedirectStandardError app-stderr.log; Write-Host \\('\\\\''ExitCode='\\\\'' + $p.ExitCode\\) }')",
+      "Read(//c/Users/gavin/AppData/Roaming/bio.yofo.mib-studio/logs/**)"
     ]
   }
 }

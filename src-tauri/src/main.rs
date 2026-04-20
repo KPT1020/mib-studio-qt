@@ -1,14 +1,36 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod bridge;
 mod commands;
 mod events;
+mod state;
+
+use state::AppState;
+use tauri::Manager;
+
+#[tauri::command]
+fn get_backend_version(state: tauri::State<'_, AppState>) -> String {
+    state.backend.version()
+}
 
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .setup(|app| {
+            let handle = app.handle().clone();
+            let app_state = AppState::new(&handle).map_err(|e| e.to_string())?;
+            app.manage(app_state);
+            let state = app.state::<AppState>();
+            state
+                .backend
+                .register_emitters(&handle)
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
+            get_backend_version,
             // Camera control
             commands::camera::discover_cameras,
             commands::camera::discover_framegrabbers,

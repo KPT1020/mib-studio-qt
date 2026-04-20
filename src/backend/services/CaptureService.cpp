@@ -136,6 +136,8 @@ void CaptureService::run() {
                           frame.data.size(),
                           frame.width,
                           frame.height,
+                          frame.linePitch,
+                          frame.pixelFormat,
                           frame.timestamp);
             }
             if (frameStore_) {

@@ -1,33 +1,12 @@
 #pragma once
 
-#include <EGrabber.h>
+#include "backend/services/CameraControlTypes.h"
 
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace backend::services {
-
-struct DiscoveredCamera {
-    int interfaceIndex = -1;
-    int deviceIndex = -1;
-    std::string interfaceID;
-    std::string deviceID;
-    std::string modelName;
-    std::string firmwareVersion; // "Unknown" if not available
-    std::string label; // interfaceID/deviceID (model) [Firmware: version]
-};
-
-struct DiscoveredFramegrabber {
-    int interfaceIndex = -1;
-    int deviceIndex = -1;
-    int streamIndex = -1;
-    std::string interfaceID;
-    std::string deviceID;
-    std::string streamID;
-    std::string modelName;
-    std::string label; // interfaceID/deviceID/streamID (model)
-};
 
 /**
  * Camera utility service for:
