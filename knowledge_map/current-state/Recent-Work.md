@@ -5,6 +5,12 @@
 
 ## Features shipped
 
+- **Release windeployqt Conan alignment** (2026-04-20) — `CMakeLists.txt`
+  picks `windeployqt` and per-config `PATH` from `qt_PACKAGE_FOLDER_DEBUG` /
+  `qt_PACKAGE_FOLDER_RELEASE` (CMakeDeps) instead of a cached `find_program`
+  result and non-deterministic Conan-cache globs, fixing MSB3073 when those
+  pointed at a different Qt package than the one linked for Release.
+
 - **Recording-mode HDF5 files now open in the Review tab** (2026-04-19) —
   The "Record" button (PlaybackPanel → `AppBackend::startFrameRecording`)
   writes raw frames to `/recorded_frames/{images,metadata}` with a
@@ -91,6 +97,34 @@
 
 ## Recent fixes
 
+- **2026-04-20** — Made ONNX Runtime optional for Linux/cloud configure paths.
+  `CMakeLists.txt` now uses `find_package(onnxruntime CONFIG QUIET)`, sets
+  `MIB_HAS_ONNXRUNTIME`, and compiles `YoloService.cpp` only when the
+  `onnxruntime::onnxruntime` target exists; otherwise it compiles
+  `src/backend/services/YoloService.stub.cpp`. This preserves startup behavior
+  (backend continues when YOLO is unavailable) while unblocking cloud builds in
+  environments without packaged ONNX Runtime CMake config files.
+- **2026-04-20** — Documented Linux cloud linker/toolchain workaround for
+  `cannot find -lstdc++` in
+  `docs/howto/mock-camera-dev-mode.md` and
+  [[../build-and-run/Build]]. Root cause in affected images: `c++`
+  alternative pointed to clang pathing that failed to resolve an unversioned
+  `libstdc++.so` during link. Workaround:
+  `sudo update-alternatives --set c++ /usr/bin/g++`, then rerun CMake.
+  Validation in cloud: linker error cleared; subsequent failures were dependency
+  provisioning / Conan graph issues (not compiler runtime linking).
+- **2026-04-20** — Guarded Windows-only hardware SDK dependencies so Linux
+  cloud builds can still compile non-hardware code paths
+  (`cursor/guard-windows-deps-linux-build-fb9e`). `CMakeLists.txt` now sets
+  `MIB_HAS_EGRABBER` (`ON` on Windows, `OFF` elsewhere), gates EGrabber/Coremor
+  include+link paths, and compiles `AutofocusService.cpp` only on Windows
+  (with `AutofocusService.stub.cpp` on non-Windows). Runtime paths now default
+  to mock-camera behavior when hardware SDKs are unavailable:
+  `AppBackend` forces mock mode on non-Windows and `CaptureService` default
+  factory uses `MockCamera`. `CameraControlService` and `EGrabberCamera` gained
+  non-Windows stubs so Linux builds no longer require EGrabber headers/libs.
+  Task record:
+  `knowledge_map/task/2026-04-20-linux-build-windows-hardware-guards.md`.
 - **2026-04-16** — Moved autofocus statistics sort onto its own thread
   (`claude/audit-thread-performance-Pr9OI`). Follow-up to the callback
   reorder below: instead of just running ring-ratio second on the

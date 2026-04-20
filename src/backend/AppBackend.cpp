@@ -30,6 +30,10 @@
 #include <shlobj.h>
 #endif
 
+#ifndef MIB_HAS_EGRABBER
+#define MIB_HAS_EGRABBER 0
+#endif
+
 namespace backend
 {
     namespace
@@ -174,6 +178,14 @@ namespace backend
             cameraMode = toLower(envMode);
         }
 
+#if !MIB_HAS_EGRABBER
+        if (cameraMode != "mock")
+        {
+            SPDLOG_WARN("AppBackend: forcing mock camera mode because EGrabber SDK is unavailable on this platform");
+            cameraMode = "mock";
+        }
+#endif
+
         if (cameraMode == "mock")
         {
             camera::mock::MockCameraOptions options;
@@ -220,10 +232,19 @@ namespace backend
         }
         else
         {
+#if MIB_HAS_EGRABBER
             SPDLOG_INFO("AppBackend: configuring hardware EGrabber camera");
             captureService_->setCameraFactory([]()
                                               { return std::make_unique<camera::common::EGrabberCamera>(); });
             mockCameraConfigured_ = false;
+#else
+            SPDLOG_WARN("AppBackend: hardware mode requested but EGrabber SDK is unavailable; keeping mock camera");
+            camera::mock::MockCameraOptions options;
+            options.folder = std::filesystem::path(dataDir) / "mock_frames";
+            captureService_->setCameraFactory([options]() mutable
+                                              { return std::make_unique<camera::mock::MockCamera>(options); });
+            mockCameraConfigured_ = true;
+#endif
         }
         playbackService_->setFrameStore(frameStore_);
 
@@ -261,6 +282,20 @@ namespace backend
     {
         if (!captureService_)
             return;
+
+#if !MIB_HAS_EGRABBER
+        SPDLOG_WARN("Hardware camera selection ignored: EGrabber SDK is unavailable on this platform");
+        camera::mock::MockCameraOptions options;
+        options.folder = std::filesystem::path("data") / "mock_frames";
+        captureService_->setCameraFactory([options]() mutable
+                                          { return std::make_unique<camera::mock::MockCamera>(options); });
+        selectedIfIndex_ = -1;
+        selectedDevIndex_ = -1;
+        selectedLabel_.clear();
+        mockCameraConfigured_ = true;
+        return;
+#endif
+
         selectedIfIndex_ = interfaceIndex;
         selectedDevIndex_ = deviceIndex;
         selectedLabel_ = label;

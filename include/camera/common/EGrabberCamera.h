@@ -2,7 +2,13 @@
 
 #include "camera/common/ICamera.h"
 
+#ifndef MIB_HAS_EGRABBER
+#define MIB_HAS_EGRABBER 0
+#endif
+
+#if MIB_HAS_EGRABBER
 #include <EGrabber.h>
+#endif
 
 #include <deque>
 #include <optional>
@@ -38,8 +44,10 @@ private:
     void replenishPendingFrames();
 
     CameraConfig config_{};
+#if MIB_HAS_EGRABBER
     mutable std::unique_ptr<Euresys::EGrabber<Euresys::CallbackOnDemand>> grabber_;
     std::unique_ptr<Euresys::EGenTL> genTL_;
+#endif
 
     uint64_t width_ = 0;
     uint64_t height_ = 0;

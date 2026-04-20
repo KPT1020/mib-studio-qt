@@ -52,6 +52,14 @@ See `src/backend/AppBackend.cpp` around lines 79–200.
   device (stops capture first, does not restart)
 - `resetSelectedHardwareCamera()` — issue GenICam `DeviceReset`
 
+### Platform behavior
+
+- On non-Windows builds (`MIB_HAS_EGRABBER=0`), initialization forces
+  `cameraMode` to mock and logs a warning when hardware mode is requested.
+- `setHardwareCameraSelection()` becomes a guarded fallback on non-Windows:
+  it logs a warning, switches the capture factory to `MockCamera`, clears
+  selected hardware indices, and keeps `mockCameraConfigured_ = true`.
+
 ## Frame recording mode
 
 Separate from experiments: record non-empty raw frames directly to HDF5 with

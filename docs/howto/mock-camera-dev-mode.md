@@ -44,4 +44,30 @@ To confirm 5000 fps playback:
 - Hardware path mirrors the Euresys SDK high frame rate samples (e.g. `egrabber-sample-programs/python/310-high-frame-rate.py`).
 - Mock implementation lives in `camera/mock/MockCamera` and is injected via `CaptureService::setCameraFactory`.
 
+## Linux cloud/toolchain note (`-lstdc++` linker error)
+
+When configuring in some cloud images, CMake may fail very early with:
+
+`/usr/bin/ld: cannot find -lstdc++`
+
+This usually means `/usr/bin/c++` is pointing to a clang alternative that
+resolves an incomplete GCC runtime path in that image.
+
+Quick fix:
+
+```bash
+sudo update-alternatives --set c++ /usr/bin/g++
+```
+
+Sanity-check link works:
+
+```bash
+printf 'int main(){return 0;}' | c++ -x c++ - -o /tmp/cxx-link-test
+/tmp/cxx-link-test
+```
+
+After that, rerun configure. If configure then fails on package resolution
+(e.g. Qt/Conan graph), the `-lstdc++` issue is resolved and you are now blocked
+on dependency provisioning rather than compiler runtime linking.
+
 

@@ -4,6 +4,7 @@
 > `resources/models/yolo11n-seg.onnx` during `AppBackend::initialize`.
 
 **Source:** `src/backend/services/YoloService.cpp`,
+`src/backend/services/YoloService.stub.cpp`,
 `include/backend/services/YoloService.h`
 
 ## Responsibility
@@ -26,3 +27,7 @@ Stateless after load; callers must serialise their own inference runs.
   `AppBackend::initialize` wiring).
 - If the model is missing, `AppBackend` logs a warning via spdlog and
   continues.
+- CMake now treats ONNX Runtime as optional (`find_package(onnxruntime CONFIG QUIET)`):
+  - with `onnxruntime::onnxruntime`, real implementation (`YoloService.cpp`) is built
+  - without it, a stub (`YoloService.stub.cpp`) is built and `initialize()`
+    returns `false` after one warning log
