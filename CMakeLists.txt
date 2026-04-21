@@ -271,9 +271,6 @@ set(PUMP_FRONTEND_COMMON_SOURCES
     src/frontend/tabs/SyringePumpTab.cpp
     include/frontend/tabs/SyringePumpTab.h
     resources/ui/SyringePumpTab.ui
-    src/frontend/dialogs/SyringePumpSettingsDialog.cpp
-    include/frontend/dialogs/SyringePumpSettingsDialog.h
-    resources/ui/SyringePumpSettingsDialog.ui
     src/frontend/widgets/PumpRowWidget.cpp
     include/frontend/widgets/PumpRowWidget.h
     resources/ui/PumpRowWidget.ui

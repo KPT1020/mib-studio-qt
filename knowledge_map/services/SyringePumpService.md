@@ -6,7 +6,6 @@
 **Source:** `src/backend/services/SyringePumpService.cpp`,
 `include/backend/services/SyringePumpService.h`
 **Related:** [[../frontend/SyringePumpTab]],
-[[../frontend/Dialogs]] (`SyringePumpSettingsDialog`),
 `src/standalone/pump_control/`
 
 ## Responsibility

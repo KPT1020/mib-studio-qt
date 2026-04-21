@@ -58,7 +58,6 @@
     <addaction name="processingSettingsAct"/>
     <addaction name="monitoringSettingsAct"/>
     <addaction name="conversionFactorAct"/>
-    <addaction name="syringePumpSettingsAct"/>
    </widget>
    <widget class="QMenu" name="helpMenu">
     <property name="title">
@@ -90,11 +89,6 @@
   <action name="conversionFactorAct">
    <property name="text">
     <string>Pixel to Micron Conversion...</string>
-   </property>
-  </action>
-  <action name="syringePumpSettingsAct">
-   <property name="text">
-    <string>Syringe Pump Settings...</string>
    </property>
   </action>
   <action name="aboutAct">

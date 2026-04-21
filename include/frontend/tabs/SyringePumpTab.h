@@ -45,6 +45,7 @@ private:
     void rebuildPumpRows();
     void wirePumpRow(PumpRowWidget* rowWidget);
     QStringList reservedPortNamesExcluding(PumpHandle selfHandle) const;
+    void populatePortChoices(PumpRowWidget* rowWidget) const;
     void updatePumpUI(PumpRowWidget* rowWidget);
     bool connectPumpFromConfig(PumpRowWidget* rowWidget);
 

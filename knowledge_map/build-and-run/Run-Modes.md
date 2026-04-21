@@ -15,8 +15,8 @@
   [[../camera/MockCamera]] to exercise capture + processing without
   the UI.
 - **`pump_control`** (`pump_control.exe` on Windows) — standalone syringe
-  pump utility with only pump controls: dynamic pump rows, status polling,
-  and `SyringePumpSettingsDialog`.
+  pump utility with only pump controls: dynamic pump rows (full per-pump
+  config editable inline) and status polling.
 
 ## Mock camera env vars
 

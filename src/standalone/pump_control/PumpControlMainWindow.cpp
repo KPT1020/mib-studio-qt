@@ -4,7 +4,6 @@
 #include <QMenu>
 #include <QMenuBar>
 
-#include "frontend/dialogs/SyringePumpSettingsDialog.h"
 #include "frontend/tabs/SyringePumpTab.h"
 
 PumpControlMainWindow::PumpControlMainWindow(QWidget* parent)
@@ -23,16 +22,6 @@ PumpControlMainWindow::PumpControlMainWindow(QWidget* parent)
     QMenu* fileMenu = menuBar()->addMenu(tr("&File"));
     QAction* exitAction = fileMenu->addAction(tr("E&xit"));
     connect(exitAction, &QAction::triggered, this, &QWidget::close);
-
-    QMenu* settingsMenu = menuBar()->addMenu(tr("&Settings"));
-    QAction* pumpSettingsAction = settingsMenu->addAction(tr("Pump Settings..."));
-    connect(pumpSettingsAction, &QAction::triggered, this, [this]() {
-        SyringePumpSettingsDialog dlg(
-            pumpService_,
-            []() { return QStringList{}; },
-            this);
-        dlg.exec();
-    });
 }
 
 PumpControlMainWindow::~PumpControlMainWindow() = default;

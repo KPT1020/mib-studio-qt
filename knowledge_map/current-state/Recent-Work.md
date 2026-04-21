@@ -5,6 +5,19 @@
 
 ## Features shipped
 
+- **SyringePumpSettingsDialog removed; all pump settings inlined in `PumpRowWidget`** (2026-04-21) —
+  the hardcoded "Sample"/"Sheath" two-pump settings dialog was out of sync with
+  the modular `SyringePumpTab` (would clobber custom pump names on Apply,
+  ignored pumps beyond index 1, wrote directly to `config.json` without going
+  through `SyringePumpService::setConfig`). Dropped the dialog entirely and
+  extended `PumpRowWidget` to expose the full `PumpConfig`: serial port +
+  refresh, baud rate, Modbus address, syringe volume + unit, alongside the
+  existing flow rate + unit, direction. Connect-time fields (port, baud,
+  address) lock while connected. Changes route through the service and are
+  persisted via `SyringePumpTab::saveConfig`. Removed dialog source/header/UI,
+  `syringePumpSettingsAct` menu entry, and the "Pump Settings..." item in
+  `PumpControlMainWindow`.
+
 - **Standalone `pump_control` executable + pump module split** (2026-04-21) —
   added a new lightweight Qt executable (`pump_control`) with only syringe-pump
   functionality (`src/standalone/pump_control/main.cpp`,
@@ -17,9 +30,9 @@
   ...)`, `getComPort`). `backend::Tools` now provides
   `availableSerialPortNames()` via `QSerialPortInfo`; `availableComPortNumbers()`
   is retained as a Windows-only compatibility wrapper. Pump UI was reworked to a
-  dynamic row model (`PumpRowWidget`) and `SyringePumpTab` / 
-  `SyringePumpSettingsDialog` now accept `SyringePumpService&` plus a reserved
-  port callback, enabling reuse in both apps. Config persistence uses
+  dynamic row model (`PumpRowWidget`) and `SyringePumpTab` now accepts
+  `SyringePumpService&` plus a reserved port callback, enabling reuse in
+  both apps. Config persistence uses
   `pump_ports` array and auto-migrates legacy `pump_sample_*` / `pump_sheath_*`
   keys.
 

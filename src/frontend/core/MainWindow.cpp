@@ -50,7 +50,6 @@
 #include <QMenu>
 #include "frontend/dialogs/ProcessingSettingsDialog.h"
 #include "frontend/dialogs/ConversionFactorDialog.h"
-#include "frontend/dialogs/SyringePumpSettingsDialog.h"
 #include "backend/Tools.h"
 #include <QCloseEvent>
 #ifdef _WIN32
@@ -99,23 +98,6 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
             {
         SPDLOG_INFO("Opening Pixel to Micron Conversion dialog");
         ConversionFactorDialog dlg(backend_, this);
-        dlg.exec(); });
-    connect(ui->syringePumpSettingsAct, &QAction::triggered, this, [this]()
-            {
-        SPDLOG_INFO("Opening Syringe Pump Settings dialog");
-        SyringePumpSettingsDialog dlg(
-            backend_.syringePump(),
-            [this]() {
-                QStringList reserved;
-                if (backend_.autofocus().isConnected()) {
-                    const int port = backend_.autofocus().getComPort();
-                    if (port > 0) {
-                        reserved << QStringLiteral("COM%1").arg(port);
-                    }
-                }
-                return reserved;
-            },
-            this);
         dlg.exec(); });
     connect(ui->aboutAct, &QAction::triggered, this, [this]()
             {

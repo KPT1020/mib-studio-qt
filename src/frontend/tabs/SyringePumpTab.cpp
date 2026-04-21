@@ -17,6 +17,7 @@
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 
+#include "backend/Tools.h"
 #include "backend/services/SyringePumpService.h"
 #include "frontend/widgets/PumpRowWidget.h"
 
@@ -118,6 +119,7 @@ void SyringePumpTab::rebuildPumpRows() {
     ui->removePumpBtn->setEnabled(handles.size() > 1);
     for (auto& row : pumpRows_) {
         updatePumpUI(row.get());
+        populatePortChoices(row.get());
     }
 }
 
@@ -181,6 +183,36 @@ void SyringePumpTab::wirePumpRow(PumpRowWidget* rowWidget) {
         saveConfig();
     });
 
+    connect(rowWidget, &PumpRowWidget::settingsChanged, this, [this, rowWidget]() {
+        const auto h = static_cast<SyringePumpService::PumpHandle>(
+            rowWidget->property("pumpHandle").toULongLong());
+        const auto state = rowWidget->viewState();
+        auto cfg = pumpService_.getConfig(h);
+        const uint16_t prevSyringeVolume = cfg.syringeVolume;
+        const uint16_t prevSyringeUnit = cfg.syringeVolumeUnit;
+        cfg.portName = state.portName;
+        cfg.baudRate = state.baudRate;
+        cfg.modbusAddress = state.modbusAddress;
+        cfg.syringeVolume = state.syringeVolume;
+        cfg.syringeVolumeUnit = state.syringeVolumeUnit;
+        pumpService_.setConfig(h, cfg);
+        if (pumpService_.isConnected(h) &&
+            (prevSyringeVolume != cfg.syringeVolume || prevSyringeUnit != cfg.syringeVolumeUnit)) {
+            pumpService_.setSyringeVolume(h, cfg.syringeVolume, cfg.syringeVolumeUnit);
+        }
+        // Refresh port lists on sibling rows so the selected port is reserved.
+        for (auto& sibling : pumpRows_) {
+            if (sibling.get() != rowWidget) {
+                populatePortChoices(sibling.get());
+            }
+        }
+        saveConfig();
+    });
+
+    connect(rowWidget, &PumpRowWidget::portRefreshRequested, this, [this, rowWidget]() {
+        populatePortChoices(rowWidget);
+    });
+
     connect(rowWidget, &PumpRowWidget::nameChanged, this, [this, handle](const QString& name) {
         pumpService_.setPumpName(handle, name);
         saveConfig();
@@ -213,6 +245,24 @@ QStringList SyringePumpTab::reservedPortNamesExcluding(SyringePumpService::PumpH
     return reserved;
 }
 
+void SyringePumpTab::populatePortChoices(PumpRowWidget* rowWidget) const {
+    const auto handle =
+        static_cast<SyringePumpService::PumpHandle>(rowWidget->property("pumpHandle").toULongLong());
+    const QString currentPort = pumpService_.getPortName(handle);
+    const auto reserved = reservedPortNamesExcluding(handle);
+
+    QStringList available;
+    for (const auto& port : backend::Tools::availableSerialPortNames()) {
+        const QString qPort = QString::fromStdString(port);
+        const QString normalized = normalizePortName(qPort);
+        if (reserved.contains(normalized)) {
+            continue;
+        }
+        available << qPort;
+    }
+    rowWidget->setPortChoices(available, currentPort);
+}
+
 void SyringePumpTab::updatePumpUI(PumpRowWidget* rowWidget) {
     const auto handle =
         static_cast<SyringePumpService::PumpHandle>(rowWidget->property("pumpHandle").toULongLong());
@@ -220,14 +270,20 @@ void SyringePumpTab::updatePumpUI(PumpRowWidget* rowWidget) {
     const auto cfg = pumpService_.getConfig(handle);
 
     rowWidget->setPumpName(cfg.name);
-    rowWidget->setConnected(status.connected);
-    rowWidget->setStatus(status);
 
     PumpRowWidget::ViewState state;
+    state.portName = cfg.portName;
+    state.baudRate = cfg.baudRate;
+    state.modbusAddress = cfg.modbusAddress;
     state.flowRate = cfg.flowRate;
     state.flowRateUnit = cfg.flowRateUnit;
     state.direction = cfg.direction;
+    state.syringeVolume = cfg.syringeVolume;
+    state.syringeVolumeUnit = cfg.syringeVolumeUnit;
     rowWidget->setViewState(state);
+
+    rowWidget->setConnected(status.connected);
+    rowWidget->setStatus(status);
     rowWidget->setRemoveEnabled(pumpService_.pumpCount() > 1);
 }
 
