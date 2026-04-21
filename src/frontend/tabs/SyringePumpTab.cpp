@@ -1,4 +1,5 @@
 #include "frontend/tabs/SyringePumpTab.h"
+
 #include "ui_SyringePumpTab.h"
 
 #include <QApplication>
@@ -6,129 +7,77 @@
 #include <QDir>
 #include <QFile>
 #include <QMessageBox>
-#include <QTextStream>
-#include <QTimer>
 #include <QSettings>
+#include <QTextStream>
+#include <QVariant>
+#include <QTimer>
+#include <QVBoxLayout>
 
-#include <spdlog/spdlog.h>
+#include <algorithm>
 #include <nlohmann/json.hpp>
+#include <spdlog/spdlog.h>
+
+#include "backend/services/SyringePumpService.h"
+#include "frontend/widgets/PumpRowWidget.h"
 
 #ifdef _WIN32
 #define NOMINMAX
-#include <windows.h>
 #include <shlobj.h>
+#include <windows.h>
 #endif
 
-#include "backend/AppBackend.h"
-#include "backend/services/SyringePumpService.h"
-
 using json = nlohmann::json;
-using PumpId = backend::services::SyringePumpService::PumpId;
-using Direction = backend::services::SyringePumpService::Direction;
-using RunStatus = backend::services::SyringePumpService::RunStatus;
+using backend::services::SyringePumpService;
 
 namespace frontend {
 
 namespace {
-    static QString getUserConfigDir()
-    {
-        QString appDir = QCoreApplication::applicationDirPath();
-        QString appDirLower = appDir.toLower();
+QString getUserConfigDir() {
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QString appDirLower = appDir.toLower();
 
 #ifdef _WIN32
-        if (appDirLower.contains("program files") ||
-            appDirLower.contains("program files (x86)"))
-        {
-            char appDataPath[MAX_PATH];
-            if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, appDataPath)))
-            {
-                QString userConfigDir = QDir(QString::fromStdString(std::string(appDataPath) + "\\MIB_Studio_Qt\\include")).absolutePath();
-                QDir().mkpath(userConfigDir);
-                return userConfigDir;
-            }
+    if (appDirLower.contains("program files") || appDirLower.contains("program files (x86)")) {
+        char appDataPath[MAX_PATH];
+        if (SUCCEEDED(SHGetFolderPathA(
+                nullptr, CSIDL_LOCAL_APPDATA, nullptr, SHGFP_TYPE_CURRENT, appDataPath))) {
+            const QString userConfigDir = QDir(QString::fromStdString(std::string(appDataPath) +
+                                                                       "\\MIB_Studio_Qt\\include"))
+                                              .absolutePath();
+            QDir().mkpath(userConfigDir);
+            return userConfigDir;
         }
+    }
 #endif
-        return QDir(appDir).absoluteFilePath("../include");
-    }
+    return QDir(appDir).absoluteFilePath("../include");
+}
 
-    QString runStatusToString(RunStatus status) {
-        switch (status) {
-            case RunStatus::Stop:     return "Stopped";
-            case RunStatus::Forward:  return "Running (Forward)";
-            case RunStatus::Backward: return "Running (Backward)";
-            case RunStatus::Pause:    return "Paused";
-            default:                  return "Unknown";
-        }
-    }
+QString normalizePortName(const QString& value) {
+    return value.trimmed().toUpper();
+}
 } // namespace
 
-SyringePumpTab::SyringePumpTab(backend::AppBackend& backend, QWidget* parent)
-    : QWidget(parent), ui(new Ui::SyringePumpTab), backend_(backend)
-{
+SyringePumpTab::SyringePumpTab(SyringePumpService& pumpService,
+                               ReservedPortNamesProvider reservedPortNamesProvider,
+                               QWidget* parent)
+    : QWidget(parent),
+      ui(new Ui::SyringePumpTab),
+      pumpService_(pumpService),
+      reservedPortNamesProvider_(std::move(reservedPortNamesProvider)) {
     ui->setupUi(this);
+    rowsLayout_ = ui->pumpRowsLayout;
 
-    // Connect Sample pump signals
-    connect(ui->sampleConnectBtn, &QPushButton::clicked, this, &SyringePumpTab::onConnectSample);
-    connect(ui->sampleDisconnectBtn, &QPushButton::clicked, this, &SyringePumpTab::onDisconnectSample);
-    connect(ui->sampleStartBtn, &QPushButton::clicked, this, &SyringePumpTab::onStartSample);
-    connect(ui->sampleStopBtn, &QPushButton::clicked, this, &SyringePumpTab::onStopSample);
-    connect(ui->samplePurgeBtn, &QPushButton::pressed, this, [this]() {
-        auto dir = ui->sampleDirectionCombo->currentIndex() == 0 ? Direction::Infuse : Direction::Withdraw;
-        backend_.syringePump().purge(PumpId::Sample, dir);
-    });
-    connect(ui->samplePurgeBtn, &QPushButton::released, this, [this]() {
-        backend_.syringePump().stopPurge(PumpId::Sample);
-    });
+    connect(ui->addPumpBtn, &QPushButton::clicked, this, &SyringePumpTab::onAddPump);
+    connect(ui->removePumpBtn, &QPushButton::clicked, this, &SyringePumpTab::onRemoveLastPump);
 
-    // Connect Sheath pump signals
-    connect(ui->sheathConnectBtn, &QPushButton::clicked, this, &SyringePumpTab::onConnectSheath);
-    connect(ui->sheathDisconnectBtn, &QPushButton::clicked, this, &SyringePumpTab::onDisconnectSheath);
-    connect(ui->sheathStartBtn, &QPushButton::clicked, this, &SyringePumpTab::onStartSheath);
-    connect(ui->sheathStopBtn, &QPushButton::clicked, this, &SyringePumpTab::onStopSheath);
-    connect(ui->sheathPurgeBtn, &QPushButton::pressed, this, [this]() {
-        auto dir = ui->sheathDirectionCombo->currentIndex() == 0 ? Direction::Infuse : Direction::Withdraw;
-        backend_.syringePump().purge(PumpId::Sheath, dir);
-    });
-    connect(ui->sheathPurgeBtn, &QPushButton::released, this, [this]() {
-        backend_.syringePump().stopPurge(PumpId::Sheath);
-    });
-
-    // Auto-apply: debounced flow rate / direction changes
-    sampleApplyTimer_ = new QTimer(this);
-    sampleApplyTimer_->setSingleShot(true);
-    sampleApplyTimer_->setInterval(300);
-    connect(sampleApplyTimer_, &QTimer::timeout, this, &SyringePumpTab::onApplySample);
-
-    sheathApplyTimer_ = new QTimer(this);
-    sheathApplyTimer_->setSingleShot(true);
-    sheathApplyTimer_->setInterval(300);
-    connect(sheathApplyTimer_, &QTimer::timeout, this, &SyringePumpTab::onApplySheath);
-
-    auto triggerSampleApply = [this]() { if (backend_.syringePump().isConnected(PumpId::Sample)) sampleApplyTimer_->start(); };
-    auto triggerSheathApply = [this]() { if (backend_.syringePump().isConnected(PumpId::Sheath)) sheathApplyTimer_->start(); };
-
-    connect(ui->sampleFlowRateSpinBox, &QDoubleSpinBox::editingFinished, this, triggerSampleApply);
-    connect(ui->sampleFlowUnitCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, triggerSampleApply);
-    connect(ui->sampleDirectionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, triggerSampleApply);
-
-    connect(ui->sheathFlowRateSpinBox, &QDoubleSpinBox::editingFinished, this, triggerSheathApply);
-    connect(ui->sheathFlowUnitCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, triggerSheathApply);
-    connect(ui->sheathDirectionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, triggerSheathApply);
-
-    // Load saved config (flow rate, direction)
     loadConfig();
+    rebuildPumpRows();
 
-    // Update UI state
-    updatePumpUI(0);
-    updatePumpUI(1);
-
-    // Status update timer (500ms)
     statusUpdateTimer_ = new QTimer(this);
     statusUpdateTimer_->setInterval(500);
     connect(statusUpdateTimer_, &QTimer::timeout, this, &SyringePumpTab::onUpdateStatus);
     statusUpdateTimer_->start();
 
-    // Save config on app quit
     connect(qApp, &QApplication::aboutToQuit, this, [this]() { saveConfig(); });
 }
 
@@ -136,276 +85,364 @@ SyringePumpTab::~SyringePumpTab() {
     delete ui;
 }
 
-uint16_t SyringePumpTab::flowUnitFromCombo(int comboIndex) const {
-    return (comboIndex == 0) ? 100 : 103;
+void SyringePumpTab::ensureMinimumPumpCount(size_t minCount, const QStringList& defaultNames) {
+    while (pumpService_.pumpCount() < minCount) {
+        const size_t idx = pumpService_.pumpCount();
+        const QString name = idx < static_cast<size_t>(defaultNames.size())
+                                 ? defaultNames[static_cast<int>(idx)]
+                                 : QStringLiteral("Pump %1").arg(static_cast<int>(idx + 1));
+        pumpService_.addPump(name);
+    }
 }
 
-int SyringePumpTab::comboIndexFromFlowUnit(uint16_t unit) const {
-    return (unit == 100) ? 0 : 1;
+void SyringePumpTab::rebuildPumpRows() {
+    QLayoutItem* item = nullptr;
+    while ((item = rowsLayout_->takeAt(0)) != nullptr) {
+        if (QWidget* w = item->widget()) {
+            w->deleteLater();
+        }
+        delete item;
+    }
+    pumpRows_.clear();
+
+    const auto handles = pumpService_.pumpHandles();
+    for (const auto handle : handles) {
+        auto row = std::make_unique<PumpRowWidget>(this);
+        row->setProperty("pumpHandle", QVariant::fromValue<qulonglong>(handle));
+        wirePumpRow(row.get());
+        rowsLayout_->addWidget(row.get());
+        pumpRows_.push_back(std::move(row));
+    }
+    rowsLayout_->addStretch();
+
+    ui->removePumpBtn->setEnabled(handles.size() > 1);
+    for (auto& row : pumpRows_) {
+        updatePumpUI(row.get());
+    }
 }
 
-// ---------------------------------------------------------------------------
-// Connection slots — read COM/baud/addr from config.json
-// ---------------------------------------------------------------------------
-void SyringePumpTab::onConnectSample() {
-    QString path = configPath();
-    QFile file(path);
+void SyringePumpTab::wirePumpRow(PumpRowWidget* rowWidget) {
+    const auto handle =
+        static_cast<SyringePumpService::PumpHandle>(rowWidget->property("pumpHandle").toULongLong());
+
+    connect(rowWidget, &PumpRowWidget::connectRequested, this, [this, rowWidget]() {
+        if (!connectPumpFromConfig(rowWidget)) {
+            const auto h = static_cast<SyringePumpService::PumpHandle>(
+                rowWidget->property("pumpHandle").toULongLong());
+            const auto cfg = pumpService_.getConfig(h);
+            QMessageBox::warning(
+                this,
+                tr("Connection Failed"),
+                tr("Failed to connect %1 on %2 addr=%3").arg(cfg.name).arg(cfg.portName).arg(cfg.modbusAddress));
+        }
+        updatePumpUI(rowWidget);
+    });
+
+    connect(rowWidget, &PumpRowWidget::disconnectRequested, this, [this, rowWidget]() {
+        const auto h = static_cast<SyringePumpService::PumpHandle>(
+            rowWidget->property("pumpHandle").toULongLong());
+        pumpService_.disconnect(h);
+        updatePumpUI(rowWidget);
+    });
+
+    connect(rowWidget, &PumpRowWidget::startRequested, this, [this, rowWidget]() {
+        const auto h = static_cast<SyringePumpService::PumpHandle>(
+            rowWidget->property("pumpHandle").toULongLong());
+        pumpService_.start(h);
+    });
+
+    connect(rowWidget, &PumpRowWidget::stopRequested, this, [this, rowWidget]() {
+        const auto h = static_cast<SyringePumpService::PumpHandle>(
+            rowWidget->property("pumpHandle").toULongLong());
+        pumpService_.stop(h);
+    });
+
+    connect(rowWidget, &PumpRowWidget::purgeRequested, this, [this, rowWidget](SyringePumpService::Direction dir) {
+        const auto h = static_cast<SyringePumpService::PumpHandle>(
+            rowWidget->property("pumpHandle").toULongLong());
+        pumpService_.purge(h, dir);
+    });
+
+    connect(rowWidget, &PumpRowWidget::stopPurgeRequested, this, [this, rowWidget]() {
+        const auto h = static_cast<SyringePumpService::PumpHandle>(
+            rowWidget->property("pumpHandle").toULongLong());
+        pumpService_.stopPurge(h);
+    });
+
+    connect(rowWidget, &PumpRowWidget::applyRequested, this, [this, rowWidget]() {
+        const auto h = static_cast<SyringePumpService::PumpHandle>(
+            rowWidget->property("pumpHandle").toULongLong());
+        if (!pumpService_.isConnected(h)) {
+            return;
+        }
+        const auto state = rowWidget->viewState();
+        pumpService_.setFlowRate(h, state.flowRate, state.flowRateUnit);
+        pumpService_.setDirection(h, state.direction);
+        saveConfig();
+    });
+
+    connect(rowWidget, &PumpRowWidget::nameChanged, this, [this, handle](const QString& name) {
+        pumpService_.setPumpName(handle, name);
+        saveConfig();
+    });
+
+    connect(rowWidget, &PumpRowWidget::removeRequested, this, [this, handle]() {
+        if (pumpService_.pumpCount() <= 1) {
+            return;
+        }
+        pumpService_.disconnect(handle);
+        pumpService_.removePump(handle);
+        rebuildPumpRows();
+        saveConfig();
+    });
+}
+
+QStringList SyringePumpTab::reservedPortNamesExcluding(SyringePumpService::PumpHandle selfHandle) const {
+    QStringList reserved;
+    if (reservedPortNamesProvider_) {
+        reserved = reservedPortNamesProvider_();
+    }
+    for (const auto handle : pumpService_.pumpHandles()) {
+        if (handle == selfHandle) {
+            continue;
+        }
+        reserved << normalizePortName(pumpService_.getPortName(handle));
+    }
+    reserved.removeAll(QString{});
+    reserved.removeDuplicates();
+    return reserved;
+}
+
+void SyringePumpTab::updatePumpUI(PumpRowWidget* rowWidget) {
+    const auto handle =
+        static_cast<SyringePumpService::PumpHandle>(rowWidget->property("pumpHandle").toULongLong());
+    const auto status = pumpService_.getStatus(handle);
+    const auto cfg = pumpService_.getConfig(handle);
+
+    rowWidget->setPumpName(cfg.name);
+    rowWidget->setConnected(status.connected);
+    rowWidget->setStatus(status);
+
+    PumpRowWidget::ViewState state;
+    state.flowRate = cfg.flowRate;
+    state.flowRateUnit = cfg.flowRateUnit;
+    state.direction = cfg.direction;
+    rowWidget->setViewState(state);
+    rowWidget->setRemoveEnabled(pumpService_.pumpCount() > 1);
+}
+
+bool SyringePumpTab::connectPumpFromConfig(PumpRowWidget* rowWidget) {
+    const auto handle =
+        static_cast<SyringePumpService::PumpHandle>(rowWidget->property("pumpHandle").toULongLong());
+    const auto cfg = pumpService_.getConfig(handle);
+    if (cfg.portName.trimmed().isEmpty()) {
+        QMessageBox::warning(this,
+                             tr("Connection Failed"),
+                             tr("No serial port configured. Open Settings > Syringe Pump Settings."));
+        return false;
+    }
+    const auto reserved = reservedPortNamesExcluding(handle);
+    if (reserved.contains(normalizePortName(cfg.portName))) {
+        QMessageBox::warning(this,
+                             tr("Connection Failed"),
+                             tr("Serial port %1 is currently reserved by another device.").arg(cfg.portName));
+        return false;
+    }
+    return pumpService_.connect(handle, cfg.portName, cfg.baudRate, cfg.modbusAddress);
+}
+
+bool SyringePumpTab::loadJsonConfig(json& config) const {
+    QFile file(configPath());
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QMessageBox::warning(this, tr("Connection Failed"),
-            tr("No config found. Open Settings > Syringe Pump Settings to configure."));
+        return false;
+    }
+    const QByteArray data = file.readAll();
+    if (data.isEmpty()) {
+        config = json::object();
+        return true;
+    }
+    config = json::parse(data.constData(), data.constData() + data.size());
+    return true;
+}
+
+bool SyringePumpTab::writeJsonConfig(const json& config) const {
+    QFile file(configPath());
+    if (!file.open(QIODevice::ReadWrite | QIODevice::Text)) {
+        return false;
+    }
+    file.resize(0);
+    QTextStream out(&file);
+    out << QString::fromStdString(config.dump(4));
+    return true;
+}
+
+json SyringePumpTab::readOrCreateConfig() const {
+    json config = json::object();
+    (void)loadJsonConfig(config);
+    if (!config.is_object()) {
+        config = json::object();
+    }
+    return config;
+}
+
+json SyringePumpTab::defaultPumpJson(const QString& name, int defaultAddress) const {
+    return json{
+        {"name", name.toStdString()},
+        {"port_name", ""},
+        {"baud_rate", 115200},
+        {"address", defaultAddress},
+        {"flow_rate", 0.0},
+        {"flow_rate_unit", 100},
+        {"direction", 0},
+        {"syringe_volume", 100},
+        {"syringe_volume_unit", 100},
+    };
+}
+
+void SyringePumpTab::migrateLegacyConfig(json& config) const {
+    if (config.contains("pump_ports") && config["pump_ports"].is_array() && !config["pump_ports"].empty()) {
         return;
     }
 
-    try {
-        QByteArray data = file.readAll();
-        json config = json::parse(data.constData(), data.constData() + data.size());
-
-        int comPort = config.value("pump_sample_com_port", -1);
-        int baudRate = config.value("pump_sample_baud_rate", 115200);
-        int addr = config.value("pump_sample_address", 1);
-
-        if (comPort < 0) {
-            QMessageBox::warning(this, tr("Connection Failed"),
-                tr("No COM port configured. Open Settings > Syringe Pump Settings."));
-            return;
+    json ports = json::array();
+    auto parseLegacyPort = [&](const char* intKey, const char* nameKey) -> std::string {
+        if (config.contains(nameKey) && config[nameKey].is_string()) {
+            return config[nameKey].get<std::string>();
         }
-
-        bool ok = backend_.syringePump().connect(PumpId::Sample, comPort, baudRate, static_cast<uint8_t>(addr));
-        if (!ok) {
-            QMessageBox::warning(this, tr("Connection Failed"),
-                tr("Failed to connect Sample pump on COM%1 addr=%2").arg(comPort).arg(addr));
+#ifdef _WIN32
+        if (config.contains(intKey) && config[intKey].is_number_integer()) {
+            const int comPort = config[intKey].get<int>();
+            if (comPort > 0) {
+                return "COM" + std::to_string(comPort);
+            }
         }
-    } catch (const std::exception& e) {
-        QMessageBox::warning(this, tr("Config Error"), QString::fromStdString(e.what()));
-    }
-    updatePumpUI(0);
-}
+#else
+        (void)intKey;
+#endif
+        return {};
+    };
 
-void SyringePumpTab::onDisconnectSample() {
-    saveConfig();
-    backend_.syringePump().disconnect(PumpId::Sample);
-    updatePumpUI(0);
-}
+    json sample = defaultPumpJson(QStringLiteral("Sample"), 1);
+    sample["port_name"] = parseLegacyPort("pump_sample_com_port", "pump_sample_port_name");
+    sample["baud_rate"] = config.value("pump_sample_baud_rate", 115200);
+    sample["address"] = config.value("pump_sample_address", 1);
+    sample["flow_rate"] = config.value("pump_sample_flow_rate", 0.0);
+    sample["flow_rate_unit"] = config.value("pump_sample_flow_unit", 100);
+    sample["direction"] = config.value("pump_sample_direction", 0);
+    sample["syringe_volume"] = config.value("pump_sample_syringe_vol", 100.0);
+    sample["syringe_volume_unit"] = config.value("pump_sample_syringe_unit", 100);
 
-void SyringePumpTab::onConnectSheath() {
-    QString path = configPath();
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QMessageBox::warning(this, tr("Connection Failed"),
-            tr("No config found. Open Settings > Syringe Pump Settings to configure."));
-        return;
-    }
+    json sheath = defaultPumpJson(QStringLiteral("Sheath"), 1);
+    sheath["port_name"] = parseLegacyPort("pump_sheath_com_port", "pump_sheath_port_name");
+    sheath["baud_rate"] = config.value("pump_sheath_baud_rate", 115200);
+    sheath["address"] = config.value("pump_sheath_address", 1);
+    sheath["flow_rate"] = config.value("pump_sheath_flow_rate", 0.0);
+    sheath["flow_rate_unit"] = config.value("pump_sheath_flow_unit", 100);
+    sheath["direction"] = config.value("pump_sheath_direction", 0);
+    sheath["syringe_volume"] = config.value("pump_sheath_syringe_vol", 100.0);
+    sheath["syringe_volume_unit"] = config.value("pump_sheath_syringe_unit", 100);
 
-    try {
-        QByteArray data = file.readAll();
-        json config = json::parse(data.constData(), data.constData() + data.size());
-
-        int comPort = config.value("pump_sheath_com_port", -1);
-        int baudRate = config.value("pump_sheath_baud_rate", 115200);
-        int addr = config.value("pump_sheath_address", 2);
-
-        if (comPort < 0) {
-            QMessageBox::warning(this, tr("Connection Failed"),
-                tr("No COM port configured. Open Settings > Syringe Pump Settings."));
-            return;
-        }
-
-        bool ok = backend_.syringePump().connect(PumpId::Sheath, comPort, baudRate, static_cast<uint8_t>(addr));
-        if (!ok) {
-            QMessageBox::warning(this, tr("Connection Failed"),
-                tr("Failed to connect Sheath pump on COM%1 addr=%2").arg(comPort).arg(addr));
-        }
-    } catch (const std::exception& e) {
-        QMessageBox::warning(this, tr("Config Error"), QString::fromStdString(e.what()));
-    }
-    updatePumpUI(1);
-}
-
-void SyringePumpTab::onDisconnectSheath() {
-    saveConfig();
-    backend_.syringePump().disconnect(PumpId::Sheath);
-    updatePumpUI(1);
-}
-
-// ---------------------------------------------------------------------------
-// Control slots
-// ---------------------------------------------------------------------------
-void SyringePumpTab::onStartSample() {
-    backend_.syringePump().start(PumpId::Sample);
-}
-
-void SyringePumpTab::onStopSample() {
-    backend_.syringePump().stop(PumpId::Sample);
-}
-
-void SyringePumpTab::onStartSheath() {
-    backend_.syringePump().start(PumpId::Sheath);
-}
-
-void SyringePumpTab::onStopSheath() {
-    backend_.syringePump().stop(PumpId::Sheath);
-}
-
-void SyringePumpTab::onApplySample() {
-    double rate = ui->sampleFlowRateSpinBox->value();
-    uint16_t unit = flowUnitFromCombo(ui->sampleFlowUnitCombo->currentIndex());
-    int dirIdx = ui->sampleDirectionCombo->currentIndex();
-
-    backend_.syringePump().setFlowRate(PumpId::Sample, rate, unit);
-    backend_.syringePump().setDirection(PumpId::Sample,
-        dirIdx == 0 ? Direction::Infuse : Direction::Withdraw);
-
-    saveConfig();
-}
-
-void SyringePumpTab::onApplySheath() {
-    double rate = ui->sheathFlowRateSpinBox->value();
-    uint16_t unit = flowUnitFromCombo(ui->sheathFlowUnitCombo->currentIndex());
-    int dirIdx = ui->sheathDirectionCombo->currentIndex();
-
-    backend_.syringePump().setFlowRate(PumpId::Sheath, rate, unit);
-    backend_.syringePump().setDirection(PumpId::Sheath,
-        dirIdx == 0 ? Direction::Infuse : Direction::Withdraw);
-
-    saveConfig();
-}
-
-// ---------------------------------------------------------------------------
-// Status polling
-// ---------------------------------------------------------------------------
-void SyringePumpTab::onUpdateStatus() {
-    auto& pumpService = backend_.syringePump();
-
-    if (pumpService.isConnected(PumpId::Sample)) {
-        pumpService.pollStatus(PumpId::Sample);
-    }
-    if (pumpService.isConnected(PumpId::Sheath)) {
-        pumpService.pollStatus(PumpId::Sheath);
-    }
-
-    updatePumpUI(0);
-    updatePumpUI(1);
-}
-
-// ---------------------------------------------------------------------------
-// UI state management
-// ---------------------------------------------------------------------------
-void SyringePumpTab::updatePumpUI(int pumpIndex) {
-    auto& pumpService = backend_.syringePump();
-    PumpId id = static_cast<PumpId>(pumpIndex);
-    auto status = pumpService.getStatus(id);
-    bool connected = status.connected;
-
-    if (pumpIndex == 0) {
-        ui->sampleConnectBtn->setEnabled(!connected);
-        ui->sampleDisconnectBtn->setEnabled(connected);
-        ui->sampleFlowRateSpinBox->setEnabled(connected);
-        ui->sampleFlowUnitCombo->setEnabled(connected);
-        ui->sampleDirectionCombo->setEnabled(connected);
-        ui->sampleStartBtn->setEnabled(connected);
-        ui->sampleStopBtn->setEnabled(connected);
-        ui->samplePurgeBtn->setEnabled(connected);
-
-        if (connected) {
-            QString statusText = runStatusToString(status.runStatus);
-            if (status.stalled) statusText += " [STALL]";
-            ui->sampleStatusLabel->setText(statusText);
-            ui->sampleFlowStatusLabel->setText(QString("%1").arg(status.currentFlowRate, 0, 'f', 4));
-            ui->sampleVolumeLabel->setText(QString("%1").arg(status.accumulatedVolume, 0, 'f', 4));
-        } else {
-            ui->sampleStatusLabel->setText("Not connected");
-            ui->sampleFlowStatusLabel->setText("--");
-            ui->sampleVolumeLabel->setText("--");
-        }
-    } else {
-        ui->sheathConnectBtn->setEnabled(!connected);
-        ui->sheathDisconnectBtn->setEnabled(connected);
-        ui->sheathFlowRateSpinBox->setEnabled(connected);
-        ui->sheathFlowUnitCombo->setEnabled(connected);
-        ui->sheathDirectionCombo->setEnabled(connected);
-        ui->sheathStartBtn->setEnabled(connected);
-        ui->sheathStopBtn->setEnabled(connected);
-        ui->sheathPurgeBtn->setEnabled(connected);
-
-        if (connected) {
-            QString statusText = runStatusToString(status.runStatus);
-            if (status.stalled) statusText += " [STALL]";
-            ui->sheathStatusLabel->setText(statusText);
-            ui->sheathFlowStatusLabel->setText(QString("%1").arg(status.currentFlowRate, 0, 'f', 4));
-            ui->sheathVolumeLabel->setText(QString("%1").arg(status.accumulatedVolume, 0, 'f', 4));
-        } else {
-            ui->sheathStatusLabel->setText("Not connected");
-            ui->sheathFlowStatusLabel->setText("--");
-            ui->sheathVolumeLabel->setText("--");
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Config persistence (flow rate, direction only — connection params in settings dialog)
-// ---------------------------------------------------------------------------
-QString SyringePumpTab::configPath() const {
-    QSettings s;
-    const QString external = s.value("Config/ExternalAppConfigPath").toString().trimmed();
-    if (!external.isEmpty()) return external;
-    return QDir(getUserConfigDir()).absoluteFilePath("config.json");
+    ports.push_back(sample);
+    ports.push_back(sheath);
+    config["pump_ports"] = ports;
 }
 
 void SyringePumpTab::loadConfig() {
-    QString path = configPath();
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return;
+    json config = readOrCreateConfig();
+    migrateLegacyConfig(config);
 
-    try {
-        QByteArray data = file.readAll();
-        json config = json::parse(data.constData(), data.constData() + data.size());
-
-        if (config.contains("pump_sample_flow_rate"))
-            ui->sampleFlowRateSpinBox->setValue(config["pump_sample_flow_rate"].get<double>());
-        if (config.contains("pump_sample_flow_unit"))
-            ui->sampleFlowUnitCombo->setCurrentIndex(
-                comboIndexFromFlowUnit(config["pump_sample_flow_unit"].get<uint16_t>()));
-        if (config.contains("pump_sample_direction"))
-            ui->sampleDirectionCombo->setCurrentIndex(config["pump_sample_direction"].get<int>());
-
-        if (config.contains("pump_sheath_flow_rate"))
-            ui->sheathFlowRateSpinBox->setValue(config["pump_sheath_flow_rate"].get<double>());
-        if (config.contains("pump_sheath_flow_unit"))
-            ui->sheathFlowUnitCombo->setCurrentIndex(
-                comboIndexFromFlowUnit(config["pump_sheath_flow_unit"].get<uint16_t>()));
-        if (config.contains("pump_sheath_direction"))
-            ui->sheathDirectionCombo->setCurrentIndex(config["pump_sheath_direction"].get<int>());
+    const bool hasPumpArray = config.contains("pump_ports") && config["pump_ports"].is_array() &&
+                              !config["pump_ports"].empty();
+    if (!hasPumpArray) {
+        ensureMinimumPumpCount(1, {QStringLiteral("Pump 1")});
+        return;
     }
-    catch (const std::exception& e) {
-        SPDLOG_ERROR("SyringePumpTab: Failed to parse config.json: {}", e.what());
+
+    pumpService_.clearPumps();
+    const auto& pumpArray = config["pump_ports"];
+    for (size_t i = 0; i < pumpArray.size(); ++i) {
+        const auto& node = pumpArray[i];
+        if (!node.is_object()) {
+            continue;
+        }
+        const QString defaultName = (i == 0) ? QStringLiteral("Sample")
+                                             : (i == 1) ? QStringLiteral("Sheath")
+                                                        : QStringLiteral("Pump %1").arg(static_cast<int>(i + 1));
+        const QString name = QString::fromStdString(node.value("name", defaultName.toStdString()));
+        const auto handle = pumpService_.addPump(name);
+        auto pumpCfg = pumpService_.getConfig(handle);
+        pumpCfg.name = name;
+        pumpCfg.portName = QString::fromStdString(node.value("port_name", std::string{}));
+        pumpCfg.baudRate = node.value("baud_rate", 115200);
+        pumpCfg.modbusAddress = static_cast<uint8_t>(node.value("address", 1));
+        pumpCfg.flowRate = node.value("flow_rate", 0.0);
+        pumpCfg.flowRateUnit = static_cast<uint16_t>(node.value("flow_rate_unit", 100));
+        pumpCfg.direction = node.value("direction", 0) == 0 ? SyringePumpService::Direction::Infuse
+                                                             : SyringePumpService::Direction::Withdraw;
+        pumpCfg.syringeVolume = static_cast<uint16_t>(node.value("syringe_volume", 100));
+        pumpCfg.syringeVolumeUnit = static_cast<uint16_t>(node.value("syringe_volume_unit", 100));
+        pumpService_.setConfig(handle, pumpCfg);
     }
+
+    ensureMinimumPumpCount(1, {QStringLiteral("Pump 1")});
 }
 
 void SyringePumpTab::saveConfig() {
-    QString path = configPath();
-    QFile file(path);
-    if (!file.open(QIODevice::ReadWrite | QIODevice::Text)) return;
-
-    try {
-        QByteArray data = file.readAll();
-        json config;
-        if (!data.isEmpty())
-            config = json::parse(data.constData(), data.constData() + data.size());
-
-        config["pump_sample_flow_rate"] = ui->sampleFlowRateSpinBox->value();
-        config["pump_sample_flow_unit"] = flowUnitFromCombo(ui->sampleFlowUnitCombo->currentIndex());
-        config["pump_sample_direction"] = ui->sampleDirectionCombo->currentIndex();
-
-        config["pump_sheath_flow_rate"] = ui->sheathFlowRateSpinBox->value();
-        config["pump_sheath_flow_unit"] = flowUnitFromCombo(ui->sheathFlowUnitCombo->currentIndex());
-        config["pump_sheath_direction"] = ui->sheathDirectionCombo->currentIndex();
-
-        file.resize(0);
-        QTextStream out(&file);
-        out << QString::fromStdString(config.dump(4));
+    json config = readOrCreateConfig();
+    json pumpArray = json::array();
+    for (const auto handle : pumpService_.pumpHandles()) {
+        const auto cfg = pumpService_.getConfig(handle);
+        pumpArray.push_back(json{
+            {"name", cfg.name.toStdString()},
+            {"port_name", cfg.portName.toStdString()},
+            {"baud_rate", cfg.baudRate},
+            {"address", cfg.modbusAddress},
+            {"flow_rate", cfg.flowRate},
+            {"flow_rate_unit", cfg.flowRateUnit},
+            {"direction", cfg.direction == SyringePumpService::Direction::Infuse ? 0 : 1},
+            {"syringe_volume", cfg.syringeVolume},
+            {"syringe_volume_unit", cfg.syringeVolumeUnit},
+        });
     }
-    catch (const std::exception& e) {
-        SPDLOG_ERROR("SyringePumpTab: Failed to save config.json: {}", e.what());
+    config["pump_ports"] = pumpArray;
+    writeJsonConfig(config);
+}
+
+QString SyringePumpTab::configPath() const {
+    QSettings s;
+    const QString external = s.value("Config/ExternalAppConfigPath").toString().trimmed();
+    if (!external.isEmpty()) {
+        return external;
+    }
+    return QDir(getUserConfigDir()).absoluteFilePath("config.json");
+}
+
+void SyringePumpTab::onAddPump() {
+    const auto nextIndex = pumpService_.pumpCount() + 1;
+    pumpService_.addPump(QStringLiteral("Pump %1").arg(static_cast<int>(nextIndex)));
+    rebuildPumpRows();
+    saveConfig();
+}
+
+void SyringePumpTab::onRemoveLastPump() {
+    const auto handles = pumpService_.pumpHandles();
+    if (handles.size() <= 1) {
+        return;
+    }
+    pumpService_.disconnect(handles.back());
+    pumpService_.removePump(handles.back());
+    rebuildPumpRows();
+    saveConfig();
+}
+
+void SyringePumpTab::onUpdateStatus() {
+    for (auto& row : pumpRows_) {
+        const auto handle =
+            static_cast<SyringePumpService::PumpHandle>(row->property("pumpHandle").toULongLong());
+        if (pumpService_.isConnected(handle)) {
+            pumpService_.pollStatus(handle);
+        }
+        updatePumpUI(row.get());
     }
 }
 

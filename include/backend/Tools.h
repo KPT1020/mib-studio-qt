@@ -13,8 +13,12 @@ public:
     static uint64_t getTimestamp();
 
     // Enumerate available COM port numbers (e.g. 1 for COM1, 3 for COM3).
-    // Windows: registry HKLM\HARDWARE\DEVICEMAP\SERIALCOMM; other platforms: empty.
+    // Windows-only compatibility wrapper over availableSerialPortNames().
     static std::vector<int> availableComPortNumbers();
+
+    // Enumerate available serial port names (e.g. COM3, ttyUSB0, cu.usbserial-*)
+    // using Qt's cross-platform serial metadata.
+    static std::vector<std::string> availableSerialPortNames();
 
     // Process memory usage (MB). Windows-first; returns 0 on unsupported platforms.
     static double getProcessMemoryMB();

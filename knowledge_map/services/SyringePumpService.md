@@ -1,43 +1,65 @@
 # SyringePumpService
 
-> Dual-pump control (Sample + Sheath) via Modbus RTU over serial.
+> Modbus RTU syringe-pump control over serial, now supporting dynamic pump
+> counts (1..N) via stable `PumpHandle` IDs.
 
 **Source:** `src/backend/services/SyringePumpService.cpp`,
 `include/backend/services/SyringePumpService.h`
 **Related:** [[../frontend/SyringePumpTab]],
-[[../frontend/Dialogs]] (SyringePumpSettingsDialog)
+[[../frontend/Dialogs]] (`SyringePumpSettingsDialog`),
+`src/standalone/pump_control/`
 
 ## Responsibility
 
-- Maintain two independent `QSerialPort` connections
-  (`PumpId::Sample`, `PumpId::Sheath`).
-- Per-pump control: `setFlowRate`, `setDirection`, `start`, `stop`,
-  `purge`, `stopPurge`, `setSyringeVolume`.
-- Per-pump status polling: `pollStatus(id)` — UI timer drives this.
-- Expose config/status structs (`PumpConfig`, `PumpStatus`).
+- Own a dynamic list of pumps (`std::vector<shared_ptr<PumpConnection>>`)
+  keyed by `PumpHandle`.
+- Manage one `QSerialPort` per pump (connect/disconnect, poll status,
+  control commands).
+- Expose per-pump config and runtime status (`PumpConfig`, `PumpStatus`).
+- Provide cross-platform serial APIs:
+  - primary: `connect(handle, QString portName, ...)`
+  - Windows compatibility: `connect(handle, int comPort, ...)` and
+    `getComPort(handle)` wrappers.
 
-## Enums
+## Public API shape
+
+- Pump lifecycle:
+  - `addPump(name)`, `removePump(handle)`, `clearPumps()`
+  - `pumpHandles()`, `pumpCount()`, `hasPump(handle)`
+- Per-pump control:
+  - `setFlowRate`, `setDirection`, `start`, `stop`
+  - `purge`, `stopPurge`, `setSyringeVolume`
+- Per-pump status:
+  - `pollStatus(handle)` (UI timer driven)
+  - `getStatus(handle)`, `getConfig(handle)`, `setConfig(handle)`
+  - `getPumpName` / `setPumpName`, `getPortName`
+
+## Enums / units
 
 - `RunStatus`: Stop (0), Forward (1), Backward (2), Pause (3)
 - `Direction`: Infuse (0), Withdraw (1)
-- `flowRateUnit` uses integer codes (e.g. `100` = µL/min)
-
-## Modbus helpers
-
-Private: CRC-16, `buildReadRequest`, `buildWriteSingleRequest`,
-`buildWriteMultipleRequest`, big-endian ABCD float ↔ two 16-bit registers,
-`readHoldingRegisters`, `writeSingleRegister`,
-`writeMultipleRegisters`.
+- Flow/syringe units continue to use integer pump register codes
+  (e.g., `100` for uL/min and uL).
 
 ## Threading
 
-Each pump has its own `std::mutex` guarding serial I/O. UI calls are
-synchronous; `pollStatus` is invoked from the Qt timer in
-[[../frontend/SyringePumpTab]].
+- `pumpsMutex_` protects the container of pump connections.
+- Each `PumpConnection` has its own `mutex` guarding serial I/O and status.
+- UI operations are synchronous, and status polling still occurs via
+  `SyringePumpTab` timer callbacks.
+
+## Modbus helpers
+
+Private helpers retained:
+CRC16, frame builders, float/register conversion, and register read/write
+helpers. Request/response logging now uses pump name + handle instead of
+hardcoded Sample/Sheath labels.
 
 ## Gotchas
 
-- `getComPort(id)` is used by [[../frontend/Dialogs]] SyringePumpSettingsDialog
-  to avoid double-assigning a COM port to both pumps.
-- Dialog-provided `baudRate` and `modbusAddress` must match the hardware.
-- See `docs/dLSP_pump.pdf` for pump protocol reference (shipped in repo).
+- Cross-platform port persistence is by serial **name** (`COM3`, `ttyUSB0`,
+  `cu.usbserial-*`), not Windows COM number.
+- Windows COM number methods are compatibility wrappers only.
+- `addPump()` does not auto-connect; UI/config controls when ports open.
+- `setFlowRate` and `setSyringeVolume` clamp to hardware register bounds.
+- See `docs/dLSP_pump.pdf` for protocol reference.

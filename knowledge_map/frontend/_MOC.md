@@ -15,6 +15,7 @@
 - [[HdfReviewTab]] — post-experiment review from saved HDF5
 - [[NanopositionerTab]] — [[../services/AutofocusService]] UI
 - [[SyringePumpTab]] — [[../services/SyringePumpService]] UI
+- [[PumpRowWidget]] — reusable per-pump row UI inside SyringePumpTab
 
 ## Support
 - [[Dialogs]] — settings dialogs (Mock, Processing, Monitoring, Buffer save,

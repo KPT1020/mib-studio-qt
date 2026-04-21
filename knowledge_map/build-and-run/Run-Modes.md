@@ -1,6 +1,6 @@
 # Run Modes
 
-> Three executables, two camera sources, a handful of env vars.
+> Four executables, two camera sources, a handful of env vars.
 
 **Related:** [[../camera/MockCamera]], [[../frontend/ConnectTab]]
 
@@ -14,6 +14,9 @@
   (`src/tests/capture_processing_test.cpp`). Uses
   [[../camera/MockCamera]] to exercise capture + processing without
   the UI.
+- **`pump_control`** (`pump_control.exe` on Windows) — standalone syringe
+  pump utility with only pump controls: dynamic pump rows, status polling,
+  and `SyringePumpSettingsDialog`.
 
 ## Mock camera env vars
 

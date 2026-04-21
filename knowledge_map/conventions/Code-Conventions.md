@@ -18,8 +18,9 @@
 
 - Review `src/backend/Tools.cpp` (`include/backend/Tools.h`) before
   writing new utility helpers: it already has `getTimestamp`,
-  `availableComPortNumbers`, `getProcessMemoryMB`,
-  `getAvailableSystemRAMBytes`, etc.
+  `availableSerialPortNames` (cross-platform),
+  `availableComPortNumbers` (Windows compatibility wrapper),
+  `getProcessMemoryMB`, `getAvailableSystemRAMBytes`, etc.
 - Before implementing a new camera feature, **check `egrabber-sample-programs/`**
   for a ready-made pattern. See [[../camera/EGrabberCamera]].
 

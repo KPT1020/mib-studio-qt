@@ -2,46 +2,67 @@
 
 #include <QWidget>
 
-namespace backend { class AppBackend; }
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <QStringList>
+#include <vector>
+
+#include <nlohmann/json_fwd.hpp>
+
+namespace backend::services {
+class SyringePumpService;
+}
+
 class QTimer;
-namespace Ui { class SyringePumpTab; }
+class QVBoxLayout;
+namespace Ui {
+class SyringePumpTab;
+}
 
 namespace frontend {
+
+class PumpRowWidget;
 
 class SyringePumpTab : public QWidget {
     Q_OBJECT
 public:
-    explicit SyringePumpTab(backend::AppBackend& backend, QWidget* parent = nullptr);
+    using ReservedPortNamesProvider = std::function<QStringList()>;
+    using PumpHandle = uint64_t;
+
+    explicit SyringePumpTab(backend::services::SyringePumpService& pumpService,
+                            ReservedPortNamesProvider reservedPortNamesProvider = {},
+                            QWidget* parent = nullptr);
     ~SyringePumpTab();
 
 private slots:
-    void onConnectSample();
-    void onDisconnectSample();
-    void onConnectSheath();
-    void onDisconnectSheath();
-    void onStartSample();
-    void onStopSample();
-    void onStartSheath();
-    void onStopSheath();
-    void onApplySample();
-    void onApplySheath();
+    void onAddPump();
+    void onRemoveLastPump();
     void onUpdateStatus();
 
 private:
-    void updatePumpUI(int pumpIndex);
+    void ensureMinimumPumpCount(size_t minCount, const QStringList& defaultNames);
+    void rebuildPumpRows();
+    void wirePumpRow(PumpRowWidget* rowWidget);
+    QStringList reservedPortNamesExcluding(PumpHandle selfHandle) const;
+    void updatePumpUI(PumpRowWidget* rowWidget);
+    bool connectPumpFromConfig(PumpRowWidget* rowWidget);
+
+    bool loadJsonConfig(nlohmann::json& config) const;
+    bool writeJsonConfig(const nlohmann::json& config) const;
+    nlohmann::json readOrCreateConfig() const;
+    nlohmann::json defaultPumpJson(const QString& name, int defaultAddress) const;
+    void migrateLegacyConfig(nlohmann::json& config) const;
     void loadConfig();
     void saveConfig();
     QString configPath() const;
 
-    // Map flow unit combo index to Modbus register value
-    uint16_t flowUnitFromCombo(int comboIndex) const;
-    int comboIndexFromFlowUnit(uint16_t unit) const;
-
-    Ui::SyringePumpTab* ui;
-    backend::AppBackend& backend_;
+    Ui::SyringePumpTab* ui{nullptr};
+    backend::services::SyringePumpService& pumpService_;
+    ReservedPortNamesProvider reservedPortNamesProvider_;
+    std::vector<std::unique_ptr<PumpRowWidget>> pumpRows_;
+    QVBoxLayout* rowsLayout_{nullptr};
     QTimer* statusUpdateTimer_{nullptr};
-    QTimer* sampleApplyTimer_{nullptr};
-    QTimer* sheathApplyTimer_{nullptr};
 };
 
 } // namespace frontend

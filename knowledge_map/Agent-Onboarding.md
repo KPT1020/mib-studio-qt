@@ -27,7 +27,7 @@ Jump to the notes that match your task:
 | Post-experiment review | [[frontend/HdfReviewTab]] |
 | Live charts during a run | [[frontend/ExperimentMonitoringTab]] |
 | Autofocus / nanopositioner | [[services/AutofocusService]] + [[frontend/NanopositionerTab]] |
-| Syringe pumps | [[services/SyringePumpService]] + [[frontend/SyringePumpTab]] |
+| Syringe pumps | [[services/SyringePumpService]] + [[frontend/SyringePumpTab]] + [[frontend/PumpControlMainWindow]] |
 | Build / deploy | [[build-and-run/Build]], [[build-and-run/Run-Modes]] |
 
 ## Step 4 — Before you write code

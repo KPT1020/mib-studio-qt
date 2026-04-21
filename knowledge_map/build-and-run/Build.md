@@ -18,7 +18,9 @@ From `CMakePresets.json`:
 | Target | Kind | Purpose |
 |---|---|---|
 | `mib_backend` | STATIC library | Core: services, camera abstraction, processing |
+| `pump_backend` | STATIC library | Slim pump-only backend (`Tools`, `Logger`, `SyringePumpService`) |
 | `mib_studio_qt` | executable (`WIN32` on Windows) | Production app |
+| `pump_control` | executable (`WIN32` on Windows) | Standalone pump-only UI (serial + settings) |
 | `mock_studio_qt` | executable | Dev app with mock-camera GUI selector |
 | `capture_processing_test` | executable | Console test harness (`src/tests/capture_processing_test.cpp`) |
 

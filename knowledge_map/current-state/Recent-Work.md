@@ -5,6 +5,24 @@
 
 ## Features shipped
 
+- **Standalone `pump_control` executable + pump module split** (2026-04-21) —
+  added a new lightweight Qt executable (`pump_control`) with only syringe-pump
+  functionality (`src/standalone/pump_control/main.cpp`,
+  `PumpControlMainWindow`). Build wiring now includes `pump_backend` and
+  `PUMP_FRONTEND_COMMON_SOURCES` so pump-only binaries avoid camera/HDF5/OpenCV/
+  ONNX/SQLite linkage while `mib_studio_qt` retains existing behavior.
+  `SyringePumpService` was refactored from fixed `PumpId::{Sample,Sheath}` to
+  dynamic `PumpHandle`-based pump vectors, with cross-platform `connect(handle,
+  portName, ...)` and Windows compatibility wrappers (`connect(handle, comPort,
+  ...)`, `getComPort`). `backend::Tools` now provides
+  `availableSerialPortNames()` via `QSerialPortInfo`; `availableComPortNumbers()`
+  is retained as a Windows-only compatibility wrapper. Pump UI was reworked to a
+  dynamic row model (`PumpRowWidget`) and `SyringePumpTab` / 
+  `SyringePumpSettingsDialog` now accept `SyringePumpService&` plus a reserved
+  port callback, enabling reuse in both apps. Config persistence uses
+  `pump_ports` array and auto-migrates legacy `pump_sample_*` / `pump_sheath_*`
+  keys.
+
 - **Release windeployqt Conan alignment** (2026-04-20) — `CMakeLists.txt`
   picks `windeployqt` and per-config `PATH` from `qt_PACKAGE_FOLDER_DEBUG` /
   `qt_PACKAGE_FOLDER_RELEASE` (CMakeDeps) instead of a cached `find_program`

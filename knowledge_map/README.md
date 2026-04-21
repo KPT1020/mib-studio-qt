@@ -69,3 +69,4 @@ mapping, and [[Agent-Onboarding]] for the pre-commit checklist.
 - `docs/` — user-facing how-tos (`docs/howto/*.md`) and integration notes
 - `knowledge_map/task/` — 19 dated task records (historical design/debug notes)
 - `CLAUDE.md` — top-level project instructions (read first)
+ - Standalone pump app docs: [[frontend/PumpControlMainWindow]]

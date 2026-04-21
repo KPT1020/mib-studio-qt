@@ -13,6 +13,8 @@
 #include "frontend/utils/BackgroundPreviewWidget.h"
 #include "frontend/tabs/NanopositionerTab.h"
 #include "frontend/tabs/SyringePumpTab.h"
+#include "backend/services/SyringePumpService.h"
+#include "backend/services/AutofocusService.h"
 
 namespace frontend
 {
@@ -71,7 +73,19 @@ namespace frontend
         contentLayout_->addWidget(pumpSeparator);
 
         // Syringe pump tab
-        syringePumpTab_ = new SyringePumpTab(backend_, contentWidget_);
+        syringePumpTab_ = new SyringePumpTab(
+            backend_.syringePump(),
+            [this]() {
+                QStringList reserved;
+                if (backend_.autofocus().isConnected()) {
+                    const int autofocusPort = backend_.autofocus().getComPort();
+                    if (autofocusPort > 0) {
+                        reserved << QStringLiteral("COM%1").arg(autofocusPort);
+                    }
+                }
+                return reserved;
+            },
+            contentWidget_);
         contentLayout_->addWidget(syringePumpTab_);
 
         contentLayout_->addStretch();

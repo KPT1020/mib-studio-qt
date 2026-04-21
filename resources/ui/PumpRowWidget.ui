@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>PumpRowWidget</class>
+ <widget class="QWidget" name="PumpRowWidget">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>340</width>
+    <height>310</height>
+   </rect>
+  </property>
+  <layout class="QVBoxLayout" name="mainLayout">
+   <property name="leftMargin">
+    <number>0</number>
+   </property>
+   <property name="topMargin">
+    <number>0</number>
+   </property>
+   <property name="rightMargin">
+    <number>0</number>
+   </property>
+   <property name="bottomMargin">
+    <number>0</number>
+   </property>
+   <item>
+    <widget class="QGroupBox" name="pumpGroup">
+     <property name="title">
+      <string>Pump</string>
+     </property>
+     <layout class="QVBoxLayout" name="groupLayout">
+      <property name="spacing">
+       <number>6</number>
+      </property>
+      <item>
+       <layout class="QHBoxLayout" name="nameLayout">
+        <item>
+         <widget class="QLabel" name="nameLabel">
+          <property name="text">
+           <string>Name:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLineEdit" name="nameEdit">
+          <property name="placeholderText">
+           <string>Pump name</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="removeBtn">
+          <property name="text">
+           <string>Remove</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="connLayout">
+        <item>
+         <widget class="QPushButton" name="connectBtn">
+          <property name="text">
+           <string>Connect</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="disconnectBtn">
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
+          <property name="text">
+           <string>Disconnect</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="connSpacer">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <layout class="QFormLayout" name="flowForm">
+        <property name="labelAlignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+        <item row="0" column="0">
+         <widget class="QLabel" name="flowLabel">
+          <property name="text">
+           <string>Flow Rate:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <layout class="QHBoxLayout" name="flowLayout">
+          <item>
+           <widget class="QDoubleSpinBox" name="flowRateSpinBox">
+            <property name="enabled">
+             <bool>false</bool>
+            </property>
+            <property name="decimals">
+             <number>4</number>
+            </property>
+            <property name="minimum">
+             <double>0.000000000000000</double>
+            </property>
+            <property name="maximum">
+             <double>100000.000000000000000</double>
+            </property>
+            <property name="value">
+             <double>0.000000000000000</double>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QComboBox" name="flowUnitCombo">
+            <property name="enabled">
+             <bool>false</bool>
+            </property>
+            <item>
+             <property name="text">
+              <string>uL/min</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>mL/min</string>
+             </property>
+            </item>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel" name="directionLabel">
+          <property name="text">
+           <string>Direction:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QComboBox" name="directionCombo">
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
+          <item>
+           <property name="text">
+            <string>Infuse</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Withdraw</string>
+           </property>
+          </item>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="runLayout">
+        <item>
+         <widget class="QPushButton" name="startBtn">
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
+          <property name="text">
+           <string>Start</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="stopBtn">
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
+          <property name="text">
+           <string>Stop</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="purgeBtn">
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
+          <property name="toolTip">
+           <string>Run pump at full speed (hold to purge)</string>
+          </property>
+          <property name="text">
+           <string>Purge</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="runSpacer">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <layout class="QFormLayout" name="statusForm">
+        <property name="labelAlignment">
+         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+        </property>
+        <item row="0" column="0">
+         <widget class="QLabel" name="statusTextLabel">
+          <property name="text">
+           <string>Status:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="1">
+         <widget class="QLabel" name="statusLabel">
+          <property name="text">
+           <string>Not connected</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="0">
+         <widget class="QLabel" name="flowStatusTextLabel">
+          <property name="text">
+           <string>Flow:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QLabel" name="flowStatusLabel">
+          <property name="text">
+           <string>--</string>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="0">
+         <widget class="QLabel" name="volumeTextLabel">
+          <property name="text">
+           <string>Volume:</string>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="1">
+         <widget class="QLabel" name="volumeLabel">
+          <property name="text">
+           <string>--</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+</ui>

@@ -2,13 +2,23 @@
 
 #include <QDialog>
 
-namespace backend { class AppBackend; }
-namespace Ui { class SyringePumpSettingsDialog; }
+#include <functional>
+
+namespace backend::services {
+class SyringePumpService;
+}
+namespace Ui {
+class SyringePumpSettingsDialog;
+}
 
 class SyringePumpSettingsDialog : public QDialog {
     Q_OBJECT
 public:
-    explicit SyringePumpSettingsDialog(backend::AppBackend& backend, QWidget* parent = nullptr);
+    using ReservedPortNamesProvider = std::function<QStringList()>;
+
+    explicit SyringePumpSettingsDialog(backend::services::SyringePumpService& pumpService,
+                                       ReservedPortNamesProvider reservedPortNamesProvider = {},
+                                       QWidget* parent = nullptr);
     ~SyringePumpSettingsDialog();
 
 private slots:
@@ -16,11 +26,14 @@ private slots:
     void onRefreshPorts();
 
 private:
+    QString configPath() const;
+    QString normalizedPort(const QString& value) const;
+    void ensureTwoPumps();
     void loadConfig();
     void saveConfig();
-    QString configPath() const;
     void populateComPorts();
 
     Ui::SyringePumpSettingsDialog* ui;
-    backend::AppBackend& backend_;
+    backend::services::SyringePumpService& pumpService_;
+    ReservedPortNamesProvider reservedPortNamesProvider_;
 };
