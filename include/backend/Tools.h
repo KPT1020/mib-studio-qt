@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QStringList>
+
 #include <string>
 #include <chrono>
 #include <cstdint>
@@ -15,6 +17,11 @@ public:
     // Enumerate available COM port numbers (e.g. 1 for COM1, 3 for COM3).
     // Windows: registry HKLM\HARDWARE\DEVICEMAP\SERIALCOMM; other platforms: empty.
     static std::vector<int> availableComPortNumbers();
+
+    // Cross-platform serial port enumeration via QSerialPortInfo.
+    // Returns port names ("COM3" on Windows, "/dev/ttyUSB0" on Linux,
+    // "/dev/cu.usbserial-..." on macOS).
+    static QStringList availableSerialPortNames();
 
     // Process memory usage (MB). Windows-first; returns 0 on unsupported platforms.
     static double getProcessMemoryMB();

@@ -33,6 +33,7 @@
 #include "frontend/dialogs/MonitoringSettingsDialog.h"
 #include "frontend/tabs/OverviewTab.h"
 #include "frontend/tabs/ConfigTabs.h"
+#include "frontend/tabs/SyringePumpTab.h"
 #include "frontend/system/AutoUpdater.h"
 #include "frontend/system/DeviceInitManager.h"
 #include "frontend/utils/SidebarWidget.h"
@@ -103,8 +104,26 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     connect(ui->syringePumpSettingsAct, &QAction::triggered, this, [this]()
             {
         SPDLOG_INFO("Opening Syringe Pump Settings dialog");
-        SyringePumpSettingsDialog dlg(backend_, this);
-        dlg.exec(); });
+        SyringePumpSettingsDialog dlg(
+            backend_.syringePump(),
+            [this]() -> QStringList {
+                if (backend_.autofocus().isConnected()) {
+                    return { QString("COM%1").arg(backend_.autofocus().getComPort()) };
+                }
+                return {};
+            },
+            this);
+        // Keep the sidebar's pump tab rows in sync if the dialog adds/removes pumps.
+        if (sidebarWidget_ && sidebarWidget_->syringePumpTab()) {
+            connect(&dlg, &SyringePumpSettingsDialog::pumpsChanged,
+                    sidebarWidget_->syringePumpTab(),
+                    &frontend::SyringePumpTab::syncRowsWithService);
+        }
+        dlg.exec();
+        if (sidebarWidget_ && sidebarWidget_->syringePumpTab()) {
+            sidebarWidget_->syringePumpTab()->syncRowsWithService();
+            sidebarWidget_->syringePumpTab()->saveConfig();
+        } });
     connect(ui->aboutAct, &QAction::triggered, this, [this]()
             {
         const QString v = QCoreApplication::applicationVersion();

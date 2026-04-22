@@ -10,6 +10,13 @@
   [[../camera/EGrabberCamera]]. No mock option in the UI.
 - **`mock_studio_qt.exe`** — development. Same UI, but lets the user
   select a mock folder from the [[../frontend/ConnectTab]].
+- **`pump_control`** (`.exe` on Windows, native binary on Linux/macOS)
+  — cross-platform standalone that ships only the syringe-pump UI.
+  No camera, HDF5, OpenCV, ONNX, or SQLite dependencies. Users can add
+  and remove pumps at runtime; each pump gets a unique serial port by
+  default. Uses `QStandardPaths::AppDataLocation` for its config and
+  log files. See [[../services/SyringePumpService]] and
+  [[../frontend/SyringePumpTab]].
 
 ## Mock camera env vars
 

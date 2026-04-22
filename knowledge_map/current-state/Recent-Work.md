@@ -5,6 +5,27 @@
 
 ## Features shipped
 
+- **Standalone cross-platform `pump_control` app + modular multi-pump
+  refactor** (2026-04-21) — The syringe-pump UI is now shippable as an
+  independent binary (`pump_control.exe` on Windows; native binaries on
+  Linux / macOS) that pulls in only Qt Widgets/SerialPort, spdlog, and
+  nlohmann_json — no OpenCV / HDF5 / ONNX / SQLite. Along the way,
+  [[../services/SyringePumpService]] was generalised from a hardcoded
+  `{Sample, Sheath}` enum to a dynamic `std::map<PumpHandle,
+  Pump>` so users can add and remove pumps at runtime. The new
+  `QSerialPortInfo`-based port enumeration in `backend::Tools` and the
+  `connect(QString portName, …)` overload on the service replace the
+  Windows-only `"COM%d"` code path. `SyringePumpTab` now hosts a scroll
+  list of `PumpRowWidget` instances with `+ Add Pump` / Remove buttons;
+  `SyringePumpSettingsDialog` mirrors the same shape and auto-assigns a
+  distinct serial port to each new row. Config schema migrated from
+  flat `pump_sample_*` / `pump_sheath_*` keys to a `pumps: [{name,
+  port_name, …}]` array (legacy keys are auto-migrated on first load).
+  Files: `SyringePumpService.{h,cpp}`, `Tools.{h,cpp}`,
+  `SyringePumpTab.{h,cpp}`, `PumpRowWidget.{h,cpp}`,
+  `SyringePumpSettingsDialog.{h,cpp}`, `MainWindow.cpp`,
+  `SidebarWidget.cpp`, new `src/standalone/pump_control/*`, `CMakeLists.txt`.
+
 - **Release windeployqt Conan alignment** (2026-04-20) — `CMakeLists.txt`
   picks `windeployqt` and per-config `PATH` from `qt_PACKAGE_FOLDER_DEBUG` /
   `qt_PACKAGE_FOLDER_RELEASE` (CMakeDeps) instead of a cached `find_program`

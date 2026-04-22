@@ -267,7 +267,8 @@ set(FRONTEND_COMMON_SOURCES
     resources/ui/NanopositionerTab.ui
     src/frontend/tabs/SyringePumpTab.cpp
     include/frontend/tabs/SyringePumpTab.h
-    resources/ui/SyringePumpTab.ui
+    src/frontend/widgets/PumpRowWidget.cpp
+    include/frontend/widgets/PumpRowWidget.h
     src/frontend/tabs/OverviewTab.cpp
     include/frontend/tabs/OverviewTab.h
     resources/ui/OverviewTab.ui
@@ -297,7 +298,6 @@ set(FRONTEND_COMMON_SOURCES
     resources/ui/ProcessingSettingsDialog.ui
     src/frontend/dialogs/SyringePumpSettingsDialog.cpp
     include/frontend/dialogs/SyringePumpSettingsDialog.h
-    resources/ui/SyringePumpSettingsDialog.ui
     # Controllers
     src/frontend/controllers/CameraController.cpp
     include/frontend/controllers/CameraController.h
@@ -398,6 +398,59 @@ elseif(DEFINED OpenCV_LIBS)
     target_include_directories(mib_studio_qt PRIVATE ${OpenCV_INCLUDE_DIRS})
     target_link_libraries(mib_studio_qt PRIVATE ${OpenCV_LIBS})
 endif()
+
+# ---------------------------------------------------------------------------
+# Standalone pump_control executable — cross-platform, serial-only.
+# No camera / HDF5 / OpenCV / ONNX / SQLite dependencies.
+# ---------------------------------------------------------------------------
+set(PUMP_CONTROL_SOURCES
+    src/standalone/pump_control/main.cpp
+    src/standalone/pump_control/PumpControlMainWindow.cpp
+    include/standalone/pump_control/PumpControlMainWindow.h
+    # Reused backend sources (compiled into this target independently of
+    # mib_backend so we do not drag OpenCV/HDF5/etc. into pump_control).
+    src/backend/services/SyringePumpService.cpp
+    include/backend/services/SyringePumpService.h
+    src/backend/services/Logger.cpp
+    include/backend/services/Logger.h
+    src/backend/Tools.cpp
+    include/backend/Tools.h
+    # Reused frontend sources
+    src/frontend/tabs/SyringePumpTab.cpp
+    include/frontend/tabs/SyringePumpTab.h
+    src/frontend/widgets/PumpRowWidget.cpp
+    include/frontend/widgets/PumpRowWidget.h
+    src/frontend/dialogs/SyringePumpSettingsDialog.cpp
+    include/frontend/dialogs/SyringePumpSettingsDialog.h
+)
+
+if(WIN32)
+    add_executable(pump_control WIN32 ${PUMP_CONTROL_SOURCES} resources/app_icon.rc)
+else()
+    add_executable(pump_control ${PUMP_CONTROL_SOURCES})
+endif()
+
+set_target_properties(pump_control PROPERTIES
+    AUTOMOC ON
+    AUTOUIC ON
+)
+target_include_directories(pump_control PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(pump_control PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::SerialPort
+    spdlog::spdlog
+)
+if(TARGET nlohmann_json::nlohmann_json)
+    target_link_libraries(pump_control PRIVATE nlohmann_json::nlohmann_json)
+endif()
+target_compile_definitions(pump_control PRIVATE
+    PUMP_CONTROL_VERSION="${PROJECT_VERSION}"
+    $<$<CONFIG:Debug>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG>
+)
 
 # Qt deployment via windeployqt (Conan)
 if(WIN32)
@@ -529,7 +582,7 @@ if(WIN32)
     endforeach()
     list(REMOVE_DUPLICATES _EXTRA_CODEC_DLLS)
 
-    foreach(app_target IN ITEMS mib_studio_qt)
+    foreach(app_target IN ITEMS mib_studio_qt pump_control)
         # Use different windeployqt for Debug vs Release
         if(WINDEPLOYQT_RELEASE)
             # Check if Debug and Release Qt DLLs exist
@@ -703,14 +756,7 @@ if(WIN32)
                 VERBATIM
             )
         endforeach()
-        # Copy Coremor DLL
-        add_custom_command(TARGET ${app_target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor/XMT_DLL_SER.dll"
-                    "$<TARGET_FILE_DIR:${app_target}>/"
-            COMMENT "Copy Coremor DLL: ${app_target}"
-        )
-        # Copy Conan package DLLs (OpenCV, HDF5, SQLite3, etc.)
+        # Copy Conan package DLLs (only the ones this target actually links against).
         add_custom_command(TARGET ${app_target} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     $<TARGET_RUNTIME_DLLS:${app_target}>
@@ -718,15 +764,23 @@ if(WIN32)
             COMMAND_EXPAND_LISTS
             COMMENT "Copying Conan package DLLs for ${app_target}"
         )
-        # Copy resources/models directory (YOLO model files)
-        add_custom_command(TARGET ${app_target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory
-                    "$<TARGET_FILE_DIR:${app_target}>/resources/models"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${CMAKE_CURRENT_SOURCE_DIR}/resources/models/yolo11n-seg.onnx"
-                    "$<TARGET_FILE_DIR:${app_target}>/resources/models/"
-            COMMENT "Copying YOLO model files for ${app_target}"
-        )
+        # Coremor DLL + YOLO model are only needed by the main app.
+        if(${app_target} STREQUAL "mib_studio_qt")
+            add_custom_command(TARGET ${app_target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${CMAKE_CURRENT_SOURCE_DIR}/include/Coremor/XMT_DLL_SER.dll"
+                        "$<TARGET_FILE_DIR:${app_target}>/"
+                COMMENT "Copy Coremor DLL: ${app_target}"
+            )
+            add_custom_command(TARGET ${app_target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E make_directory
+                        "$<TARGET_FILE_DIR:${app_target}>/resources/models"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${CMAKE_CURRENT_SOURCE_DIR}/resources/models/yolo11n-seg.onnx"
+                        "$<TARGET_FILE_DIR:${app_target}>/resources/models/"
+                COMMENT "Copying YOLO model files for ${app_target}"
+            )
+        endif()
     endforeach()
 endif()
 

@@ -1,5 +1,6 @@
 #include "backend/Tools.h"
 
+#include <QSerialPortInfo>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -123,8 +124,31 @@ std::vector<int> Tools::availableComPortNumbers() {
     ports.erase(std::unique(ports.begin(), ports.end()), ports.end());
     return ports;
 #else
-    return {};
+    // Fallback via QSerialPortInfo: extract trailing digits from "COM<n>"-style
+    // names when present; otherwise the list is empty on non-Windows.
+    std::vector<int> ports;
+    for (const auto& info : QSerialPortInfo::availablePorts()) {
+        const QString name = info.portName();
+        if (name.startsWith("COM", Qt::CaseInsensitive)) {
+            bool ok = false;
+            int n = name.mid(3).toInt(&ok);
+            if (ok && n >= 1 && n <= 256) ports.push_back(n);
+        }
+    }
+    std::sort(ports.begin(), ports.end());
+    ports.erase(std::unique(ports.begin(), ports.end()), ports.end());
+    return ports;
 #endif
+}
+
+QStringList Tools::availableSerialPortNames() {
+    QStringList names;
+    for (const auto& info : QSerialPortInfo::availablePorts()) {
+        names.append(info.portName());
+    }
+    names.sort();
+    names.removeDuplicates();
+    return names;
 }
 
 } // namespace backend

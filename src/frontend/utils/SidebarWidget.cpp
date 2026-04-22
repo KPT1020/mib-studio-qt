@@ -70,8 +70,10 @@ namespace frontend
         pumpSeparator->setFrameShadow(QFrame::Sunken);
         contentLayout_->addWidget(pumpSeparator);
 
-        // Syringe pump tab
-        syringePumpTab_ = new SyringePumpTab(backend_, contentWidget_);
+        // Syringe pump tab. Ensure Sample/Sheath defaults on first run so
+        // existing users see the same two pumps they had before.
+        syringePumpTab_ = new SyringePumpTab(backend_.syringePump(), contentWidget_);
+        syringePumpTab_->ensureDefaultPumps({QStringLiteral("Sample"), QStringLiteral("Sheath")});
         contentLayout_->addWidget(syringePumpTab_);
 
         contentLayout_->addStretch();
