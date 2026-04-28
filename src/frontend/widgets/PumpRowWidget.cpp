@@ -110,7 +110,9 @@ void PumpRowWidget::setViewState(const ViewState& state) {
                                             ? 0
                                             : 1);
     ui->baudCombo->setCurrentIndex(comboIndexFromBaudRate(state.baudRate));
-    ui->addressSpinBox->setValue(static_cast<int>(state.modbusAddress));
+    if (!isAddressEditInProgress()) {
+        ui->addressSpinBox->setValue(static_cast<int>(state.modbusAddress));
+    }
     ui->syringeVolSpinBox->setValue(static_cast<int>(state.syringeVolume));
     ui->syringeUnitCombo->setCurrentIndex(comboIndexFromSyringeUnit(state.syringeVolumeUnit));
 }
@@ -128,6 +130,10 @@ PumpRowWidget::ViewState PumpRowWidget::viewState() const {
     state.syringeVolume = static_cast<uint16_t>(ui->syringeVolSpinBox->value());
     state.syringeVolumeUnit = syringeUnitFromComboIndex(ui->syringeUnitCombo->currentIndex());
     return state;
+}
+
+bool PumpRowWidget::isAddressEditInProgress() const {
+    return ui->addressSpinBox->hasFocus();
 }
 
 void PumpRowWidget::setPortChoices(const QStringList& availablePorts, const QString& currentSelection) {

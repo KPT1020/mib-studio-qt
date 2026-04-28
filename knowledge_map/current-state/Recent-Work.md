@@ -113,6 +113,26 @@
 
 ## Recent fixes
 
+- **2026-04-28** — Standalone pump Modbus address edit no longer snaps back during typing.
+  `SyringePumpTab::onUpdateStatus()` refreshes each row every 500 ms, and
+  `PumpRowWidget::setViewState()` previously rewrote `addressSpinBox` on every
+  refresh. Because address persistence is triggered on `editingFinished`, active
+  edits could be clobbered by the last saved/default value (often `1`).
+  `PumpRowWidget` now guards address refresh while the spin box has focus
+  (`isAddressEditInProgress()`), preserving the current edit until commit.
+
+- **2026-04-28** — Pump connection regression fix (`claude/sync-syringe-pump-settings-W39wO`).
+  Removing `SyringePumpSettingsDialog` (2026-04-21) broke the sheath pump connection: the
+  old dialog stored port/address/baud in QSettings, not `config.json`. When the new
+  `pump_ports` migration ran without those QSettings entries, `migrateLegacyConfig()` fell
+  back to `address=1` for the sheath pump, which lives at Modbus address 2. Every connect
+  attempt timed out with "not responding on COM6 addr=1". Fixes: (1) changed migration
+  default for sheath address from `1` → `2`; (2) corrected `build/include/config.json` on
+  disk (both pumps had been saved as "Pump 2" with address=1); (3) changed `connect()`
+  handshake from write-only to read-then-write for safer liveness detection; (4) added
+  `logVerbose` parameter to `sendRequest()` so connect-phase TX/RX bytes log at INFO with
+  `[CRC MISMATCH]` annotation on corrupt frames.
+
 - **2026-04-20** — Made ONNX Runtime optional for Linux/cloud configure paths.
   `CMakeLists.txt` now uses `find_package(onnxruntime CONFIG QUIET)`, sets
   `MIB_HAS_ONNXRUNTIME`, and compiles `YoloService.cpp` only when the

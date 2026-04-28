@@ -36,6 +36,7 @@ public:
 
     void setViewState(const ViewState& state);
     ViewState viewState() const;
+    bool isAddressEditInProgress() const;
 
     void setPortChoices(const QStringList& availablePorts, const QString& currentSelection);
 

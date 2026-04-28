@@ -35,4 +35,8 @@
   When a pump's port changes, sibling rows' port lists are repopulated.
 - `flowRateUnit` and `syringeVolumeUnit` are integer codes, not strings —
   `100` = µL / µL/min, `103` = mL / mL/min.
+- Row status refresh runs every 500 ms. `PumpRowWidget::setViewState()` skips
+  Modbus address writes while the address spin box has focus, preventing
+  in-progress edits from being overwritten before `editingFinished` commits
+  and persists the new value.
 - See `docs/dLSP_pump.pdf` for the protocol.
