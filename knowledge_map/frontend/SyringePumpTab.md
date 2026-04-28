@@ -16,6 +16,8 @@
   flow rate, accumulated volume, stall indicator.
 - Delegate COM port / baud / Modbus address configuration to
   `SyringePumpSettingsDialog`.
+- `SyringePumpSettingsDialog` now includes per-pump baud/address fields and
+  in-dialog address scan; tab connect buttons consume those persisted values.
 
 ## Gotchas
 

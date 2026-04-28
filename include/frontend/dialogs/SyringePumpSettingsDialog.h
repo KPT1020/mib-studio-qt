@@ -14,12 +14,17 @@ public:
 private slots:
     void onApply();
     void onRefreshPorts();
+    void onScanSampleAddresses();
+    void onScanSheathAddresses();
+    void onUseSampleScannedAddress();
+    void onUseSheathScannedAddress();
 
 private:
     void loadConfig();
     void saveConfig();
     QString configPath() const;
     void populateComPorts();
+    void scanAddresses(bool samplePump);
 
     Ui::SyringePumpSettingsDialog* ui;
     backend::AppBackend& backend_;

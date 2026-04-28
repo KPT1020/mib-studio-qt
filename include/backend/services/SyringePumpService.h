@@ -77,6 +77,14 @@ public:
     // Get COM port in use by a specific pump (for port collision avoidance)
     int getComPort(PumpId id) const;
 
+    // Probe a COM port and return responsive Modbus addresses for dLSP pumps.
+    std::vector<uint8_t> scanModbusAddresses(
+        int comPort,
+        int baudRate,
+        uint8_t startAddress = 1,
+        uint8_t endAddress = 8,
+        int timeoutMs = 300);
+
 private:
     // Modbus RTU helpers
     static uint16_t crc16(const uint8_t* data, size_t len);

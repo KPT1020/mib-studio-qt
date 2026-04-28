@@ -7,6 +7,7 @@
 #include <QMessageBox>
 #include <QSettings>
 #include <QTextStream>
+#include <QSignalBlocker>
 
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
@@ -66,6 +67,10 @@ SyringePumpSettingsDialog::SyringePumpSettingsDialog(backend::AppBackend& backen
 
     connect(ui->sampleRefreshBtn, &QPushButton::clicked, this, &SyringePumpSettingsDialog::onRefreshPorts);
     connect(ui->sheathRefreshBtn, &QPushButton::clicked, this, &SyringePumpSettingsDialog::onRefreshPorts);
+    connect(ui->sampleScanAddrBtn, &QPushButton::clicked, this, &SyringePumpSettingsDialog::onScanSampleAddresses);
+    connect(ui->sheathScanAddrBtn, &QPushButton::clicked, this, &SyringePumpSettingsDialog::onScanSheathAddresses);
+    connect(ui->sampleApplyScanAddrBtn, &QPushButton::clicked, this, &SyringePumpSettingsDialog::onUseSampleScannedAddress);
+    connect(ui->sheathApplyScanAddrBtn, &QPushButton::clicked, this, &SyringePumpSettingsDialog::onUseSheathScannedAddress);
 
     connect(ui->buttonBox, &QDialogButtonBox::accepted, this, [this]() { onApply(); accept(); });
     connect(ui->buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -95,6 +100,53 @@ void SyringePumpSettingsDialog::onApply() {
 
 void SyringePumpSettingsDialog::onRefreshPorts() {
     populateComPorts();
+}
+
+void SyringePumpSettingsDialog::onScanSampleAddresses() {
+    scanAddresses(true);
+}
+
+void SyringePumpSettingsDialog::onScanSheathAddresses() {
+    scanAddresses(false);
+}
+
+void SyringePumpSettingsDialog::onUseSampleScannedAddress() {
+    if (ui->sampleScanResultCombo->currentIndex() < 0) return;
+    ui->sampleAddressSpinBox->setValue(ui->sampleScanResultCombo->currentData().toInt());
+}
+
+void SyringePumpSettingsDialog::onUseSheathScannedAddress() {
+    if (ui->sheathScanResultCombo->currentIndex() < 0) return;
+    ui->sheathAddressSpinBox->setValue(ui->sheathScanResultCombo->currentData().toInt());
+}
+
+void SyringePumpSettingsDialog::scanAddresses(bool samplePump) {
+    auto* comCombo = samplePump ? ui->sampleComPortCombo : ui->sheathComPortCombo;
+    auto* baudSpin = samplePump ? ui->sampleBaudRateSpinBox : ui->sheathBaudRateSpinBox;
+    auto* resultCombo = samplePump ? ui->sampleScanResultCombo : ui->sheathScanResultCombo;
+
+    if (comCombo->currentIndex() < 0) {
+        QMessageBox::warning(this, tr("Scan Failed"), tr("Select a COM port first."));
+        return;
+    }
+
+    const int comPort = comCombo->currentData().toInt();
+    const int baudRate = baudSpin->value();
+    const auto found = backend_.syringePump().scanModbusAddresses(comPort, baudRate, 1, 8, 300);
+
+    QSignalBlocker blocker(resultCombo);
+    resultCombo->clear();
+    for (uint8_t addr : found) {
+        resultCombo->addItem(QString::number(addr), static_cast<int>(addr));
+    }
+
+    if (found.empty()) {
+        QMessageBox::information(this, tr("Scan Complete"),
+            tr("No pump address responded on COM%1 at %2 baud.").arg(comPort).arg(baudRate));
+    } else {
+        QMessageBox::information(this, tr("Scan Complete"),
+            tr("Found %1 responsive address(es) on COM%2.").arg(found.size()).arg(comPort));
+    }
 }
 
 void SyringePumpSettingsDialog::populateComPorts() {
@@ -145,6 +197,10 @@ void SyringePumpSettingsDialog::loadConfig() {
             int idx = ui->sampleComPortCombo->findData(config["pump_sample_com_port"].get<int>());
             if (idx >= 0) ui->sampleComPortCombo->setCurrentIndex(idx);
         }
+        if (config.contains("pump_sample_baud_rate"))
+            ui->sampleBaudRateSpinBox->setValue(config["pump_sample_baud_rate"].get<int>());
+        if (config.contains("pump_sample_address"))
+            ui->sampleAddressSpinBox->setValue(config["pump_sample_address"].get<int>());
         if (config.contains("pump_sample_syringe_vol"))
             ui->sampleSyringeVolSpinBox->setValue(config["pump_sample_syringe_vol"].get<double>());
         if (config.contains("pump_sample_syringe_unit")) {
@@ -156,6 +212,10 @@ void SyringePumpSettingsDialog::loadConfig() {
             int idx = ui->sheathComPortCombo->findData(config["pump_sheath_com_port"].get<int>());
             if (idx >= 0) ui->sheathComPortCombo->setCurrentIndex(idx);
         }
+        if (config.contains("pump_sheath_baud_rate"))
+            ui->sheathBaudRateSpinBox->setValue(config["pump_sheath_baud_rate"].get<int>());
+        if (config.contains("pump_sheath_address"))
+            ui->sheathAddressSpinBox->setValue(config["pump_sheath_address"].get<int>());
         if (config.contains("pump_sheath_syringe_vol"))
             ui->sheathSyringeVolSpinBox->setValue(config["pump_sheath_syringe_vol"].get<double>());
         if (config.contains("pump_sheath_syringe_unit")) {
@@ -181,15 +241,15 @@ void SyringePumpSettingsDialog::saveConfig() {
 
         if (ui->sampleComPortCombo->currentIndex() >= 0)
             config["pump_sample_com_port"] = ui->sampleComPortCombo->currentData().toInt();
-        config["pump_sample_baud_rate"] = 115200;
-        config["pump_sample_address"] = 1;
+        config["pump_sample_baud_rate"] = ui->sampleBaudRateSpinBox->value();
+        config["pump_sample_address"] = ui->sampleAddressSpinBox->value();
         config["pump_sample_syringe_vol"] = ui->sampleSyringeVolSpinBox->value();
         config["pump_sample_syringe_unit"] = ui->sampleSyringeUnitCombo->currentData().toUInt();
 
         if (ui->sheathComPortCombo->currentIndex() >= 0)
             config["pump_sheath_com_port"] = ui->sheathComPortCombo->currentData().toInt();
-        config["pump_sheath_baud_rate"] = 115200;
-        config["pump_sheath_address"] = 1;
+        config["pump_sheath_baud_rate"] = ui->sheathBaudRateSpinBox->value();
+        config["pump_sheath_address"] = ui->sheathAddressSpinBox->value();
         config["pump_sheath_syringe_vol"] = ui->sheathSyringeVolSpinBox->value();
         config["pump_sheath_syringe_unit"] = ui->sheathSyringeUnitCombo->currentData().toUInt();
 

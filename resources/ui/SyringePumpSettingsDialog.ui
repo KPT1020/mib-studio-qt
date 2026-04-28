@@ -42,9 +42,52 @@
        </layout>
       </item>
       <item row="1" column="0">
-       <widget class="QLabel"><property name="text"><string>Syringe Vol:</string></property></widget>
+       <widget class="QLabel"><property name="text"><string>Baud Rate:</string></property></widget>
       </item>
       <item row="1" column="1">
+       <widget class="QSpinBox" name="sampleBaudRateSpinBox">
+        <property name="minimum"><number>1200</number></property>
+        <property name="maximum"><number>921600</number></property>
+        <property name="value"><number>115200</number></property>
+        <property name="singleStep"><number>1200</number></property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel"><property name="text"><string>Modbus Addr:</string></property></widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QSpinBox" name="sampleAddressSpinBox">
+        <property name="minimum"><number>1</number></property>
+        <property name="maximum"><number>247</number></property>
+        <property name="value"><number>1</number></property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel"><property name="text"><string>Addr Scan:</string></property></widget>
+      </item>
+      <item row="3" column="1">
+       <layout class="QHBoxLayout">
+        <item>
+         <widget class="QPushButton" name="sampleScanAddrBtn">
+          <property name="text"><string>Scan</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QComboBox" name="sampleScanResultCombo">
+          <property name="minimumContentsLength"><number>8</number></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="sampleApplyScanAddrBtn">
+          <property name="text"><string>Use</string></property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel"><property name="text"><string>Syringe Vol:</string></property></widget>
+      </item>
+      <item row="4" column="1">
        <layout class="QHBoxLayout">
         <item>
          <widget class="QDoubleSpinBox" name="sampleSyringeVolSpinBox">
@@ -92,9 +135,52 @@
        </layout>
       </item>
       <item row="1" column="0">
-       <widget class="QLabel"><property name="text"><string>Syringe Vol:</string></property></widget>
+       <widget class="QLabel"><property name="text"><string>Baud Rate:</string></property></widget>
       </item>
       <item row="1" column="1">
+       <widget class="QSpinBox" name="sheathBaudRateSpinBox">
+        <property name="minimum"><number>1200</number></property>
+        <property name="maximum"><number>921600</number></property>
+        <property name="value"><number>115200</number></property>
+        <property name="singleStep"><number>1200</number></property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel"><property name="text"><string>Modbus Addr:</string></property></widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QSpinBox" name="sheathAddressSpinBox">
+        <property name="minimum"><number>1</number></property>
+        <property name="maximum"><number>247</number></property>
+        <property name="value"><number>2</number></property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel"><property name="text"><string>Addr Scan:</string></property></widget>
+      </item>
+      <item row="3" column="1">
+       <layout class="QHBoxLayout">
+        <item>
+         <widget class="QPushButton" name="sheathScanAddrBtn">
+          <property name="text"><string>Scan</string></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QComboBox" name="sheathScanResultCombo">
+          <property name="minimumContentsLength"><number>8</number></property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="sheathApplyScanAddrBtn">
+          <property name="text"><string>Use</string></property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel"><property name="text"><string>Syringe Vol:</string></property></widget>
+      </item>
+      <item row="4" column="1">
        <layout class="QHBoxLayout">
         <item>
          <widget class="QDoubleSpinBox" name="sheathSyringeVolSpinBox">

@@ -15,6 +15,8 @@
   `purge`, `stopPurge`, `setSyringeVolume`.
 - Per-pump status polling: `pollStatus(id)` — UI timer drives this.
 - Expose config/status structs (`PumpConfig`, `PumpStatus`).
+- Provide `scanModbusAddresses(comPort, baudRate, start, end, timeoutMs)` for
+  settings-time address discovery on a selected serial port.
 
 ## Enums
 
@@ -28,6 +30,9 @@ Private: CRC-16, `buildReadRequest`, `buildWriteSingleRequest`,
 `buildWriteMultipleRequest`, big-endian ABCD float ↔ two 16-bit registers,
 `readHoldingRegisters`, `writeSingleRegister`,
 `writeMultipleRegisters`.
+
+Public scan helper probes `REG_RUN_COMMAND` (`0x0001`) with Modbus function
+`0x03` over an address range (default 1..8) and returns responsive addresses.
 
 ## Threading
 

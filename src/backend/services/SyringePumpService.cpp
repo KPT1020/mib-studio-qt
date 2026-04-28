@@ -554,6 +554,104 @@ int SyringePumpService::getComPort(PumpId id) const {
     return pump.config.comPort;
 }
 
+std::vector<uint8_t> SyringePumpService::scanModbusAddresses(
+    int comPort,
+    int baudRate,
+    uint8_t startAddress,
+    uint8_t endAddress,
+    int timeoutMs) {
+    std::vector<uint8_t> addresses;
+    if (comPort <= 0 || baudRate <= 0) {
+        return addresses;
+    }
+    if (startAddress == 0 || endAddress == 0 || startAddress > endAddress) {
+        return addresses;
+    }
+
+    QSerialPort serial;
+    serial.setPortName(QString("COM%1").arg(comPort));
+    serial.setBaudRate(baudRate);
+    serial.setDataBits(QSerialPort::Data8);
+    serial.setParity(QSerialPort::NoParity);
+    serial.setStopBits(QSerialPort::OneStop);
+    serial.setFlowControl(QSerialPort::NoFlowControl);
+
+    if (!serial.open(QIODevice::ReadWrite)) {
+        SPDLOG_WARN("SyringePumpService: scan failed to open COM{}: {}",
+                    comPort, serial.errorString().toStdString());
+        return addresses;
+    }
+
+    for (uint16_t addr = startAddress; addr <= endAddress; ++addr) {
+        QByteArray request(6, 0);
+        request[0] = static_cast<char>(addr);
+        request[1] = static_cast<char>(FUNC_READ_HOLDING);
+        request[2] = static_cast<char>((REG_RUN_COMMAND >> 8) & 0xFF);
+        request[3] = static_cast<char>(REG_RUN_COMMAND & 0xFF);
+        request[4] = 0x00;
+        request[5] = 0x01;
+        uint16_t crc = crc16(reinterpret_cast<const uint8_t*>(request.constData()), 6);
+        request.append(static_cast<char>(crc & 0xFF));
+        request.append(static_cast<char>((crc >> 8) & 0xFF));
+
+        serial.readAll();
+        std::this_thread::sleep_for(std::chrono::milliseconds(INTER_FRAME_DELAY_MS));
+
+        if (serial.write(request) != request.size()) {
+            continue;
+        }
+        if (!serial.waitForBytesWritten(timeoutMs)) {
+            continue;
+        }
+        if (!serial.waitForReadyRead(timeoutMs)) {
+            continue;
+        }
+
+        QByteArray response = serial.readAll();
+        while (serial.waitForReadyRead(20)) {
+            response.append(serial.readAll());
+            if (response.size() >= 7) {
+                break;
+            }
+        }
+        if (response.size() < 5) {
+            continue;
+        }
+
+        const uint8_t rxAddr = static_cast<uint8_t>(response[0]);
+        const uint8_t rxFunc = static_cast<uint8_t>(response[1]);
+        if (rxAddr != static_cast<uint8_t>(addr)) {
+            continue;
+        }
+        if (rxFunc & 0x80) {
+            continue;
+        }
+        if (rxFunc != FUNC_READ_HOLDING) {
+            continue;
+        }
+
+        const int frameSize = 3 + static_cast<int>(static_cast<uint8_t>(response[2])) + 2;
+        if (response.size() < frameSize || frameSize < 5) {
+            continue;
+        }
+        response = response.left(frameSize);
+
+        const size_t dataLen = static_cast<size_t>(response.size()) - 2;
+        const uint16_t receivedCrc = static_cast<uint16_t>(
+            (static_cast<uint8_t>(response[response.size() - 1]) << 8) |
+             static_cast<uint8_t>(response[response.size() - 2]));
+        const uint16_t calculatedCrc = crc16(reinterpret_cast<const uint8_t*>(response.constData()), dataLen);
+        if (receivedCrc != calculatedCrc) {
+            continue;
+        }
+
+        addresses.push_back(static_cast<uint8_t>(addr));
+    }
+
+    serial.close();
+    return addresses;
+}
+
 void SyringePumpService::pollStatus(PumpId id) {
     int idx = static_cast<int>(id);
     auto& pump = pumps_[static_cast<size_t>(idx)];

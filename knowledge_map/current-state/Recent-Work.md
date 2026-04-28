@@ -97,6 +97,11 @@
 
 ## Recent fixes
 
+- **2026-04-28** — Syringe Pump Settings now supports per-pump Modbus
+  baud/address configuration and in-dialog address scanning. Added
+  `SyringePumpService::scanModbusAddresses(...)` and wired Sample/Sheath scan
+  controls in `SyringePumpSettingsDialog` so discovered addresses can be
+  applied directly and persisted to config.
 - **2026-04-28** — Added a standalone raw-serial Modbus helper script for
   dLSP501 pump bring-up and manual control:
   `scripts/dlsp501_pump_minimal.py` (+ unit tests in
