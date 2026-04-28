@@ -97,6 +97,12 @@
 
 ## Recent fixes
 
+- **2026-04-28** — Added a standalone raw-serial Modbus helper script for
+  dLSP501 pump bring-up and manual control:
+  `scripts/dlsp501_pump_minimal.py` (+ unit tests in
+  `scripts/test_dlsp501_pump_minimal.py`). The script uses pyserial only
+  (no higher-level Modbus package) and exposes minimal commands for
+  enable/start/stop, flow+direction setup, purge, and status reads.
 - **2026-04-20** — Removed obsolete `capture_processing_test` from the build.
   `CMakeLists.txt` no longer defines a `BUILD_TESTING` block for the deleted
   `src/tests/capture_processing_test.cpp` harness, and docs/vault notes were

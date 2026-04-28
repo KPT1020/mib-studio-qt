@@ -3,3 +3,4 @@ h5py>=3.8.0
 numpy>=1.24.0
 opencv-python>=4.8.0
 pyinstaller>=5.13.0
+pyserial>=3.5
