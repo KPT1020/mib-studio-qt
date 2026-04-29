@@ -32,7 +32,7 @@ from typing import Any, Optional
 
 # Allow importing from same directory when run from repo root
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from export_hdf5 import read_experiment_info, read_hdf5_images, read_hdf5_metadata
+from export_hdf5 import imwrite_unicode, read_experiment_info, read_hdf5_images, read_hdf5_metadata
 
 try:
     import cv2
@@ -204,7 +204,7 @@ def _save_tiff(path: Path, img: np.ndarray) -> bool:
     img = _normalize_for_tiff(np.asarray(img))
     if len(img.shape) == 3 and img.shape[2] == 1:
         img = img[:, :, 0]
-    return cv2.imwrite(str(path), img)
+    return imwrite_unicode(path, img, ".tiff")
 
 
 def build_background_from_all_images(

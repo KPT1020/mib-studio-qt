@@ -26,6 +26,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 from datasets import load_dataset
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from export_hdf5 import imwrite_unicode  # noqa: E402
 from sklearn.metrics import (
     accuracy_score,
     classification_report,
@@ -233,7 +236,7 @@ def save_annotated_image(
         cv2.putText(vis, line, (5, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
 
     filename = f"{index:03d}_{gt_label}_{pred_label}.png"
-    cv2.imwrite(str(output_path / filename), vis)
+    imwrite_unicode(output_path / filename, vis, ".png")
     return output_path / filename
 
 
@@ -258,7 +261,7 @@ def save_intermediate_images(
     ]
     for name, img in stages:
         path = subdir / name
-        cv2.imwrite(str(path), img)
+        imwrite_unicode(path, img, ".png")
         saved.append(path)
 
     # Copy the annotated image as the 6th stage

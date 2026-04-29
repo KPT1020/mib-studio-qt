@@ -235,7 +235,7 @@ def export_images_to_tiff(
     metadata: np.ndarray,
     output_dir: Path,
     frame_type_prefix: str
-) -> int:
+) -> Tuple[int, int]:
     """
     Export images to TIFF files.
 
@@ -246,14 +246,15 @@ def export_images_to_tiff(
         frame_type_prefix: Prefix for filenames ("valid" or "invalid")
 
     Returns:
-        Number of images exported
+        Tuple of (exported_count, failed_count).
     """
     if not HAS_CV2:
         print("ERROR: opencv-python (cv2) is required for image export.", file=sys.stderr)
         print("Install with: pip install opencv-python", file=sys.stderr)
-        return 0
+        return 0, len(images)
 
     exported_count = 0
+    failed_count = 0
 
     for i, image in enumerate(images):
         # Get frame index from metadata
@@ -265,22 +266,24 @@ def export_images_to_tiff(
 
         image_bgr = _prepare_image_for_tiff(image, i)
         if image_bgr is None:
+            failed_count += 1
             continue
 
         # Write TIFF without compression (matching C++ behavior)
-        if cv2.imwrite(str(filepath), image_bgr):
+        if imwrite_unicode(filepath, image_bgr):
             exported_count += 1
         else:
+            failed_count += 1
             print(f"WARNING: Failed to write image {filepath}", file=sys.stderr)
 
-    return exported_count
+    return exported_count, failed_count
 
 
 def export_series_images_to_tiff(
     h5_file: h5py.File,
     metadata: np.ndarray,
     output_dir: Path
-) -> int:
+) -> Tuple[int, int]:
     """
     Export multi-image series data from /valid_frames/series_images.
 
@@ -293,24 +296,25 @@ def export_series_images_to_tiff(
         output_dir: Output directory
 
     Returns:
-        Number of series images exported
+        Tuple of (exported_count, failed_count).
     """
     if not HAS_CV2:
-        return 0
+        return 0, 0
 
     dataset_path = "/valid_frames/series_images"
     if dataset_path not in h5_file:
-        return 0
+        return 0, 0
 
     series_ds = h5_file[dataset_path]
     if len(series_ds.shape) != 4:
         print(f"WARNING: series_images has unexpected shape {series_ds.shape}", file=sys.stderr)
-        return 0
+        return 0, 0
 
     n_records, series_count, height, width = series_ds.shape
     print(f"Found series_images: {n_records} records x {series_count} images ({height}x{width})")
 
     exported_count = 0
+    failed_count = 0
     for i in range(min(n_records, len(metadata))):
         frame_index = metadata[i]['index']
         series_data = series_ds[i]  # shape: (seriesCount, H, W)
@@ -321,10 +325,34 @@ def export_series_images_to_tiff(
             filepath = output_dir / filename
 
             image_out = _prepare_image_for_tiff(image, i)
-            if image_out is not None and cv2.imwrite(str(filepath), image_out):
+            if image_out is None:
+                failed_count += 1
+                continue
+            if imwrite_unicode(filepath, image_out):
                 exported_count += 1
+            else:
+                failed_count += 1
+                print(f"WARNING: Failed to write image {filepath}", file=sys.stderr)
 
-    return exported_count
+    return exported_count, failed_count
+
+
+def imwrite_unicode(filepath: Path, image: np.ndarray, ext: str = ".tiff") -> bool:
+    """Write image to disk via cv2 in a way that tolerates non-ASCII paths.
+
+    cv2.imwrite goes through the C runtime fopen, which on Windows uses the
+    active code page (MBCS) and silently fails for paths outside it (returns
+    False). Encoding in memory and writing the bytes through numpy.tofile
+    routes through Python's Unicode-aware filesystem APIs.
+    """
+    success, buf = cv2.imencode(ext, image)
+    if not success:
+        return False
+    try:
+        buf.tofile(str(filepath))
+        return True
+    except OSError:
+        return False
 
 
 def _prepare_image_for_tiff(image: np.ndarray, index: int) -> Optional[np.ndarray]:
@@ -437,45 +465,50 @@ def export_hdf5(
             if format_type in ("images", "all"):
                 total_exported = 0
                 
+                total_failed = 0
+
                 # Export valid frames
                 if frame_type in ("valid", "both") and metadata_valid is not None:
                     images_valid = read_hdf5_images(h5_file, "/valid_frames/images")
                     if images_valid is not None:
-                        exported = export_images_to_tiff(
+                        exported, failed = export_images_to_tiff(
                             images_valid,
                             metadata_valid,
                             output_dir,
                             "valid"
                         )
                         total_exported += exported
-                        print(f"Exported {exported} valid frame images")
+                        total_failed += failed
+                        print(f"Exported {exported} valid frame images" + (f" ({failed} failed)" if failed else ""))
                     else:
                         print("WARNING: /valid_frames/images dataset not found", file=sys.stderr)
 
                     # Export multi-image series if present
-                    series_exported = export_series_images_to_tiff(
+                    series_exported, series_failed = export_series_images_to_tiff(
                         h5_file, metadata_valid, output_dir
                     )
-                    if series_exported > 0:
+                    if series_exported > 0 or series_failed > 0:
                         total_exported += series_exported
-                        print(f"Exported {series_exported} series images")
-                
+                        total_failed += series_failed
+                        print(f"Exported {series_exported} series images" + (f" ({series_failed} failed)" if series_failed else ""))
+
                 # Export invalid frames
                 if frame_type in ("invalid", "both") and metadata_invalid is not None:
                     images_invalid = read_hdf5_images(h5_file, "/invalid_frames/images")
                     if images_invalid is not None:
-                        exported = export_images_to_tiff(
+                        exported, failed = export_images_to_tiff(
                             images_invalid,
                             metadata_invalid,
                             output_dir,
                             "invalid"
                         )
                         total_exported += exported
-                        print(f"Exported {exported} invalid frame images")
+                        total_failed += failed
+                        print(f"Exported {exported} invalid frame images" + (f" ({failed} failed)" if failed else ""))
                     else:
                         print("WARNING: /invalid_frames/images dataset not found", file=sys.stderr)
-                
-                print(f"Total images exported: {total_exported}")
+
+                print(f"Total images exported: {total_exported}" + (f" ({total_failed} failed)" if total_failed else ""))
             
             # Read and display experiment info if available
             exp_info = read_experiment_info(h5_file)

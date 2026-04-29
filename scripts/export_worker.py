@@ -142,50 +142,75 @@ class ExportWorker(QObject):
                 if format_type in ("images", "all"):
                     self.progress_message.emit("Exporting images...")
                     self.progress_value.emit(50)
-                    
+
                     total_exported = 0
-                    
+                    total_failed = 0
+                    expected_any_images = False
+
                     # Export valid frames
                     if frame_type in ("valid", "both") and metadata_valid is not None:
                         images_valid = read_hdf5_images(h5_file, "/valid_frames/images")
                         if images_valid is not None:
+                            expected_any_images = expected_any_images or len(images_valid) > 0
                             self.progress_message.emit("Exporting valid frame images...")
-                            exported = export_images_to_tiff(
+                            exported, failed = export_images_to_tiff(
                                 images_valid,
                                 metadata_valid,
                                 output_dir,
                                 "valid"
                             )
                             total_exported += exported
+                            total_failed += failed
                             self.progress_message.emit(f"Exported {exported} valid frame images")
+                            if failed > 0:
+                                self.progress_message.emit(
+                                    f"WARNING: {failed} valid frame images failed to write"
+                                )
                         else:
                             self.progress_message.emit("WARNING: /valid_frames/images dataset not found")
-                        
+
                         if self._cancel_requested:
                             self.finished.emit(False, "Export cancelled by user")
                             return
-                    
+
                     # Export invalid frames
                     if frame_type in ("invalid", "both") and metadata_invalid is not None:
                         images_invalid = read_hdf5_images(h5_file, "/invalid_frames/images")
                         if images_invalid is not None:
+                            expected_any_images = expected_any_images or len(images_invalid) > 0
                             self.progress_message.emit("Exporting invalid frame images...")
-                            exported = export_images_to_tiff(
+                            exported, failed = export_images_to_tiff(
                                 images_invalid,
                                 metadata_invalid,
                                 output_dir,
                                 "invalid"
                             )
                             total_exported += exported
+                            total_failed += failed
                             self.progress_message.emit(f"Exported {exported} invalid frame images")
+                            if failed > 0:
+                                self.progress_message.emit(
+                                    f"WARNING: {failed} invalid frame images failed to write"
+                                )
                         else:
                             self.progress_message.emit("WARNING: /invalid_frames/images dataset not found")
-                        
+
                         if self._cancel_requested:
                             self.finished.emit(False, "Export cancelled by user")
                             return
-                    
+
                     self.progress_message.emit(f"Total images exported: {total_exported}")
+
+                    # Refuse to claim success if images were requested but nothing landed.
+                    if expected_any_images and total_exported == 0:
+                        self.finished.emit(
+                            False,
+                            "No images were written. The output path may contain "
+                            "characters unsupported by the OS image writer (e.g. "
+                            "non-ASCII characters on Windows). Try an output path "
+                            "with only ASCII characters."
+                        )
+                        return
                 
                 # Read experiment info
                 exp_info = read_experiment_info(h5_file)
