@@ -111,6 +111,13 @@ namespace backend
         if (!yoloService_->initialize(modelPath.string())) {
             SPDLOG_WARN("YOLO model not loaded - segmentation features will not be available");
         }
+        processingService_->setSegmentationMaskCallback(
+            [this](const cv::Mat& gray, cv::Mat& outMask, float threshold) -> bool {
+                if (!yoloService_) {
+                    return false;
+                }
+                return yoloService_->inferSegmentationMask(gray, outMask, threshold);
+            });
 
         // Load Young's modulus LUT for emodulus gating
         std::filesystem::path lutPath = exeDir / "resources" / "isoelastic_curve" / "scaled_isoelastic_data_LUT_6.16-4.24.txt";

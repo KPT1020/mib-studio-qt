@@ -22,7 +22,10 @@
 ## Pipeline (per frame)
 
 1. Optional background subtraction (`setRealtimeBackgroundGray`).
-2. Gaussian blur → threshold → morphological ops → contour find.
+2. Segment ROI/frame mask via either:
+   - classical path (Gaussian blur → threshold → morphology), or
+   - optional lightweight U-Net callback (`use_lightweight_unet=true`).
+   If U-Net inference is unavailable/fails, the classical path is used.
 3. `filterProcessedImage` produces a `FilterResult`:
    - `deformability`, `area` (μm² via `pixelToMicronFactor_`),
      `areaRatio`, `ringRatio`, `youngsModulus` (LUT lookup)
@@ -48,6 +51,8 @@ All gates in one struct. Notable fields:
   `enable_target_group_emodulus` + `target_group_emodulus_*` (uses
   `EModulusLut`)
 - Multi-image mode: `multi_image_enabled`, `multi_image_count`
+- Optional lightweight U-Net inference path:
+  `use_lightweight_unet`, `lightweight_unet_threshold`
 
 ## Accumulation modes
 
@@ -70,8 +75,8 @@ live camera — e.g., frames stored in an HDF5 experiment file or a folder of
 TIFFs — use:
 
 - `ProcessingService::computeProcessedFrame(grayInput, background, config, roi, index, ts)`
-  — pure helper: blur → (optional) background subtract → threshold →
-  morphology → `filterProcessedImage`. Zero side-effects (no monitoring
+  — pure helper: optional U-Net mask inference (or blur → background subtract
+  → threshold → morphology fallback) → `filterProcessedImage`. Zero side-effects (no monitoring
   rings, no experiment accumulation, no callbacks, no auto-background).
   Returns a `ProcessedFrame` with a full-size mask (zero outside ROI).
 - `ProcessingService::processBatch(grayImages, config, background, roi, progressCb)`
@@ -91,7 +96,8 @@ they're safe to run concurrently with live capture.
 
 - Realtime drop-frames mode is ignored while an experiment is active.
 - `pixelToMicronFactor_` default is `0.4886` — UI lets users change this.
-- YOLO is a separate service ([[YoloService]]); this pipeline does not use it.
+- Optional U-Net segmentation path is callback-driven (`setSegmentationMaskCallback`)
+  and wired from [[YoloService]] in `AppBackend`.
 - **Callback ordering invariant**: `TargetGroupCallback` and
   `RingRatioCallback` are invoked **before** `monitoringFramesMutex_` is
   taken (and with no other locks held) so the UI thread's periodic

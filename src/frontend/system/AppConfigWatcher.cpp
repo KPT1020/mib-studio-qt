@@ -279,6 +279,18 @@ namespace frontend
 					if (mi.contains("count"))
 						pcfg.multi_image_count = std::max(1, mi.value("count").toInt(pcfg.multi_image_count));
 				}
+				// Lightweight U-Net segmentation mode (optional ONNX path)
+				if (ip.contains("lightweight_unet") && ip.value("lightweight_unet").isObject())
+				{
+					const QJsonObject unet = ip.value("lightweight_unet").toObject();
+					if (unet.contains("enabled"))
+						pcfg.use_lightweight_unet = unet.value("enabled").toBool(pcfg.use_lightweight_unet);
+					if (unet.contains("threshold"))
+					{
+						const double threshold = unet.value("threshold").toDouble(static_cast<double>(pcfg.lightweight_unet_threshold));
+						pcfg.lightweight_unet_threshold = static_cast<float>(std::max(0.0, std::min(1.0, threshold)));
+					}
+				}
 			}
 		}
 		backend_.processing().setProcessingConfig(pcfg);
@@ -295,6 +307,10 @@ namespace frontend
 					pcfg.enable_target_group_emodulus, pcfg.target_group_emodulus_min, pcfg.target_group_emodulus_max);
 		if (pcfg.multi_image_enabled) {
 			SPDLOG_INFO("AppConfigWatcher: multi_image enabled, count={}", pcfg.multi_image_count);
+		}
+		if (pcfg.use_lightweight_unet) {
+			SPDLOG_INFO("AppConfigWatcher: lightweight_unet enabled, threshold={:.2f}",
+						pcfg.lightweight_unet_threshold);
 		}
 
 		// 2) Flush interval (buffer threshold)

@@ -37,6 +37,11 @@ bool YoloService::initialize(const std::string& /*modelPath*/) {
     return false;
 }
 
+bool YoloService::inferSegmentationMask(const cv::Mat& /*grayInput*/, cv::Mat& outMask, float /*threshold*/) const {
+    outMask.release();
+    return false;
+}
+
 Ort::Session* YoloService::getSession() const {
     return nullptr;
 }

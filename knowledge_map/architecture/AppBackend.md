@@ -30,7 +30,8 @@ See `src/backend/AppBackend.cpp` around lines 79–200.
 2. Instantiates all services + `FrameStore(5000)`.
 3. `sqliteService_->initialize(dataDir/app.sqlite3)`,
    `hdf5Service_->initialize(dataDir)`.
-4. Loads optional YOLO model from `resources/models/yolo11n-seg.onnx`.
+4. Loads optional ONNX segmentation model from
+   `resources/models/yolo11n-seg.onnx`.
 5. Loads Young's modulus LUT from
    `resources/isoelastic_curve/scaled_isoelastic_data_LUT_6.16-4.24.txt`.
 6. Starts the processing worker pool (`processingService_->start()`).
@@ -39,6 +40,9 @@ See `src/backend/AppBackend.cpp` around lines 79–200.
 7. Wires callbacks:
    - `ProcessingService::RingRatioCallback` → `AutofocusService::onRingRatio`
    - `ProcessingService::TargetGroupCallback` → `TriggerService::onTargetGroupResult`
+   - `ProcessingService::SegmentationMaskCallback` →
+     `YoloService::inferSegmentationMask` (used when
+     `image_processing.lightweight_unet.enabled=true`)
    - `CaptureService::CameraReadyCallback` → starts/stops `TriggerService`
      and hands it the live `ICamera*`
    - `ProcessingService::BackgroundCaptureCallback` → emits Qt signal via
