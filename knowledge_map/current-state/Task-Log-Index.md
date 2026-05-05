@@ -16,6 +16,7 @@
 
 ### Cloud/Linux build environment
 - `task/2026-04-20-cloud-toolchain-cxx-libstdcpp-fix.md`
+- `task/2026-05-05-hdf5-exporter-linux-macos-build.md`
 
 ### Mock camera / dev workflow
 - `task/mock_camera_dev_mode.md`
@@ -59,6 +60,7 @@
 2026-04-16-thread-performance-audit.md
 2026-04-20-linux-build-windows-hardware-guards.md
 2026-04-20-cloud-toolchain-cxx-libstdcpp-fix.md
+2026-05-05-hdf5-exporter-linux-macos-build.md
 camera-reset.md
 diagnostic-logging.md
 external-config-browse.md

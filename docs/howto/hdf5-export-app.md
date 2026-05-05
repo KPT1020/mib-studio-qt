@@ -6,7 +6,7 @@ This guide explains how to build and use the standalone HDF5 Export GUI applicat
 
 ## Overview
 
-The HDF5 Export GUI Application is a standalone PySide6 (Qt for Python) application that wraps the functionality of `scripts/export_hdf5.py` in a graphical user interface. It can be packaged as a standalone executable for Windows (.exe) and macOS (.app/.dmg).
+The HDF5 Export GUI Application is a standalone PySide6 (Qt for Python) application that wraps the functionality of `scripts/export_hdf5.py` in a graphical user interface. It can be packaged as a standalone executable for Windows (.exe), macOS (.app/.dmg), and Linux (ELF executable).
 
 ## Prerequisites
 
@@ -20,6 +20,12 @@ The HDF5 Export GUI Application is a standalone PySide6 (Qt for Python) applicat
 - Python 3.8 or later
 - Xcode Command Line Tools (for building)
 - `hdiutil` (included with macOS, for creating DMG files)
+
+### Linux
+
+- Python 3.8 or later
+- `pip` available for your Python installation
+- Optional but recommended: `python3-venv` package (if you want isolated venv builds)
 
 ## Building the Application
 
@@ -84,6 +90,29 @@ The HDF5 Export GUI Application is a standalone PySide6 (Qt for Python) applicat
    scripts/dist/hdf5_export_app.dmg
    ```
 
+### Linux
+
+1. **Navigate to the scripts directory:**
+   ```bash
+   cd scripts
+   ```
+
+2. **Run the Unix build script:**
+   ```bash
+   ./build_mac.sh
+   ```
+
+   To clean previous builds:
+   ```bash
+   ./build_mac.sh --clean
+   ```
+
+3. **Find the executable:**
+   The built executable will be located at:
+   ```
+   scripts/dist/hdf5_export_app
+   ```
+
 ## Manual Build Process
 
 If you prefer to build manually:
@@ -96,7 +125,7 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 ```
 
-**macOS:**
+**macOS / Linux:**
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
@@ -131,6 +160,12 @@ Double-click `hdf5_export_app.exe` or run from command line:
 Double-click `hdf5_export_app.app` in Finder, or run from command line:
 ```bash
 open dist/hdf5_export_app.app
+```
+
+**Linux:**
+Run from command line:
+```bash
+./dist/hdf5_export_app
 ```
 
 ### Using the GUI
@@ -200,10 +235,14 @@ Where `XXXXXX` is the zero-padded frame index.
 **"PyInstaller not found"**
 - Ensure you've activated the virtual environment
 - Run `pip install -r requirements.txt` again
+- If you are using system Python (no venv), run:
+  `python3 -m pip install --user pyinstaller`
 
 **"Module not found" errors during build**
 - Check that all dependencies in `requirements.txt` are installed
 - Try cleaning and rebuilding: `build_windows.ps1 -Clean` or `./build_mac.sh --clean`
+- On Linux system Python, install user-scoped deps:
+  `python3 -m pip install --user -r requirements.txt`
 
 ### Runtime Issues
 
@@ -219,6 +258,7 @@ Where `XXXXXX` is the zero-padded frame index.
 **Application won't start**
 - On Windows, check Windows Defender or antivirus isn't blocking the executable
 - On macOS, you may need to allow the app in System Preferences > Security & Privacy
+- On Linux, ensure required Qt/X11 runtime libraries are installed (for example `libxcb-cursor0` and TIFF runtime libs, depending on distro)
 - Try running from command line to see error messages
 
 **Large file sizes**
@@ -259,6 +299,10 @@ cd scripts
 hdiutil create -volname "HDF5 Export App" -srcfolder dist/hdf5_export_app.app \
     -ov -format UDZO dist/hdf5_export_app.dmg
 ```
+
+### Linux
+
+The `hdf5_export_app` binary is a standalone Linux executable produced by PyInstaller. It is not a `.deb`/`.rpm` package; distribute the binary together with any distro runtime dependency instructions your users need.
 
 ## Technical Details
 

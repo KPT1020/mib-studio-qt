@@ -97,6 +97,21 @@
 
 ## Recent fixes
 
+- **2026-05-05** — Made `scripts/hdf5_export.spec` and
+  `scripts/build_mac.sh` portable for Unix packaging of the HDF5 Export GUI.
+  `hdf5_export.spec` now resolves its script directory robustly across
+  PyInstaller execution contexts (`__file__`, `SPECPATH`, fallback cwd), so
+  invoking from repo root (`pyinstaller scripts/hdf5_export.spec`) works.
+  `build_mac.sh` now supports both macOS and Linux: Linux builds produce
+  `scripts/dist/hdf5_export_app` (ELF), while macOS still produces
+  `scripts/dist/hdf5_export_app.app` with optional `--dmg`. The script also
+  handles environments missing `python3-venv` by falling back to system
+  Python, avoids pip self-upgrade on distro-managed Python, validates existing
+  `.venv` usability, and retries dependency install in a Linux-safe way.
+  Validation in cloud: `bash scripts/build_mac.sh --clean` succeeded on Linux,
+  and `python3 -m PyInstaller scripts/hdf5_export.spec ...` from repo root also
+  succeeded.
+
 - **2026-04-28** — Syringe Pump Settings now supports per-pump Modbus
   baud/address configuration and in-dialog address scanning. Added
   `SyringePumpService::scanModbusAddresses(...)` and wired Sample/Sheath scan
