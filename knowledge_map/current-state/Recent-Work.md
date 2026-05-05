@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Mock camera load/runtime parity improvements** (2026-04-20) —
+  [[../camera/MockCamera]] preload now runs in parallel across available CPU
+  cores (up to `hardware_concurrency()` workers), preserving lexical frame
+  order while reducing startup latency on large mock datasets. Runtime pacing
+  now switches to pure spin at sub-500 us cadence (default threshold `500 us`,
+  tunable with `MIB_MOCK_CAMERA_SPIN_THRESHOLD_US`) so 5 kHz playback avoids
+  scheduler jitter from `sleep_for` wakeups. Optional affinity pinning
+  (`MIB_MOCK_CAMERA_PIN_CPU`) is supported on Linux via
+  `pthread_setaffinity_np` for dedicated-core mock runs. Files:
+  `src/camera/mock/MockCamera.cpp`, `docs/howto/mock-camera-dev-mode.md`.
+
 - **Release windeployqt Conan alignment** (2026-04-20) — `CMakeLists.txt`
   picks `windeployqt` and per-config `PATH` from `qt_PACKAGE_FOLDER_DEBUG` /
   `qt_PACKAGE_FOLDER_RELEASE` (CMakeDeps) instead of a cached `find_program`

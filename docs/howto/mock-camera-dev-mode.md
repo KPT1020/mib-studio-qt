@@ -15,8 +15,11 @@ Set the following environment variables before launching `mib_studio_qt`:
 
 - `MIB_CAMERA_MODE=mock` &mdash; selects the folder-backed camera. Any other value (or unset) keeps the hardware path.
 - `MIB_MOCK_CAMERA_DIR=<absolute-or-relative-path>` &mdash; directory containing the images to stream. Defaults to `<data>/mock_frames`.
-- `MIB_MOCK_CAMERA_INTERVAL_MS` (optional) &mdash; delay between frames in milliseconds, default `33` (~30 fps). For finer control use the mock config dialog or set options programmatically (microsecond precision).
+- `MIB_MOCK_CAMERA_INTERVAL_MS` (optional) &mdash; delay between frames in milliseconds, default `33` (~30 fps). Integer values only.
 - `MIB_MOCK_CAMERA_LOOP` (optional) &mdash; set to `false`, `0`, or `no` to stop after the last frame. Otherwise the sequence loops.
+- `MIB_MOCK_CAMERA_SPIN_THRESHOLD_US` (optional) &mdash; intervals at or below this threshold use pure spin pacing (default `500`).
+- `MIB_MOCK_CAMERA_FORCE_SPIN` (optional) &mdash; set to `1` / `true` / `yes` / `on` to force pure-spin pacing at all intervals.
+- `MIB_MOCK_CAMERA_PIN_CPU` (optional, Linux only) &mdash; pin mock capture thread to a CPU index (e.g. `0`) to reduce scheduler jitter at very high frame rates.
 
 ## Image requirements
 
@@ -26,14 +29,15 @@ Images are streamed in lexical order by filename. For deterministic playback, us
 
 ## Stats and logging
 
-`MockCamera` preloads all images into memory on start and serves frames from an in-memory cache to maximize throughput. It tracks the measured frame rate and data rate based on delivery timestamps, exposing them through `CaptureService::stats()` like the hardware camera. Logging (via `spdlog`) reports the source folder, microsecond interval, and derived fps during backend initialization, and warns when images are missing or unreadable. There is no per‑frame logging; rely on the periodic capture stats instead.
+`MockCamera` preloads all images into memory on start and serves frames from an in-memory cache to maximize throughput. Preload decoding is parallelized across worker threads (up to hardware concurrency), and startup logs now include preload timing (`loaded`, `failed`, `workers`, `elapsed_ms`) so slow folders are easier to diagnose. For high-rate pacing, intervals below 500 us use pure busy-spin pacing to avoid scheduler wakeup jitter, while larger intervals use cooperative staged waits to reduce CPU burn. On Linux, optional CPU pinning (`MIB_MOCK_CAMERA_PIN_CPU`) can further stabilize sub-millisecond cadence. It tracks the measured frame rate and data rate based on delivery timestamps, exposing them through `CaptureService::stats()` like the hardware camera. Logging (via `spdlog`) reports the source folder, microsecond interval, and derived fps during backend initialization, and warns when images are missing or unreadable. There is no per‑frame logging; rely on the periodic capture stats instead.
 
 ## High-fps sanity check
 
 To confirm 5000 fps playback:
 
-1. Launch `mib_studio_qt.exe` and use the ConnectTab to configure mock camera with your frame folder and set the frame rate to `5000`, or set `MIB_MOCK_CAMERA_INTERVAL_MS=0.2` (200 microseconds) via environment variables.
+1. Launch `mib_studio_qt.exe` and use the ConnectTab to configure mock camera with your frame folder and set the frame rate to `5000`.
 2. Start capture and let it run for a few seconds. The backend log prints `interval=200 us (~5000.0 fps)` for the mock camera.
+   - On Linux, for jitter-sensitive runs, also set `MIB_MOCK_CAMERA_PIN_CPU=<core>` to dedicate the mock capture thread to one CPU.
 3. Open the capture stats panel (or tail the log) — `CaptureService` should report a frame rate close to 5000 fps once steady.
 4. Pause playback; frames remain buffered at the configured rate, so you can scrub without waiting for rendering.
 

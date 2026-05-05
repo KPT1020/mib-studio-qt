@@ -10,10 +10,17 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
+#include <optional>
 #include <thread>
+#ifdef __linux__
+#include <pthread.h>
+#include <sched.h>
+#endif
 
 namespace camera::mock
 {
@@ -21,6 +28,10 @@ namespace camera::mock
     namespace
     {
         constexpr uint64_t kPfncMono8 = 0x01080001;
+        constexpr auto kSpinOnlyThreshold = std::chrono::microseconds(500);
+        constexpr auto kCoarseGuard = std::chrono::microseconds(100);
+        constexpr auto kSleepFineThreshold = std::chrono::microseconds(200);
+        constexpr auto kYieldFineThreshold = std::chrono::microseconds(20);
 
         bool hasSupportedExtension(const std::filesystem::path &path)
         {
@@ -39,6 +50,28 @@ namespace camera::mock
 #else
             return QString::fromUtf8(path.u8string().c_str());
 #endif
+        }
+
+        std::optional<int> parseOptionalCpuIndex(const char *value)
+        {
+            if (!value)
+            {
+                return std::nullopt;
+            }
+
+            try
+            {
+                const int parsed = std::stoi(value);
+                if (parsed < 0)
+                {
+                    return std::nullopt;
+                }
+                return parsed;
+            }
+            catch (const std::exception &)
+            {
+                return std::nullopt;
+            }
         }
     } // namespace
 
@@ -80,6 +113,9 @@ namespace camera::mock
         lastFrameTime_ = std::chrono::steady_clock::now();
         stats_ = {};
 
+        configurePacingFromEnv();
+        affinityAttempted_ = false;
+
         SPDLOG_INFO("MockCamera started with {} files from {} (preloaded {} frames)",
                     files_.size(), options_.folder.string(), preloadedFrames_.size());
         return true;
@@ -108,41 +144,64 @@ namespace camera::mock
         const auto interval = options_.frameInterval;
         if (interval > std::chrono::microseconds::zero())
         {
-            // Hybrid wait: coarse sleep for long intervals, busy-wait for sub-millisecond precision
-            auto now = std::chrono::steady_clock::now();
-            auto elapsed = now - lastFrameTime_;
+            const auto now = std::chrono::steady_clock::now();
+            const auto elapsed = now - lastFrameTime_;
             if (elapsed < interval)
             {
-                auto remaining = interval - elapsed;
-                // For >=2 ms, do a coarse sleep first to reduce CPU
-                constexpr auto kCoarseThreshold = std::chrono::microseconds(2000);
-                if (remaining >= kCoarseThreshold)
-                {
-                    // Leave ~1 ms for the fine wait to avoid oversleep on Windows
-                    const auto coarse = remaining - std::chrono::milliseconds(1);
-                    std::this_thread::sleep_for(coarse);
-                }
-                // Fine wait: busy-spin until target time
                 const auto target = lastFrameTime_ + interval;
-                do
+                applyThreadAffinityIfRequested();
+
+                if (forceSpinPacing_ || interval <= spinOnlyThreshold_)
                 {
-                    // Only yield when far from target; yielding too close can jitter
-                    if ((target - std::chrono::steady_clock::now()) > std::chrono::microseconds(1000))
+                    // For sub-500 us pacing, pure spin avoids scheduler wakeup jitter.
+                    while (std::chrono::steady_clock::now() < target)
                     {
-                        std::this_thread::yield();
                     }
-                } while (std::chrono::steady_clock::now() < target);
+                }
+                else
+                {
+                    // For larger intervals, cooperate with scheduler first, then spin tail.
+                    auto remaining = target - now;
+                    if (remaining > kCoarseGuard)
+                    {
+                        const auto coarse = remaining - kCoarseGuard;
+                        std::this_thread::sleep_for(coarse);
+                        remaining = target - std::chrono::steady_clock::now();
+                    }
+
+                    while (std::chrono::steady_clock::now() < target)
+                    {
+                        const auto fineRemaining = target - std::chrono::steady_clock::now();
+                        if (fineRemaining > kSleepFineThreshold)
+                        {
+                            std::this_thread::sleep_for(std::chrono::microseconds(50));
+                        }
+                        else if (fineRemaining > kYieldFineThreshold)
+                        {
+                            std::this_thread::yield();
+                        }
+                    }
+                }
             }
         }
 
         const camera::common::Frame &cached = preloadedFrames_[nextIndex_];
 
         const auto delivered = std::chrono::steady_clock::now();
-        camera::common::Frame frameOut = cached;
-        frameOut.timestamp = static_cast<uint64_t>(
+        out.width = cached.width;
+        out.height = cached.height;
+        out.linePitch = cached.linePitch;
+        out.pixelFormat = cached.pixelFormat;
+        if (out.data.size() != cached.data.size())
+        {
+            out.data.resize(cached.data.size());
+        }
+        if (!cached.data.empty())
+        {
+            std::memcpy(out.data.data(), cached.data.data(), cached.data.size());
+        }
+        out.timestamp = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(delivered.time_since_epoch()).count());
-
-        out = std::move(frameOut);
 
         nextIndex_ += 1;
         if (nextIndex_ >= preloadedFrames_.size())
@@ -316,24 +375,154 @@ namespace camera::mock
 
     bool MockCamera::preloadFrames()
     {
-        // Load and convert all images once to maximize grab throughput
-        preloadedFrames_.reserve(files_.size());
-
-        size_t loadedCount = 0;
-        for (const auto &path : files_)
+        // Load and convert all images once to maximize grab throughput.
+        if (files_.empty())
         {
-            camera::common::Frame f;
-            if (loadFrameFromPath(path, f))
+            preloadedFrames_.clear();
+            return false;
+        }
+
+        const auto preloadStart = std::chrono::steady_clock::now();
+
+        const size_t maxWorkers = std::max<size_t>(1, std::thread::hardware_concurrency());
+        const size_t workerCount = std::min(files_.size(), maxWorkers);
+        std::vector<std::optional<camera::common::Frame>> loaded(files_.size());
+        std::atomic<size_t> nextFile{0};
+        std::atomic<size_t> loadedCount{0};
+        std::atomic<size_t> failedCount{0};
+
+        auto worker = [&]()
+        {
+            for (;;)
             {
-                preloadedFrames_.push_back(std::move(f));
-                ++loadedCount;
+                const size_t i = nextFile.fetch_add(1, std::memory_order_relaxed);
+                if (i >= files_.size())
+                {
+                    break;
+                }
+
+                camera::common::Frame frame;
+                if (loadFrameFromPath(files_[i], frame))
+                {
+                    loaded[i] = std::move(frame);
+                    loadedCount.fetch_add(1, std::memory_order_relaxed);
+                }
+                else
+                {
+                    failedCount.fetch_add(1, std::memory_order_relaxed);
+                }
             }
-            else
+        };
+
+        std::vector<std::thread> workers;
+        workers.reserve(workerCount);
+        for (size_t i = 0; i < workerCount; ++i)
+        {
+            workers.emplace_back(worker);
+        }
+        for (auto &thread : workers)
+        {
+            thread.join();
+        }
+
+        preloadedFrames_.clear();
+        preloadedFrames_.reserve(loadedCount.load(std::memory_order_relaxed));
+        for (size_t i = 0; i < loaded.size(); ++i)
+        {
+            if (loaded[i].has_value())
             {
-                // Warning already emitted by loadFrameFromPath; continue
+                preloadedFrames_.push_back(std::move(*loaded[i]));
             }
         }
-        return loadedCount > 0;
+
+        const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   std::chrono::steady_clock::now() - preloadStart)
+                                   .count();
+        SPDLOG_INFO("MockCamera preload: loaded={} failed={} workers={} elapsed_ms={}",
+                    preloadedFrames_.size(),
+                    failedCount.load(std::memory_order_relaxed),
+                    workerCount,
+                    elapsedMs);
+
+        if (preloadedFrames_.empty())
+        {
+            SPDLOG_WARN("MockCamera preload produced zero usable frames");
+            return false;
+        }
+        return true;
+    }
+
+    void MockCamera::configurePacingFromEnv()
+    {
+        forceSpinPacing_ = false;
+        spinOnlyThreshold_ = kSpinOnlyThreshold;
+        pinnedCpu_ = -1;
+
+        if (const char *envSpin = std::getenv("MIB_MOCK_CAMERA_FORCE_SPIN"))
+        {
+            std::string value = envSpin;
+            std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c)
+                           { return static_cast<char>(std::tolower(c)); });
+            if (value == "1" || value == "true" || value == "yes" || value == "on")
+            {
+                forceSpinPacing_ = true;
+            }
+        }
+
+        if (const char *envThreshold = std::getenv("MIB_MOCK_CAMERA_SPIN_THRESHOLD_US"))
+        {
+            try
+            {
+                const int parsed = std::stoi(envThreshold);
+                if (parsed > 0)
+                {
+                    spinOnlyThreshold_ = std::chrono::microseconds(parsed);
+                }
+            }
+            catch (const std::exception &)
+            {
+                SPDLOG_WARN("MockCamera: invalid MIB_MOCK_CAMERA_SPIN_THRESHOLD_US value: {}", envThreshold);
+            }
+        }
+
+        if (const auto parsedCpuLegacy = parseOptionalCpuIndex(std::getenv("MIB_MOCK_CAMERA_PIN_CPU")); parsedCpuLegacy.has_value())
+        {
+            pinnedCpu_ = *parsedCpuLegacy;
+        }
+
+        SPDLOG_INFO("MockCamera pacing config: spin_only_threshold_us={} force_spin={} pin_cpu={}",
+                    spinOnlyThreshold_.count(),
+                    forceSpinPacing_ ? 1 : 0,
+                    pinnedCpu_);
+    }
+
+    void MockCamera::applyThreadAffinityIfRequested()
+    {
+        if (affinityAttempted_)
+        {
+            return;
+        }
+        affinityAttempted_ = true;
+
+        if (pinnedCpu_ < 0)
+        {
+            return;
+        }
+
+#ifdef __linux__
+        cpu_set_t set;
+        CPU_ZERO(&set);
+        CPU_SET(pinnedCpu_, &set);
+        const int rc = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &set);
+        if (rc != 0)
+        {
+            SPDLOG_WARN("MockCamera: failed to pin capture thread to cpu {} (errno={})", pinnedCpu_, rc);
+            return;
+        }
+        SPDLOG_INFO("MockCamera: capture thread pinned to cpu {}", pinnedCpu_);
+#else
+        SPDLOG_WARN("MockCamera: MIB_MOCK_CAMERA_PIN_CPU is set but CPU affinity is only supported on Linux in this build");
+#endif
     }
 
 } // namespace camera::mock
