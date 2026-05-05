@@ -12,6 +12,8 @@
 
 #include <spdlog/spdlog.h>
 #include <nlohmann/json.hpp>
+#include <algorithm>
+#include <cmath>
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -58,6 +60,29 @@ namespace {
             case RunStatus::Backward: return "Running (Backward)";
             case RunStatus::Pause:    return "Paused";
             default:                  return "Unknown";
+        }
+    }
+
+    void applySyringeConfigToConnectedPump(backend::services::SyringePumpService& pumpService,
+                                           PumpId id,
+                                           const json& config,
+                                           const char* volumeKey,
+                                           const char* unitKey,
+                                           const char* innerDiameterMmKey)
+    {
+        if (!pumpService.isConnected(id)) {
+            return;
+        }
+
+        if (config.contains(volumeKey) && config.contains(unitKey)) {
+            int volume = static_cast<int>(std::lround(config[volumeKey].get<double>()));
+            volume = std::clamp(volume, 1, 9999);
+            const uint16_t volumeUnit = config[unitKey].get<uint16_t>();
+            pumpService.setSyringeVolume(id, static_cast<uint16_t>(volume), volumeUnit);
+        }
+
+        if (config.contains(innerDiameterMmKey)) {
+            pumpService.setSyringeInnerDiameterMm(id, config[innerDiameterMmKey].get<double>());
         }
     }
 } // namespace
@@ -174,6 +199,13 @@ void SyringePumpTab::onConnectSample() {
         if (!ok) {
             QMessageBox::warning(this, tr("Connection Failed"),
                 tr("Failed to connect Sample pump on COM%1 addr=%2").arg(comPort).arg(addr));
+        } else {
+            applySyringeConfigToConnectedPump(backend_.syringePump(),
+                                              PumpId::Sample,
+                                              config,
+                                              "pump_sample_syringe_vol",
+                                              "pump_sample_syringe_unit",
+                                              "pump_sample_inner_diameter_mm");
         }
     } catch (const std::exception& e) {
         QMessageBox::warning(this, tr("Config Error"), QString::fromStdString(e.what()));
@@ -214,6 +246,13 @@ void SyringePumpTab::onConnectSheath() {
         if (!ok) {
             QMessageBox::warning(this, tr("Connection Failed"),
                 tr("Failed to connect Sheath pump on COM%1 addr=%2").arg(comPort).arg(addr));
+        } else {
+            applySyringeConfigToConnectedPump(backend_.syringePump(),
+                                              PumpId::Sheath,
+                                              config,
+                                              "pump_sheath_syringe_vol",
+                                              "pump_sheath_syringe_unit",
+                                              "pump_sheath_inner_diameter_mm");
         }
     } catch (const std::exception& e) {
         QMessageBox::warning(this, tr("Config Error"), QString::fromStdString(e.what()));

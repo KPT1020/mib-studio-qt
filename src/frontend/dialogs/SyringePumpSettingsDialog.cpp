@@ -90,11 +90,13 @@ void SyringePumpSettingsDialog::onApply() {
         pump.setSyringeVolume(PumpId::Sample,
             static_cast<uint16_t>(ui->sampleSyringeVolSpinBox->value()),
             ui->sampleSyringeUnitCombo->currentData().toUInt());
+        pump.setSyringeInnerDiameterMm(PumpId::Sample, ui->sampleInnerDiameterSpinBox->value());
     }
     if (pump.isConnected(PumpId::Sheath)) {
         pump.setSyringeVolume(PumpId::Sheath,
             static_cast<uint16_t>(ui->sheathSyringeVolSpinBox->value()),
             ui->sheathSyringeUnitCombo->currentData().toUInt());
+        pump.setSyringeInnerDiameterMm(PumpId::Sheath, ui->sheathInnerDiameterSpinBox->value());
     }
 }
 
@@ -207,6 +209,8 @@ void SyringePumpSettingsDialog::loadConfig() {
             int idx = ui->sampleSyringeUnitCombo->findData(config["pump_sample_syringe_unit"].get<uint16_t>());
             if (idx >= 0) ui->sampleSyringeUnitCombo->setCurrentIndex(idx);
         }
+        if (config.contains("pump_sample_inner_diameter_mm"))
+            ui->sampleInnerDiameterSpinBox->setValue(config["pump_sample_inner_diameter_mm"].get<double>());
 
         if (config.contains("pump_sheath_com_port")) {
             int idx = ui->sheathComPortCombo->findData(config["pump_sheath_com_port"].get<int>());
@@ -222,6 +226,8 @@ void SyringePumpSettingsDialog::loadConfig() {
             int idx = ui->sheathSyringeUnitCombo->findData(config["pump_sheath_syringe_unit"].get<uint16_t>());
             if (idx >= 0) ui->sheathSyringeUnitCombo->setCurrentIndex(idx);
         }
+        if (config.contains("pump_sheath_inner_diameter_mm"))
+            ui->sheathInnerDiameterSpinBox->setValue(config["pump_sheath_inner_diameter_mm"].get<double>());
     }
     catch (const std::exception& e) {
         SPDLOG_ERROR("SyringePumpSettingsDialog: Failed to parse config: {}", e.what());
@@ -245,6 +251,7 @@ void SyringePumpSettingsDialog::saveConfig() {
         config["pump_sample_address"] = ui->sampleAddressSpinBox->value();
         config["pump_sample_syringe_vol"] = ui->sampleSyringeVolSpinBox->value();
         config["pump_sample_syringe_unit"] = ui->sampleSyringeUnitCombo->currentData().toUInt();
+        config["pump_sample_inner_diameter_mm"] = ui->sampleInnerDiameterSpinBox->value();
 
         if (ui->sheathComPortCombo->currentIndex() >= 0)
             config["pump_sheath_com_port"] = ui->sheathComPortCombo->currentData().toInt();
@@ -252,6 +259,7 @@ void SyringePumpSettingsDialog::saveConfig() {
         config["pump_sheath_address"] = ui->sheathAddressSpinBox->value();
         config["pump_sheath_syringe_vol"] = ui->sheathSyringeVolSpinBox->value();
         config["pump_sheath_syringe_unit"] = ui->sheathSyringeUnitCombo->currentData().toUInt();
+        config["pump_sheath_inner_diameter_mm"] = ui->sheathInnerDiameterSpinBox->value();
 
         file.resize(0);
         QTextStream out(&file);

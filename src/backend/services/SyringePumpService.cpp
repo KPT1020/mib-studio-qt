@@ -4,6 +4,8 @@
 #include <QByteArray>
 #include <spdlog/spdlog.h>
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstring>
 #include <thread>
 #include <chrono>
@@ -22,6 +24,8 @@ namespace {
     constexpr uint16_t REG_MODE              = 0x0060;  // 0=infuse, 1=withdraw, 2=infuse+withdraw, 3=withdraw+infuse
     constexpr uint16_t REG_SYRINGE_VOLUME    = 0x0061;  // uint16, 1~9999
     constexpr uint16_t REG_SYRINGE_VOL_UNIT  = 0x0062;  // uint16, volume unit code
+    constexpr uint16_t REG_SYRINGE_AREA      = 0x0063;  // uint16, 1~9999
+    constexpr uint16_t REG_SYRINGE_AREA_UNIT = 0x0064;  // uint16, area unit code
     constexpr uint16_t REG_INFUSE_FLOW_RATE  = 0x006A;  // uint16, 1~9999
     constexpr uint16_t REG_INFUSE_FLOW_UNIT  = 0x006B;  // uint16, unit code
     constexpr uint16_t REG_WITHDRAW_FLOW_RATE = 0x006C; // uint16, 1~9999
@@ -39,6 +43,18 @@ namespace {
 
     // Inter-frame silence for Modbus RTU (3.5 char times: ~0.3ms at 115200, ~4ms at 9600)
     constexpr int INTER_FRAME_DELAY_MS = 5;
+
+    struct AreaUnitScale {
+        uint16_t unitCode;
+        double squareMmPerUnit;
+    };
+
+    // dLSP 501X "unit conversion - cross-sectional area"
+    constexpr std::array<AreaUnitScale, 7> AREA_UNITS{{
+        {94, 1e-6}, {95, 1e-5}, {96, 1e-4}, {97, 1e-3}, {98, 1e-2}, {99, 1e-1}, {100, 1.0}
+    }};
+
+    constexpr double PI = 3.14159265358979323846;
 
     const char* pumpName(SyringePumpService::PumpId id) {
         return id == SyringePumpService::PumpId::Sample ? "Sample" : "Sheath";
@@ -516,6 +532,59 @@ bool SyringePumpService::setSyringeVolume(PumpId id, uint16_t volume, uint16_t u
     }
 
     SPDLOG_INFO("SyringePumpService: {} pump syringe volume set to {} (unit={})", pumpName(id), clampedVol, unit);
+    return true;
+}
+
+bool SyringePumpService::setSyringeInnerArea(PumpId id, uint16_t areaValue, uint16_t areaUnit) {
+    int idx = static_cast<int>(id);
+    auto& pump = pumps_[static_cast<size_t>(idx)];
+    std::scoped_lock lock(pump.mutex);
+
+    if (!pump.status.connected) return false;
+
+    uint16_t clampedArea = static_cast<uint16_t>(std::clamp(static_cast<int>(areaValue), 1, 9999));
+    if (!writeSingleRegister(idx, REG_SYRINGE_AREA, clampedArea)) {
+        SPDLOG_ERROR("SyringePumpService: Failed to set syringe inner area for {} pump", pumpName(id));
+        return false;
+    }
+    if (!writeSingleRegister(idx, REG_SYRINGE_AREA_UNIT, areaUnit)) {
+        SPDLOG_ERROR("SyringePumpService: Failed to set syringe inner area unit for {} pump", pumpName(id));
+        return false;
+    }
+
+    SPDLOG_INFO("SyringePumpService: {} pump syringe inner area set to {} (unit={})",
+                pumpName(id), clampedArea, areaUnit);
+    return true;
+}
+
+bool SyringePumpService::setSyringeInnerDiameterMm(PumpId id, double diameterMm) {
+    if (!std::isfinite(diameterMm) || diameterMm <= 0.0) {
+        SPDLOG_ERROR("SyringePumpService: Invalid syringe inner diameter {} mm", diameterMm);
+        return false;
+    }
+
+    const double radiusMm = diameterMm * 0.5;
+    const double areaMm2 = PI * radiusMm * radiusMm;
+
+    uint16_t selectedUnit = AREA_UNITS.back().unitCode;
+    int selectedValue = static_cast<int>(std::lround(areaMm2 / AREA_UNITS.back().squareMmPerUnit));
+
+    for (const auto& candidate : AREA_UNITS) {
+        const int value = static_cast<int>(std::lround(areaMm2 / candidate.squareMmPerUnit));
+        if (value >= 1 && value <= 9999) {
+            selectedUnit = candidate.unitCode;
+            selectedValue = value;
+            break;
+        }
+    }
+
+    selectedValue = std::clamp(selectedValue, 1, 9999);
+    if (!setSyringeInnerArea(id, static_cast<uint16_t>(selectedValue), selectedUnit)) {
+        return false;
+    }
+
+    SPDLOG_INFO("SyringePumpService: {} pump syringe inner diameter {:.4f} mm -> area {} (unit={})",
+                pumpName(id), diameterMm, selectedValue, selectedUnit);
     return true;
 }
 

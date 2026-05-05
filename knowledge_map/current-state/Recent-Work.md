@@ -97,6 +97,15 @@
 
 ## Recent fixes
 
+- **2026-05-05** — Syringe Pump settings now support per-pump **inner diameter**
+  and apply it to hardware using the dLSP501 basic-mode syringe area registers.
+  `SyringePumpSettingsDialog` adds an `Inner Dia (mm)` field for Sample/Sheath
+  and persists values in config as
+  `pump_sample_inner_diameter_mm` / `pump_sheath_inner_diameter_mm`.
+  `SyringePumpService` now writes `0x0063` (syringe cross-section area value)
+  and `0x0064` (area unit), with helper conversion from diameter(mm) -> area.
+  `SyringePumpTab` applies saved syringe volume + inner diameter after a pump
+  connects so the runtime pump config matches persisted settings.
 - **2026-04-28** — Syringe Pump Settings now supports per-pump Modbus
   baud/address configuration and in-dialog address scanning. Added
   `SyringePumpService::scanModbusAddresses(...)` and wired Sample/Sheath scan
