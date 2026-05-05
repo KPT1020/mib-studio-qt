@@ -97,6 +97,14 @@
 
 ## Recent fixes
 
+- **2026-05-05** — Syringe pumps now explicitly program target volume before run
+  and can run continuously until stall. Added
+  `SyringePumpService::setTargetVolume(...)` writing basic-mode target volume
+  registers `0x0068` (value) and `0x0069` (unit). `SyringePumpSettingsDialog`
+  now persists per-pump target volume/unit and a `run_until_stall` toggle.
+  `SyringePumpTab` applies target volume on connect and, when run-until-stall is
+  enabled, auto-restarts a stopped pump after each completed dispense until
+  hardware stall is detected (or user presses Stop/Disconnect).
 - **2026-05-05** — Syringe Pump settings now support per-pump **inner diameter**
   and apply it to hardware using the dLSP501 basic-mode syringe area registers.
   `SyringePumpSettingsDialog` adds an `Inner Dia (mm)` field for Sample/Sheath

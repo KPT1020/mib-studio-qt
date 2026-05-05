@@ -56,11 +56,15 @@ SyringePumpSettingsDialog::SyringePumpSettingsDialog(backend::AppBackend& backen
 {
     ui->setupUi(this);
 
-    // Syringe unit combo data
+    // Syringe volume/target unit combo data
     ui->sampleSyringeUnitCombo->setItemData(0, VOL_UNIT_UL);
     ui->sampleSyringeUnitCombo->setItemData(1, VOL_UNIT_ML);
     ui->sheathSyringeUnitCombo->setItemData(0, VOL_UNIT_UL);
     ui->sheathSyringeUnitCombo->setItemData(1, VOL_UNIT_ML);
+    ui->sampleTargetUnitCombo->setItemData(0, VOL_UNIT_UL);
+    ui->sampleTargetUnitCombo->setItemData(1, VOL_UNIT_ML);
+    ui->sheathTargetUnitCombo->setItemData(0, VOL_UNIT_UL);
+    ui->sheathTargetUnitCombo->setItemData(1, VOL_UNIT_ML);
 
     populateComPorts();
     loadConfig();
@@ -84,18 +88,24 @@ SyringePumpSettingsDialog::~SyringePumpSettingsDialog() {
 void SyringePumpSettingsDialog::onApply() {
     saveConfig();
 
-    // If pumps are connected, apply syringe volume live
+    // If pumps are connected, apply syringe/target settings live
     auto& pump = backend_.syringePump();
     if (pump.isConnected(PumpId::Sample)) {
         pump.setSyringeVolume(PumpId::Sample,
             static_cast<uint16_t>(ui->sampleSyringeVolSpinBox->value()),
             ui->sampleSyringeUnitCombo->currentData().toUInt());
+        pump.setTargetVolume(PumpId::Sample,
+            static_cast<uint16_t>(ui->sampleTargetVolSpinBox->value()),
+            ui->sampleTargetUnitCombo->currentData().toUInt());
         pump.setSyringeInnerDiameterMm(PumpId::Sample, ui->sampleInnerDiameterSpinBox->value());
     }
     if (pump.isConnected(PumpId::Sheath)) {
         pump.setSyringeVolume(PumpId::Sheath,
             static_cast<uint16_t>(ui->sheathSyringeVolSpinBox->value()),
             ui->sheathSyringeUnitCombo->currentData().toUInt());
+        pump.setTargetVolume(PumpId::Sheath,
+            static_cast<uint16_t>(ui->sheathTargetVolSpinBox->value()),
+            ui->sheathTargetUnitCombo->currentData().toUInt());
         pump.setSyringeInnerDiameterMm(PumpId::Sheath, ui->sheathInnerDiameterSpinBox->value());
     }
 }
@@ -209,6 +219,14 @@ void SyringePumpSettingsDialog::loadConfig() {
             int idx = ui->sampleSyringeUnitCombo->findData(config["pump_sample_syringe_unit"].get<uint16_t>());
             if (idx >= 0) ui->sampleSyringeUnitCombo->setCurrentIndex(idx);
         }
+        if (config.contains("pump_sample_target_volume"))
+            ui->sampleTargetVolSpinBox->setValue(config["pump_sample_target_volume"].get<double>());
+        if (config.contains("pump_sample_target_unit")) {
+            int idx = ui->sampleTargetUnitCombo->findData(config["pump_sample_target_unit"].get<uint16_t>());
+            if (idx >= 0) ui->sampleTargetUnitCombo->setCurrentIndex(idx);
+        }
+        if (config.contains("pump_sample_run_until_stall"))
+            ui->sampleRunUntilStallCheckBox->setChecked(config["pump_sample_run_until_stall"].get<bool>());
         if (config.contains("pump_sample_inner_diameter_mm"))
             ui->sampleInnerDiameterSpinBox->setValue(config["pump_sample_inner_diameter_mm"].get<double>());
 
@@ -226,6 +244,14 @@ void SyringePumpSettingsDialog::loadConfig() {
             int idx = ui->sheathSyringeUnitCombo->findData(config["pump_sheath_syringe_unit"].get<uint16_t>());
             if (idx >= 0) ui->sheathSyringeUnitCombo->setCurrentIndex(idx);
         }
+        if (config.contains("pump_sheath_target_volume"))
+            ui->sheathTargetVolSpinBox->setValue(config["pump_sheath_target_volume"].get<double>());
+        if (config.contains("pump_sheath_target_unit")) {
+            int idx = ui->sheathTargetUnitCombo->findData(config["pump_sheath_target_unit"].get<uint16_t>());
+            if (idx >= 0) ui->sheathTargetUnitCombo->setCurrentIndex(idx);
+        }
+        if (config.contains("pump_sheath_run_until_stall"))
+            ui->sheathRunUntilStallCheckBox->setChecked(config["pump_sheath_run_until_stall"].get<bool>());
         if (config.contains("pump_sheath_inner_diameter_mm"))
             ui->sheathInnerDiameterSpinBox->setValue(config["pump_sheath_inner_diameter_mm"].get<double>());
     }
@@ -251,6 +277,9 @@ void SyringePumpSettingsDialog::saveConfig() {
         config["pump_sample_address"] = ui->sampleAddressSpinBox->value();
         config["pump_sample_syringe_vol"] = ui->sampleSyringeVolSpinBox->value();
         config["pump_sample_syringe_unit"] = ui->sampleSyringeUnitCombo->currentData().toUInt();
+        config["pump_sample_target_volume"] = ui->sampleTargetVolSpinBox->value();
+        config["pump_sample_target_unit"] = ui->sampleTargetUnitCombo->currentData().toUInt();
+        config["pump_sample_run_until_stall"] = ui->sampleRunUntilStallCheckBox->isChecked();
         config["pump_sample_inner_diameter_mm"] = ui->sampleInnerDiameterSpinBox->value();
 
         if (ui->sheathComPortCombo->currentIndex() >= 0)
@@ -259,6 +288,9 @@ void SyringePumpSettingsDialog::saveConfig() {
         config["pump_sheath_address"] = ui->sheathAddressSpinBox->value();
         config["pump_sheath_syringe_vol"] = ui->sheathSyringeVolSpinBox->value();
         config["pump_sheath_syringe_unit"] = ui->sheathSyringeUnitCombo->currentData().toUInt();
+        config["pump_sheath_target_volume"] = ui->sheathTargetVolSpinBox->value();
+        config["pump_sheath_target_unit"] = ui->sheathTargetUnitCombo->currentData().toUInt();
+        config["pump_sheath_run_until_stall"] = ui->sheathRunUntilStallCheckBox->isChecked();
         config["pump_sheath_inner_diameter_mm"] = ui->sheathInnerDiameterSpinBox->value();
 
         file.resize(0);

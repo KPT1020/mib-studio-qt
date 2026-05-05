@@ -26,6 +26,8 @@ namespace {
     constexpr uint16_t REG_SYRINGE_VOL_UNIT  = 0x0062;  // uint16, volume unit code
     constexpr uint16_t REG_SYRINGE_AREA      = 0x0063;  // uint16, 1~9999
     constexpr uint16_t REG_SYRINGE_AREA_UNIT = 0x0064;  // uint16, area unit code
+    constexpr uint16_t REG_TARGET_VOLUME     = 0x0068;  // uint16, 1~9999
+    constexpr uint16_t REG_TARGET_VOL_UNIT   = 0x0069;  // uint16, target-volume unit code
     constexpr uint16_t REG_INFUSE_FLOW_RATE  = 0x006A;  // uint16, 1~9999
     constexpr uint16_t REG_INFUSE_FLOW_UNIT  = 0x006B;  // uint16, unit code
     constexpr uint16_t REG_WITHDRAW_FLOW_RATE = 0x006C; // uint16, 1~9999
@@ -532,6 +534,27 @@ bool SyringePumpService::setSyringeVolume(PumpId id, uint16_t volume, uint16_t u
     }
 
     SPDLOG_INFO("SyringePumpService: {} pump syringe volume set to {} (unit={})", pumpName(id), clampedVol, unit);
+    return true;
+}
+
+bool SyringePumpService::setTargetVolume(PumpId id, uint16_t volume, uint16_t unit) {
+    int idx = static_cast<int>(id);
+    auto& pump = pumps_[static_cast<size_t>(idx)];
+    std::scoped_lock lock(pump.mutex);
+
+    if (!pump.status.connected) return false;
+
+    uint16_t clampedVol = static_cast<uint16_t>(std::clamp(static_cast<int>(volume), 1, 9999));
+    if (!writeSingleRegister(idx, REG_TARGET_VOLUME, clampedVol)) {
+        SPDLOG_ERROR("SyringePumpService: Failed to set target volume for {} pump", pumpName(id));
+        return false;
+    }
+    if (!writeSingleRegister(idx, REG_TARGET_VOL_UNIT, unit)) {
+        SPDLOG_ERROR("SyringePumpService: Failed to set target volume unit for {} pump", pumpName(id));
+        return false;
+    }
+
+    SPDLOG_INFO("SyringePumpService: {} pump target volume set to {} (unit={})", pumpName(id), clampedVol, unit);
     return true;
 }
 

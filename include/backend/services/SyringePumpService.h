@@ -65,6 +65,7 @@ public:
     bool purge(PumpId id, Direction dir);
     bool stopPurge(PumpId id);
     bool setSyringeVolume(PumpId id, uint16_t volume, uint16_t unit);
+    bool setTargetVolume(PumpId id, uint16_t volume, uint16_t unit);
     bool setSyringeInnerArea(PumpId id, uint16_t areaValue, uint16_t areaUnit);
     bool setSyringeInnerDiameterMm(PumpId id, double diameterMm);
 

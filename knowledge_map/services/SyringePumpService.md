@@ -12,7 +12,7 @@
 - Maintain two independent `QSerialPort` connections
   (`PumpId::Sample`, `PumpId::Sheath`).
 - Per-pump control: `setFlowRate`, `setDirection`, `start`, `stop`,
-  `purge`, `stopPurge`, `setSyringeVolume`,
+  `purge`, `stopPurge`, `setSyringeVolume`, `setTargetVolume`,
   `setSyringeInnerArea`, `setSyringeInnerDiameterMm`.
 - Per-pump status polling: `pollStatus(id)` — UI timer drives this.
 - Expose config/status structs (`PumpConfig`, `PumpStatus`).
@@ -24,6 +24,10 @@
 - `RunStatus`: Stop (0), Forward (1), Backward (2), Pause (3)
 - `Direction`: Infuse (0), Withdraw (1)
 - `flowRateUnit` uses integer codes (e.g. `100` = µL/min)
+- Target volume uses Modbus registers `0x0068` (target value)
+  and `0x0069` (target unit code). The service now exposes
+  `setTargetVolume(...)` so UI code can explicitly program these values
+  instead of relying on whatever was left in pump memory.
 - Syringe cross-sectional area uses Modbus registers `0x0063` (value)
   and `0x0064` (unit code). `setSyringeInnerDiameterMm` converts from
   millimeter diameter to area and picks a valid area unit scale so the

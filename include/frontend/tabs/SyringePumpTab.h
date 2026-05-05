@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include <QWidget>
 
 namespace backend { class AppBackend; }
@@ -28,6 +30,11 @@ private slots:
     void onUpdateStatus();
 
 private:
+    struct PumpRunControlState {
+        bool runUntilStall{false};
+        bool requestedStart{false};
+    };
+
     void updatePumpUI(int pumpIndex);
     void loadConfig();
     void saveConfig();
@@ -42,6 +49,7 @@ private:
     QTimer* statusUpdateTimer_{nullptr};
     QTimer* sampleApplyTimer_{nullptr};
     QTimer* sheathApplyTimer_{nullptr};
+    std::array<PumpRunControlState, 2> runControlState_{};
 };
 
 } // namespace frontend

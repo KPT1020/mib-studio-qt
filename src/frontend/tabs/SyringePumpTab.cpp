@@ -68,7 +68,9 @@ namespace {
                                            const json& config,
                                            const char* volumeKey,
                                            const char* unitKey,
-                                           const char* innerDiameterMmKey)
+                                           const char* innerDiameterMmKey,
+                                           const char* targetVolumeKey,
+                                           const char* targetUnitKey)
     {
         if (!pumpService.isConnected(id)) {
             return;
@@ -83,6 +85,13 @@ namespace {
 
         if (config.contains(innerDiameterMmKey)) {
             pumpService.setSyringeInnerDiameterMm(id, config[innerDiameterMmKey].get<double>());
+        }
+
+        if (config.contains(targetVolumeKey) && config.contains(targetUnitKey)) {
+            int targetVolume = static_cast<int>(std::lround(config[targetVolumeKey].get<double>()));
+            targetVolume = std::clamp(targetVolume, 1, 9999);
+            const uint16_t targetUnit = config[targetUnitKey].get<uint16_t>();
+            pumpService.setTargetVolume(id, static_cast<uint16_t>(targetVolume), targetUnit);
         }
     }
 } // namespace
@@ -205,7 +214,11 @@ void SyringePumpTab::onConnectSample() {
                                               config,
                                               "pump_sample_syringe_vol",
                                               "pump_sample_syringe_unit",
-                                              "pump_sample_inner_diameter_mm");
+                                              "pump_sample_inner_diameter_mm",
+                                              "pump_sample_target_volume",
+                                              "pump_sample_target_unit");
+            runControlState_[static_cast<size_t>(PumpId::Sample)].runUntilStall =
+                config.value("pump_sample_run_until_stall", false);
         }
     } catch (const std::exception& e) {
         QMessageBox::warning(this, tr("Config Error"), QString::fromStdString(e.what()));
@@ -215,6 +228,8 @@ void SyringePumpTab::onConnectSample() {
 
 void SyringePumpTab::onDisconnectSample() {
     saveConfig();
+    auto& runControl = runControlState_[static_cast<size_t>(PumpId::Sample)];
+    runControl.requestedStart = false;
     backend_.syringePump().disconnect(PumpId::Sample);
     updatePumpUI(0);
 }
@@ -252,7 +267,11 @@ void SyringePumpTab::onConnectSheath() {
                                               config,
                                               "pump_sheath_syringe_vol",
                                               "pump_sheath_syringe_unit",
-                                              "pump_sheath_inner_diameter_mm");
+                                              "pump_sheath_inner_diameter_mm",
+                                              "pump_sheath_target_volume",
+                                              "pump_sheath_target_unit");
+            runControlState_[static_cast<size_t>(PumpId::Sheath)].runUntilStall =
+                config.value("pump_sheath_run_until_stall", false);
         }
     } catch (const std::exception& e) {
         QMessageBox::warning(this, tr("Config Error"), QString::fromStdString(e.what()));
@@ -262,6 +281,8 @@ void SyringePumpTab::onConnectSheath() {
 
 void SyringePumpTab::onDisconnectSheath() {
     saveConfig();
+    auto& runControl = runControlState_[static_cast<size_t>(PumpId::Sheath)];
+    runControl.requestedStart = false;
     backend_.syringePump().disconnect(PumpId::Sheath);
     updatePumpUI(1);
 }
@@ -270,18 +291,22 @@ void SyringePumpTab::onDisconnectSheath() {
 // Control slots
 // ---------------------------------------------------------------------------
 void SyringePumpTab::onStartSample() {
+    runControlState_[static_cast<size_t>(PumpId::Sample)].requestedStart = true;
     backend_.syringePump().start(PumpId::Sample);
 }
 
 void SyringePumpTab::onStopSample() {
+    runControlState_[static_cast<size_t>(PumpId::Sample)].requestedStart = false;
     backend_.syringePump().stop(PumpId::Sample);
 }
 
 void SyringePumpTab::onStartSheath() {
+    runControlState_[static_cast<size_t>(PumpId::Sheath)].requestedStart = true;
     backend_.syringePump().start(PumpId::Sheath);
 }
 
 void SyringePumpTab::onStopSheath() {
+    runControlState_[static_cast<size_t>(PumpId::Sheath)].requestedStart = false;
     backend_.syringePump().stop(PumpId::Sheath);
 }
 
@@ -314,12 +339,30 @@ void SyringePumpTab::onApplySheath() {
 // ---------------------------------------------------------------------------
 void SyringePumpTab::onUpdateStatus() {
     auto& pumpService = backend_.syringePump();
+    const std::array<PumpId, 2> pumpIds{PumpId::Sample, PumpId::Sheath};
 
-    if (pumpService.isConnected(PumpId::Sample)) {
-        pumpService.pollStatus(PumpId::Sample);
-    }
-    if (pumpService.isConnected(PumpId::Sheath)) {
-        pumpService.pollStatus(PumpId::Sheath);
+    for (const PumpId id : pumpIds) {
+        if (!pumpService.isConnected(id)) {
+            runControlState_[static_cast<size_t>(id)].requestedStart = false;
+            continue;
+        }
+
+        pumpService.pollStatus(id);
+        const auto status = pumpService.getStatus(id);
+        auto& runControl = runControlState_[static_cast<size_t>(id)];
+
+        if (status.stalled) {
+            runControl.requestedStart = false;
+            continue;
+        }
+
+        if (runControl.runUntilStall &&
+            runControl.requestedStart &&
+            status.runStatus == RunStatus::Stop) {
+            if (!pumpService.start(id)) {
+                SPDLOG_WARN("SyringePumpTab: Auto-restart failed for {} pump", id == PumpId::Sample ? "Sample" : "Sheath");
+            }
+        }
     }
 
     updatePumpUI(0);
