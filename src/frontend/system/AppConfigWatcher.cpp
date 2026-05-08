@@ -22,6 +22,7 @@
 #include "backend/services/ProcessingService.h"
 #include "backend/services/AutofocusService.h"
 #include "frontend/system/PlaybackPanel.h"
+#include "frontend/utils/FileIOUtils.h"
 
 namespace frontend
 {
@@ -129,41 +130,19 @@ namespace frontend
 
 	void AppConfigWatcher::ensureDefaultConfigExists(const QString &path) const
 	{
-		// Only ensure when path points to app include path
+		// Only manage the built-in default config path. External configs are user-selected and
+		// should never be rewritten automatically.
 		const QString defaultPath = QDir(getUserConfigDir()).absoluteFilePath("config.json");
 		if (QFileInfo(path).absoluteFilePath() != QFileInfo(defaultPath).absoluteFilePath())
 		{
 			return;
 		}
-		QFileInfo fi(path);
-		QDir dir(fi.absolutePath());
-		if (!dir.exists())
+
+		QString err;
+		if (!FileIOUtils::ensureDefaultJsonFile(path, ":/defaults/config.json", &err))
 		{
-			dir.mkpath(".");
-		}
-		if (!QFile::exists(path))
-		{
-			QFile res(":/defaults/config.json");
-			if (res.open(QIODevice::ReadOnly))
-			{
-				QFile out(path);
-				if (out.open(QIODevice::WriteOnly | QIODevice::Truncate))
-				{
-					const QByteArray data = res.readAll();
-					if (out.write(data) != data.size())
-					{
-						SPDLOG_WARN("AppConfigWatcher: failed to write default config.json to {}", path.toStdString());
-					}
-				}
-				else
-				{
-					SPDLOG_WARN("AppConfigWatcher: failed to create {}", path.toStdString());
-				}
-			}
-			else
-			{
-				SPDLOG_WARN("AppConfigWatcher: failed to open resource defaults/config.json");
-			}
+			SPDLOG_WARN("AppConfigWatcher: failed to synchronize default config.json at {}: {}",
+						path.toStdString(), err.toStdString());
 		}
 	}
 

@@ -24,7 +24,7 @@ Pipeline parity
 
 Notes
 - Logging uses spdlog; no `std::cout` in app code.
-- If the default include `config.json` doesn’t exist yet, it is seeded from `:/defaults/config.json`.
+- If the default include `config.json` doesn’t exist yet, it is seeded from `:/defaults/config.json`; if newer releases add JSON keys, those missing keys are merged into the default managed config without overwriting existing values.
 - This aligns with the workspace rule to prefer ready‑made SDK patterns for metrics/capture (see Euresys samples); runtime reload is additive to that.
 
 

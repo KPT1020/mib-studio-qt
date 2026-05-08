@@ -25,6 +25,10 @@ namespace frontend
         // Ensure a default file exists by copying from a resource if it doesn't exist
         static bool ensureDefaultsFile(const QString &targetPath, const QString &resourceName, QString *err = nullptr);
 
+        // Ensure a default JSON file exists and add any keys introduced by newer bundled defaults.
+        // Existing user values are preserved; only missing object keys are inserted recursively.
+        static bool ensureDefaultJsonFile(const QString &targetPath, const QString &resourceName, QString *err = nullptr);
+
     private:
         FileIOUtils() = default; // Static utility class
     };

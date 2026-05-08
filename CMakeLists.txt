@@ -389,6 +389,24 @@ target_compile_definitions(mib_studio_qt PRIVATE
     MIB_STUDIO_QT_VERSION="${PROJECT_VERSION}"
 )
 
+# Keep the default runtime config files beside the built executable current on every build.
+# The app's development-mode config directory is <exe>/../include, so stale files here
+# otherwise mask updates made under resources/defaults until the build directory is cleaned.
+add_custom_command(TARGET mib_studio_qt POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:mib_studio_qt>/../include"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/resources/defaults/config.json"
+            "$<TARGET_FILE_DIR:mib_studio_qt>/../include/config.json"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/resources/defaults/egrabberConfig.js"
+            "$<TARGET_FILE_DIR:mib_studio_qt>/../include/egrabberConfig.js"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/resources/defaults/overviewConfig.js"
+            "$<TARGET_FILE_DIR:mib_studio_qt>/../include/overviewConfig.js"
+    COMMENT "Synchronizing default runtime config files"
+)
+
 # OpenCV linking (prefer imported targets; fallback to variables)
 if(TARGET opencv_world)
     target_link_libraries(mib_studio_qt PRIVATE opencv_world)
