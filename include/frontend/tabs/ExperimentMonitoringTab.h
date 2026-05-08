@@ -33,6 +33,7 @@ class QHideEvent;
 class QSpinBox;
 class QDoubleSpinBox;
 class QGroupBox;
+class QProgressBar;
 
 namespace Ui { class ExperimentMonitoringTab; }
 
@@ -101,9 +102,12 @@ public slots:
 private:
     void setupCharts();
     void setupTuneParamsPanel();
+    void setupBrightnessDashboard();
     void loadIsoelasticCurves();
     void updateScatterplot(const std::vector<backend::services::ProcessedFrame>& validFrames);
     void updateHistogram(const std::vector<backend::services::ProcessedFrame>& validFrames);
+    void updateBrightnessDashboard(const std::vector<backend::services::ProcessedFrame>& validFrames,
+                                   const std::vector<backend::services::ProcessedFrame>& invalidFrames);
     void updateValidFramesGrid(const std::vector<backend::services::ProcessedFrame>& validFrames);
     void updateInvalidFramesGrid(const std::vector<backend::services::ProcessedFrame>& invalidFrames);
     QImage extractRoiImage(const cv::Mat& image, int x, int y, int w, int h) const;
@@ -119,6 +123,15 @@ private:
     QTimer* periodicTriggerTimer_ = nullptr;
     uint64_t periodicTriggerPulseCount_ = 0;
     QLabel* roiLabel_ = nullptr;
+
+    // Image brightness dashboard (left column)
+    QGroupBox* brightnessDashboardGroup_ = nullptr;
+    QLabel* brightnessStatusLabel_ = nullptr;
+    QLabel* brightnessMedianLabel_ = nullptr;
+    QLabel* brightnessIqrLabel_ = nullptr;
+    QLabel* brightnessRangeLabel_ = nullptr;
+    QLabel* brightnessSampleLabel_ = nullptr;
+    QProgressBar* brightnessMedianBar_ = nullptr;
 
     // Panel 1: Scatterplot
     ZoomableChartView* scatterplotView_ = nullptr;
