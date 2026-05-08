@@ -4,6 +4,8 @@
 #include <QtConcurrent/QtConcurrent>
 #include <QFutureWatcher>
 
+#include <algorithm>
+
 #include <spdlog/spdlog.h>
 
 #include "backend/AppBackend.h"
@@ -23,9 +25,18 @@ std::vector<backend::services::DiscoveredCamera> discoverCamerasInWorker() {
     return cc.discoverCameras();
 }
 
-std::vector<int> probeNanopositionerPortsInWorker(int baudRate, unsigned char deviceAddress) {
+std::vector<int> probeNanopositionerPortsInWorker(int baudRate, unsigned char deviceAddress, int preferredPort) {
     std::vector<int> validPorts;
     std::vector<int> ports = backend::Tools::availableComPortNumbers();
+    if (preferredPort > 0 && std::find(ports.begin(), ports.end(), preferredPort) == ports.end()) {
+        ports.insert(ports.begin(), preferredPort);
+    }
+    std::stable_sort(ports.begin(), ports.end(), [preferredPort](int lhs, int rhs) {
+        const int lhsRank = (lhs == preferredPort) ? 0 : 1;
+        const int rhsRank = (rhs == preferredPort) ? 0 : 1;
+        return lhsRank == rhsRank ? lhs < rhs : lhsRank < rhsRank;
+    });
+    ports.erase(std::unique(ports.begin(), ports.end()), ports.end());
     for (int port : ports) {
         if (backend::services::AutofocusService::probeComPort(port, baudRate, deviceAddress)) {
             validPorts.push_back(port);
@@ -147,13 +158,26 @@ void DeviceInitManager::onNanopositionerStepTimer() {
     }
     int baudRate = nanopositionerTab_->getBaudRate();
     unsigned char deviceAddress = nanopositionerTab_->getDeviceAddress();
+    int preferredPort = nanopositionerTab_->getConfiguredComPort();
+
+    if (preferredPort > 0 && nanopositionerRetryCount_ == 0) {
+        nanopositionerTab_->setNanopositionerStatus(tr("Checking saved nanopositioner port COM%1...").arg(preferredPort));
+        if (backend::services::AutofocusService::probeComPort(preferredPort, baudRate, deviceAddress) &&
+            backend_.autofocus().connect(preferredPort, baudRate, deviceAddress)) {
+            nanopositionerTab_->applyAutoConnectResult(preferredPort);
+            SPDLOG_INFO("DeviceInitManager: auto-connected to nanopositioner on saved COM{}", preferredPort);
+            emit nanopositionerInitFinished(true);
+            return;
+        }
+        SPDLOG_WARN("DeviceInitManager: saved nanopositioner COM{} did not validate; scanning all ports", preferredPort);
+    }
 
     if (!nanopositionerWatcher_) {
         nanopositionerWatcher_ = std::make_unique<QFutureWatcher<std::vector<int>>>(this);
         connect(nanopositionerWatcher_.get(), &QFutureWatcher<std::vector<int>>::finished,
                 this, &DeviceInitManager::onNanopositionerProbeFinished);
     }
-    QFuture<std::vector<int>> future = QtConcurrent::run(probeNanopositionerPortsInWorker, baudRate, deviceAddress);
+    QFuture<std::vector<int>> future = QtConcurrent::run(probeNanopositionerPortsInWorker, baudRate, deviceAddress, preferredPort);
     nanopositionerWatcher_->setFuture(future);
 }
 

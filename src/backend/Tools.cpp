@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <cwchar>
+#include <iterator>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -95,26 +97,28 @@ std::vector<int> Tools::availableComPortNumbers() {
     if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, subkey, 0, KEY_READ, &hKey) != ERROR_SUCCESS) {
         return ports;
     }
-    char valueName[256];
-    char valueData[32];
+    wchar_t valueName[256];
+    wchar_t valueData[64];
     DWORD valueNameSize;
     DWORD valueDataSize;
     DWORD valueType;
     for (DWORD i = 0;; ++i) {
-        valueNameSize = static_cast<DWORD>(sizeof(valueName));
+        valueNameSize = static_cast<DWORD>(std::size(valueName));
         valueDataSize = static_cast<DWORD>(sizeof(valueData));
-        if (RegEnumValueA(hKey, i, valueName, &valueNameSize, nullptr, &valueType,
+        if (RegEnumValueW(hKey, i, valueName, &valueNameSize, nullptr, &valueType,
                           reinterpret_cast<LPBYTE>(valueData), &valueDataSize) != ERROR_SUCCESS) {
             break;
         }
-        if (valueType != REG_SZ || valueDataSize == 0) {
+        if ((valueType != REG_SZ && valueType != REG_EXPAND_SZ) || valueDataSize < 4 * sizeof(wchar_t)) {
             continue;
         }
-        valueData[sizeof(valueData) - 1] = '\0';
-        if (valueData[0] == 'C' && valueData[1] == 'O' && valueData[2] == 'M') {
-            const int num = std::atoi(valueData + 3);
-            if (num >= 1 && num <= 256) {
-                ports.push_back(num);
+        const size_t valueChars = std::min<size_t>(valueDataSize / sizeof(wchar_t), std::size(valueData) - 1);
+        valueData[valueChars] = L'\0';
+        if (valueData[0] == L'C' && valueData[1] == L'O' && valueData[2] == L'M') {
+            wchar_t* end = nullptr;
+            const long num = std::wcstol(valueData + 3, &end, 10);
+            if (end != valueData + 3 && num >= 1 && num <= 4096) {
+                ports.push_back(static_cast<int>(num));
             }
         }
     }

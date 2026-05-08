@@ -16,6 +16,7 @@ public:
 
 	/** Used by DeviceInitManager before starting probe worker. */
 	int getBaudRate() const;
+	int getConfiguredComPort() const;
 	unsigned char getDeviceAddress() const;
 	/** Called by DeviceInitManager on main thread to set status text (e.g. "Searching..."). */
 	void setNanopositionerStatus(const QString& message);
@@ -41,6 +42,7 @@ private:
 	Ui::NanopositionerTab* ui;
 	backend::AppBackend& backend_;
 	QTimer* statusUpdateTimer_ = nullptr;
+	int configuredComPort_ = -1;
 };
 
 } // namespace frontend

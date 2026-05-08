@@ -10,6 +10,8 @@
 #include <spdlog/spdlog.h>
 #include <algorithm>
 #include <cmath>
+#include <mutex>
+#include <thread>
 
 namespace backend::services {
 
@@ -17,6 +19,32 @@ namespace {
     // Plausible voltage range for XMT nanopositioner (V). Used to validate probe response.
     constexpr double PROBE_VOLTAGE_MIN = 0.0;
     constexpr double PROBE_VOLTAGE_MAX = 250.0;
+    constexpr int SERIAL_OPEN_ATTEMPTS = 3;
+    constexpr auto SERIAL_RETRY_DELAY = std::chrono::milliseconds(150);
+
+    std::mutex& xmtSerialMutex() {
+        static std::mutex mutex;
+        return mutex;
+    }
+
+    bool isPlausibleProbeVoltage(double val) {
+        return std::isfinite(val) && val >= PROBE_VOLTAGE_MIN && val <= PROBE_VOLTAGE_MAX;
+    }
+
+    int openComWithRetriesLocked(int comPort, int baudRate) {
+        int result = 0;
+        for (int attempt = 1; attempt <= SERIAL_OPEN_ATTEMPTS; ++attempt) {
+            CloseSer();
+            result = OpenComConnectRS232(comPort, baudRate);
+            if (result != 0) {
+                return result;
+            }
+            SPDLOG_DEBUG("AutofocusService: COM{} open attempt {}/{} failed",
+                         comPort, attempt, SERIAL_OPEN_ATTEMPTS);
+            std::this_thread::sleep_for(SERIAL_RETRY_DELAY);
+        }
+        return result;
+    }
 } // namespace
 
 AutofocusService::AutofocusService() {
@@ -43,32 +71,46 @@ bool AutofocusService::connect(int comPort, int baudRate, unsigned char deviceAd
     if (connected_.load()) {
         disconnect();
     }
-    // Ensure port is closed before opening (e.g. after force-close or failed probe)
-    CloseSer();
 
     comPort_ = comPort;
     baudRate_ = baudRate;
     deviceAddress_ = deviceAddress;
 
-    int result = OpenComConnectRS232(comPort, baudRate);
-    if (result == 0) {
-        SPDLOG_ERROR("AutofocusService: Failed to open COM port {}", comPort);
-        if (statusCallback_) {
-            statusCallback_("Failed to open COM port " + std::to_string(comPort));
-        }
-        connected_.store(false);
-        return false;
-    }
-
-    SPDLOG_INFO("AutofocusService: COM port {} opened successfully", comPort);
-    connected_.store(true);
-
-    // Initialize voltage
     {
-        std::scoped_lock cfgLock(configMutex_);
-        double initialVoltage = config_.initialVoltage;
-        XMT_COMMAND_SinglePoint(deviceAddress_, 0, 0, 0, initialVoltage);
-        currentVoltage_.store(initialVoltage);
+        std::scoped_lock serialLock(xmtSerialMutex());
+        int result = openComWithRetriesLocked(comPort, baudRate);
+        if (result == 0) {
+            SPDLOG_ERROR("AutofocusService: Failed to open COM{} at {} baud after {} attempts",
+                         comPort, baudRate, SERIAL_OPEN_ATTEMPTS);
+            if (statusCallback_) {
+                statusCallback_("Failed to open COM port " + std::to_string(comPort));
+            }
+            connected_.store(false);
+            CloseSer();
+            return false;
+        }
+
+        double currentVolt = XMT_COMMAND_ReadData(deviceAddress_, 5, 0, 0);
+        if (isPlausibleProbeVoltage(currentVolt)) {
+            currentVoltage_.store(currentVolt);
+            SPDLOG_INFO("AutofocusService: COM{} opened and responded at {:.2f} V", comPort, currentVolt);
+        } else {
+            // Some CoreMOR controllers return an invalid first read immediately after open.
+            // Keep the explicit user-selected connection open, but log the value for diagnostics
+            // instead of treating a single bad read as a hard failure.
+            SPDLOG_WARN("AutofocusService: COM{} opened but initial voltage read was not plausible: {}",
+                        comPort, currentVolt);
+        }
+
+        connected_.store(true);
+
+        // Initialize voltage
+        {
+            std::scoped_lock cfgLock(configMutex_);
+            double initialVoltage = config_.initialVoltage;
+            XMT_COMMAND_SinglePoint(deviceAddress_, 0, 0, 0, initialVoltage);
+            currentVoltage_.store(initialVoltage);
+        }
     }
 
     // Start control thread
@@ -97,17 +139,18 @@ void AutofocusService::disconnect() {
         }
     }
 
-    // Set safe shutdown voltage
+    // Set safe shutdown voltage and close the global SDK handle under the serial mutex.
     {
+        std::scoped_lock serialLock(xmtSerialMutex());
         std::scoped_lock cfgLock(configMutex_);
         double safeVoltage = config_.safeShutdownVoltage;
         if (connected_.load()) {
             XMT_COMMAND_SinglePoint(deviceAddress_, 0, 0, 0, safeVoltage);
         }
+        CloseSer();
     }
 
     // Close COM port
-    CloseSer();
     connected_.store(false);
 
     // Clear buffers (both pending inbox and ring-ratio buffer) so a later
@@ -130,16 +173,25 @@ void AutofocusService::disconnect() {
 
 bool AutofocusService::probeComPort(int comPort, int baudRate, unsigned char deviceAddress) {
     // Caller must not be connected (SDK uses a single global COM handle).
-    CloseSer();
-    int result = OpenComConnectRS232(comPort, baudRate);
+    std::scoped_lock serialLock(xmtSerialMutex());
+    int result = openComWithRetriesLocked(comPort, baudRate);
     if (result == 0) {
+        CloseSer();
+        SPDLOG_DEBUG("AutofocusService: COM{} probe failed to open at {} baud", comPort, baudRate);
         return false;
     }
+
     double val = XMT_COMMAND_ReadData(deviceAddress, 5, 0, 0);
+    if (!isPlausibleProbeVoltage(val)) {
+        std::this_thread::sleep_for(SERIAL_RETRY_DELAY);
+        val = XMT_COMMAND_ReadData(deviceAddress, 5, 0, 0);
+    }
     CloseSer();
-    bool plausible = std::isfinite(val) && val >= PROBE_VOLTAGE_MIN && val <= PROBE_VOLTAGE_MAX;
+    bool plausible = isPlausibleProbeVoltage(val);
     if (plausible) {
         SPDLOG_DEBUG("AutofocusService: COM{} probe OK (read {:.2f} V)", comPort, val);
+    } else {
+        SPDLOG_DEBUG("AutofocusService: COM{} probe rejected voltage response {}", comPort, val);
     }
     return plausible;
 }
@@ -310,7 +362,10 @@ void AutofocusService::controlLoop() {
 
             if (increaseVoltageRequest_.load()) {
                 double newVoltage = std::min(currentVoltage_.load() + cfg.manualVoltageStep, cfg.maxVoltage);
-                XMT_COMMAND_SinglePoint(deviceAddress_, 0, 0, 0, newVoltage);
+                {
+                    std::scoped_lock serialLock(xmtSerialMutex());
+                    XMT_COMMAND_SinglePoint(deviceAddress_, 0, 0, 0, newVoltage);
+                }
                 currentVoltage_.store(newVoltage);
                 SPDLOG_DEBUG("AutofocusService: Manual voltage increased to {}V", newVoltage);
                 increaseVoltageRequest_.store(false);
@@ -321,7 +376,10 @@ void AutofocusService::controlLoop() {
 
             if (decreaseVoltageRequest_.load()) {
                 double newVoltage = std::max(currentVoltage_.load() - cfg.manualVoltageStep, cfg.minVoltage);
-                XMT_COMMAND_SinglePoint(deviceAddress_, 0, 0, 0, newVoltage);
+                {
+                    std::scoped_lock serialLock(xmtSerialMutex());
+                    XMT_COMMAND_SinglePoint(deviceAddress_, 0, 0, 0, newVoltage);
+                }
                 currentVoltage_.store(newVoltage);
                 SPDLOG_DEBUG("AutofocusService: Manual voltage decreased to {}V", newVoltage);
                 decreaseVoltageRequest_.store(false);
@@ -340,8 +398,14 @@ void AutofocusService::controlLoop() {
             }
 
             // Update current voltage from device
-            double currentVolt = XMT_COMMAND_ReadData(deviceAddress_, 5, 0, 0);
-            currentVoltage_.store(currentVolt);
+            double currentVolt = 0.0;
+            {
+                std::scoped_lock serialLock(xmtSerialMutex());
+                currentVolt = XMT_COMMAND_ReadData(deviceAddress_, 5, 0, 0);
+            }
+            if (isPlausibleProbeVoltage(currentVolt)) {
+                currentVoltage_.store(currentVolt);
+            }
 
             // Get median ring ratio
             double medianRingRatio = medianRingRatio_.load();
@@ -388,7 +452,10 @@ void AutofocusService::controlLoop() {
 
                 // Apply the new voltage if it changed
                 if (std::abs(newVoltage - currentVoltage_.load()) > 0.01) {
-                    XMT_COMMAND_SinglePoint(deviceAddress_, 0, 0, 0, newVoltage);
+                    {
+                        std::scoped_lock serialLock(xmtSerialMutex());
+                        XMT_COMMAND_SinglePoint(deviceAddress_, 0, 0, 0, newVoltage);
+                    }
                     currentVoltage_.store(newVoltage);
                     lastAppliedSequence_ = currentSequence;
 
