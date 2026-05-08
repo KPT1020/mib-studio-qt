@@ -55,6 +55,8 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
+include(CTest)
+
 # Suppress character encoding warnings from third-party headers
 if(MSVC)
     add_compile_options(/wd4828)
@@ -70,6 +72,10 @@ find_package(onnxruntime CONFIG QUIET)
 set(MIB_HAS_EGRABBER OFF)
 if(WIN32)
     set(MIB_HAS_EGRABBER ON)
+endif()
+
+if(BUILD_TESTING)
+    add_subdirectory(tests)
 endif()
 
 set(MIB_HAS_ONNXRUNTIME OFF)
