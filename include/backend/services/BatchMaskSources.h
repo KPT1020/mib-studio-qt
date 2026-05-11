@@ -61,6 +61,7 @@ bool saveMasksToHdf5(const std::vector<ProcessedFrame>& frames,
                      const std::string& outputPath,
                      const ProcessingConfig& config,
                      int roiX, int roiY, int roiW, int roiH,
-                     const cv::Mat& background);
+                     const cv::Mat& background,
+                     bool useFrameTimestamps = false);
 
 } // namespace backend::services::batch_masks

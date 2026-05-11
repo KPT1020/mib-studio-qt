@@ -40,9 +40,11 @@ layout:
 - Dataset reads go through `imagesPath(bool)` / `masksPath(bool)` helpers
   that route to `/recorded_frames/images` (and return `""` for masks,
   since recording files have none).
-- Disabled in recording mode: overlay combo, ROI overlay, Regenerate
-  Masks, Export Metrics (no per-frame metrics), Export Charts (no
-  metrics to chart). Export All still writes the raw TIFF images.
+- Disabled in recording mode: overlay combo, ROI overlay, Export Metrics
+  (no per-frame metrics), Export Charts (no metrics to chart). Export All
+  still writes the raw TIFF images. Regenerate Masks remains enabled and
+  feeds `/recorded_frames/images` into `BatchMaskDialog`, then reloads the
+  standard remasked HDF5 output.
 - `clearDisplay()` restores default tab labels/visibility so loading an
   experiment file after a recording file works correctly.
 
@@ -51,11 +53,17 @@ layout:
 Toolbar action **"Regenerate masks…"** opens [[Dialogs|BatchMaskDialog]]
 (`include/frontend/dialogs/BatchMaskDialog.h`). The dialog drives
 [[../services/ProcessingService]]'s `processBatch` API on either the
-currently loaded HDF5 file's `/valid_frames/images` (with start/count) or
-a folder of TIFF/PNG/JPEG images. Outputs can be written as PNG masks,
-saved to a new HDF5 file via [[../services/BatchMaskSources]]
-`saveMasksToHdf5`, and/or pushed back into the tab to refresh thumbnails
-and metrics with the newly-computed masks. The currently active
+currently loaded HDF5 file's image dataset (`/valid_frames/images` for
+standard experiment files, `/recorded_frames/images` for recording files)
+with start/count, the whole HDF5 file, an AVI file, or a folder of
+TIFF/PNG/JPEG images. Whole-file mode processes all recording frames for
+recording files and both valid + invalid datasets for standard review files.
+HDF5-sourced runs preserve source frame indices and store timestamps
+normalised to the first regenerated image. Output is saved to a new HDF5
+file via [[../services/BatchMaskSources]] `saveMasksToHdf5` and the tab
+reloads from that file. If the user does not select a background frame,
+the dialog can synthesize one tile-by-tile from the least-changing source
+frames. The currently active
 `ProcessingConfig`, ROI, and background image (from
 `processing().getProcessingConfig()` / `getRealtimeRoi()` /
 `getRealtimeBackgroundGray()`) are used as inputs.

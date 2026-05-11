@@ -7,6 +7,7 @@
 #include "frontend/utils/RoiDrawCanvas.h"
 
 #include <QCoreApplication>
+#include <QCheckBox>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
@@ -31,6 +32,10 @@
 #include <opencv2/videoio.hpp>
 
 #include <spdlog/spdlog.h>
+
+#include <algorithm>
+#include <limits>
+#include <utility>
 
 namespace frontend {
 
@@ -61,7 +66,11 @@ void BatchMaskDialog::buildUi() {
     auto* srcGroup  = new QGroupBox(tr("Input source"), this);
     auto* srcLayout = new QVBoxLayout(srcGroup);
 
-    srcHdf5_ = new QRadioButton(tr("Current HDF5 frames (/valid_frames/images)"), srcGroup);
+    const QString hdf5Dataset = hdf5ImageDatasetPath();
+    const QString hdf5Label = hdf5Dataset.isEmpty()
+        ? tr("Current HDF5 frames")
+        : tr("Current HDF5 frames (%1)").arg(hdf5Dataset);
+    srcHdf5_ = new QRadioButton(hdf5Label, srcGroup);
     srcHdf5_->setEnabled(!hdf5LoadedPath_.isEmpty());
     srcHdf5_->setChecked(!hdf5LoadedPath_.isEmpty());
     srcLayout->addWidget(srcHdf5_);
@@ -75,11 +84,20 @@ void BatchMaskDialog::buildUi() {
     rangeRow->addWidget(startIdxSpin_);
     rangeRow->addWidget(new QLabel(tr("Count:")));
     countSpin_ = new QSpinBox(srcGroup);
-    countSpin_->setRange(1, 1000000);
+    countSpin_->setRange(1, 1000000000);
     countSpin_->setValue(100);
     rangeRow->addWidget(countSpin_);
     rangeRow->addStretch();
     srcLayout->addLayout(rangeRow);
+
+    auto* entireRow = new QHBoxLayout();
+    entireRow->addSpacing(20);
+    entireHdf5Check_ = new QCheckBox(tr("Regenerate entire HDF5 file"), srcGroup);
+    entireHdf5Check_->setEnabled(!hdf5LoadedPath_.isEmpty());
+    entireHdf5Check_->setChecked(!hdf5LoadedPath_.isEmpty());
+    entireRow->addWidget(entireHdf5Check_);
+    entireRow->addStretch();
+    srcLayout->addLayout(entireRow);
 
     srcFolder_ = new QRadioButton(tr("Folder of TIFF/PNG/JPEG images"), srcGroup);
     srcFolder_->setChecked(hdf5LoadedPath_.isEmpty());
@@ -138,6 +156,11 @@ void BatchMaskDialog::buildUi() {
     bgStatusLabel_->setStyleSheet("color: gray;");
     bgRow->addWidget(bgStatusLabel_, 1);
     previewLayout->addLayout(bgRow);
+
+    syntheticBgCheck_ = new QCheckBox(
+        tr("Use synthetic background when none selected"), previewGroup);
+    syntheticBgCheck_->setChecked(true);
+    previewLayout->addWidget(syntheticBgCheck_);
 
     topRow->addWidget(previewGroup, 1);
 
@@ -245,6 +268,7 @@ void BatchMaskDialog::buildUi() {
     connect(srcHdf5_,    &QRadioButton::toggled, this, &BatchMaskDialog::onSourceChanged);
     connect(srcFolder_,  &QRadioButton::toggled, this, &BatchMaskDialog::onSourceChanged);
     connect(srcAvi_,     &QRadioButton::toggled, this, &BatchMaskDialog::onSourceChanged);
+    connect(entireHdf5Check_, &QCheckBox::toggled, this, &BatchMaskDialog::onSourceChanged);
     connect(folderBrowseBtn_, &QPushButton::clicked, this, &BatchMaskDialog::onBrowseFolder);
     connect(aviBrowseBtn_,    &QPushButton::clicked, this, &BatchMaskDialog::onBrowseAvi);
 
@@ -263,6 +287,10 @@ void BatchMaskDialog::buildUi() {
     connect(aviEdit_,    &QLineEdit::editingFinished,
             this, &BatchMaskDialog::onPreviewSourceChanged);
     connect(startIdxSpin_, qOverload<int>(&QSpinBox::valueChanged),
+            this, &BatchMaskDialog::onPreviewSourceChanged);
+    connect(countSpin_, qOverload<int>(&QSpinBox::valueChanged),
+            this, &BatchMaskDialog::onPreviewSourceChanged);
+    connect(entireHdf5Check_, &QCheckBox::toggled,
             this, &BatchMaskDialog::onPreviewSourceChanged);
 
     connect(prevFrameBtn_,  &QPushButton::clicked, this, &BatchMaskDialog::onPrevFrame);
@@ -302,12 +330,24 @@ void BatchMaskDialog::onSourceChanged() {
     const bool hdf5   = srcHdf5_->isChecked();
     const bool folder = srcFolder_->isChecked();
     const bool avi    = srcAvi_->isChecked();
-    startIdxSpin_->setEnabled(hdf5);
-    countSpin_->setEnabled(hdf5);
+    const bool hdf5Range = hdf5 && !entireHdf5Check_->isChecked();
+    entireHdf5Check_->setEnabled(hdf5 && !hdf5LoadedPath_.isEmpty());
+    startIdxSpin_->setEnabled(hdf5Range);
+    countSpin_->setEnabled(hdf5Range);
     folderEdit_->setEnabled(folder);
     folderBrowseBtn_->setEnabled(folder);
     aviEdit_->setEnabled(avi);
     aviBrowseBtn_->setEnabled(avi);
+
+    if (hdf5 && entireHdf5Check_->isChecked()) {
+        const QSignalBlocker b1(startIdxSpin_);
+        const QSignalBlocker b2(countSpin_);
+        startIdxSpin_->setValue(0);
+        const int total = getHdf5FrameCount();
+        if (total > 0) {
+            countSpin_->setValue(std::min(total, countSpin_->maximum()));
+        }
+    }
 }
 
 void BatchMaskDialog::onBrowseFolder() {
@@ -346,6 +386,7 @@ void BatchMaskDialog::onPreviewSourceChanged() {
     if (srcHdf5_->isChecked() && !hdf5LoadedPath_.isEmpty()) {
         backend::services::Hdf5Service reader;
         if (reader.loadFile(hdf5LoadedPath_.toStdString())) {
+            roiCanvas_->setRoi({});
             uint64_t s{}, e{};
             size_t v{}, inv{};
             backend::services::ProcessingService::Roi roi{};
@@ -369,10 +410,16 @@ int BatchMaskDialog::getSourceFrameCount() const {
         if (!reader.loadFile(hdf5LoadedPath_.toStdString())) return 0;
         size_t count = 0;
         int h = 0, w = 0, ch = 0;
-        if (!reader.getDatasetInfo("/valid_frames/images", count, h, w, ch)) return 0;
-        const size_t start = static_cast<size_t>(startIdxSpin_->value());
+        const QString datasetPath = hdf5ImageDatasetPath();
+        if (datasetPath.isEmpty()) return 0;
+        if (!reader.getDatasetInfo(datasetPath.toStdString(), count, h, w, ch)) return 0;
+        const size_t start = entireHdf5Check_->isChecked()
+            ? 0
+            : static_cast<size_t>(startIdxSpin_->value());
         if (start >= count) return 0;
-        const size_t requested = static_cast<size_t>(countSpin_->value());
+        const size_t requested = entireHdf5Check_->isChecked()
+            ? count
+            : static_cast<size_t>(countSpin_->value());
         return static_cast<int>(std::min(requested, count - start));
     } else if (srcAvi_->isChecked()) {
         const QString path = aviEdit_->text().trimmed();
@@ -423,8 +470,12 @@ void BatchMaskDialog::loadPreviewFrame(int index) {
         backend::services::Hdf5Service reader;
         if (reader.loadFile(hdf5LoadedPath_.toStdString())) {
             const size_t absIdx =
-                static_cast<size_t>(startIdxSpin_->value()) + previewFrameIndex_;
-            reader.readImageByIndex("/valid_frames/images", absIdx, mat);
+                (entireHdf5Check_->isChecked() ? 0 : static_cast<size_t>(startIdxSpin_->value()))
+                + previewFrameIndex_;
+            const QString datasetPath = hdf5ImageDatasetPath();
+            if (!datasetPath.isEmpty()) {
+                reader.readImageByIndex(datasetPath.toStdString(), absIdx, mat);
+            }
         }
     } else if (srcAvi_->isChecked()) {
         if (previewAviCap_.isOpened()) {
@@ -474,8 +525,12 @@ void BatchMaskDialog::onSetBackground() {
         backend::services::Hdf5Service reader;
         if (reader.loadFile(hdf5LoadedPath_.toStdString())) {
             const size_t absIdx =
-                static_cast<size_t>(startIdxSpin_->value()) + previewFrameIndex_;
-            reader.readImageByIndex("/valid_frames/images", absIdx, mat);
+                (entireHdf5Check_->isChecked() ? 0 : static_cast<size_t>(startIdxSpin_->value()))
+                + previewFrameIndex_;
+            const QString datasetPath = hdf5ImageDatasetPath();
+            if (!datasetPath.isEmpty()) {
+                reader.readImageByIndex(datasetPath.toStdString(), absIdx, mat);
+            }
         }
     } else if (srcAvi_->isChecked()) {
         if (previewAviCap_.isOpened()) {
@@ -547,38 +602,101 @@ QImage BatchMaskDialog::matToQImage(const cv::Mat& gray) const {
                   QImage::Format_RGB888).copy();
 }
 
+cv::Mat BatchMaskDialog::buildSyntheticBackground(const std::vector<cv::Mat>& grayImages) const {
+    if (grayImages.empty() || grayImages.front().empty()) return {};
+
+    const int rows = grayImages.front().rows;
+    const int cols = grayImages.front().cols;
+    std::vector<cv::Mat> frames;
+    frames.reserve(grayImages.size());
+    for (const auto& image : grayImages) {
+        if (image.empty() || image.rows != rows || image.cols != cols) continue;
+        if (image.type() == CV_8UC1) {
+            frames.push_back(image);
+        } else if (image.channels() == 3) {
+            cv::Mat gray;
+            cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+            frames.push_back(std::move(gray));
+        } else if (image.channels() == 4) {
+            cv::Mat gray;
+            cv::cvtColor(image, gray, cv::COLOR_BGRA2GRAY);
+            frames.push_back(std::move(gray));
+        } else {
+            cv::Mat gray;
+            image.convertTo(gray, CV_8UC1);
+            frames.push_back(std::move(gray));
+        }
+    }
+
+    if (frames.empty()) return {};
+    if (frames.size() == 1) return frames.front().clone();
+
+    const int tileSize = 64;
+    const size_t keepCount = std::min<size_t>(
+        std::max<size_t>(3, frames.size() / 10),
+        std::min<size_t>(10, frames.size()));
+    cv::Mat background(rows, cols, CV_8UC1, cv::Scalar(0));
+
+    for (int y = 0; y < rows; y += tileSize) {
+        const int h = std::min(tileSize, rows - y);
+        for (int x = 0; x < cols; x += tileSize) {
+            const int w = std::min(tileSize, cols - x);
+            const cv::Rect tile(x, y, w, h);
+
+            std::vector<std::pair<double, size_t>> ranked;
+            ranked.reserve(frames.size());
+            for (size_t i = 0; i < frames.size(); ++i) {
+                double score = 0.0;
+                int comparisons = 0;
+                if (i > 0) {
+                    cv::Mat diff;
+                    cv::absdiff(frames[i](tile), frames[i - 1](tile), diff);
+                    score += cv::mean(diff)[0];
+                    ++comparisons;
+                }
+                if (i + 1 < frames.size()) {
+                    cv::Mat diff;
+                    cv::absdiff(frames[i](tile), frames[i + 1](tile), diff);
+                    score += cv::mean(diff)[0];
+                    ++comparisons;
+                }
+                ranked.emplace_back(score / std::max(1, comparisons), i);
+            }
+
+            std::partial_sort(
+                ranked.begin(), ranked.begin() + static_cast<std::ptrdiff_t>(keepCount), ranked.end(),
+                [](const auto& a, const auto& b) { return a.first < b.first; });
+
+            cv::Mat accum(h, w, CV_32FC1, cv::Scalar(0));
+            for (size_t i = 0; i < keepCount; ++i) {
+                cv::Mat tileFloat;
+                frames[ranked[i].second](tile).convertTo(tileFloat, CV_32FC1);
+                accum += tileFloat;
+            }
+            accum /= static_cast<double>(keepCount);
+            accum.convertTo(background(tile), CV_8UC1);
+        }
+    }
+
+    SPDLOG_INFO("BatchMaskDialog: built synthetic background from {} frames (tile={} keep={})",
+                frames.size(), tileSize, keepCount);
+    return background;
+}
+
 // ---------------------------------------------------------------------------
 // Input loading
 // ---------------------------------------------------------------------------
 
 bool BatchMaskDialog::loadInputs(std::vector<cv::Mat>& outGray,
                                  std::vector<std::string>& outNames,
+                                 std::vector<backend::services::ProcessedFrame>& outMetadata,
                                  QString& errorOut) {
     outGray.clear();
     outNames.clear();
+    outMetadata.clear();
 
     if (srcHdf5_->isChecked()) {
-        if (hdf5LoadedPath_.isEmpty()) {
-            errorOut = tr("No HDF5 file is currently loaded.");
-            return false;
-        }
-        backend::services::Hdf5Service reader;
-        if (!reader.loadFile(hdf5LoadedPath_.toStdString())) {
-            errorOut = tr("Failed to open HDF5 file: %1").arg(hdf5LoadedPath_);
-            return false;
-        }
-        const size_t start = static_cast<size_t>(startIdxSpin_->value());
-        const size_t count = static_cast<size_t>(countSpin_->value());
-        if (!backend::services::batch_masks::loadFromHdf5(
-                reader, "/valid_frames/images", start, count, outGray)) {
-            errorOut = tr("Failed to read images from HDF5 /valid_frames/images.");
-            return false;
-        }
-        outNames.resize(outGray.size());
-        for (size_t i = 0; i < outNames.size(); ++i) {
-            outNames[i] = "frame_" + std::to_string(start + i);
-        }
-        return true;
+        return loadHdf5Inputs(outGray, outNames, outMetadata, errorOut);
     } else if (srcAvi_->isChecked()) {
         const QString path = aviEdit_->text().trimmed();
         if (path.isEmpty()) {
@@ -629,6 +747,163 @@ bool BatchMaskDialog::loadInputs(std::vector<cv::Mat>& outGray,
     }
 }
 
+bool BatchMaskDialog::loadHdf5Inputs(std::vector<cv::Mat>& outGray,
+                                     std::vector<std::string>& outNames,
+                                     std::vector<backend::services::ProcessedFrame>& outMetadata,
+                                     QString& errorOut) {
+    if (hdf5LoadedPath_.isEmpty()) {
+        errorOut = tr("No HDF5 file is currently loaded.");
+        return false;
+    }
+
+    backend::services::Hdf5Service reader;
+    if (!reader.loadFile(hdf5LoadedPath_.toStdString())) {
+        errorOut = tr("Failed to open HDF5 file: %1").arg(hdf5LoadedPath_);
+        return false;
+    }
+
+    auto toGray = [](cv::Mat m) {
+        if (m.empty()) return cv::Mat{};
+        if (m.type() == CV_8UC1) return m;
+        cv::Mat gray;
+        if (m.channels() == 3) {
+            cv::cvtColor(m, gray, cv::COLOR_BGR2GRAY);
+        } else if (m.channels() == 4) {
+            cv::cvtColor(m, gray, cv::COLOR_BGRA2GRAY);
+        } else {
+            m.convertTo(gray, CV_8UC1);
+        }
+        return gray;
+    };
+
+    if (!entireHdf5Check_->isChecked()) {
+        const size_t start = static_cast<size_t>(startIdxSpin_->value());
+        const size_t count = static_cast<size_t>(countSpin_->value());
+        const QString datasetPath = hdf5ImageDatasetPath();
+        if (datasetPath.isEmpty()) {
+            errorOut = tr("No supported image dataset found in HDF5 file.");
+            return false;
+        }
+        if (!backend::services::batch_masks::loadFromHdf5(
+                reader, datasetPath.toStdString(), start, count, outGray)) {
+            errorOut = tr("Failed to read images from HDF5 %1.").arg(datasetPath);
+            return false;
+        }
+
+        std::vector<backend::services::ProcessedFrame> allMetadata;
+        readHdf5Metadata(reader, datasetPath, allMetadata);
+        outMetadata.reserve(outGray.size());
+        outNames.resize(outGray.size());
+        for (size_t i = 0; i < outGray.size(); ++i) {
+            const size_t sourceIdx = start + i;
+            backend::services::ProcessedFrame md;
+            if (sourceIdx < allMetadata.size()) {
+                md.index = allMetadata[sourceIdx].index;
+                md.timestampNs = allMetadata[sourceIdx].timestampNs;
+            } else {
+                md.index = static_cast<uint64_t>(sourceIdx);
+            }
+            outMetadata.push_back(md);
+            outNames[i] = "frame_" + std::to_string(md.index);
+        }
+        return true;
+    }
+
+    std::vector<Hdf5FrameRef> refs;
+    auto collectRefs = [&](const QString& datasetPath) {
+        size_t count = 0;
+        int h = 0, w = 0, ch = 0;
+        if (!reader.getDatasetInfo(datasetPath.toStdString(), count, h, w, ch)) {
+            return;
+        }
+
+        std::vector<backend::services::ProcessedFrame> metadata;
+        readHdf5Metadata(reader, datasetPath, metadata);
+        refs.reserve(refs.size() + count);
+        for (size_t i = 0; i < count; ++i) {
+            Hdf5FrameRef ref;
+            ref.datasetPath = datasetPath;
+            ref.datasetIndex = i;
+            ref.sourceIndex = i;
+            if (i < metadata.size()) {
+                ref.sourceIndex = metadata[i].index;
+                ref.timestampNs = metadata[i].timestampNs;
+            }
+            refs.push_back(std::move(ref));
+        }
+    };
+
+    if (reader.isRecordingFile()) {
+        collectRefs(QStringLiteral("/recorded_frames/images"));
+    } else {
+        collectRefs(QStringLiteral("/valid_frames/images"));
+        collectRefs(QStringLiteral("/invalid_frames/images"));
+    }
+
+    if (refs.empty()) {
+        errorOut = tr("No supported image dataset found in HDF5 file.");
+        return false;
+    }
+
+    const bool hasTimestamps = std::any_of(
+        refs.begin(), refs.end(), [](const Hdf5FrameRef& ref) { return ref.timestampNs != 0; });
+    std::sort(refs.begin(), refs.end(), [hasTimestamps](const Hdf5FrameRef& a, const Hdf5FrameRef& b) {
+        if (hasTimestamps && a.timestampNs != b.timestampNs) return a.timestampNs < b.timestampNs;
+        if (a.sourceIndex != b.sourceIndex) return a.sourceIndex < b.sourceIndex;
+        if (a.datasetPath != b.datasetPath) return a.datasetPath < b.datasetPath;
+        return a.datasetIndex < b.datasetIndex;
+    });
+
+    outGray.reserve(refs.size());
+    outNames.reserve(refs.size());
+    outMetadata.reserve(refs.size());
+    for (const auto& ref : refs) {
+        cv::Mat img;
+        if (!reader.readImageByIndex(ref.datasetPath.toStdString(), ref.datasetIndex, img)) {
+            errorOut = tr("Failed to read images from HDF5 %1.").arg(ref.datasetPath);
+            return false;
+        }
+
+        backend::services::ProcessedFrame md;
+        md.index = ref.sourceIndex;
+        md.timestampNs = ref.timestampNs;
+        outGray.push_back(toGray(std::move(img)));
+        outMetadata.push_back(md);
+        outNames.push_back("frame_" + std::to_string(ref.sourceIndex));
+    }
+    return true;
+}
+
+bool BatchMaskDialog::readHdf5Metadata(
+    backend::services::Hdf5Service& reader,
+    const QString& datasetPath,
+    std::vector<backend::services::ProcessedFrame>& outMetadata) const {
+    outMetadata.clear();
+    if (datasetPath == QStringLiteral("/recorded_frames/images")) {
+        return reader.readRecordingMetadata(outMetadata);
+    }
+    if (datasetPath == QStringLiteral("/valid_frames/images")) {
+        return reader.readValidMetadata(outMetadata);
+    }
+    if (datasetPath == QStringLiteral("/invalid_frames/images")) {
+        return reader.readInvalidMetadata(outMetadata);
+    }
+    return false;
+}
+
+void BatchMaskDialog::applySourceMetadata() {
+    if (results_.size() != sourceMetadata_.size()) return;
+
+    const uint64_t firstTimestamp = sourceMetadata_.empty() ? 0 : sourceMetadata_.front().timestampNs;
+    for (size_t i = 0; i < results_.size(); ++i) {
+        const auto& md = sourceMetadata_[i];
+        results_[i].index = md.index;
+        results_[i].timestampNs = (md.timestampNs >= firstTimestamp)
+            ? (md.timestampNs - firstTimestamp)
+            : 0;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Running state
 // ---------------------------------------------------------------------------
@@ -636,6 +911,7 @@ bool BatchMaskDialog::loadInputs(std::vector<cv::Mat>& outGray,
 void BatchMaskDialog::setRunning(bool running) {
     runBtn_->setEnabled(!running);
     srcHdf5_->setEnabled(!running && !hdf5LoadedPath_.isEmpty());
+    entireHdf5Check_->setEnabled(!running && srcHdf5_->isChecked() && !hdf5LoadedPath_.isEmpty());
     srcFolder_->setEnabled(!running);
     srcAvi_->setEnabled(!running);
     folderBrowseBtn_->setEnabled(!running && srcFolder_->isChecked());
@@ -644,6 +920,7 @@ void BatchMaskDialog::setRunning(bool running) {
     nextFrameBtn_->setEnabled(!running && previewFrameIndex_ < previewFrameTotal_ - 1);
     setBgBtn_->setEnabled(!running);
     clearBgBtn_->setEnabled(!running);
+    syntheticBgCheck_->setEnabled(!running);
 }
 
 // ---------------------------------------------------------------------------
@@ -676,8 +953,9 @@ void BatchMaskDialog::onRun() {
 
     std::vector<cv::Mat> images;
     std::vector<std::string> names;
+    sourceMetadata_.clear();
     QString err;
-    if (!loadInputs(images, names, err)) {
+    if (!loadInputs(images, names, sourceMetadata_, err)) {
         setRunning(false);
         statusLabel_->setText(tr("Error: %1").arg(err));
         QMessageBox::warning(this, tr("Load failed"), err);
@@ -691,7 +969,15 @@ void BatchMaskDialog::onRun() {
     const QRect qroi = roiCanvas_->getRoi();
     const backend::services::ProcessingService::Roi roi{
         qroi.x(), qroi.y(), qroi.width(), qroi.height()};
-    const cv::Mat background = backgroundMat_;
+    cv::Mat background = backgroundMat_;
+    if (background.empty() && syntheticBgCheck_->isChecked()) {
+        statusLabel_->setText(tr("Building synthetic background..."));
+        QCoreApplication::processEvents();
+        background = buildSyntheticBackground(images);
+        if (!background.empty()) {
+            logView_->appendPlainText(tr("Built synthetic background from %1 images.").arg(images.size()));
+        }
+    }
 
     progressBar_->setRange(0, static_cast<int>(images.size()));
     statusLabel_->setText(tr("Processing %1 images...").arg(images.size()));
@@ -704,6 +990,7 @@ void BatchMaskDialog::onRun() {
     };
 
     results_ = proc.processBatch(images, config, background, roi, progressCb);
+    applySourceMetadata();
 
     size_t validCount = 0;
     for (const auto& f : results_) if (f.validation.isValid) ++validCount;
@@ -713,7 +1000,8 @@ void BatchMaskDialog::onRun() {
 
     const bool ok = backend::services::batch_masks::saveMasksToHdf5(
         results_, outputPath.toStdString(), config,
-        roi.x, roi.y, roi.w, roi.h, background);
+        roi.x, roi.y, roi.w, roi.h, background,
+        srcHdf5_->isChecked());
 
     if (ok) {
         savedHdf5Path_ = outputPath;
@@ -725,6 +1013,47 @@ void BatchMaskDialog::onRun() {
     }
 
     setRunning(false);
+}
+
+int BatchMaskDialog::getHdf5FrameCount() const {
+    if (hdf5LoadedPath_.isEmpty()) return 0;
+
+    backend::services::Hdf5Service reader;
+    if (!reader.loadFile(hdf5LoadedPath_.toStdString())) return 0;
+
+    size_t count = 0;
+    int h = 0, w = 0, ch = 0;
+    if (reader.isRecordingFile()) {
+        return reader.getDatasetInfo("/recorded_frames/images", count, h, w, ch)
+            ? static_cast<int>(std::min<size_t>(count, static_cast<size_t>(std::numeric_limits<int>::max())))
+            : 0;
+    }
+
+    size_t total = 0;
+    if (reader.getDatasetInfo("/valid_frames/images", count, h, w, ch)) total += count;
+    if (reader.getDatasetInfo("/invalid_frames/images", count, h, w, ch)) total += count;
+    return static_cast<int>(std::min<size_t>(total, static_cast<size_t>(std::numeric_limits<int>::max())));
+}
+
+QString BatchMaskDialog::hdf5ImageDatasetPath() const {
+    if (hdf5LoadedPath_.isEmpty()) return {};
+
+    backend::services::Hdf5Service reader;
+    if (!reader.loadFile(hdf5LoadedPath_.toStdString())) return {};
+
+    size_t count = 0;
+    int h = 0, w = 0, ch = 0;
+    if (reader.isRecordingFile() &&
+        reader.getDatasetInfo("/recorded_frames/images", count, h, w, ch)) {
+        return QStringLiteral("/recorded_frames/images");
+    }
+    if (reader.getDatasetInfo("/valid_frames/images", count, h, w, ch)) {
+        return QStringLiteral("/valid_frames/images");
+    }
+    if (reader.getDatasetInfo("/recorded_frames/images", count, h, w, ch)) {
+        return QStringLiteral("/recorded_frames/images");
+    }
+    return {};
 }
 
 QString BatchMaskDialog::computeAutoOutputPath() const {

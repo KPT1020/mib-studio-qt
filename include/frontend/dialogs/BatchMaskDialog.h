@@ -6,6 +6,7 @@
 #include <QString>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <opencv2/videoio.hpp>
@@ -15,6 +16,7 @@
 
 namespace cv { class Mat; }
 namespace backend { class AppBackend; }
+namespace backend::services { class Hdf5Service; }
 
 class QRadioButton;
 class QLineEdit;
@@ -24,6 +26,7 @@ class QLabel;
 class QProgressBar;
 class QPlainTextEdit;
 class QDoubleSpinBox;
+class QCheckBox;
 
 namespace frontend {
 
@@ -66,15 +69,34 @@ private slots:
     void resetConfigToLive();
 
 private:
+    struct Hdf5FrameRef {
+        QString datasetPath;
+        size_t datasetIndex{0};
+        uint64_t sourceIndex{0};
+        uint64_t timestampNs{0};
+    };
+
     void buildUi();
     bool loadInputs(std::vector<cv::Mat>& outGray,
                     std::vector<std::string>& outNames,
+                    std::vector<backend::services::ProcessedFrame>& outMetadata,
                     QString& errorOut);
     void setRunning(bool running);
 
     void    loadPreviewFrame(int index);
     int     getSourceFrameCount() const;
+    int     getHdf5FrameCount() const;
     QImage  matToQImage(const cv::Mat& gray) const;
+    cv::Mat buildSyntheticBackground(const std::vector<cv::Mat>& grayImages) const;
+    QString hdf5ImageDatasetPath() const;
+    bool    loadHdf5Inputs(std::vector<cv::Mat>& outGray,
+                           std::vector<std::string>& outNames,
+                           std::vector<backend::services::ProcessedFrame>& outMetadata,
+                           QString& errorOut);
+    bool    readHdf5Metadata(backend::services::Hdf5Service& reader,
+                             const QString& datasetPath,
+                             std::vector<backend::services::ProcessedFrame>& outMetadata) const;
+    void    applySourceMetadata();
     QString computeAutoOutputPath() const;
 
     backend::AppBackend& backend_;
@@ -90,6 +112,7 @@ private:
     QPushButton* aviBrowseBtn_ = nullptr;
     QSpinBox* startIdxSpin_ = nullptr;
     QSpinBox* countSpin_ = nullptr;
+    QCheckBox* entireHdf5Check_ = nullptr;
 
     // Status + controls
     QPushButton* runBtn_ = nullptr;
@@ -106,6 +129,7 @@ private:
     QPushButton*   setBgBtn_         = nullptr;
     QPushButton*   clearBgBtn_       = nullptr;
     QLabel*        bgStatusLabel_    = nullptr;
+    QCheckBox*     syntheticBgCheck_ = nullptr;
 
     // Preview state
     int     previewFrameIndex_ = 0;
@@ -132,6 +156,7 @@ private:
     backend::services::ProcessingConfig localConfig_;
 
     std::vector<backend::services::ProcessedFrame> results_;
+    std::vector<backend::services::ProcessedFrame> sourceMetadata_;
     QString savedHdf5Path_;
 };
 

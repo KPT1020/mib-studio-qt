@@ -5,6 +5,19 @@
 
 ## Features shipped
 
+- **Recording HDF5 mask regeneration in Review** (2026-05-11) - The
+  Review tab now keeps "Regenerate Masks" enabled for recording-mode HDF5
+  files. `BatchMaskDialog` resolves the active HDF5 source dataset and uses
+  `/recorded_frames/images` for recording files instead of the hardcoded
+  `/valid_frames/images`, so generated recording `.h5` files can be
+  remasked and reloaded as standard review HDF5 outputs. The dialog also
+  has a whole-HDF5 option that processes all recording frames or both
+  valid/invalid datasets for standard files, preserving source frame indices
+  and writing timestamps normalised to the first regenerated image. When no
+  manual background frame is selected, regeneration can synthesize a
+  background by averaging the lowest-change source frames per image tile.
+  Files: `HdfReviewTab.cpp`, `BatchMaskDialog.{h,cpp}`.
+
 - **Release windeployqt Conan alignment** (2026-04-20) — `CMakeLists.txt`
   picks `windeployqt` and per-config `PATH` from `qt_PACKAGE_FOLDER_DEBUG` /
   `qt_PACKAGE_FOLDER_RELEASE` (CMakeDeps) instead of a cached `find_program`
@@ -22,9 +35,10 @@
   load, hides the "Invalid Frames" tab, relabels "Valid Frames" as
   "Frames", and routes all thumbnail/viewer/export reads through new
   `imagesPath(bool)` / `masksPath(bool)` helpers. Masks, overlay modes,
-  ROI overlay, Regenerate Masks, Export Metrics CSV and Export Charts are
-  disabled for recording files (no per-frame metrics exist); Export All
-  still writes TIFFs. Files: `Hdf5Service.{h,cpp}`, `HdfReviewTab.{h,cpp}`.
+  ROI overlay, Export Metrics CSV and Export Charts are disabled for
+  recording files (no per-frame metrics exist); Export All still writes
+  TIFFs. Regenerate Masks was re-enabled on 2026-05-11. Files:
+  `Hdf5Service.{h,cpp}`, `HdfReviewTab.{h,cpp}`.
 
 - **Buffer save to AVI + AVI source for mask regeneration** (2026-04-16) —
   [[../data-model/FrameStore]] gained `saveFramesToAvi()` overloads

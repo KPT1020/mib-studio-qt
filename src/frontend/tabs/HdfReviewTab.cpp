@@ -400,7 +400,7 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
     ui->exportAllBtn->setEnabled(hasData);
     ui->exportChartsBtn->setEnabled(hasData && !isRecordingMode_);
     ui->closeFileBtn->setEnabled(hasData);
-    ui->regenerateMasksBtn->setEnabled(hasData && !isRecordingMode_);
+    ui->regenerateMasksBtn->setEnabled(hasData);
 
     // Enable overlay controls if we have frames (not in recording mode — no masks/ROI)
     if (hasData && !isRecordingMode_) {
@@ -867,12 +867,6 @@ void HdfReviewTab::onViewFrameDetails(int frameIndex) {
 }
 
 void HdfReviewTab::onRegenerateMasks() {
-    if (isRecordingMode_) {
-        QMessageBox::information(this, tr("Not Available"),
-            tr("Mask regeneration is not available for recording-mode files."));
-        return;
-    }
-
     QString loadedPath;
     if (hdfReader_) {
         const QString label = ui->filePathLabel->text();

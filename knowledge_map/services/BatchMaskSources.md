@@ -35,11 +35,13 @@
   `<basename>_mask.png` per `ProcessedFrame::processedImage`. If
   `filenames` is empty or shorter than `frames`, falls back to
   `mask_00000.png`, `mask_00001.png`, ...
-- `saveMasksToHdf5(frames, outputPath, config, roiX, roiY, roiW, roiH, background)`
+- `saveMasksToHdf5(frames, outputPath, config, roiX, roiY, roiW, roiH, background, useFrameTimestamps = false)`
   — opens a fresh HDF5 file, writes `experiment_info` (so the file
   round-trips through [[../frontend/HdfReviewTab]]), then partitions
   `frames` into valid/invalid by `validation.isValid` and writes them via
-  `Hdf5Service::saveFrames()`.
+  `Hdf5Service::saveFrames()`. When `useFrameTimestamps` is true,
+  `experiment_info` start/end timestamps come from the already normalised
+  frame timestamps instead of wall-clock write time.
 
 ## Typical flow
 
