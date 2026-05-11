@@ -152,30 +152,53 @@ namespace frontend
 
 	void NanopositionerTab::populateComPortList()
 	{
+		const int previouslySelected = ui->comPortCombo->currentData().toInt();
 		ui->comPortCombo->clear();
 		if (backend_.autofocus().isConnected())
 		{
-			// Do not probe while connected (SDK uses single global COM handle). Show current port only.
+			// Do not probe while connected (SDK uses a single global COM handle). Show current port only.
 			int port = backend_.autofocus().getComPort();
 			ui->comPortCombo->addItem(QString("COM%1").arg(port), port);
 			ui->comPortCombo->setCurrentIndex(0);
 			return;
 		}
-		int baudRate = ui->baudRateCombo->currentData().toInt();
-		unsigned char deviceAddress = static_cast<unsigned char>(ui->deviceAddressSpinBox->value());
+
+		// List every COM port Windows reports instead of filtering by an active device probe.
+		// The CoreMOR serial DLL keeps a single process-global serial handle, and probe reads
+		// can be flaky immediately after another program releases the controller. Hiding ports
+		// that fail a probe made it impossible to manually select a known-good port.
 		std::vector<int> ports = backend::Tools::availableComPortNumbers();
+		if (configuredComPort_ > 0 && std::find(ports.begin(), ports.end(), configuredComPort_) == ports.end())
+		{
+			ports.push_back(configuredComPort_);
+			std::sort(ports.begin(), ports.end());
+		}
+
 		for (int port : ports)
 		{
-			if (backend::services::AutofocusService::probeComPort(port, baudRate, deviceAddress))
-			{
-				ui->comPortCombo->addItem(QString("COM%1").arg(port), port);
-			}
+			ui->comPortCombo->addItem(QString("COM%1").arg(port), port);
 		}
+
+		int preferredPort = configuredComPort_ > 0 ? configuredComPort_ : previouslySelected;
+		int preferredIndex = ui->comPortCombo->findData(preferredPort);
+		if (preferredIndex >= 0)
+		{
+			ui->comPortCombo->setCurrentIndex(preferredIndex);
+		}
+
+		setNanopositionerStatus(ports.empty()
+			? tr("No COM ports found. Check USB/power, then click Refresh.")
+			: tr("Found %1 COM port(s). Select the nanopositioner port and click Connect.").arg(ports.size()));
 	}
 
 	int NanopositionerTab::getBaudRate() const
 	{
 		return ui->baudRateCombo->currentData().toInt();
+	}
+
+	int NanopositionerTab::getConfiguredComPort() const
+	{
+		return configuredComPort_;
 	}
 
 	unsigned char NanopositionerTab::getDeviceAddress() const
@@ -331,6 +354,7 @@ namespace frontend
 			if (config.contains("autofocus_com_port"))
 			{
 				int port = config["autofocus_com_port"].get<int>();
+				configuredComPort_ = port;
 				int idx = ui->comPortCombo->findData(port);
 				if (idx >= 0)
 				{
@@ -436,7 +460,8 @@ namespace frontend
 			// Save autofocus settings
 			if (ui->comPortCombo->currentIndex() >= 0)
 			{
-				config["autofocus_com_port"] = ui->comPortCombo->currentData().toInt();
+				configuredComPort_ = ui->comPortCombo->currentData().toInt();
+				config["autofocus_com_port"] = configuredComPort_;
 			}
 			config["autofocus_baud_rate"] = ui->baudRateCombo->currentData().toInt();
 			config["autofocus_device_address"] = ui->deviceAddressSpinBox->value();
