@@ -12,8 +12,14 @@ Usage:
     # Reanalyse and save all intermediates (background = stored in .h5, or from_all if absent)
     python scripts/reanalyse_hdf5.py -i experiment.h5 -o ./reanalysis
 
+    # Reanalyse every HDF5 file under a folder (experiment or recording-mode files)
+    python scripts/reanalyse_hdf5.py -i ./data -o ./reanalysis
+
     # No background subtraction, save contour overlay and CSV
     python scripts/reanalyse_hdf5.py -i experiment.h5 -o ./reanalysis --background none --save-overlay --export-csv
+
+    # Large recording folder: recompute metrics only, without per-frame TIFFs
+    python scripts/reanalyse_hdf5.py -i ./data -o ./reanalysis --no-save-intermediates
 
     # Export a new HDF5 with recomputed masks for MIB Studio
     python scripts/reanalyse_hdf5.py -i experiment.h5 -o ./reanalysis --export-h5
@@ -69,6 +75,12 @@ REASON_AREA_OOR = "area_out_of_range"
 REASON_RING_OOR = "ring_ratio_out_of_range"
 REASON_DEFORM_OOR = "deformability_out_of_range"
 
+FRAME_PATHS = {
+    "valid": "/valid_frames",
+    "invalid": "/invalid_frames",
+    "recorded": "/recorded_frames",
+}
+
 
 def _int_attr(value: Any) -> Optional[int]:
     """Convert an HDF5 attr (possibly numpy scalar) to int, or None if invalid."""
@@ -107,7 +119,7 @@ def extract_roi_from_exp_info(
 
 def get_image_shape_from_h5(h5_file: h5py.File) -> Optional[tuple[int, int]]:
     """Return (height, width) from first available images dataset, or None."""
-    for path_prefix in ("/valid_frames", "/invalid_frames"):
+    for path_prefix in ("/valid_frames", "/invalid_frames", "/recorded_frames"):
         images_ds = path_prefix + "/images"
         if images_ds not in h5_file:
             continue
@@ -118,6 +130,37 @@ def get_image_shape_from_h5(h5_file: h5py.File) -> Optional[tuple[int, int]]:
         if imgs.ndim >= 3:
             return (int(imgs.shape[1]), int(imgs.shape[2]))
     return None
+
+
+def read_group_attrs(h5_file: h5py.File, group_path: str) -> Optional[dict]:
+    """Read all attributes from a group, or None if the group is absent/empty."""
+    if group_path not in h5_file:
+        return None
+    group = h5_file[group_path]
+    attrs = {name: group.attrs[name] for name in group.attrs}
+    return attrs if attrs else None
+
+
+def available_frame_types(h5_file: h5py.File) -> list[str]:
+    """Return frame sets with images and metadata in processing order."""
+    found: list[str] = []
+    for frame_type, path_prefix in FRAME_PATHS.items():
+        if path_prefix + "/images" in h5_file and path_prefix + "/metadata" in h5_file:
+            found.append(frame_type)
+    return found
+
+
+def selected_frame_types(h5_file: h5py.File, requested: str) -> list[str]:
+    """Map CLI frame selection to available HDF5 frame groups."""
+    available = available_frame_types(h5_file)
+    if requested == "all":
+        return available
+    if requested == "both":
+        selected = [ft for ft in ("valid", "invalid") if ft in available]
+        if not selected and "recorded" in available:
+            selected = ["recorded"]
+        return selected
+    return [requested] if requested in available else []
 
 
 def compute_synthetic_roi_from_valid_masks(
@@ -266,14 +309,14 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--input", "-i", type=str, required=True, help="Path to input .h5 file")
+    parser.add_argument("--input", "-i", type=str, required=True, help="Path to input .h5/.hdf5 file, or a directory containing HDF5 files")
     parser.add_argument("--output", "-o", type=str, required=True, help="Output directory")
     parser.add_argument(
         "--frame-type", "-t",
         type=str,
-        choices=["valid", "invalid", "both"],
+        choices=["valid", "invalid", "recorded", "both", "all"],
         default="both",
-        help="Process valid, invalid, or both frame types. Default: both",
+        help="Process valid, invalid, recorded, both experiment frame types, or all available frame types. Default: both; recording-only files process recorded frames.",
     )
     parser.add_argument(
         "--background",
@@ -291,6 +334,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--threshold", type=int, default=None, help="Binary threshold value. Overrides config.")
     parser.add_argument("--morph-kernel", type=int, default=None, help="Morphology kernel size (odd). Overrides config.")
     parser.add_argument("--morph-iterations", type=int, default=None, help="Morphology iterations. Overrides config.")
+    parser.add_argument("--save-intermediates", action="store_true", dest="save_intermediates", default=True, help="Save original, blurred, diff, threshold, and mask TIFFs per frame (default).")
+    parser.add_argument("--no-save-intermediates", action="store_false", dest="save_intermediates", help="Do not write per-frame intermediate TIFFs.")
+    parser.add_argument(
+        "--metrics-mode",
+        type=str,
+        choices=["auto", "frame", "objects"],
+        default="auto",
+        help="CSV metrics granularity. auto writes one row per detected object for recording files, otherwise one row per frame.",
+    )
     parser.add_argument("--save-overlay", action="store_true", dest="save_overlay", default=True, help="Save contour overlay per frame (default).")
     parser.add_argument("--no-save-overlay", action="store_false", dest="save_overlay", help="Do not save overlay.")
     parser.add_argument("--export-csv", action="store_true", dest="export_csv", default=True, help="Recompute metrics and write metrics.csv (default).")
@@ -618,6 +670,120 @@ def filter_processed_image(
     return result
 
 
+def _contour_touches_roi_border(c: np.ndarray, roi: tuple[int, int, int, int]) -> bool:
+    rx, ry, rw, rh = roi
+    for pt in c[:, 0, :]:
+        x, y = int(pt[0]) - rx, int(pt[1]) - ry
+        if 0 <= x < rw and 0 <= y < rh:
+            if x < BORDER_THRESHOLD or x >= rw - BORDER_THRESHOLD or y < BORDER_THRESHOLD or y >= rh - BORDER_THRESHOLD:
+                return True
+        else:
+            return True
+    return False
+
+
+def _contour_brightness_quantiles(gray: np.ndarray, contour: np.ndarray) -> tuple[float, float, float, float]:
+    if not gray.size:
+        return 0.0, 0.0, 0.0, 0.0
+    contour_mask = np.zeros(gray.shape[:2], dtype=np.uint8)
+    cv2.drawContours(contour_mask, [contour], -1, 255, -1)
+    return brightness_quantiles(gray, contour_mask)
+
+
+def metrics_for_detected_objects(
+    mask: np.ndarray,
+    roi: tuple[int, int, int, int],
+    config: dict[str, Any],
+    original_gray: np.ndarray,
+) -> list[dict[str, Any]]:
+    """
+    Compute one metrics row per detected object candidate.
+
+    A candidate is an inner contour with its parent outer contour when available.
+    This is intended for full-frame recording files where multiple objects may
+    appear in the ROI and a single frame-level row would collapse or reject them.
+    """
+    filtered, inner_contours, parent_indices, all_contours, _, inner_filtered_indices = find_contours_filtered(mask)
+    object_count = len(inner_contours)
+    if object_count == 0:
+        frame_result = filter_processed_image(mask, roi, config, original_gray)
+        frame_result["objectId"] = -1
+        frame_result["objectCount"] = 0
+        frame_result["metricsMode"] = "objects"
+        return [frame_result]
+
+    rows: list[dict[str, Any]] = []
+    for object_id, c in enumerate(inner_contours):
+        parent_idx = parent_indices[object_id] if object_id < len(parent_indices) else -1
+        contour_area = cv2.contourArea(c)
+        hull = cv2.convexHull(c)
+        hull_area = cv2.contourArea(hull)
+        perim = cv2.arcLength(hull, True)
+        circularity = (math.sqrt(4 * math.pi * hull_area) / perim) if perim > 0 else 0.0
+        ring_ratio = 0.0
+        if 0 <= parent_idx < len(filtered):
+            ring_ratio = calculate_ring_ratio(c, filtered[parent_idx])
+
+        touches_border = _contour_touches_roi_border(c, roi) if config["enable_border_check"] else False
+        area_ok = not config["enable_area_range_check"] or (config["area_threshold_min"] <= hull_area <= config["area_threshold_max"])
+        ring_ok = ring_ratio > RING_RATIO_MIN and ring_ratio < RING_RATIO_MAX
+        deformability = 1.0 - circularity
+        deform_ok = not config["enable_deformability_range_check"] or (
+            config["deformability_threshold_min"] <= deformability <= config["deformability_threshold_max"]
+        )
+        valid = (not touches_border) and area_ok and ring_ok and deform_ok
+
+        q1, q2, q3, q4 = _contour_brightness_quantiles(original_gray, c)
+        selected_idx = inner_filtered_indices[object_id] if object_id < len(inner_filtered_indices) else -1
+        result = {
+            "isValid": bool(valid),
+            "touchesBorder": bool(touches_border),
+            "hasSingleInnerContour": True,
+            "inRange": bool(valid),
+            "innerContourCount": object_count,
+            "deformability": deformability,
+            "area": hull_area,
+            "areaRatio": hull_area / contour_area if contour_area > 0 else 0.0,
+            "ringRatio": ring_ratio,
+            "brightness_q1": q1,
+            "brightness_q2": q2,
+            "brightness_q3": q3,
+            "brightness_q4": q4,
+            "rejectReason": REASON_VALID if valid else "",
+            "failedAt": "",
+            "passSingleInnerCheck": True,
+            "passBorderCheck": not touches_border,
+            "passAreaCheck": bool(area_ok),
+            "passRingCheck": bool(ring_ok),
+            "passDeformabilityCheck": bool(deform_ok),
+            "contourUsed": "inner",
+            "allContourCount": int(len(all_contours)) if all_contours is not None else 0,
+            "filteredContourCount": int(len(filtered)),
+            "selectedFilteredIndex": int(selected_idx),
+            "selectedParentFilteredIndex": int(parent_idx),
+            "selectedContourArea": float(contour_area),
+            "selectedHullArea": float(hull_area),
+            "objectId": int(object_id),
+            "objectCount": int(object_count),
+            "metricsMode": "objects",
+        }
+        if not valid:
+            if touches_border:
+                result["rejectReason"] = REASON_TOUCHES_BORDER
+                result["failedAt"] = REASON_TOUCHES_BORDER
+            elif not area_ok:
+                result["rejectReason"] = REASON_AREA_OOR
+                result["failedAt"] = REASON_AREA_OOR
+            elif not ring_ok:
+                result["rejectReason"] = REASON_RING_OOR
+                result["failedAt"] = REASON_RING_OOR
+            else:
+                result["rejectReason"] = REASON_DEFORM_OOR
+                result["failedAt"] = REASON_DEFORM_OOR
+        rows.append(result)
+    return rows
+
+
 def draw_overlay(
     original: np.ndarray,
     mask: np.ndarray,
@@ -663,8 +829,8 @@ def process_one_frame_set(
     blur_k: int,
     roi: tuple[int, int, int, int],
 ) -> tuple[list[dict], list[np.ndarray], list[np.ndarray]]:
-    """Process valid or invalid frames. roi = (x, y, w, h). Returns (list of metric dicts, list of masks, list of original images for export-h5)."""
-    path_prefix = "/valid_frames" if frame_type == "valid" else "/invalid_frames"
+    """Process one HDF5 frame group. roi = (x, y, w, h). Returns metrics and export-h5 payloads."""
+    path_prefix = FRAME_PATHS[frame_type]
     images_ds = path_prefix + "/images"
     meta_ds = path_prefix + "/metadata"
     if images_ds not in h5_file or meta_ds not in h5_file:
@@ -680,6 +846,9 @@ def process_one_frame_set(
     masks_list = []
     images_list = []
     rx, ry, rw, rh = roi
+    object_metrics = args.metrics_mode == "objects" or (
+        args.metrics_mode == "auto" and frame_type == "recorded" and not args.export_h5
+    )
 
     for i in range(n):
         frame_index = int(meta[i]["index"])
@@ -715,21 +884,33 @@ def process_one_frame_set(
         rec_metrics = filter_processed_image(mask, roi, config, gray) if (args.export_csv or args.export_h5 or args.save_overlay) else {}
         rec_metrics["index"] = frame_index
         rec_metrics["timestampNs"] = timestamp_ns
-        metrics_list.append(rec_metrics)
-        masks_list.append(mask.copy())
-        images_list.append(gray.copy())
+        if object_metrics and args.export_csv:
+            frame_rows = metrics_for_detected_objects(mask, roi, config, gray)
+            for row in frame_rows:
+                row["index"] = frame_index
+                row["timestampNs"] = timestamp_ns
+            metrics_list.extend(frame_rows)
+        else:
+            rec_metrics["objectId"] = 0 if rec_metrics.get("contourUsed") != "none" else -1
+            rec_metrics["objectCount"] = rec_metrics.get("innerContourCount", 0)
+            rec_metrics["metricsMode"] = "frame"
+            metrics_list.append(rec_metrics)
+        if args.export_h5:
+            masks_list.append(mask.copy())
+            images_list.append(gray.copy())
 
-        frame_dir = output_dir / frame_type / f"frame_{frame_index:06d}"
-        frame_dir.mkdir(parents=True, exist_ok=True)
-        _save_tiff(frame_dir / "original.tiff", gray)
-        _save_tiff(frame_dir / "blurred.tiff", blurred)
-        _save_tiff(frame_dir / "diff.tiff", diff)
-        _save_tiff(frame_dir / "thresh.tiff", thresh)
-        _save_tiff(frame_dir / "mask.tiff", mask)
-        if args.save_overlay:
-            filtered, _, _, all_contours, _, _ = find_contours_filtered(mask)
-            overlay = draw_overlay(gray, mask, list(all_contours), filtered, rec_metrics)
-            _save_tiff(frame_dir / "overlay.tiff", overlay)
+        if args.save_intermediates:
+            frame_dir = output_dir / frame_type / f"frame_{frame_index:06d}"
+            frame_dir.mkdir(parents=True, exist_ok=True)
+            _save_tiff(frame_dir / "original.tiff", gray)
+            _save_tiff(frame_dir / "blurred.tiff", blurred)
+            _save_tiff(frame_dir / "diff.tiff", diff)
+            _save_tiff(frame_dir / "thresh.tiff", thresh)
+            _save_tiff(frame_dir / "mask.tiff", mask)
+            if args.save_overlay:
+                filtered, _, _, all_contours, _, _ = find_contours_filtered(mask)
+                overlay = draw_overlay(gray, mask, list(all_contours), filtered, rec_metrics)
+                _save_tiff(frame_dir / "overlay.tiff", overlay)
 
     return metrics_list, masks_list, images_list
 
@@ -737,6 +918,7 @@ def process_one_frame_set(
 def write_csv(
     rows_valid: list[dict],
     rows_invalid: list[dict],
+    rows_recorded: list[dict],
     output_path: Path,
     pixel_to_micron: float,
     frame_type: str,
@@ -753,6 +935,7 @@ def write_csv(
         f.write("Filtered Contours,All Contours,Selected Idx,Selected Parent Idx,")
         f.write("Selected Contour Area,Selected Hull Area,")
         f.write("Pass Single Inner,Pass Border,Pass Area,Pass Ring,")
+        f.write("Object Id,Object Count,Metrics Mode,")
         f.write("ROI X,ROI Y,ROI W,ROI H\n")
 
         def write_row(ft: str, r: dict) -> None:
@@ -773,14 +956,18 @@ def write_csv(
             f.write(f"{r.get('selectedFilteredIndex', -1)},{r.get('selectedParentFilteredIndex', -1)},")
             f.write(f"{r.get('selectedContourArea', 0.0):.2f},{r.get('selectedHullArea', 0.0):.2f},")
             f.write(f"{yn(r.get('passSingleInnerCheck'))},{yn(r.get('passBorderCheck'))},{yn(r.get('passAreaCheck'))},{yn(r.get('passRingCheck'))},")
+            f.write(f"{r.get('objectId', -1)},{r.get('objectCount', 0)},{r.get('metricsMode', 'frame')},")
             f.write(f"{roi_x},{roi_y},{roi_w},{roi_h}\n")
 
-        if frame_type in ("valid", "both"):
+        if frame_type in ("valid", "both", "all"):
             for r in rows_valid:
                 write_row("Valid", r)
-        if frame_type in ("invalid", "both"):
+        if frame_type in ("invalid", "both", "all"):
             for r in rows_invalid:
                 write_row("Invalid", r)
+        if frame_type in ("recorded", "all") or (frame_type == "both" and rows_recorded):
+            for r in rows_recorded:
+                write_row("Recorded", r)
 
 
 def write_reanalysis_h5(
@@ -854,25 +1041,25 @@ def write_reanalysis_h5(
             grp.create_dataset("metadata", data=meta_arr)
 
 
-def main() -> int:
-    if getattr(sys, "frozen", False) and len(sys.argv) == 1:
-        _interactive_prompt_args()
-    args = parse_args()
-    input_path = Path(args.input)
-    output_dir = Path(args.output)
-    if not input_path.exists() or not input_path.is_file():
-        print(f"ERROR: Input file does not exist: {input_path}", file=sys.stderr)
-        return 1
-    output_dir.mkdir(parents=True, exist_ok=True)
+def process_hdf5_file(input_path: Path, output_dir: Path, args: argparse.Namespace) -> int:
     config = load_processing_config(args)
     blur_k = _to_odd(config["gaussian_blur_size"])
 
     try:
         with h5py.File(input_path, "r") as h5_file:
             exp_info = read_experiment_info(h5_file)
+            recording_info = read_group_attrs(h5_file, "/recording_info")
+            frame_types = selected_frame_types(h5_file, args.frame_type)
+            if not frame_types:
+                available = ", ".join(available_frame_types(h5_file)) or "none"
+                print(
+                    f"ERROR: No matching frame groups for --frame-type {args.frame_type!r} in {input_path} (available: {available})",
+                    file=sys.stderr,
+                )
+                return 1
             img_shape = get_image_shape_from_h5(h5_file)
             if img_shape is None:
-                print("ERROR: No images found in .h5 (valid_frames or invalid_frames)", file=sys.stderr)
+                print("ERROR: No images found in .h5 (valid_frames, invalid_frames, or recorded_frames)", file=sys.stderr)
                 return 1
             img_h, img_w = img_shape
             roi = extract_roi_from_exp_info(exp_info, img_w, img_h)
@@ -883,16 +1070,16 @@ def main() -> int:
                 roi_origin = "stored"
             print(f"ROI: {roi} (source: {roi_origin})")
 
-            bg_blurred_valid = None
-            bg_blurred_invalid = None
-            if args.background == "stored":
+            backgrounds: dict[str, Optional[np.ndarray]] = {frame_type: None for frame_type in frame_types}
+            background_mode = args.background
+            if background_mode == "stored":
                 bg_path_h5 = "/experiment_info/background"
                 if bg_path_h5 in h5_file:
                     ds = h5_file[bg_path_h5]
                     bg_raw = np.asarray(ds)
                     if bg_raw.size == 0:
                         print("WARNING: /experiment_info/background is empty; falling back to --background from_all", file=sys.stderr)
-                        args.background = "from_all"
+                        background_mode = "from_all"
                     else:
                         if bg_raw.ndim == 3 and bg_raw.shape[0] == 1:
                             bg_img = np.squeeze(bg_raw, 0)
@@ -901,64 +1088,94 @@ def main() -> int:
                         bg_img = _ensure_grayscale(bg_img.astype(np.float64) if bg_img.dtype != np.uint8 else bg_img)
                         if bg_img.dtype != np.uint8 and bg_img.size > 0:
                             bg_img = (bg_img.astype(np.float64) / bg_img.max() * 255).astype(np.uint8)
-                        bg_blurred_valid = cv2.GaussianBlur(bg_img, (blur_k, blur_k), 0)
-                        bg_blurred_invalid = bg_blurred_valid.copy()
+                        bg_blurred = cv2.GaussianBlur(bg_img, (blur_k, blur_k), 0)
+                        for frame_type in frame_types:
+                            backgrounds[frame_type] = bg_blurred.copy()
                 else:
                     print("WARNING: No stored background in .h5 (/experiment_info/background); falling back to --background from_all", file=sys.stderr)
-                    args.background = "from_all"
-            if args.background == "from_all":
-                if args.frame_type in ("valid", "both"):
-                    bg_blurred_valid = build_background_from_all_images(
-                        h5_file, "/valid_frames", config, blur_k
+                    background_mode = "from_all"
+            if background_mode == "from_all":
+                for frame_type in frame_types:
+                    backgrounds[frame_type] = build_background_from_all_images(
+                        h5_file, FRAME_PATHS[frame_type], config, blur_k
                     )
-                    if bg_blurred_valid is not None:
-                        print("Built background from all valid frame images (pixel-wise mean)")
-                if args.frame_type in ("invalid", "both"):
-                    bg_blurred_invalid = build_background_from_all_images(
-                        h5_file, "/invalid_frames", config, blur_k
-                    )
-                    if bg_blurred_invalid is not None:
-                        print("Built background from all invalid frame images (pixel-wise mean)")
-            elif args.background != "none" and args.background != "stored":
-                bg_path = Path(args.background)
+                    if backgrounds[frame_type] is not None:
+                        print(f"Built background from all {frame_type} frame images (pixel-wise mean)")
+            elif background_mode != "none" and background_mode != "stored":
+                bg_path = Path(background_mode)
                 if bg_path.exists():
                     bg_img = cv2.imread(str(bg_path), cv2.IMREAD_GRAYSCALE)
                     if bg_img is not None:
-                        bg_blurred_valid = cv2.GaussianBlur(bg_img, (blur_k, blur_k), 0)
-                        bg_blurred_invalid = bg_blurred_valid.copy()
+                        bg_blurred = cv2.GaussianBlur(bg_img, (blur_k, blur_k), 0)
+                        for frame_type in frame_types:
+                            backgrounds[frame_type] = bg_blurred.copy()
 
             all_metrics_valid, all_masks_valid, all_images_valid = [], [], []
             all_metrics_invalid, all_masks_invalid, all_images_invalid = [], [], []
+            all_metrics_recorded, all_masks_recorded, all_images_recorded = [], [], []
 
-            if args.frame_type in ("valid", "both"):
+            if "valid" in frame_types:
                 m, masks, imgs = process_one_frame_set(
-                    h5_file, "valid", config, output_dir, args, bg_blurred_valid, blur_k, roi
+                    h5_file, "valid", config, output_dir, args, backgrounds.get("valid"), blur_k, roi
                 )
                 all_metrics_valid, all_masks_valid, all_images_valid = m, masks, imgs
-                print(f"Processed {len(m)} valid frames -> {output_dir / 'valid'}")
-            if args.frame_type in ("invalid", "both"):
+                print(f"Processed {len(m)} valid metric rows -> {output_dir / 'valid'}")
+            if "invalid" in frame_types:
                 m, masks, imgs = process_one_frame_set(
-                    h5_file, "invalid", config, output_dir, args, bg_blurred_invalid, blur_k, roi
+                    h5_file, "invalid", config, output_dir, args, backgrounds.get("invalid"), blur_k, roi
                 )
                 all_metrics_invalid, all_masks_invalid, all_images_invalid = m, masks, imgs
-                print(f"Processed {len(m)} invalid frames -> {output_dir / 'invalid'}")
+                print(f"Processed {len(m)} invalid metric rows -> {output_dir / 'invalid'}")
+            if "recorded" in frame_types:
+                m, masks, imgs = process_one_frame_set(
+                    h5_file, "recorded", config, output_dir, args, backgrounds.get("recorded"), blur_k, roi
+                )
+                all_metrics_recorded, all_masks_recorded, all_images_recorded = m, masks, imgs
+                print(f"Processed {len(m)} recorded metric rows -> {output_dir / 'recorded'}")
 
-            if args.export_csv and (all_metrics_valid or all_metrics_invalid):
+            if args.export_csv and (all_metrics_valid or all_metrics_invalid or all_metrics_recorded):
                 csv_path = output_dir / "metrics.csv"
-                write_csv(all_metrics_valid, all_metrics_invalid, csv_path, args.pixel_to_micron, args.frame_type, roi)
+                write_csv(
+                    all_metrics_valid,
+                    all_metrics_invalid,
+                    all_metrics_recorded,
+                    csv_path,
+                    args.pixel_to_micron,
+                    args.frame_type,
+                    roi,
+                )
                 print(f"Wrote {csv_path}")
 
-            if args.export_h5 and (all_images_valid or all_images_invalid):
+            if args.export_h5 and (all_images_valid or all_images_invalid or all_images_recorded):
                 h5_path = output_dir / "reanalysis.h5"
                 exp_info_for_h5 = dict(exp_info) if exp_info else {}
+                if recording_info:
+                    exp_info_for_h5["source_mode"] = "frame_recording_reanalysis"
+                    for k, v in recording_info.items():
+                        exp_info_for_h5[f"recording_{k}"] = v
                 exp_info_for_h5["roi_x"] = roi[0]
                 exp_info_for_h5["roi_y"] = roi[1]
                 exp_info_for_h5["roi_w"] = roi[2]
                 exp_info_for_h5["roi_h"] = roi[3]
+                export_valid_metrics = list(all_metrics_valid)
+                export_valid_masks = list(all_masks_valid)
+                export_valid_images = list(all_images_valid)
+                export_invalid_metrics = list(all_metrics_invalid)
+                export_invalid_masks = list(all_masks_invalid)
+                export_invalid_images = list(all_images_invalid)
+                for i, metrics in enumerate(all_metrics_recorded):
+                    if metrics.get("isValid"):
+                        export_valid_metrics.append(metrics)
+                        export_valid_masks.append(all_masks_recorded[i])
+                        export_valid_images.append(all_images_recorded[i])
+                    else:
+                        export_invalid_metrics.append(metrics)
+                        export_invalid_masks.append(all_masks_recorded[i])
+                        export_invalid_images.append(all_images_recorded[i])
                 write_reanalysis_h5(
                     h5_path,
-                    all_images_valid, all_masks_valid, all_metrics_valid,
-                    all_images_invalid, all_masks_invalid, all_metrics_invalid,
+                    export_valid_images, export_valid_masks, export_valid_metrics,
+                    export_invalid_images, export_invalid_masks, export_invalid_metrics,
                     exp_info_for_h5,
                 )
                 print(f"Wrote {h5_path}")
@@ -973,6 +1190,46 @@ def main() -> int:
         return 1
 
     print(f"Reanalysis complete. Output: {output_dir}")
+    return 0
+
+
+def main() -> int:
+    if getattr(sys, "frozen", False) and len(sys.argv) == 1:
+        _interactive_prompt_args()
+    args = parse_args()
+    input_path = Path(args.input)
+    output_dir = Path(args.output)
+    if not input_path.exists():
+        print(f"ERROR: Input path does not exist: {input_path}", file=sys.stderr)
+        return 1
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if input_path.is_file():
+        return process_hdf5_file(input_path, output_dir, args)
+
+    hdf5_files = sorted(
+        p for p in input_path.rglob("*")
+        if p.is_file() and p.suffix.lower() in {".h5", ".hdf5"}
+    )
+    if not hdf5_files:
+        print(f"ERROR: No .h5/.hdf5 files found under {input_path}", file=sys.stderr)
+        return 1
+
+    failures = 0
+    print(f"Found {len(hdf5_files)} HDF5 files under {input_path}")
+    for h5_path in hdf5_files:
+        rel = h5_path.relative_to(input_path).with_suffix("")
+        per_file_output = output_dir / rel
+        per_file_output.mkdir(parents=True, exist_ok=True)
+        print(f"\n=== Reanalysing {h5_path} ===")
+        rc = process_hdf5_file(h5_path, per_file_output, args)
+        if rc != 0:
+            failures += 1
+
+    if failures:
+        print(f"Completed with {failures} failed file(s). Output: {output_dir}", file=sys.stderr)
+        return 1
+    print(f"Reanalysis complete for {len(hdf5_files)} files. Output: {output_dir}")
     return 0
 
 
