@@ -2,7 +2,9 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QMessageBox>
+#include <QSettings>
 #include <QString>
+#include <QStringList>
 
 #include "backend/AppBackend.h"
 #include "frontend/core/MainWindow.h"
@@ -18,6 +20,40 @@
 #endif
 
 namespace {
+    QString normalizeDisabledServicesCsv(const QString &raw)
+    {
+        const QStringList parts = raw.split(',', Qt::SkipEmptyParts);
+        QStringList normalized;
+        normalized.reserve(parts.size());
+        for (QString token : parts)
+        {
+            token = token.trimmed().toLower();
+            token.replace('-', '_');
+            if (!token.isEmpty() && !normalized.contains(token))
+            {
+                normalized.push_back(token);
+            }
+        }
+        return normalized.join(',');
+    }
+
+    void applyBootDisabledServicesFromSettings()
+    {
+        // Respect explicit environment configuration first.
+        if (!qEnvironmentVariableIsEmpty("MIB_DISABLED_SERVICES"))
+        {
+            return;
+        }
+
+        QSettings settings;
+        const QString persisted = normalizeDisabledServicesCsv(
+            settings.value("Startup/DisabledServices").toString());
+        if (!persisted.isEmpty())
+        {
+            qputenv("MIB_DISABLED_SERVICES", persisted.toUtf8());
+        }
+    }
+
     // Write error to a guaranteed-writable location before logging is available
     void writeEarlyError(const std::string& errorMsg) {
         try {
@@ -72,6 +108,9 @@ int main(int argc, char* argv[]) {
         // Application identity/version (used by the updater and About dialogs)
         QCoreApplication::setApplicationName(QStringLiteral("MIB Studio Qt"));
         QCoreApplication::setApplicationVersion(QStringLiteral(MIB_STUDIO_QT_VERSION));
+
+        // Apply GUI-persisted startup disable list unless env already specifies it.
+        applyBootDisabledServicesFromSettings();
         
         // Get executable directory and resolve data path
         QString exeDir = QCoreApplication::applicationDirPath();

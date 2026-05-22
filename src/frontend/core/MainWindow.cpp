@@ -16,6 +16,15 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPushButton>
+#include <QCheckBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QSet>
+#include <QSettings>
+#include <QStringList>
+#include <QVector>
+#include <algorithm>
+#include <vector>
 
 #include "backend/AppBackend.h"
 #include "backend/BackgroundCaptureNotifier.h"
@@ -56,6 +65,65 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
+
+namespace
+{
+QString normalizeServiceToken(QString token)
+{
+    token = token.trimmed().toLower();
+    token.replace('-', '_');
+    return token;
+}
+
+QSet<QString> parseDisabledServicesCsv(const QString &raw)
+{
+    QSet<QString> out;
+    const QStringList parts = raw.split(',', Qt::SkipEmptyParts);
+    for (const QString &part : parts)
+    {
+        const QString token = normalizeServiceToken(part);
+        if (!token.isEmpty())
+        {
+            out.insert(token);
+        }
+    }
+    return out;
+}
+
+QString serializeDisabledServicesCsv(const QSet<QString> &disabled)
+{
+    QStringList values = disabled.values();
+    std::sort(values.begin(), values.end());
+    return values.join(',');
+}
+
+QSet<QString> loadPersistedDisabledServices()
+{
+    QSettings settings;
+    return parseDisabledServicesCsv(settings.value("Startup/DisabledServices").toString());
+}
+
+void savePersistedDisabledServices(const QSet<QString> &disabled)
+{
+    QSettings settings;
+    const QString csv = serializeDisabledServicesCsv(disabled);
+    if (csv.isEmpty())
+    {
+        settings.remove("Startup/DisabledServices");
+    }
+    else
+    {
+        settings.setValue("Startup/DisabledServices", csv);
+    }
+}
+
+bool isServiceDisabledAtBoot(const QString &serviceToken)
+{
+    const QSet<QString> disabled = parseDisabledServicesCsv(QString::fromUtf8(qgetenv("MIB_DISABLED_SERVICES")));
+    const QString token = normalizeServiceToken(serviceToken);
+    return disabled.contains("all") || disabled.contains(token);
+}
+} // namespace
 
 MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow), backend_(backend)
@@ -114,7 +182,67 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
                                .arg(v.isEmpty() ? tr("(unknown)") : v));
     });
 
-    const bool autoUpdateDisabled = isDisabledByBootEnv("auto_update");
+    auto *bootServicesAct = new QAction(tr("Boot Service Toggles..."), this);
+    ui->settingsMenu->addSeparator();
+    ui->settingsMenu->addAction(bootServicesAct);
+    connect(bootServicesAct, &QAction::triggered, this, [this]()
+            {
+        struct Option { const char* token; const char* label; };
+        const std::vector<Option> options = {
+            {"sqlite", "SQLite service"},
+            {"hdf5", "HDF5 service"},
+            {"processing", "Processing service"},
+            {"yolo", "YOLO service"},
+            {"autofocus", "Autofocus wiring"},
+            {"trigger", "Trigger wiring"},
+            {"capture", "Capture service"},
+            {"playback", "Playback service"},
+            {"auto_update", "Auto update checker"}
+        };
+
+        QDialog dlg(this);
+        dlg.setWindowTitle(tr("Boot Service Toggles"));
+        dlg.setModal(true);
+        auto* layout = new QVBoxLayout(&dlg);
+        auto* info = new QLabel(tr("Disable selected services at next application startup.\n"
+                                   "Changes are persisted and applied on next launch."), &dlg);
+        info->setWordWrap(true);
+        layout->addWidget(info);
+
+        const QSet<QString> persisted = loadPersistedDisabledServices();
+        const bool allEnabled = persisted.contains("all");
+        QVector<QCheckBox*> checkboxes;
+        checkboxes.reserve(static_cast<int>(options.size()));
+        for (const auto& option : options)
+        {
+            auto* box = new QCheckBox(QString::fromUtf8(option.label), &dlg);
+            box->setChecked(allEnabled || persisted.contains(QString::fromUtf8(option.token)));
+            box->setProperty("serviceToken", QString::fromUtf8(option.token));
+            layout->addWidget(box);
+            checkboxes.push_back(box);
+        }
+
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+        connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+        layout->addWidget(buttons);
+
+        if (dlg.exec() == QDialog::Accepted)
+        {
+            QSet<QString> disabled;
+            for (QCheckBox* box : checkboxes)
+            {
+                if (box && box->isChecked())
+                {
+                    disabled.insert(box->property("serviceToken").toString());
+                }
+            }
+            savePersistedDisabledServices(disabled);
+            QMessageBox::information(this, tr("Boot Service Toggles"),
+                                     tr("Saved. Restart the application for changes to take effect."));
+        } });
+
+    const bool autoUpdateDisabled = isServiceDisabledAtBoot(QStringLiteral("auto_update"));
     if (!autoUpdateDisabled)
     {
         updater_ = new frontend::AutoUpdater(this, this);

@@ -25,6 +25,10 @@ Read at startup (see `main.cpp` and [[../architecture/AppBackend]]):
 
 Sample frames ship at `data/mock_frames/frame_00000.tiff`.
 
+The GUI Settings action **Boot Service Toggles...** stores a persisted
+`QSettings` value (`Startup/DisabledServices`) that `main.cpp` maps into
+`MIB_DISABLED_SERVICES` before backend startup (unless the env var is already set externally).
+
 ## MLflow (test metrics only)
 
 Test performance scripts (`scripts/empty_frame_detection.py` and the

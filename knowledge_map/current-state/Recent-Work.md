@@ -5,14 +5,14 @@
 
 ## Features shipped
 
-- **Granular boot toggles for backend + updater** (2026-05-22) —
-  `AppBackend::initialize` now supports finer `MIB_DISABLED_SERVICES` tokens
-  beyond persistence/processing (`sqlite`, `hdf5`, `processing`, `yolo`) to also
-  control startup wiring for `autofocus`, `trigger`, `capture` (`camera` alias),
-  and `playback` (`all` still disables all supported backend startup paths).
-  `MainWindow` now honors `MIB_DISABLED_SERVICES=auto_update` to skip
-  `AutoUpdater` construction, disable the update menu action, and skip quiet
-  startup update checks.
+- **GUI-configurable boot disable list** (2026-05-22) - Added a Settings menu
+  action (**Boot Service Toggles...**) that persists disabled startup services
+  in `QSettings` (`Startup/DisabledServices`). `main.cpp` now applies that
+  persisted value to `MIB_DISABLED_SERVICES` before `AppBackend::initialize`,
+  so GUI choices take effect at next launch. `MainWindow` also honors
+  `auto_update` at startup by skipping updater initialization and quiet checks
+  when disabled. Files: `src/frontend/core/main.cpp`,
+  `src/frontend/core/MainWindow.cpp`.
 
 - **Recording HDF5 mask regeneration in Review** (2026-05-11) - The
   Review tab now keeps "Regenerate Masks" enabled for recording-mode HDF5
