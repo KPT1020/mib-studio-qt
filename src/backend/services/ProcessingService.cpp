@@ -1,5 +1,6 @@
 #include "backend/services/ProcessingService.h"
 #include "backend/services/Hdf5Service.h"
+#include "backend/diagnostics/CrashStateMirror.h"
 #include "backend/playback/FrameStore.h"
 #include "backend/Tools.h"
 
@@ -29,6 +30,11 @@ void ProcessingService::start(size_t workerCount) {
     for (size_t i = 0; i < workerCount; ++i) {
         workers_.emplace_back(&ProcessingService::workerLoop, this);
     }
+    {
+        auto& m = backend::diagnostics::CrashStateMirror::instance().processing;
+        m.running.store(true);
+        m.workerCount.store(static_cast<int>(workerCount));
+    }
     SPDLOG_INFO("ProcessingService started with {} workers", workerCount);
 }
 
@@ -46,6 +52,11 @@ void ProcessingService::stop() {
         std::queue<Job> empty;
         queue_.swap(empty);
     }
+    {
+        auto& m = backend::diagnostics::CrashStateMirror::instance().processing;
+        m.running.store(false);
+        m.workerCount.store(0);
+    }
     SPDLOG_INFO("ProcessingService stopped");
 }
 
@@ -55,6 +66,9 @@ void ProcessingService::submit(Job job) {
         std::scoped_lock lk(mutex_);
         queue_.push(std::move(job));
         stats_.jobsQueued.fetch_add(1, std::memory_order_relaxed);
+        backend::diagnostics::CrashStateMirror::instance().processing.jobsQueued
+            .store(stats_.jobsQueued.load(std::memory_order_relaxed),
+                   std::memory_order_relaxed);
     }
     cv_.notify_one();
 }
@@ -73,6 +87,8 @@ void ProcessingService::workerLoop() {
         if (job) {
             job();
             stats_.jobsProcessed.fetch_add(1, std::memory_order_relaxed);
+            backend::diagnostics::CrashStateMirror::instance().processing.jobsProcessed
+                .fetch_add(1, std::memory_order_relaxed);
         }
     }
 }
@@ -88,6 +104,7 @@ void ProcessingService::startRealtime(std::shared_ptr<backend::playback::FrameSt
         previousFrameForAutoCapture_.release();
     }
     realtimeThread_ = std::thread(&ProcessingService::realtimeLoop, this);
+    backend::diagnostics::CrashStateMirror::instance().processing.realtimeRunning.store(true);
     SPDLOG_INFO("ProcessingService: realtime processing started");
 }
 
@@ -95,6 +112,7 @@ void ProcessingService::stopRealtime() {
     if (!rtRunning_.load()) return;
     rtRunning_.store(false);
     if (realtimeThread_.joinable()) realtimeThread_.join();
+    backend::diagnostics::CrashStateMirror::instance().processing.realtimeRunning.store(false);
     SPDLOG_INFO("ProcessingService: realtime processing stopped");
 }
 
@@ -162,13 +180,15 @@ void ProcessingService::startExperiment() {
     // Reset auto-capture counter when experiment starts
     consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
     experimentActive_.store(true);
-    SPDLOG_INFO("ProcessingService: experiment started, frame buffers cleared (flush interval: {} frames, invalid sampling: every {}th)", 
+    backend::diagnostics::CrashStateMirror::instance().processing.experimentActive.store(true);
+    SPDLOG_INFO("ProcessingService: experiment started, frame buffers cleared (flush interval: {} frames, invalid sampling: every {}th)",
                 flushInterval_.load(), invalidFrameSamplingRate_.load());
 }
 
 void ProcessingService::endExperiment() {
     experimentActive_.store(false);
-    SPDLOG_INFO("ProcessingService: experiment ended, valid frames: {}, invalid frames: {}", 
+    backend::diagnostics::CrashStateMirror::instance().processing.experimentActive.store(false);
+    SPDLOG_INFO("ProcessingService: experiment ended, valid frames: {}, invalid frames: {}",
                 validFrames_.size(), invalidFrames_.size());
 }
 

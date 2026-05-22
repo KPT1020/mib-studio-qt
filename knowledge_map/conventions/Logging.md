@@ -41,3 +41,20 @@ capture source file/line info.
 
 See `knowledge_map/task/diagnostic-logging.md` for the extended
 diagnostic pattern used during camera lifecycle issues.
+
+## Crash reporting
+
+Process-level crash capture is owned by [[../services/CrashReporter]].
+On unrecoverable failures (SEH violation, signal, uncaught C++
+exception, Qt fatal) it writes a minidump + a JSON state snapshot
+from [[../diagnostics/CrashStateMirror]] under
+`%LOCALAPPDATA%/MIB_Studio_Qt/crashes/` and (when a Sentry DSN is
+configured) submits them on next launch.
+
+When you add a new service or a new long-running thread:
+- Update its slot in `CrashStateMirror` at the same call sites where
+  you already log lifecycle events (start/stop/error). See the
+  "Wiring pattern" table in [[../diagnostics/CrashStateMirror]].
+- Use `CrashReporter::breadcrumb("category", "message")` for one-shot
+  events worth correlating with a crash but not worth a slot
+  (e.g. "user opened HDF5 file X").

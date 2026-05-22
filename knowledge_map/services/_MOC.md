@@ -24,5 +24,10 @@
 - [[BatchMaskSources]] — adapters for offline mask regeneration
   (`processBatch` inputs/outputs)
 
+## Diagnostics
+- [[CrashReporter]] — process-level crash handler + Sentry forwarder;
+  pairs with [[../diagnostics/CrashStateMirror]]
+
 **Up**: [[../README|Vault home]] · **See also**:
-[[../architecture/Data-Flow]], [[../architecture/Threading-Model]]
+[[../architecture/Data-Flow]], [[../architecture/Threading-Model]],
+[[../diagnostics/_MOC|Diagnostics MOC]]
