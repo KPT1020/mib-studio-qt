@@ -30,6 +30,12 @@
 - `QFutureWatcher<size_t> flushWatcher_` — used to await the final HDF5
   flush on experiment stop without blocking the UI thread.
 
+### Boot-time update toggle
+
+- `MIB_DISABLED_SERVICES=auto_update` disables `AutoUpdater` creation at startup,
+  disables the "Check for Updates" menu action, and skips the quiet
+  startup update check.
+
 ## Gotchas
 
 - `closeEvent` must stop capture + experiment cleanly. Mis-ordering causes

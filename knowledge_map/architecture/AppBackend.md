@@ -46,15 +46,26 @@ See `src/backend/AppBackend.cpp` around lines 79–200.
 
 ### Boot-time service toggles (`MIB_DISABLED_SERVICES`)
 
-Startup now supports disabling selected service bootstraps via a comma-separated
-environment variable:
+`AppBackend::initialize` reads a comma-separated disable list from
+`MIB_DISABLED_SERVICES` and conditionally skips selected startup wiring.
 
-`MIB_DISABLED_SERVICES=sqlite,hdf5,processing,yolo`
+Supported backend tokens:
 
-- Supported tokens: `sqlite`, `hdf5`, `processing`, `yolo`, `all`
-- Token matching is case-insensitive; `-` and `_` are treated equivalently
-- Disabled services are still constructed, but their startup initialization is
-  skipped (for example, processing workers are not started when `processing` is disabled)
+- `sqlite`
+- `hdf5`
+- `processing`
+- `yolo`
+- `autofocus` (disables ring-ratio callback wiring from processing)
+- `trigger` (disables processing/camera trigger wiring)
+- `capture` (alias: `camera`)
+- `playback`
+- `all` (disables all backend startup paths above)
+
+Notes:
+
+- Tokens are case-insensitive; `-` and `_` are treated the same.
+- Services are still constructed to preserve existing references in frontend
+  and backend code; toggles control startup wiring/initialization.
 
 ## Camera selection
 

@@ -114,10 +114,19 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
                                .arg(v.isEmpty() ? tr("(unknown)") : v));
     });
 
-    updater_ = new frontend::AutoUpdater(this, this);
-    connect(ui->checkUpdatesAct, &QAction::triggered, this, [this]() {
-        if (updater_) updater_->checkForUpdates(true);
-    });
+    const bool autoUpdateDisabled = isDisabledByBootEnv("auto_update");
+    if (!autoUpdateDisabled)
+    {
+        updater_ = new frontend::AutoUpdater(this, this);
+        connect(ui->checkUpdatesAct, &QAction::triggered, this, [this]() {
+            if (updater_) updater_->checkForUpdates(true);
+        });
+    }
+    else
+    {
+        ui->checkUpdatesAct->setEnabled(false);
+        SPDLOG_INFO("MainWindow: auto update disabled by MIB_DISABLED_SERVICES");
+    }
 
     // Camera buttons will be added to main tab bar corner widget, not toolbar
     auto *startCaptureAct = new QAction("Start Camera", this);
@@ -248,9 +257,12 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     initManager_->start();
 
     // Quiet update check on startup (only prompts if an update is available)
-    QTimer::singleShot(1500, this, [this]() {
-        if (updater_) updater_->checkForUpdates(false);
-    });
+    if (!autoUpdateDisabled)
+    {
+        QTimer::singleShot(1500, this, [this]() {
+            if (updater_) updater_->checkForUpdates(false);
+        });
+    }
 }
 
 MainWindow::~MainWindow() {
