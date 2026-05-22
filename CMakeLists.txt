@@ -60,6 +60,22 @@ if(MSVC)
     add_compile_options(/wd4828)
 endif()
 
+# Preserve PDBs and address-to-source mapping for Release builds so that
+# minidumps from end-user crashes can be symbolicated. /Zi generates the
+# .pdb; /DEBUG instructs the linker to emit and keep it; /OPT:REF /OPT:ICF
+# restore Release optimizations that /DEBUG would otherwise disable.
+if(MSVC)
+    add_compile_options($<$<CONFIG:Release>:/Zi>)
+    add_link_options(
+        $<$<CONFIG:Release>:/DEBUG>
+        $<$<CONFIG:Release>:/OPT:REF>
+        $<$<CONFIG:Release>:/OPT:ICF>)
+endif()
+
+# Optional sentry-native integration (FetchContent-based).
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(Sentry)
+
 find_package(Qt6 COMPONENTS Core Widgets Gui Charts Network Concurrent SerialPort REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG QUIET)
@@ -103,6 +119,8 @@ add_library(mib_backend STATIC
     src/backend/Tools.cpp
     src/backend/EModulusLut.cpp
     src/backend/services/Logger.cpp
+    src/backend/services/CrashReporter.cpp
+    src/backend/diagnostics/CrashStateMirror.cpp
     src/backend/services/SqliteService.cpp
     src/backend/services/CameraControlService.cpp
     src/backend/services/Hdf5Service.cpp
@@ -170,6 +188,21 @@ target_link_libraries(mib_backend PUBLIC
     Qt6::Gui
     Qt6::SerialPort
 )
+
+# CrashReporter requires dbghelp on Windows for MiniDumpWriteDump.
+if(WIN32)
+    target_link_libraries(mib_backend PUBLIC dbghelp)
+endif()
+
+# Wire optional sentry-native. When MIB_USE_SENTRY=OFF (or the fetch failed)
+# MIB_SENTRY_AVAILABLE stays false and CrashReporter falls back to the
+# local-only path.
+if(MIB_SENTRY_AVAILABLE)
+    target_link_libraries(mib_backend PUBLIC sentry::sentry)
+    target_compile_definitions(mib_backend PUBLIC MIB_USE_SENTRY=1)
+else()
+    target_compile_definitions(mib_backend PUBLIC MIB_USE_SENTRY=0)
+endif()
 if(MIB_HAS_EGRABBER)
     target_link_libraries(mib_backend PUBLIC
         ${COREMOR_LIB_DIR}/XMT_DLL_SER.lib
@@ -727,7 +760,31 @@ if(WIN32)
                     "$<TARGET_FILE_DIR:${app_target}>/resources/models/"
             COMMENT "Copying YOLO model files for ${app_target}"
         )
+
+        # crashpad_handler.exe is required next to the application when
+        # sentry-native is built with the Crashpad backend (the default on
+        # Windows). Without it Sentry falls back to in-process capture and
+        # cannot collect dumps for non-recoverable failures.
+        if(MIB_SENTRY_AVAILABLE AND TARGET crashpad_handler)
+            add_custom_command(TARGET ${app_target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "$<TARGET_FILE:crashpad_handler>"
+                        "$<TARGET_FILE_DIR:${app_target}>/"
+                COMMENT "Copying crashpad_handler.exe for ${app_target}"
+            )
+        endif()
     endforeach()
+endif()
+
+# Ensure the .pdb for the application ends up next to the .exe so it can
+# be archived per release for later symbolication of remote crashes.
+if(MSVC)
+    set_target_properties(mib_studio_qt PROPERTIES
+        PDB_NAME              "mib_studio_qt"
+        PDB_OUTPUT_DIRECTORY  "$<TARGET_FILE_DIR:mib_studio_qt>"
+        COMPILE_PDB_NAME      "mib_studio_qt"
+        COMPILE_PDB_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:mib_studio_qt>"
+    )
 endif()
 
 if(TARGET nlohmann_json::nlohmann_json)

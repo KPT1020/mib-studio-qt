@@ -1,5 +1,6 @@
 #include "backend/services/AutofocusService.h"
 #include "backend/Tools.h"
+#include "backend/diagnostics/CrashStateMirror.h"
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -103,6 +104,13 @@ bool AutofocusService::connect(int comPort, int baudRate, unsigned char deviceAd
         }
 
         connected_.store(true);
+        {
+            auto& m = backend::diagnostics::CrashStateMirror::instance().autofocus;
+            m.connected.store(true);
+            m.voltage.store(currentVoltage_.load());
+            backend::diagnostics::CrashStateMirror::instance().setAutofocusPort(
+                "COM" + std::to_string(comPort));
+        }
 
         // Initialize voltage
         {
@@ -110,6 +118,7 @@ bool AutofocusService::connect(int comPort, int baudRate, unsigned char deviceAd
             double initialVoltage = config_.initialVoltage;
             XMT_COMMAND_SinglePoint(deviceAddress_, 0, 0, 0, initialVoltage);
             currentVoltage_.store(initialVoltage);
+            backend::diagnostics::CrashStateMirror::instance().autofocus.voltage.store(initialVoltage);
         }
     }
 
@@ -152,6 +161,7 @@ void AutofocusService::disconnect() {
 
     // Close COM port
     connected_.store(false);
+    backend::diagnostics::CrashStateMirror::instance().autofocus.connected.store(false);
 
     // Clear buffers (both pending inbox and ring-ratio buffer) so a later
     // reconnect starts from a clean slate.
@@ -198,6 +208,7 @@ bool AutofocusService::probeComPort(int comPort, int baudRate, unsigned char dev
 
 void AutofocusService::setEnabled(bool enabled) {
     enabled_.store(enabled);
+    backend::diagnostics::CrashStateMirror::instance().autofocus.enabled.store(enabled);
     SPDLOG_INFO("AutofocusService: Autofocus {}", enabled ? "enabled" : "disabled");
     if (statusCallback_) {
         statusCallback_(enabled ? "Autofocus enabled" : "Autofocus disabled");
