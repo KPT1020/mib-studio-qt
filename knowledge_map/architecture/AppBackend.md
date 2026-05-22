@@ -44,6 +44,18 @@ See `src/backend/AppBackend.cpp` around lines 79–200.
    - `ProcessingService::BackgroundCaptureCallback` → emits Qt signal via
      [[../frontend/System-Utilities]] `BackgroundCaptureNotifier`
 
+### Boot-time service toggles (`MIB_DISABLED_SERVICES`)
+
+Startup now supports disabling selected service bootstraps via a comma-separated
+environment variable:
+
+`MIB_DISABLED_SERVICES=sqlite,hdf5,processing,yolo`
+
+- Supported tokens: `sqlite`, `hdf5`, `processing`, `yolo`, `all`
+- Token matching is case-insensitive; `-` and `_` are treated equivalently
+- Disabled services are still constructed, but their startup initialization is
+  skipped (for example, processing workers are not started when `processing` is disabled)
+
 ## Camera selection
 
 - `setHardwareCameraSelection(ifIdx, devIdx, label)` — choose device (no start)

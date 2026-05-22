@@ -5,6 +5,13 @@
 
 ## Features shipped
 
+- **Boot-time backend service toggles** (2026-05-22) - `AppBackend::initialize`
+  now reads `MIB_DISABLED_SERVICES` (comma-separated) and can skip startup
+  initialization for `sqlite`, `hdf5`, `processing`, and `yolo` (or `all`).
+  This lets startup runs selectively disable service bootstraps without changing
+  binaries. Camera and UI wiring remain unchanged unless their dependent service
+  startup is disabled. Files: `src/backend/AppBackend.cpp`.
+
 - **Recording HDF5 mask regeneration in Review** (2026-05-11) - The
   Review tab now keeps "Regenerate Masks" enabled for recording-mode HDF5
   files. `BatchMaskDialog` resolves the active HDF5 source dataset and uses

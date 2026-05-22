@@ -100,25 +100,112 @@ namespace backend
         syringePumpService_ = std::make_unique<services::SyringePumpService>();
         frameStore_ = std::make_shared<playback::FrameStore>(5000);
 
-        sqliteService_->initialize((std::filesystem::path(dataDir) / "app.sqlite3").string());
-        hdf5Service_->initialize(dataDir);
+        bool bootSqlite = true;
+        bool bootHdf5 = true;
+        bool bootProcessing = true;
+        bool bootYolo = true;
+        if (const char *rawDisabledServices = std::getenv("MIB_DISABLED_SERVICES"))
+        {
+            std::string disabled(rawDisabledServices);
+            auto normalize = [](std::string token)
+            {
+                const auto first = token.find_first_not_of(" \t\r\n");
+                if (first == std::string::npos)
+                {
+                    return std::string{};
+                }
+                const auto last = token.find_last_not_of(" \t\r\n");
+                token = token.substr(first, last - first + 1);
+                std::transform(token.begin(), token.end(), token.begin(), [](unsigned char c)
+                               { return static_cast<char>(std::tolower(c)); });
+                std::replace(token.begin(), token.end(), '-', '_');
+                return token;
+            };
+            size_t cursor = 0;
+            while (cursor <= disabled.size())
+            {
+                const size_t next = disabled.find(',', cursor);
+                const std::string token = normalize(disabled.substr(cursor, next == std::string::npos ? std::string::npos : next - cursor));
+                if (token == "all")
+                {
+                    bootSqlite = false;
+                    bootHdf5 = false;
+                    bootProcessing = false;
+                    bootYolo = false;
+                }
+                else if (token == "sqlite")
+                {
+                    bootSqlite = false;
+                }
+                else if (token == "hdf5")
+                {
+                    bootHdf5 = false;
+                }
+                else if (token == "processing")
+                {
+                    bootProcessing = false;
+                }
+                else if (token == "yolo")
+                {
+                    bootYolo = false;
+                }
+                if (next == std::string::npos)
+                {
+                    break;
+                }
+                cursor = next + 1;
+            }
+        }
+
+        if (bootSqlite)
+        {
+            sqliteService_->initialize((std::filesystem::path(dataDir) / "app.sqlite3").string());
+        }
+        else
+        {
+            SPDLOG_WARN("AppBackend: sqlite bootstrap disabled by MIB_DISABLED_SERVICES");
+        }
+
+        if (bootHdf5)
+        {
+            hdf5Service_->initialize(dataDir);
+        }
+        else
+        {
+            SPDLOG_WARN("AppBackend: hdf5 bootstrap disabled by MIB_DISABLED_SERVICES");
+        }
 
         // Initialize YOLO service - resolve model path relative to data directory
         // dataDir is typically {exeDir}/data, so we go up one level to get exeDir
         std::filesystem::path dataPath(dataDir);
         std::filesystem::path exeDir = dataPath.parent_path();
         std::filesystem::path modelPath = exeDir / "resources" / "models" / "yolo11n-seg.onnx";
-        if (!yoloService_->initialize(modelPath.string())) {
-            SPDLOG_WARN("YOLO model not loaded - segmentation features will not be available");
+        if (bootYolo)
+        {
+            if (!yoloService_->initialize(modelPath.string()))
+            {
+                SPDLOG_WARN("YOLO model not loaded - segmentation features will not be available");
+            }
+        }
+        else
+        {
+            SPDLOG_WARN("AppBackend: yolo bootstrap disabled by MIB_DISABLED_SERVICES");
         }
 
         // Load Young's modulus LUT for emodulus gating
-        std::filesystem::path lutPath = exeDir / "resources" / "isoelastic_curve" / "scaled_isoelastic_data_LUT_6.16-4.24.txt";
-        if (!processingService_->loadEModulusLut(lutPath.string())) {
-            SPDLOG_WARN("Young's modulus LUT not loaded - emodulus gating will not be available");
+        if (bootProcessing)
+        {
+            std::filesystem::path lutPath = exeDir / "resources" / "isoelastic_curve" / "scaled_isoelastic_data_LUT_6.16-4.24.txt";
+            if (!processingService_->loadEModulusLut(lutPath.string()))
+            {
+                SPDLOG_WARN("Young's modulus LUT not loaded - emodulus gating will not be available");
+            }
+            processingService_->start();
         }
-
-        processingService_->start();
+        else
+        {
+            SPDLOG_WARN("AppBackend: processing bootstrap disabled by MIB_DISABLED_SERVICES");
+        }
         // Note: startRealtime() is now called when Experiment tab becomes active, not during initialization
 
         // Wire autofocus service to receive ring ratios from processing service
