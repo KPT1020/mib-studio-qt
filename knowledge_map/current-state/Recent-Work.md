@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Monorepo-safe Sentry release wiring** (2026-05-23, branch
+  `cursor/sentry-monorepo-setup-5c46`) — Added monorepo-oriented Sentry
+  runtime config in `main.cpp`: DSN fallback (`MIB_SENTRY_DSN` →
+  `SENTRY_DSN`), environment fallback (`MIB_CRASH_ENV` →
+  `SENTRY_ENVIRONMENT`), component-aware release names, and isolated
+  Crashpad DB directories per component under `.../crashes/sentry-db/`.
+  Added `scripts/sentry-release-monorepo.sh` to standardize release
+  creation/finalization, commit association, and optional debug-file upload
+  for one or many Sentry projects from the same repository. Added user docs
+  in `docs/howto/sentry-monorepo.md` and linked it from `docs/README.md`.
+
 - **Crash monitoring + remote logging** (2026-05-22, branch
   `claude/crash-monitoring-logging-jUziR`) — Added a process-level crash
   pipeline that captures Windows minidumps and a JSON snapshot of live

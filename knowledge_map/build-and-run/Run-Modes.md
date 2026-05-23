@@ -24,6 +24,24 @@ Read at startup (see `main.cpp` and [[../architecture/AppBackend]]):
 
 Sample frames ship at `data/mock_frames/frame_00000.tiff`.
 
+## Crash reporting / Sentry env vars
+
+Read in `src/frontend/core/main.cpp` before backend startup:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `MIB_SENTRY_DSN` | unset | Preferred DSN for crash upload |
+| `SENTRY_DSN` | unset | Fallback DSN if `MIB_SENTRY_DSN` is unset |
+| `MIB_SENTRY_COMPONENT` | `mib-studio-qt/desktop` | Monorepo component label for release naming and tags |
+| `MIB_SENTRY_RELEASE` | auto | Explicit release override |
+| `SENTRY_RELEASE` | auto | Fallback explicit release override |
+| `MIB_CRASH_ENV` | `production` / `development` | Preferred environment label |
+| `SENTRY_ENVIRONMENT` | `production` / `development` | Fallback environment label |
+| `MIB_GIT_SHA` | unset | Build SHA used in auto release format |
+
+When no explicit release is set, startup computes:
+`<component>@<MIB_STUDIO_QT_VERSION>+<short-sha>`.
+
 ## MLflow (test metrics only)
 
 Test performance scripts (`scripts/empty_frame_detection.py` and the

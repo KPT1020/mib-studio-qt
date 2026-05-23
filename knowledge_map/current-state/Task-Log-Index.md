@@ -37,6 +37,10 @@
 - `task/diagnostic-logging.md`
 - `task/review_logging_improvements.md`
 
+### Crash reporting / observability
+- `task/2026-05-22-crash-monitoring.md`
+- `task/2026-05-23-sentry-monorepo-setup.md`
+
 ### Nanopositioner
 - `task/2025-11-19-nanopositioner-tab.md`
 
@@ -48,7 +52,7 @@
 - `task/2026-04-15-trigger-timing-bug.md`
 - `task/2026-04-16-thread-performance-audit.md`
 
-## By filename (all 23)
+## By filename (all 26)
 
 ```
 2025-11-14-safe-start-stop-egrabber.md
@@ -61,6 +65,8 @@
 2026-04-20-linux-build-windows-hardware-guards.md
 2026-04-20-cloud-toolchain-cxx-libstdcpp-fix.md
 2026-05-05-hdf5-exporter-linux-macos-build.md
+2026-05-22-crash-monitoring.md
+2026-05-23-sentry-monorepo-setup.md
 camera-reset.md
 diagnostic-logging.md
 external-config-browse.md

@@ -11,9 +11,11 @@
 #include "frontend/core/MainWindow.h"
 
 #include <cstdlib>
+#include <cctype>
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <iostream>
 #include <string>
 #ifdef _WIN32
@@ -23,6 +25,55 @@
 #endif
 
 namespace {
+    std::string readEnvFirst(std::initializer_list<const char*> names) {
+        for (const char* name : names) {
+            if (const char* value = std::getenv(name)) {
+                if (*value != '\0') {
+                    return std::string(value);
+                }
+            }
+        }
+        return {};
+    }
+
+    std::string resolveSentryComponent() {
+        std::string component = readEnvFirst({"MIB_SENTRY_COMPONENT"});
+        if (component.empty()) {
+            // Keep release identifiers globally unique for org-level Sentry releases.
+            component = "mib-studio-qt/desktop";
+        }
+        return component;
+    }
+
+    std::string sanitizePathSegment(std::string value) {
+        for (char& ch : value) {
+            const unsigned char uch = static_cast<unsigned char>(ch);
+            if (!std::isalnum(uch) && ch != '-' && ch != '_') {
+                ch = '_';
+            }
+        }
+        if (value.empty()) {
+            value = "default";
+        }
+        return value;
+    }
+
+    std::string resolveReleaseName(const std::string& component) {
+        std::string release = readEnvFirst({"MIB_SENTRY_RELEASE", "SENTRY_RELEASE"});
+        if (!release.empty()) {
+            return release;
+        }
+
+        std::string gitSha = readEnvFirst({"MIB_GIT_SHA", "GITHUB_SHA", "CI_COMMIT_SHA", "BUILD_SOURCEVERSION"});
+        if (!gitSha.empty() && gitSha.size() > 12) {
+            gitSha.resize(12);
+        }
+        if (gitSha.empty()) {
+            return component + "@" + MIB_STUDIO_QT_VERSION;
+        }
+        return component + "@" + MIB_STUDIO_QT_VERSION + "+" + gitSha;
+    }
+
     // Write error to a guaranteed-writable location before logging is available
     void writeEarlyError(const std::string& errorMsg) {
         try {
@@ -71,19 +122,19 @@ namespace {
     void installCrashReporter(const QString& exeDir, const std::string& dataDir) {
         backend::services::CrashReporter::Config cfg;
         cfg.crashDir = resolveCrashDir(exeDir);
-        cfg.databaseDir = cfg.crashDir / "sentry-db";
-        cfg.release = std::string("mib_studio_qt@") + MIB_STUDIO_QT_VERSION;
+        const std::string sentryComponent = resolveSentryComponent();
+        cfg.databaseDir = cfg.crashDir / "sentry-db" / sanitizePathSegment(sentryComponent);
+        cfg.release = resolveReleaseName(sentryComponent);
         cfg.environment =
 #ifdef NDEBUG
             "production";
 #else
             "development";
 #endif
-        if (const char* env = std::getenv("MIB_SENTRY_DSN")) {
-            cfg.dsn = env;
-        }
-        if (const char* envEnv = std::getenv("MIB_CRASH_ENV")) {
-            cfg.environment = envEnv;
+        cfg.dsn = readEnvFirst({"MIB_SENTRY_DSN", "SENTRY_DSN"});
+        const std::string envName = readEnvFirst({"MIB_CRASH_ENV", "SENTRY_ENVIRONMENT"});
+        if (!envName.empty()) {
+            cfg.environment = envName;
         }
 
         backend::services::CrashReporter::init(cfg);
@@ -101,6 +152,7 @@ namespace {
         backend::services::CrashReporter::setTag("os", QSysInfo::prettyProductName().toStdString());
         backend::services::CrashReporter::setTag("kernel", QSysInfo::kernelVersion().toStdString());
         backend::services::CrashReporter::setTag("release", cfg.release);
+        backend::services::CrashReporter::setTag("sentry_component", sentryComponent);
     }
 }
 

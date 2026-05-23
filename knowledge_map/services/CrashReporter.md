@@ -51,11 +51,18 @@ Sentry is not compiled in — they remain safe to sprinkle through services.
 
 ## DSN configuration
 
-- Read from `MIB_SENTRY_DSN` env var at process start.
+- DSN read order: `MIB_SENTRY_DSN` → `SENTRY_DSN`.
 - Empty DSN → local-only mode: minidumps still written to disk, but never
   uploaded.
-- Override environment label with `MIB_CRASH_ENV` (defaults to
-  `production` for Release / `development` for Debug).
+- Environment read order: `MIB_CRASH_ENV` → `SENTRY_ENVIRONMENT`
+  (defaults to `production` for Release / `development` for Debug).
+- Component/release metadata for monorepos:
+  - `MIB_SENTRY_COMPONENT` defaults to `mib-studio-qt/desktop`
+  - release read order: `MIB_SENTRY_RELEASE` → `SENTRY_RELEASE` →
+    auto-generated `<component>@<app-version>+<sha>`
+  - `databaseDir` is namespaced to
+    `%LOCALAPPDATA%/MIB_Studio_Qt/crashes/sentry-db/<component>` to avoid
+    collisions between components sharing one repo.
 
 ## Crash artifacts
 
