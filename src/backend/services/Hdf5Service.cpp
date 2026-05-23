@@ -1,4 +1,5 @@
 #include "backend/services/Hdf5Service.h"
+#include "backend/diagnostics/CrashStateMirror.h"
 #include "backend/services/ProcessingService.h"
 #include "backend/services/Logger.h"
 
@@ -75,6 +76,13 @@ namespace backend::services
         impl_->validFramesWritten_ = 0;
         impl_->invalidFramesWritten_ = 0;
         impl_->seriesImagesWritten_ = 0;
+        {
+            auto& m = backend::diagnostics::CrashStateMirror::instance();
+            m.hdf5.fileOpen.store(true);
+            m.hdf5.appendedValid.store(0);
+            m.hdf5.appendedInvalid.store(0);
+            m.setHdf5Path(filePath);
+        }
         SPDLOG_INFO("HDF5 file opened: {}", filePath);
         return true;
     }
@@ -102,6 +110,11 @@ namespace backend::services
             }
             impl_->fileId_ = H5I_INVALID_HID;
             impl_->isOpen_ = false;
+            {
+                auto& m = backend::diagnostics::CrashStateMirror::instance();
+                m.hdf5.fileOpen.store(false);
+                m.clearHdf5Path();
+            }
         }
     }
 

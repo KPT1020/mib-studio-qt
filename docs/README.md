@@ -17,3 +17,4 @@ This folder hosts living documentation as we build functionality. Keep content c
 - Integration: EGrabber — see `integration/egrabber.md`
 - Tasks/issues live in `knowledge_map/task/`
 - Post-processing tools (export, reanalyse) — see [howto/tools.md](howto/tools.md)
+- Sentry monorepo setup — see [howto/sentry-monorepo.md](howto/sentry-monorepo.md)

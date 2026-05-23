@@ -1,5 +1,6 @@
 #include "backend/services/CaptureService.h"
 #include "backend/Tools.h"
+#include "backend/diagnostics/CrashStateMirror.h"
 #include "backend/playback/FrameStore.h"
 #include "camera/common/EGrabberCamera.h"
 #include "camera/common/ICamera.h"
@@ -84,6 +85,12 @@ void CaptureService::run() {
 
     try {
         SPDLOG_INFO("CaptureService starting: parts={}, buffers={}", config_.bufferPartCount, config_.numBuffers);
+        {
+            auto& m = backend::diagnostics::CrashStateMirror::instance().capture;
+            m.running.store(true, std::memory_order_relaxed);
+            m.bufferPartCount.store(config_.bufferPartCount, std::memory_order_relaxed);
+            m.numBuffers.store(config_.numBuffers, std::memory_order_relaxed);
+        }
 
         if (!cameraFactory_) {
             throw std::runtime_error("CaptureService has no camera factory configured");
@@ -158,12 +165,17 @@ void CaptureService::run() {
                                        frame.timestamp);
             }
             stats_.framesProcessed.fetch_add(1, std::memory_order_relaxed);
+            backend::diagnostics::CrashStateMirror::instance().capture.framesProcessed
+                .fetch_add(1, std::memory_order_relaxed);
 
             if (now >= nextStatsPoll) {
                 camera::common::CameraStats cameraStats{};
                 if (camera->pollStats(cameraStats)) {
                     stats_.lastFrameRate.store(cameraStats.frameRate, std::memory_order_relaxed);
                     stats_.lastDataRateMBps.store(cameraStats.dataRateMBps, std::memory_order_relaxed);
+                    auto& m = backend::diagnostics::CrashStateMirror::instance().capture;
+                    m.lastFrameRate.store(cameraStats.frameRate, std::memory_order_relaxed);
+                    m.lastDataRateMBps.store(cameraStats.dataRateMBps, std::memory_order_relaxed);
                     SPDLOG_DEBUG("Capture stats: {} fps, {} MB/s", cameraStats.frameRate, cameraStats.dataRateMBps);
                 }
                 nextStatsPoll = now + kStatsInterval;
@@ -180,15 +192,18 @@ void CaptureService::run() {
 
         releaseCamera();
         running_.store(false);
+        backend::diagnostics::CrashStateMirror::instance().capture.running.store(false);
         SPDLOG_INFO("CaptureService stopped");
     } catch (const std::exception& ex) {
         SPDLOG_ERROR("CaptureService exception: {}", ex.what());
         releaseCamera();
         running_.store(false);
+        backend::diagnostics::CrashStateMirror::instance().capture.running.store(false);
     } catch (...) {
         SPDLOG_ERROR("CaptureService unknown exception");
         releaseCamera();
         running_.store(false);
+        backend::diagnostics::CrashStateMirror::instance().capture.running.store(false);
     }
 }
 

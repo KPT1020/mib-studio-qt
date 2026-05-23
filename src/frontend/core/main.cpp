@@ -3,13 +3,20 @@
 #include <QDir>
 #include <QMessageBox>
 #include <QString>
+#include <QSysInfo>
 
 #include "backend/AppBackend.h"
+#include "backend/diagnostics/CrashStateMirror.h"
+#include "backend/services/CrashReporter.h"
 #include "frontend/core/MainWindow.h"
 
+#include <cstdlib>
+#include <cctype>
 #include <exception>
-#include <iostream>
+#include <filesystem>
 #include <fstream>
+#include <initializer_list>
+#include <iostream>
 #include <string>
 #ifdef _WIN32
 #define NOMINMAX  // Prevent Windows.h from defining min/max macros
@@ -18,6 +25,55 @@
 #endif
 
 namespace {
+    std::string readEnvFirst(std::initializer_list<const char*> names) {
+        for (const char* name : names) {
+            if (const char* value = std::getenv(name)) {
+                if (*value != '\0') {
+                    return std::string(value);
+                }
+            }
+        }
+        return {};
+    }
+
+    std::string resolveSentryComponent() {
+        std::string component = readEnvFirst({"MIB_SENTRY_COMPONENT"});
+        if (component.empty()) {
+            // Keep release identifiers globally unique for org-level Sentry releases.
+            component = "mib-studio-qt/desktop";
+        }
+        return component;
+    }
+
+    std::string sanitizePathSegment(std::string value) {
+        for (char& ch : value) {
+            const unsigned char uch = static_cast<unsigned char>(ch);
+            if (!std::isalnum(uch) && ch != '-' && ch != '_') {
+                ch = '_';
+            }
+        }
+        if (value.empty()) {
+            value = "default";
+        }
+        return value;
+    }
+
+    std::string resolveReleaseName(const std::string& component) {
+        std::string release = readEnvFirst({"MIB_SENTRY_RELEASE", "SENTRY_RELEASE"});
+        if (!release.empty()) {
+            return release;
+        }
+
+        std::string gitSha = readEnvFirst({"MIB_GIT_SHA", "GITHUB_SHA", "CI_COMMIT_SHA", "BUILD_SOURCEVERSION"});
+        if (!gitSha.empty() && gitSha.size() > 12) {
+            gitSha.resize(12);
+        }
+        if (gitSha.empty()) {
+            return component + "@" + MIB_STUDIO_QT_VERSION;
+        }
+        return component + "@" + MIB_STUDIO_QT_VERSION + "+" + gitSha;
+    }
+
     // Write error to a guaranteed-writable location before logging is available
     void writeEarlyError(const std::string& errorMsg) {
         try {
@@ -47,6 +103,57 @@ namespace {
         std::cerr << title.toStdString() << ": " << message.toStdString() << std::endl;
 #endif
     }
+
+    // Resolve a user-writable directory for crash artifacts (.dmp + .json).
+    // Falls back to {exeDir}/data/crashes if AppData lookup fails.
+    std::filesystem::path resolveCrashDir(const QString& exeDir) {
+#ifdef _WIN32
+        char appDataPath[MAX_PATH];
+        if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL,
+                                       SHGFP_TYPE_CURRENT, appDataPath))) {
+            return std::filesystem::path(appDataPath) / "MIB_Studio_Qt" / "crashes";
+        }
+#endif
+        return std::filesystem::path(exeDir.toStdString()) / "data" / "crashes";
+    }
+
+    // Install the crash reporter as early as possible. Must be safe to call
+    // before QApplication exists (uses Qt only for QString helpers below).
+    void installCrashReporter(const QString& exeDir, const std::string& dataDir) {
+        backend::services::CrashReporter::Config cfg;
+        cfg.crashDir = resolveCrashDir(exeDir);
+        const std::string sentryComponent = resolveSentryComponent();
+        cfg.databaseDir = cfg.crashDir / "sentry-db" / sanitizePathSegment(sentryComponent);
+        cfg.release = resolveReleaseName(sentryComponent);
+        cfg.environment =
+#ifdef NDEBUG
+            "production";
+#else
+            "development";
+#endif
+        cfg.dsn = readEnvFirst({"MIB_SENTRY_DSN", "SENTRY_DSN"});
+        const std::string envName = readEnvFirst({"MIB_CRASH_ENV", "SENTRY_ENVIRONMENT"});
+        if (!envName.empty()) {
+            cfg.environment = envName;
+        }
+
+        backend::services::CrashReporter::init(cfg);
+
+        // Register the state mirror as the source of crash-time JSON.
+        backend::services::CrashReporter::registerStateMirror([]() {
+            return backend::diagnostics::CrashStateMirror::instance().snapshotJsonString();
+        });
+
+        // Seed initial app context.
+        auto& mirror = backend::diagnostics::CrashStateMirror::instance();
+        mirror.setDataDir(dataDir);
+        mirror.setBuildVersion(MIB_STUDIO_QT_VERSION);
+
+        backend::services::CrashReporter::setTag("os", QSysInfo::prettyProductName().toStdString());
+        backend::services::CrashReporter::setTag("kernel", QSysInfo::kernelVersion().toStdString());
+        backend::services::CrashReporter::setTag("release", cfg.release);
+        backend::services::CrashReporter::setTag("sentry_component", sentryComponent);
+    }
 }
 
 int main(int argc, char* argv[]) {
@@ -72,19 +179,25 @@ int main(int argc, char* argv[]) {
         // Application identity/version (used by the updater and About dialogs)
         QCoreApplication::setApplicationName(QStringLiteral("MIB Studio Qt"));
         QCoreApplication::setApplicationVersion(QStringLiteral(MIB_STUDIO_QT_VERSION));
-        
+
         // Get executable directory and resolve data path
         QString exeDir = QCoreApplication::applicationDirPath();
         QString dataDir = QDir(exeDir).filePath("data");
-        
+
         // Convert to std::string for backend
         std::string dataDirStd = dataDir.toStdString();
-        
+
+        // Install crash reporter BEFORE Logger / AppBackend so that crashes
+        // during backend init are still captured. Logger init happens inside
+        // AppBackend::initialize() and CrashReporter uses spdlog for its own
+        // diagnostic messages once Logger comes online.
+        installCrashReporter(exeDir, dataDirStd);
+
         // Early diagnostic output
         std::cout << "MIB Studio Qt starting..." << std::endl;
         std::cout << "Executable directory: " << exeDir.toStdString() << std::endl;
         std::cout << "Data directory: " << dataDirStd << std::endl;
-        
+
         // Initialize backend with proper path
         backend::AppBackend backend;
         if (!backend.initialize(dataDirStd)) {
@@ -118,12 +231,15 @@ int main(int argc, char* argv[]) {
         w.show();
         
         std::cout << "Application started successfully." << std::endl;
-        
-        return app.exec();
-        
+
+        const int rc = app.exec();
+        backend::services::CrashReporter::shutdown();
+        return rc;
+
     } catch (const std::exception& e) {
         std::string errorMsg = std::string("Unhandled exception: ") + e.what();
         writeEarlyError(errorMsg);
+        backend::services::CrashReporter::captureException(e.what());
         // Only show message box if QApplication was successfully created
         try {
             if (QCoreApplication::instance() != nullptr) {
@@ -140,6 +256,7 @@ int main(int argc, char* argv[]) {
     } catch (...) {
         std::string errorMsg = "Unknown exception occurred";
         writeEarlyError(errorMsg);
+        backend::services::CrashReporter::captureException("unknown exception at top level");
         // Only show message box if QApplication was successfully created
         try {
             if (QCoreApplication::instance() != nullptr) {

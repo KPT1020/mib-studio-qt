@@ -5,6 +5,40 @@
 
 ## Features shipped
 
+- **Monorepo-safe Sentry release wiring** (2026-05-23, branch
+  `cursor/sentry-monorepo-setup-5c46`) — Added monorepo-oriented Sentry
+  runtime config in `main.cpp`: DSN fallback (`MIB_SENTRY_DSN` →
+  `SENTRY_DSN`), environment fallback (`MIB_CRASH_ENV` →
+  `SENTRY_ENVIRONMENT`), component-aware release names, and isolated
+  Crashpad DB directories per component under `.../crashes/sentry-db/`.
+  Added `scripts/sentry-release-monorepo.sh` to standardize release
+  creation/finalization, commit association, and optional debug-file upload
+  for one or many Sentry projects from the same repository. Added user docs
+  in `docs/howto/sentry-monorepo.md` and linked it from `docs/README.md`.
+
+- **Crash monitoring + remote logging** (2026-05-22, branch
+  `claude/crash-monitoring-logging-jUziR`) — Added a process-level crash
+  pipeline that captures Windows minidumps and a JSON snapshot of live
+  service state on any unrecoverable failure (SEH, signals, uncaught C++
+  exceptions, Qt fatal). New [[../services/CrashReporter]] installs the
+  handlers via `dbghelp` / `std::signal` / `std::set_terminate` /
+  `qInstallMessageHandler` and optionally forwards events to Sentry via
+  `sentry-native` (FetchContent, off by default if the fetch fails or
+  `MIB_USE_SENTRY=OFF`). New [[../diagnostics/CrashStateMirror]] gives
+  every service a lock-free atomic slot so the crash handler can read
+  state without taking any locks; `CaptureService`, `ProcessingService`,
+  `Hdf5Service`, `FrameStore`, `AutofocusService`, and `AppBackend`
+  recording all write to their slots at existing lifecycle hot-spots.
+  CMake now emits `/Zi + /DEBUG /OPT:REF /OPT:ICF` for Release builds so
+  the produced `mib_studio_qt.pdb` can be archived for later
+  symbolication via `sentry-cli upload-dif`. Crash dumps land under
+  `%LOCALAPPDATA%/MIB_Studio_Qt/crashes/` and (when a DSN is configured
+  via the `MIB_SENTRY_DSN` env var) pending dumps from prior runs are
+  drained on next launch. Files: new `CrashReporter.{h,cpp}`,
+  `CrashStateMirror.{h,cpp}`, `cmake/Sentry.cmake`; modified
+  `CMakeLists.txt`, `src/frontend/core/main.cpp`,
+  `src/backend/AppBackend.cpp`, and the five services above.
+
 - **Recording HDF5 mask regeneration in Review** (2026-05-11) - The
   Review tab now keeps "Regenerate Masks" enabled for recording-mode HDF5
   files. `BatchMaskDialog` resolves the active HDF5 source dataset and uses
