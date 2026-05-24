@@ -57,6 +57,25 @@ Sentry is not compiled in — they remain safe to sprinkle through services.
 - Override environment label with `MIB_CRASH_ENV` (defaults to
   `production` for Release / `development` for Debug).
 
+### How the DSN reaches production installs
+
+The release pipeline injects the DSN at three layers:
+
+1. **CMake** — `cmake -DMIB_SENTRY_DSN=...` is set by the
+   `Build Windows` workflow (from the `SENTRY_DSN` repo secret) when
+   running the `CMake configure` step.
+2. **InnoSetup** — CMake forwards `MIB_SENTRY_DSN` to ISCC via
+   `/DSentryDSN=...`. The `[Registry]` section in
+   `resources/installers/mib-studio-qt.iss` writes a system-wide
+   `HKLM\…\Environment\MIB_SENTRY_DSN` value so every process spawned
+   after install picks it up.
+3. **Runtime** — `main.cpp` reads `MIB_SENTRY_DSN` (and the optional
+   `MIB_CRASH_ENV`) via `qgetenv` and passes them into
+   `CrashReporter::init`.
+
+Operator setup (org slug, auth token, self-hosted URL) is documented in
+[`docs/howto/sentry-setup.md`](../../docs/howto/sentry-setup.md).
+
 ## Crash artifacts
 
 ```
@@ -71,16 +90,28 @@ Sentry is not compiled in — they remain safe to sprinkle through services.
 
 ## Symbolication
 
-Minidumps are useless without matching PDB. The CMake config now emits
+Minidumps are useless without matching PDB. The CMake config emits
 `mib_studio_qt.pdb` next to the `.exe` for Release builds (via `/Zi` +
-`/DEBUG /OPT:REF /OPT:ICF`). Archive each released PDB so remote crashes
-can be symbolicated:
+`/DEBUG /OPT:REF /OPT:ICF`).
 
-```bash
-sentry-cli login
-sentry-cli upload-dif --org <org> --project mib-studio-qt \
-    build/Release/mib_studio_qt.exe \
-    build/Release/mib_studio_qt.pdb
+The `Build Windows` GitHub Actions workflow runs
+`sentry-cli debug-files upload --include-sources build\Release` on
+every release/beta build, so symbols are pushed automatically when
+`SENTRY_AUTH_TOKEN` is present. The workflow then creates a Sentry
+release named `mib_studio_qt@<version>`, matching the `release` field
+set at runtime by `main.cpp`.
+
+For manual / hotfix uploads outside CI:
+
+```powershell
+$env:SENTRY_AUTH_TOKEN = "sntrys_..."
+$env:SENTRY_URL = "https://sentry.example.com"   # omit for sentry.io
+$env:SENTRY_ORG = "mib-studio"
+$env:SENTRY_PROJECT = "mib-studio-qt"
+
+sentry-cli debug-files upload --include-sources build\Release
+sentry-cli releases new "mib_studio_qt@$version"
+sentry-cli releases finalize "mib_studio_qt@$version"
 ```
 
 ## Gotchas

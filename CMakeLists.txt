@@ -807,11 +807,25 @@ if(WIN32)
         # Create dist directory
         set(INSTALLER_OUTPUT_DIR "${CMAKE_BINARY_DIR}/dist")
         file(MAKE_DIRECTORY "${INSTALLER_OUTPUT_DIR}")
-        
+
         # InnoSetup script paths
         set(INNOSETUP_SCRIPT "${CMAKE_SOURCE_DIR}/resources/installers/mib-studio-qt.iss")
         set(INNOSETUP_UPDATE_SCRIPT "${CMAKE_SOURCE_DIR}/resources/installers/mib-studio-qt-update.iss")
-        
+
+        # Sentry DSN / environment passed through to InnoSetup so installed
+        # builds get MIB_SENTRY_DSN / MIB_CRASH_ENV as system env vars. Empty
+        # by default — release CI passes the real value via -D on configure.
+        set(MIB_SENTRY_DSN "" CACHE STRING
+            "Sentry DSN baked into the installer (HKLM env var)")
+        set(MIB_SENTRY_ENVIRONMENT "production" CACHE STRING
+            "Sentry environment tag baked into the installer")
+
+        set(_ISCC_SENTRY_FLAGS)
+        if(MIB_SENTRY_DSN)
+            list(APPEND _ISCC_SENTRY_FLAGS "/DSentryDSN=${MIB_SENTRY_DSN}")
+            list(APPEND _ISCC_SENTRY_FLAGS "/DSentryEnvironment=${MIB_SENTRY_ENVIRONMENT}")
+        endif()
+
         # Custom target to build full installer
         add_custom_target(package_installer
             COMMAND ${CMAKE_COMMAND} -E echo "Building Windows installer..."
@@ -821,12 +835,12 @@ if(WIN32)
             COMMAND ${CMAKE_COMMAND} -E echo "Checking for ${CMAKE_BINARY_DIR}/Release/mib_studio_qt.exe..."
             # Build installer
             COMMAND ${CMAKE_COMMAND} -E echo "Compiling InnoSetup script..."
-            COMMAND "${ISCC_EXE}" "/DAppVersion=${PROJECT_VERSION}" "/O${INSTALLER_OUTPUT_DIR}" "${INNOSETUP_SCRIPT}"
+            COMMAND "${ISCC_EXE}" "/DAppVersion=${PROJECT_VERSION}" ${_ISCC_SENTRY_FLAGS} "/O${INSTALLER_OUTPUT_DIR}" "${INNOSETUP_SCRIPT}"
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             COMMENT "Building Windows installer with InnoSetup"
             DEPENDS mib_studio_qt
         )
-        
+
         # Custom target to build update package (app files only, no eGrabber/VC++)
         add_custom_target(package_installer_update
             COMMAND ${CMAKE_COMMAND} -E echo "Building Windows update package..."
@@ -836,7 +850,7 @@ if(WIN32)
             COMMAND ${CMAKE_COMMAND} -E echo "Checking for ${CMAKE_BINARY_DIR}/Release/mib_studio_qt.exe..."
             # Build update package
             COMMAND ${CMAKE_COMMAND} -E echo "Compiling InnoSetup update script..."
-            COMMAND "${ISCC_EXE}" "/DAppVersion=${PROJECT_VERSION}" "/O${INSTALLER_OUTPUT_DIR}" "${INNOSETUP_UPDATE_SCRIPT}"
+            COMMAND "${ISCC_EXE}" "/DAppVersion=${PROJECT_VERSION}" ${_ISCC_SENTRY_FLAGS} "/O${INSTALLER_OUTPUT_DIR}" "${INNOSETUP_UPDATE_SCRIPT}"
             WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
             COMMENT "Building Windows update package with InnoSetup"
             DEPENDS mib_studio_qt

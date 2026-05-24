@@ -5,6 +5,23 @@
 
 ## Features shipped
 
+- **Sentry build-pipeline wiring** (2026-05-22, same branch) — Wired
+  the Sentry DSN end-to-end so installed builds report crashes without
+  per-machine setup. CMake gained `MIB_SENTRY_DSN` and
+  `MIB_SENTRY_ENVIRONMENT` cache vars that get forwarded to ISCC; both
+  `mib-studio-qt.iss` and `mib-studio-qt-update.iss` now ship
+  `crashpad_handler.exe` and emit a `[Registry]` entry writing
+  `HKLM\…\Environment\MIB_SENTRY_DSN` (cleanly removed on uninstall).
+  `.github/workflows/build-windows.yml` injects the DSN at configure
+  time from the `SENTRY_DSN` repo secret, verifies the build produced
+  `mib_studio_qt.pdb` + `crashpad_handler.exe`, and runs
+  `sentry-cli debug-files upload` + `sentry-cli releases new/finalize`
+  using `SENTRY_AUTH_TOKEN`/`SENTRY_URL`/`SENTRY_ORG`/`SENTRY_PROJECT`
+  (skips cleanly when the auth token is absent). The setup is
+  documented for operators in `docs/howto/sentry-setup.md`, with the
+  troubleshooting guide updated to point at the new structured crash
+  artifacts under `%LOCALAPPDATA%/MIB_Studio_Qt/crashes/`.
+
 - **Crash monitoring + remote logging** (2026-05-22, branch
   `claude/crash-monitoring-logging-jUziR`) — Added a process-level crash
   pipeline that captures Windows minidumps and a JSON snapshot of live
