@@ -100,156 +100,340 @@ namespace backend
         syringePumpService_ = std::make_unique<services::SyringePumpService>();
         frameStore_ = std::make_shared<playback::FrameStore>(5000);
 
-        sqliteService_->initialize((std::filesystem::path(dataDir) / "app.sqlite3").string());
-        hdf5Service_->initialize(dataDir);
+        bool bootSqlite = true;
+        bool bootHdf5 = true;
+        bool bootProcessing = true;
+        bool bootYolo = true;
+        bool bootAutofocus = true;
+        bool bootTrigger = true;
+        bool bootCapture = true;
+        bool bootPlayback = true;
+        if (const char *rawDisabledServices = std::getenv("MIB_DISABLED_SERVICES"))
+        {
+            std::string disabled(rawDisabledServices);
+            auto normalize = [](std::string token)
+            {
+                const auto first = token.find_first_not_of(" 	
+");
+                if (first == std::string::npos)
+                {
+                    return std::string{};
+                }
+                const auto last = token.find_last_not_of(" 	
+");
+                token = token.substr(first, last - first + 1);
+                std::transform(token.begin(), token.end(), token.begin(), [](unsigned char c)
+                               { return static_cast<char>(std::tolower(c)); });
+                std::replace(token.begin(), token.end(), '-', '_');
+                return token;
+            };
+            size_t cursor = 0;
+            while (cursor <= disabled.size())
+            {
+                const size_t next = disabled.find(',', cursor);
+                const std::string token = normalize(disabled.substr(cursor, next == std::string::npos ? std::string::npos : next - cursor));
+                if (token == "all")
+                {
+                    bootSqlite = false;
+                    bootHdf5 = false;
+                    bootProcessing = false;
+                    bootYolo = false;
+                    bootAutofocus = false;
+                    bootTrigger = false;
+                    bootCapture = false;
+                    bootPlayback = false;
+                }
+                else if (token == "sqlite")
+                {
+                    bootSqlite = false;
+                }
+                else if (token == "hdf5")
+                {
+                    bootHdf5 = false;
+                }
+                else if (token == "processing")
+                {
+                    bootProcessing = false;
+                }
+                else if (token == "yolo")
+                {
+                    bootYolo = false;
+                }
+                else if (token == "autofocus")
+                {
+                    bootAutofocus = false;
+                }
+                else if (token == "trigger")
+                {
+                    bootTrigger = false;
+                }
+                else if (token == "capture" || token == "camera")
+                {
+                    bootCapture = false;
+                }
+                else if (token == "playback")
+                {
+                    bootPlayback = false;
+                }
+                else if (token == "auto_update")
+                {
+                    // Handled by frontend startup path.
+                }
+                else if (!token.empty())
+                {
+                    SPDLOG_WARN("Unknown token '{}' in MIB_DISABLED_SERVICES", token);
+                }
+                if (next == std::string::npos)
+                {
+                    break;
+                }
+                cursor = next + 1;
+            }
+        }
+
+        SPDLOG_INFO("AppBackend boot toggles: sqlite={}, hdf5={}, processing={}, yolo={}, autofocus={}, trigger={}, capture={}, playback={}",
+                    bootSqlite, bootHdf5, bootProcessing, bootYolo, bootAutofocus, bootTrigger, bootCapture, bootPlayback);
+
+        if (bootSqlite)
+        {
+            sqliteService_->initialize((std::filesystem::path(dataDir) / "app.sqlite3").string());
+        }
+        else
+        {
+            SPDLOG_WARN("AppBackend: sqlite bootstrap disabled by MIB_DISABLED_SERVICES");
+        }
+
+        if (bootHdf5)
+        {
+            hdf5Service_->initialize(dataDir);
+        }
+        else
+        {
+            SPDLOG_WARN("AppBackend: hdf5 bootstrap disabled by MIB_DISABLED_SERVICES");
+        }
 
         // Initialize YOLO service - resolve model path relative to data directory
         // dataDir is typically {exeDir}/data, so we go up one level to get exeDir
         std::filesystem::path dataPath(dataDir);
         std::filesystem::path exeDir = dataPath.parent_path();
         std::filesystem::path modelPath = exeDir / "resources" / "models" / "yolo11n-seg.onnx";
-        if (!yoloService_->initialize(modelPath.string())) {
-            SPDLOG_WARN("YOLO model not loaded - segmentation features will not be available");
-        }
-
-        // Load Young's modulus LUT for emodulus gating
-        std::filesystem::path lutPath = exeDir / "resources" / "isoelastic_curve" / "scaled_isoelastic_data_LUT_6.16-4.24.txt";
-        if (!processingService_->loadEModulusLut(lutPath.string())) {
-            SPDLOG_WARN("Young's modulus LUT not loaded - emodulus gating will not be available");
-        }
-
-        processingService_->start();
-        // Note: startRealtime() is now called when Experiment tab becomes active, not during initialization
-
-        // Wire autofocus service to receive ring ratios from processing service
-        processingService_->setRingRatioCallback([this](double ringRatio, int64_t timestampNs)
-                                                 {
-            if (autofocusService_) {
-                autofocusService_->onRingRatio(ringRatio, timestampNs);
-            } });
-
-        // Wire target group trigger: processing -> trigger service
-        processingService_->setTargetGroupCallback([this](bool isTargetGroup) {
-            if (triggerService_) {
-                triggerService_->onTargetGroupResult(isTargetGroup);
-            }
-        });
-
-        // Wire camera lifecycle to trigger service
-        captureService_->setCameraReadyCallback([this](camera::common::ICamera* cam) {
-            if (triggerService_) {
-                triggerService_->setCamera(cam);
-                if (cam) {
-                    triggerService_->start();
-                } else {
-                    triggerService_->stop();
-                }
-            }
-        });
-
-        // Wire background capture callback to emit Qt signal
-        processingService_->setBackgroundCaptureCallback([this](const cv::Mat& bg, uint64_t frameIndex) {
-            if (backgroundCaptureNotifier_) {
-                // Convert cv::Mat to QImage
-                QImage qimg(bg.data, bg.cols, bg.rows, static_cast<int>(bg.step), QImage::Format_Grayscale8);
-                QImage qimgCopy = qimg.copy(); // Ensure we own the data
-                // Use QTimer::singleShot to ensure we're in the Qt event loop thread
-                QTimer::singleShot(0, backgroundCaptureNotifier_.get(), [this, qimgCopy, frameIndex]() {
-                    emit backgroundCaptureNotifier_->backgroundAutoCaptured(qimgCopy, frameIndex);
-                });
-            }
-            SPDLOG_INFO("Background auto-captured at frame {}", frameIndex);
-        });
-
-        // Wire capture -> frame store for playback/display
-        captureService_->setFrameStore(frameStore_);
-
-        // Configure camera source (hardware or mock) before we start streaming.
-        auto toLower = [](std::string value)
+        if (bootYolo)
         {
-            std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c)
-                           { return static_cast<char>(std::tolower(c)); });
-            return value;
-        };
-
-        std::string cameraMode = "hardware";
-        if (const char *envMode = std::getenv("MIB_CAMERA_MODE"))
-        {
-            cameraMode = toLower(envMode);
-        }
-
-#if !MIB_HAS_EGRABBER
-        if (cameraMode != "mock")
-        {
-            SPDLOG_WARN("AppBackend: forcing mock camera mode because EGrabber SDK is unavailable on this platform");
-            cameraMode = "mock";
-        }
-#endif
-
-        if (cameraMode == "mock")
-        {
-            camera::mock::MockCameraOptions options;
-            if (const char *envDir = std::getenv("MIB_MOCK_CAMERA_DIR"))
+            if (!yoloService_->initialize(modelPath.string()))
             {
-                options.folder = std::filesystem::path(envDir);
+                SPDLOG_WARN("YOLO model not loaded - segmentation features will not be available");
             }
-            else
-            {
-                options.folder = std::filesystem::path(dataDir) / "mock_frames";
-            }
-            if (const char *envInterval = std::getenv("MIB_MOCK_CAMERA_INTERVAL_MS"))
-            {
-                try
-                {
-                    const int ms = std::stoi(envInterval);
-                    if (ms > 0)
-                    {
-                        options.frameInterval = std::chrono::milliseconds(ms);
-                    }
-                }
-                catch (const std::exception &)
-                {
-                    SPDLOG_WARN("Invalid MIB_MOCK_CAMERA_INTERVAL_MS value: {}", envInterval);
-                }
-            }
-            if (const char *envLoop = std::getenv("MIB_MOCK_CAMERA_LOOP"))
-            {
-                const std::string loopValue = toLower(envLoop);
-                options.loopFiles = (loopValue != "false" && loopValue != "0" && loopValue != "no");
-            }
-
-            const auto intervalUs = options.frameInterval.count();
-            const double configuredFps = intervalUs > 0 ? 1'000'000.0 / static_cast<double>(intervalUs) : 0.0;
-            SPDLOG_INFO("AppBackend: configuring MockCamera (folder={}, interval={} us, ~{:.1f} fps, loop={})",
-                        options.folder.string(),
-                        intervalUs,
-                        configuredFps,
-                        options.loopFiles);
-
-            captureService_->setCameraFactory([options]() mutable
-                                              { return std::make_unique<camera::mock::MockCamera>(options); });
-            mockCameraConfigured_ = true;
         }
         else
         {
-#if MIB_HAS_EGRABBER
-            SPDLOG_INFO("AppBackend: configuring hardware EGrabber camera");
-            captureService_->setCameraFactory([]()
-                                              { return std::make_unique<camera::common::EGrabberCamera>(); });
-            mockCameraConfigured_ = false;
-#else
-            SPDLOG_WARN("AppBackend: hardware mode requested but EGrabber SDK is unavailable; keeping mock camera");
-            camera::mock::MockCameraOptions options;
-            options.folder = std::filesystem::path(dataDir) / "mock_frames";
-            captureService_->setCameraFactory([options]() mutable
-                                              { return std::make_unique<camera::mock::MockCamera>(options); });
-            mockCameraConfigured_ = true;
-#endif
+            SPDLOG_WARN("AppBackend: yolo bootstrap disabled by MIB_DISABLED_SERVICES");
         }
-        playbackService_->setFrameStore(frameStore_);
 
-        // No per-frame logging; rely on periodic capture stats
-        captureService_->setFrameCallback(nullptr);
+        // Load Young's modulus LUT for emodulus gating
+        if (bootProcessing)
+        {
+            std::filesystem::path lutPath = exeDir / "resources" / "isoelastic_curve" / "scaled_isoelastic_data_LUT_6.16-4.24.txt";
+            if (!processingService_->loadEModulusLut(lutPath.string()))
+            {
+                SPDLOG_WARN("Young's modulus LUT not loaded - emodulus gating will not be available");
+            }
+            processingService_->start();
+        }
+        else
+        {
+            SPDLOG_WARN("AppBackend: processing bootstrap disabled by MIB_DISABLED_SERVICES");
+        }
+        // Note: startRealtime() is now called when Experiment tab becomes active, not during initialization
+
+        // Wire autofocus service to receive ring ratios from processing service
+        if (bootProcessing && bootAutofocus)
+        {
+            processingService_->setRingRatioCallback([this](double ringRatio, int64_t timestampNs)
+                                                     {
+                if (autofocusService_) {
+                    autofocusService_->onRingRatio(ringRatio, timestampNs);
+                } });
+        }
+        else
+        {
+            processingService_->setRingRatioCallback({});
+            if (!bootAutofocus)
+            {
+                SPDLOG_WARN("AppBackend: autofocus ring-ratio callback disabled by MIB_DISABLED_SERVICES");
+            }
+        }
+
+        // Wire target group trigger: processing -> trigger service
+        if (bootProcessing && bootTrigger)
+        {
+            processingService_->setTargetGroupCallback([this](bool isTargetGroup) {
+                if (triggerService_) {
+                    triggerService_->onTargetGroupResult(isTargetGroup);
+                }
+            });
+        }
+        else
+        {
+            processingService_->setTargetGroupCallback({});
+            if (!bootTrigger)
+            {
+                SPDLOG_WARN("AppBackend: trigger callback wiring disabled by MIB_DISABLED_SERVICES");
+            }
+        }
+
+        // Wire camera lifecycle to trigger service
+        if (bootCapture && bootTrigger)
+        {
+            captureService_->setCameraReadyCallback([this](camera::common::ICamera* cam) {
+                if (triggerService_) {
+                    triggerService_->setCamera(cam);
+                    if (cam) {
+                        triggerService_->start();
+                    } else {
+                        triggerService_->stop();
+                    }
+                }
+            });
+        }
+        else
+        {
+            captureService_->setCameraReadyCallback({});
+            if (triggerService_)
+            {
+                triggerService_->setCamera(nullptr);
+                triggerService_->stop();
+            }
+        }
+
+        // Wire background capture callback to emit Qt signal
+        if (bootProcessing)
+        {
+            processingService_->setBackgroundCaptureCallback([this](const cv::Mat& bg, uint64_t frameIndex) {
+                if (backgroundCaptureNotifier_) {
+                    // Convert cv::Mat to QImage
+                    QImage qimg(bg.data, bg.cols, bg.rows, static_cast<int>(bg.step), QImage::Format_Grayscale8);
+                    QImage qimgCopy = qimg.copy(); // Ensure we own the data
+                    // Use QTimer::singleShot to ensure we're in the Qt event loop thread
+                    QTimer::singleShot(0, backgroundCaptureNotifier_.get(), [this, qimgCopy, frameIndex]() {
+                        emit backgroundCaptureNotifier_->backgroundAutoCaptured(qimgCopy, frameIndex);
+                    });
+                }
+                SPDLOG_INFO("Background auto-captured at frame {}", frameIndex);
+            });
+        }
+        else
+        {
+            processingService_->setBackgroundCaptureCallback({});
+        }
+
+        if (bootCapture)
+        {
+            // Wire capture -> frame store for playback/display
+            captureService_->setFrameStore(frameStore_);
+
+            // Configure camera source (hardware or mock) before we start streaming.
+            auto toLower = [](std::string value)
+            {
+                std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c)
+                               { return static_cast<char>(std::tolower(c)); });
+                return value;
+            };
+
+            std::string cameraMode = "hardware";
+            if (const char *envMode = std::getenv("MIB_CAMERA_MODE"))
+            {
+                cameraMode = toLower(envMode);
+            }
+
+#if !MIB_HAS_EGRABBER
+            if (cameraMode != "mock")
+            {
+                SPDLOG_WARN("AppBackend: forcing mock camera mode because EGrabber SDK is unavailable on this platform");
+                cameraMode = "mock";
+            }
+#endif
+
+            if (cameraMode == "mock")
+            {
+                camera::mock::MockCameraOptions options;
+                if (const char *envDir = std::getenv("MIB_MOCK_CAMERA_DIR"))
+                {
+                    options.folder = std::filesystem::path(envDir);
+                }
+                else
+                {
+                    options.folder = std::filesystem::path(dataDir) / "mock_frames";
+                }
+                if (const char *envInterval = std::getenv("MIB_MOCK_CAMERA_INTERVAL_MS"))
+                {
+                    try
+                    {
+                        const int ms = std::stoi(envInterval);
+                        if (ms > 0)
+                        {
+                            options.frameInterval = std::chrono::milliseconds(ms);
+                        }
+                    }
+                    catch (const std::exception &)
+                    {
+                        SPDLOG_WARN("Invalid MIB_MOCK_CAMERA_INTERVAL_MS value: {}", envInterval);
+                    }
+                }
+                if (const char *envLoop = std::getenv("MIB_MOCK_CAMERA_LOOP"))
+                {
+                    const std::string loopValue = toLower(envLoop);
+                    options.loopFiles = (loopValue != "false" && loopValue != "0" && loopValue != "no");
+                }
+
+                const auto intervalUs = options.frameInterval.count();
+                const double configuredFps = intervalUs > 0 ? 1'000'000.0 / static_cast<double>(intervalUs) : 0.0;
+                SPDLOG_INFO("AppBackend: configuring MockCamera (folder={}, interval={} us, ~{:.1f} fps, loop={})",
+                            options.folder.string(),
+                            intervalUs,
+                            configuredFps,
+                            options.loopFiles);
+
+                captureService_->setCameraFactory([options]() mutable
+                                                  { return std::make_unique<camera::mock::MockCamera>(options); });
+                mockCameraConfigured_ = true;
+            }
+            else
+            {
+#if MIB_HAS_EGRABBER
+                SPDLOG_INFO("AppBackend: configuring hardware EGrabber camera");
+                captureService_->setCameraFactory([]()
+                                                  { return std::make_unique<camera::common::EGrabberCamera>(); });
+                mockCameraConfigured_ = false;
+#else
+                SPDLOG_WARN("AppBackend: hardware mode requested but EGrabber SDK is unavailable; keeping mock camera");
+                camera::mock::MockCameraOptions options;
+                options.folder = std::filesystem::path(dataDir) / "mock_frames";
+                captureService_->setCameraFactory([options]() mutable
+                                                  { return std::make_unique<camera::mock::MockCamera>(options); });
+                mockCameraConfigured_ = true;
+#endif
+            }
+
+            // No per-frame logging; rely on periodic capture stats
+            captureService_->setFrameCallback(nullptr);
+        }
+        else
+        {
+            SPDLOG_WARN("AppBackend: capture bootstrap disabled by MIB_DISABLED_SERVICES");
+            selectedIfIndex_ = -1;
+            selectedDevIndex_ = -1;
+            selectedLabel_.clear();
+            mockCameraConfigured_ = false;
+        }
+
+        if (bootPlayback)
+        {
+            playbackService_->setFrameStore(frameStore_);
+        }
+        else
+        {
+            SPDLOG_WARN("AppBackend: playback bootstrap disabled by MIB_DISABLED_SERVICES");
+        }
 
         SPDLOG_INFO("Backend initialized.");
         return true;

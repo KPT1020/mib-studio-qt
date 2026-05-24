@@ -30,6 +30,16 @@
 - `QFutureWatcher<size_t> flushWatcher_` — used to await the final HDF5
   flush on experiment stop without blocking the UI thread.
 
+## Boot disable GUI
+
+- Settings menu includes **Boot Service Toggles...** for selecting services to
+  disable on next launch.
+- Selection is persisted in `QSettings` at `Startup/DisabledServices`.
+- `main.cpp` applies this persisted CSV to `MIB_DISABLED_SERVICES` before
+  backend initialization (unless the env var is already explicitly set).
+- `auto_update` is honored in `MainWindow` startup: updater construction and
+  quiet update checks are skipped when disabled.
+
 ## Gotchas
 
 - `closeEvent` must stop capture + experiment cleanly. Mis-ordering causes

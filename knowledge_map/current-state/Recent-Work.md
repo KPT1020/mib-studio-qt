@@ -5,6 +5,15 @@
 
 ## Features shipped
 
+- **GUI-configurable boot disable list** (2026-05-22) - Added a Settings menu
+  action (**Boot Service Toggles...**) that persists disabled startup services
+  in `QSettings` (`Startup/DisabledServices`). `main.cpp` now applies that
+  persisted value to `MIB_DISABLED_SERVICES` before `AppBackend::initialize`,
+  so GUI choices take effect at next launch. `MainWindow` also honors
+  `auto_update` at startup by skipping updater initialization and quiet checks
+  when disabled. Files: `src/frontend/core/main.cpp`,
+  `src/frontend/core/MainWindow.cpp`.
+
 - **Recording HDF5 mask regeneration in Review** (2026-05-11) - The
   Review tab now keeps "Regenerate Masks" enabled for recording-mode HDF5
   files. `BatchMaskDialog` resolves the active HDF5 source dataset and uses

@@ -21,8 +21,13 @@ Read at startup (see `main.cpp` and [[../architecture/AppBackend]]):
 | `MIB_MOCK_CAMERA_DIR=<path>` | — | Folder with PNG/TIFF/JPEG frames |
 | `MIB_MOCK_CAMERA_INTERVAL_MS=<ms>` | 33 | Frame cadence |
 | `MIB_MOCK_CAMERA_LOOP=true\|false` | true | Loop or stop at end |
+| `MIB_DISABLED_SERVICES=<csv>` | unset | Disable startup paths (`sqlite,hdf5,processing,yolo,autofocus,trigger,capture/camera,playback,auto_update,all`) |
 
 Sample frames ship at `data/mock_frames/frame_00000.tiff`.
+
+The GUI Settings action **Boot Service Toggles...** stores a persisted
+`QSettings` value (`Startup/DisabledServices`) that `main.cpp` maps into
+`MIB_DISABLED_SERVICES` before backend startup (unless the env var is already set externally).
 
 ## MLflow (test metrics only)
 
