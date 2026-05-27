@@ -8,14 +8,30 @@ InnoSetup.
 ## Prerequisites
 
 - CMake 3.21+
-- Conan 2.x
 - A C++17 compiler toolchain
-- `make`
+- Ninja
+
+For the fastest local loop on Ubuntu, install system development packages:
+
+```bash
+sudo apt install cmake build-essential ninja-build pkg-config git \
+  qt6-base-dev qt6-charts-dev qt6-serialport-dev \
+  libopencv-dev libhdf5-dev libspdlog-dev nlohmann-json3-dev libsqlite3-dev
+```
 
 ## Configure And Build
 
+Fast local build from system packages:
+
 ```bash
-conan install . --output-folder=build/linux --build=missing -s build_type=Release
+cmake --preset linux-system-release
+cmake --build --preset linux-system-release-build
+```
+
+Conan-based build:
+
+```bash
+conan install . --profile:host=conan/profiles/linux-gcc13 --profile:build=default --output-folder=build/linux --build=missing
 cmake --preset linux-release
 cmake --build --preset linux-release-build
 ```
@@ -35,7 +51,7 @@ Use this when touching `CrashReporter` code and you want local compile coverage
 for the sentry-native API calls:
 
 ```bash
-conan install . --output-folder=build/linux-sentry --build=missing -s build_type=Release
+conan install . --profile:host=conan/profiles/linux-gcc13 --profile:build=default --output-folder=build/linux-sentry --build=missing
 cmake --preset linux-sentry-release
 cmake --build --preset linux-sentry-release-build
 ```

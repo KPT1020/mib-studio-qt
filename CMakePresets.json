@@ -21,6 +21,24 @@
       }
     },
     {
+      "name": "linux-system-release",
+      "displayName": "Linux Release (system packages, no Windows SDKs)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/linux-system",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_IGNORE_PREFIX_PATH": "/home/gavin/miniconda3;/home/linuxbrew/.linuxbrew",
+        "MIB_ENABLE_HARDWARE_SDKS": "OFF",
+        "MIB_ENABLE_WINDOWS_PACKAGING": "OFF",
+        "MIB_USE_SENTRY": "OFF"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
       "name": "linux-sentry-release",
       "displayName": "Linux Release (Conan, sentry-native)",
       "inherits": "linux-release",
@@ -49,6 +67,11 @@
       "configurePreset": "linux-release"
     },
     {
+      "name": "linux-system-release-build",
+      "displayName": "Build Linux Release from system packages",
+      "configurePreset": "linux-system-release"
+    },
+    {
       "name": "linux-sentry-release-build",
       "displayName": "Build Linux Release with sentry-native",
       "configurePreset": "linux-sentry-release"
@@ -71,6 +94,17 @@
       "name": "linux-test",
       "displayName": "Test Linux Release",
       "configurePreset": "linux-release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 30
+      }
+    },
+    {
+      "name": "linux-system-test",
+      "displayName": "Test Linux Release from system packages",
+      "configurePreset": "linux-system-release",
       "output": {
         "outputOnFailure": true
       },

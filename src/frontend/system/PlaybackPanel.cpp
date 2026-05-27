@@ -1331,7 +1331,6 @@ void PlaybackPanel::onLogMetrics()
                           windowDrops > 0 ||
                           lastOverlayComputeMs_ > 30.0;
     static uint64_t lastSentryPerfUs = 0;
-    const uint64_t nowUs = backend::Tools::getTimestamp();
     if (degraded && nowUs - lastSentryPerfUs >= 60'000'000ULL)
     {
         const std::string data = fmt::format(
