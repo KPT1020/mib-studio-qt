@@ -116,6 +116,12 @@ namespace {
 #else
             "development";
 #endif
+        cfg.tracesSampleRate =
+#ifdef NDEBUG
+            0.20;
+#else
+            1.0;
+#endif
         if (const char* env = std::getenv("MIB_SENTRY_DSN")) {
             cfg.dsn = env;
         }

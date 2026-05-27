@@ -57,7 +57,8 @@ Sentry is not compiled in — they remain safe to sprinkle through services.
 - Override environment label with `MIB_CRASH_ENV` (defaults to
   `production` for Release / `development` for Debug).
 - Override performance transaction sampling with
-  `MIB_SENTRY_TRACES_SAMPLE_RATE` (`0.0` to `1.0`, default `0.20`).
+  `MIB_SENTRY_TRACES_SAMPLE_RATE` (`0.0` to `1.0`; defaults are `0.20`
+  for Release and `1.0` for Debug).
 
 ## Performance Monitoring
 

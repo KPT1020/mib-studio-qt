@@ -99,8 +99,9 @@ matching event should appear in Sentry within ~30 s with symbolicated
 frames and a `state_snapshot` extra field summarizing live service
 state.
 
-Performance monitoring is also enabled for Sentry builds. The default
-transaction sample rate is `0.20`; override it on a test machine with:
+Performance monitoring is also enabled for Sentry builds. Release builds
+default to a transaction sample rate of `0.20`; Debug builds default to `1.0`.
+Override either value on a test machine with:
 
 ```powershell
 [Environment]::SetEnvironmentVariable('MIB_SENTRY_TRACES_SAMPLE_RATE','1.0','Machine')
