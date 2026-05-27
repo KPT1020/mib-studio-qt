@@ -784,9 +784,9 @@ endif()
 if(MSVC)
     set_target_properties(mib_studio_qt PROPERTIES
         PDB_NAME              "mib_studio_qt"
-        PDB_OUTPUT_DIRECTORY  "$<TARGET_FILE_DIR:mib_studio_qt>"
+        PDB_OUTPUT_DIRECTORY  "${CMAKE_BINARY_DIR}/$<CONFIG>"
         COMPILE_PDB_NAME      "mib_studio_qt"
-        COMPILE_PDB_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:mib_studio_qt>"
+        COMPILE_PDB_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIG>"
     )
 endif()
 
