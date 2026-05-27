@@ -29,6 +29,7 @@
 #include "backend/AppBackend.h"
 #include "backend/BackgroundCaptureNotifier.h"
 #include "backend/services/CaptureService.h"
+#include "backend/services/CrashReporter.h"
 #include "backend/services/ProcessingService.h"
 #include "backend/services/Hdf5Service.h"
 #include "backend/services/PlaybackService.h"
@@ -49,6 +50,7 @@
 #include <spdlog/spdlog.h>
 #include <opencv2/core.hpp>
 #include <chrono>
+#include <sstream>
 #include <QtConcurrent/QtConcurrent>
 #include <QFutureWatcher>
 #include <QSpinBox>
@@ -799,9 +801,17 @@ void MainWindow::onStopExperiment()
     updateExperimentButtonStates(); // This will also call updateTabStates() to enable Overview and Review tabs
 
     const auto cfgAtStop = processing.getProcessingConfig();
+    const double stopTotalMs = sinceMs(tStopBegin);
     SPDLOG_INFO("stop-lag: onStopExperiment total {:.3f} ms (multiImage={}/{})",
-                sinceMs(tStopBegin),
+                stopTotalMs,
                 cfgAtStop.multi_image_enabled, cfgAtStop.multi_image_count);
+    {
+        std::ostringstream data;
+        data << "{\"multi_image_enabled\":" << (cfgAtStop.multi_image_enabled ? 1 : 0)
+             << ",\"multi_image_count\":" << cfgAtStop.multi_image_count << "}";
+        backend::services::CrashReporter::capturePerformanceTransaction(
+            "experiment.stop", "ui.action", stopTotalMs, data.str());
+    }
 }
 
 void MainWindow::onUpdateStats()

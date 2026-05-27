@@ -60,6 +60,22 @@ if(MSVC)
     add_compile_options(/wd4828)
 endif()
 
+set(MIB_ENABLE_HARDWARE_SDKS_DEFAULT OFF)
+if(WIN32)
+    set(MIB_ENABLE_HARDWARE_SDKS_DEFAULT ON)
+endif()
+option(MIB_ENABLE_HARDWARE_SDKS
+    "Enable proprietary Windows hardware SDK integrations (EGrabber/Coremor)"
+    ${MIB_ENABLE_HARDWARE_SDKS_DEFAULT})
+
+set(MIB_ENABLE_WINDOWS_PACKAGING_DEFAULT OFF)
+if(WIN32)
+    set(MIB_ENABLE_WINDOWS_PACKAGING_DEFAULT ON)
+endif()
+option(MIB_ENABLE_WINDOWS_PACKAGING
+    "Enable Windows runtime deployment and InnoSetup packaging targets"
+    ${MIB_ENABLE_WINDOWS_PACKAGING_DEFAULT})
+
 # Preserve PDBs and address-to-source mapping for Release builds so that
 # minidumps from end-user crashes can be symbolicated. /Zi generates the
 # .pdb; /DEBUG instructs the linker to emit and keep it; /OPT:REF /OPT:ICF
@@ -82,11 +98,14 @@ find_package(nlohmann_json CONFIG QUIET)
 find_package(OpenCV CONFIG REQUIRED)
 find_package(onnxruntime CONFIG QUIET)
 
-# Hardware SDKs (EGrabber/Coremor) are Windows-only in this project.
+# Hardware SDKs (EGrabber/Coremor) are Windows-only in this project. Non-Windows
+# builds compile against service stubs so Linux can be used for fast local
+# verification without installing proprietary SDKs.
 set(MIB_HAS_EGRABBER OFF)
-if(WIN32)
+if(WIN32 AND MIB_ENABLE_HARDWARE_SDKS)
     set(MIB_HAS_EGRABBER ON)
 endif()
+message(STATUS "Hardware SDK integrations: ${MIB_HAS_EGRABBER}")
 
 set(MIB_HAS_ONNXRUNTIME OFF)
 if(TARGET onnxruntime::onnxruntime)
@@ -436,7 +455,7 @@ elseif(DEFINED OpenCV_LIBS)
 endif()
 
 # Qt deployment via windeployqt (Conan)
-if(WIN32)
+if(WIN32 AND MIB_ENABLE_WINDOWS_PACKAGING)
     # Find Qt6 installation path from Conan
     # Qt6_DIR is set by Conan's CMakeDeps generator
     if(DEFINED Qt6_DIR)
@@ -791,7 +810,7 @@ if(MSVC)
 endif()
 
 # Windows installer packaging (InnoSetup)
-if(WIN32)
+if(WIN32 AND MIB_ENABLE_WINDOWS_PACKAGING)
     # Find InnoSetup compiler
     find_program(ISCC_EXE
         NAMES ISCC.exe

@@ -78,6 +78,23 @@ std::filesystem::path makeCrashFilenameBase(const std::filesystem::path& dir,
     return dir / os.str();
 }
 
+double parseSampleRate(const char* value, double fallback) {
+    if (!value || !*value) return fallback;
+    char* end = nullptr;
+    const double parsed = std::strtod(value, &end);
+    if (end == value) return fallback;
+    if (parsed < 0.0) return 0.0;
+    if (parsed > 1.0) return 1.0;
+    return parsed;
+}
+
+uint64_t epochMicrosNow() {
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count());
+}
+
 // Safe to call from a crash handler — only uses C-runtime file APIs.
 void writeStateJsonSidecar(const std::filesystem::path& jsonPath) {
     auto& g = globals();
@@ -300,6 +317,10 @@ bool CrashReporter::init(const Config& cfg) {
             sentry_options_set_release(options, cfg.release.c_str());
         }
         sentry_options_set_environment(options, cfg.environment.c_str());
+        const double tracesSampleRate =
+            parseSampleRate(std::getenv("MIB_SENTRY_TRACES_SAMPLE_RATE"),
+                            cfg.tracesSampleRate);
+        sentry_options_set_traces_sample_rate(options, tracesSampleRate);
         if (!cfg.databaseDir.empty()) {
             sentry_options_set_database_path(options, cfg.databaseDir.string().c_str());
         }
@@ -309,8 +330,8 @@ bool CrashReporter::init(const Config& cfg) {
         if (sentry_init(options) != 0) {
             SPDLOG_WARN("CrashReporter: sentry_init failed; continuing local-only");
         } else {
-            SPDLOG_INFO("CrashReporter: Sentry initialized (release={}, env={})",
-                        cfg.release, cfg.environment);
+            SPDLOG_INFO("CrashReporter: Sentry initialized (release={}, env={}, tracesSampleRate={})",
+                        cfg.release, cfg.environment, tracesSampleRate);
         }
     } else {
         SPDLOG_INFO("CrashReporter: no DSN configured; running in local-only mode");
@@ -432,6 +453,42 @@ void CrashReporter::captureException(std::string_view what) {
         f << "exception: " << what << "\n";
     } catch (...) {
     }
+}
+
+void CrashReporter::capturePerformanceTransaction(std::string_view name,
+                                                  std::string_view operation,
+                                                  double durationMs,
+                                                  std::string_view jsonData) {
+#if defined(MIB_USE_SENTRY) && MIB_USE_SENTRY
+    if (!globals().initialized.load()) return;
+    if (name.empty() || operation.empty() || durationMs < 0.0) return;
+
+    const std::string nameStr(name);
+    const std::string opStr(operation);
+    sentry_transaction_context_t* ctx =
+        sentry_transaction_context_new(nameStr.c_str(), opStr.c_str());
+    if (!ctx) return;
+
+    const uint64_t finishUs = epochMicrosNow();
+    const auto durationUs = static_cast<uint64_t>(durationMs * 1000.0);
+    const uint64_t startUs = finishUs > durationUs ? finishUs - durationUs : finishUs;
+    sentry_transaction_t* tx =
+        sentry_transaction_start_ts(ctx, sentry_value_new_null(), startUs);
+    if (!tx) return;
+
+    sentry_transaction_set_tag(tx, "component", "mib-studio-qt");
+    sentry_transaction_set_data(tx, "duration_ms", sentry_value_new_double(durationMs));
+    if (!jsonData.empty()) {
+        sentry_transaction_set_data(tx, "perf_data",
+                                    sentry_value_new_string(std::string(jsonData).c_str()));
+    }
+    sentry_transaction_finish_ts(tx, finishUs);
+#else
+    (void)name;
+    (void)operation;
+    (void)durationMs;
+    (void)jsonData;
+#endif
 }
 
 bool CrashReporter::writeDiagnosticSnapshot(std::string_view reason) {

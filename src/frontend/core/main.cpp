@@ -12,6 +12,7 @@
 #include "backend/services/CrashReporter.h"
 #include "frontend/core/MainWindow.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
@@ -115,11 +116,24 @@ namespace {
 #else
             "development";
 #endif
+        cfg.tracesSampleRate =
+#ifdef NDEBUG
+            0.20;
+#else
+            1.0;
+#endif
         if (const char* env = std::getenv("MIB_SENTRY_DSN")) {
             cfg.dsn = env;
         }
         if (const char* envEnv = std::getenv("MIB_CRASH_ENV")) {
             cfg.environment = envEnv;
+        }
+        if (const char* traceRate = std::getenv("MIB_SENTRY_TRACES_SAMPLE_RATE")) {
+            char* end = nullptr;
+            const double parsed = std::strtod(traceRate, &end);
+            if (end != traceRate) {
+                cfg.tracesSampleRate = std::max(0.0, std::min(1.0, parsed));
+            }
         }
 
         backend::services::CrashReporter::init(cfg);

@@ -1,5 +1,6 @@
 #include "backend/services/Hdf5Service.h"
 #include "backend/diagnostics/CrashStateMirror.h"
+#include "backend/services/CrashReporter.h"
 #include "backend/services/ProcessingService.h"
 #include "backend/services/Logger.h"
 
@@ -15,6 +16,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <chrono>
+#include <sstream>
 
 namespace backend::services
 {
@@ -107,6 +109,12 @@ namespace backend::services
             {
                 SPDLOG_INFO("HDF5 file closed: {} (H5Fclose took {:.3f} ms)",
                             impl_->filePath_, ms);
+            }
+            {
+                std::ostringstream data;
+                data << "{\"status\":" << status << "}";
+                CrashReporter::capturePerformanceTransaction(
+                    "hdf5.close_file", "hdf5.close", ms, data.str());
             }
             impl_->fileId_ = H5I_INVALID_HID;
             impl_->isOpen_ = false;
@@ -1018,6 +1026,18 @@ namespace backend::services
                     validFrames.size(), msValidImages,
                     seriesFramesCount, msSeries,
                     invalidFrames.size(), msInvalid);
+        {
+            std::ostringstream data;
+            data << "{\"valid\":" << validFrames.size()
+                 << ",\"invalid\":" << invalidFrames.size()
+                 << ",\"series_frames\":" << seriesFramesCount
+                 << ",\"valid_ms\":" << msValidImages
+                 << ",\"series_ms\":" << msSeries
+                 << ",\"invalid_ms\":" << msInvalid
+                 << "}";
+            CrashReporter::capturePerformanceTransaction(
+                "hdf5.append_frames", "hdf5.write", msTotal, data.str());
+        }
 
         return true;
     }
