@@ -3,6 +3,34 @@
   "cmakeMinimumRequired": { "major": 3, "minor": 20, "patch": 0 },
   "configurePresets": [
     {
+      "name": "linux-release",
+      "displayName": "Linux Release (Conan, no Windows SDKs)",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/linux",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux/conan_toolchain.cmake",
+        "MIB_ENABLE_HARDWARE_SDKS": "OFF",
+        "MIB_ENABLE_WINDOWS_PACKAGING": "OFF",
+        "MIB_USE_SENTRY": "OFF"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-sentry-release",
+      "displayName": "Linux Release (Conan, sentry-native)",
+      "inherits": "linux-release",
+      "binaryDir": "${sourceDir}/build/linux-sentry",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux-sentry/conan_toolchain.cmake",
+        "MIB_USE_SENTRY": "ON"
+      }
+    },
+    {
       "name": "windows-default",
       "displayName": "Windows VS2022 x64 (Conan)",
       "generator": "Visual Studio 17 2022",
@@ -15,6 +43,16 @@
     }
   ],
   "buildPresets": [
+    {
+      "name": "linux-release-build",
+      "displayName": "Build Linux Release",
+      "configurePreset": "linux-release"
+    },
+    {
+      "name": "linux-sentry-release-build",
+      "displayName": "Build Linux Release with sentry-native",
+      "configurePreset": "linux-sentry-release"
+    },
     {
       "name": "windows-default-build",
       "displayName": "Build (Debug)",
@@ -29,6 +67,17 @@
     }
   ],
   "testPresets": [
+    {
+      "name": "linux-test",
+      "displayName": "Test Linux Release",
+      "configurePreset": "linux-release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 30
+      }
+    },
     {
       "name": "windows-test",
       "displayName": "Test (Release)",
