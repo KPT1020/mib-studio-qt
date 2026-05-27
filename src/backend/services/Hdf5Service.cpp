@@ -2073,6 +2073,12 @@ namespace backend::services {
                                       size_t count,
                                       std::vector<cv::Mat>& outImages) const
     {
+        const auto tReadStart = std::chrono::steady_clock::now();
+        auto elapsedMs = [](std::chrono::steady_clock::time_point t0) {
+            return std::chrono::duration<double, std::milli>(
+                       std::chrono::steady_clock::now() - t0)
+                .count();
+        };
         outImages.clear();
 
         // Validate dataset and get count
@@ -2103,11 +2109,38 @@ namespace backend::services {
             if (!readImageByIndex(datasetPath, i, img))
             {
                 SPDLOG_ERROR("readImagesRange: failed to read {}[{}]", datasetPath, i);
+                std::ostringstream data;
+                data << "{\"status\":\"failed\""
+                     << ",\"dataset\":\"" << datasetPath << "\""
+                     << ",\"start\":" << startIndex
+                     << ",\"requested\":" << count
+                     << ",\"loaded\":" << outImages.size()
+                     << ",\"failed_index\":" << i
+                     << "}";
+                CrashReporter::capturePerformanceTransaction(
+                    "hdf5.read_images_range", "hdf5.read",
+                    elapsedMs(tReadStart), data.str());
                 return false;
             }
             outImages.push_back(std::move(img));
         }
         SPDLOG_DEBUG("readImagesRange: loaded {} images from {}", outImages.size(), datasetPath);
+        {
+            std::ostringstream data;
+            data << "{\"status\":\"ok\""
+                 << ",\"dataset\":\"" << datasetPath << "\""
+                 << ",\"start\":" << startIndex
+                 << ",\"requested\":" << count
+                 << ",\"loaded\":" << outImages.size()
+                 << ",\"total\":" << total
+                 << ",\"height\":" << h
+                 << ",\"width\":" << w
+                 << ",\"channels\":" << c
+                 << "}";
+            CrashReporter::capturePerformanceTransaction(
+                "hdf5.read_images_range", "hdf5.read",
+                elapsedMs(tReadStart), data.str());
+        }
         return true;
     }
 

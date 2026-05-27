@@ -42,6 +42,7 @@
 #endif
 
 #include "backend/AppBackend.h"
+#include "backend/services/CrashReporter.h"
 #include "backend/services/Hdf5Service.h"
 #include "backend/services/ProcessingService.h"
 #include "frontend/dialogs/BatchMaskDialog.h"
@@ -53,6 +54,8 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <chrono>
+#include <sstream>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -278,6 +281,12 @@ void HdfReviewTab::onCloseFile() {
 }
 
 void HdfReviewTab::loadHdfFile(const QString& filePath) {
+    using load_clock = std::chrono::steady_clock;
+    const auto tLoadStart = load_clock::now();
+    auto elapsedMs = [](load_clock::time_point t0) {
+        return std::chrono::duration<double, std::milli>(load_clock::now() - t0).count();
+    };
+
     ui->statusLabel->setText(tr("Loading..."));
     ui->filePathLabel->setText(filePath);
     clearDisplay();
@@ -287,6 +296,11 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
     hdfReader_.reset();
     hdfReader_ = std::make_unique<backend::services::Hdf5Service>();
     if (!hdfReader_->loadFile(filePath.toStdString())) {
+        const double loadMs = elapsedMs(tLoadStart);
+        std::ostringstream data;
+        data << "{\"status\":\"failed\"}";
+        backend::services::CrashReporter::capturePerformanceTransaction(
+            "hdf5.review_load", "hdf5.load", loadMs, data.str());
         const bool exists = QFile::exists(filePath);
         const QString detail = exists
             ? tr("The file exists but its HDF5 metadata is corrupt, likely caused by "
@@ -429,6 +443,19 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
 
     SPDLOG_INFO("Loaded HDF file: {} valid frames, {} invalid frames", 
                validFrames_.size(), invalidFrames_.size());
+    {
+        const double loadMs = elapsedMs(tLoadStart);
+        std::ostringstream data;
+        data << "{\"status\":\"ok\""
+             << ",\"recording_mode\":" << (isRecordingMode_ ? "true" : "false")
+             << ",\"valid_frames\":" << validFrames_.size()
+             << ",\"invalid_frames\":" << invalidFrames_.size()
+             << ",\"valid_images\":" << validImagesCount
+             << ",\"invalid_images\":" << invalidImagesCount
+             << "}";
+        backend::services::CrashReporter::capturePerformanceTransaction(
+            "hdf5.review_load", "hdf5.load", loadMs, data.str());
+    }
 }
 
 void HdfReviewTab::populateFrames(const std::vector<backend::services::ProcessedFrame>& frames, bool isValid) {
@@ -2113,4 +2140,3 @@ void HdfReviewTab::loadIsoelasticCurves() {
 
 // Include moc file for ThumbnailLabel class (defined in this .cpp file with Q_OBJECT)
 #include "HdfReviewTab.moc"
-

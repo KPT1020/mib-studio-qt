@@ -70,6 +70,9 @@ configured. The current instrumentation covers:
 - `hdf5.append_frames` (`hdf5.write`) — HDF5 append duration with valid,
   invalid, and multi-image series counts/timings in `perf_data`.
 - `hdf5.close_file` (`hdf5.close`) — HDF5 close/flush duration.
+- `hdf5.review_load` (`hdf5.load`) — total HDF Review tab load time.
+- `hdf5.read_images_range` (`hdf5.read`) — on-demand HDF5 image range
+  reads used by review thumbnails/viewers and batch inputs.
 - `playback.degraded` (`ui.render`) — throttled to at most once per minute
   when display FPS drops below 30, average latency exceeds 250 ms, dropped
   frames are detected, or overlay compute exceeds 30 ms.

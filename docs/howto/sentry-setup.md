@@ -109,7 +109,8 @@ Override either value on a test machine with:
 
 Restart the app after changing the value. In Sentry, check **Performance**
 for transactions such as `experiment.stop`, `hdf5.append_frames`,
-`hdf5.close_file`, and `playback.degraded`.
+`hdf5.close_file`, `hdf5.review_load`, `hdf5.read_images_range`, and
+`playback.degraded`.
 
 ## Local development
 
