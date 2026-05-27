@@ -43,6 +43,8 @@ if(NOT EXISTS "${_mib_sentry_source_dir}/CMakeLists.txt")
             COMMAND
                 ${GIT_EXECUTABLE} clone
                 --depth 1
+                --recurse-submodules
+                --shallow-submodules
                 --branch ${MIB_SENTRY_GIT_TAG}
                 https://github.com/getsentry/sentry-native.git
                 ${_mib_sentry_source_dir}
@@ -58,7 +60,36 @@ if(NOT EXISTS "${_mib_sentry_source_dir}/CMakeLists.txt")
     endif()
 endif()
 
+if(EXISTS "${_mib_sentry_source_dir}/CMakeLists.txt"
+   AND WIN32
+   AND NOT EXISTS "${_mib_sentry_source_dir}/external/crashpad/CMakeLists.txt")
+    find_package(Git QUIET)
+    if(GIT_FOUND)
+        message(STATUS "sentry-native: fetching Crashpad submodule...")
+        execute_process(
+            COMMAND
+                ${GIT_EXECUTABLE} -C ${_mib_sentry_source_dir}
+                submodule update --init --recursive --depth 1
+            RESULT_VARIABLE _mib_sentry_submodule_result
+            OUTPUT_QUIET
+            ERROR_QUIET
+        )
+        if(NOT _mib_sentry_submodule_result EQUAL 0)
+            message(WARNING "sentry-native: Crashpad submodule fetch failed; building with local-only crash reporting")
+        endif()
+    endif()
+endif()
+
+set(_mib_sentry_ready OFF)
 if(EXISTS "${_mib_sentry_source_dir}/CMakeLists.txt")
+    set(_mib_sentry_ready ON)
+    if(WIN32 AND NOT EXISTS "${_mib_sentry_source_dir}/external/crashpad/CMakeLists.txt")
+        set(_mib_sentry_ready OFF)
+        message(WARNING "sentry-native: Crashpad sources missing; building with local-only crash reporting")
+    endif()
+endif()
+
+if(_mib_sentry_ready)
     add_subdirectory(${_mib_sentry_source_dir} ${_mib_sentry_binary_dir} EXCLUDE_FROM_ALL)
     if(TARGET sentry::sentry)
         set(MIB_SENTRY_AVAILABLE ON)
