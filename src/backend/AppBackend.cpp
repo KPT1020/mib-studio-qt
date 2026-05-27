@@ -115,14 +115,13 @@ namespace backend
             std::string disabled(rawDisabledServices);
             auto normalize = [](std::string token)
             {
-                const auto first = token.find_first_not_of(" 	
-");
+                constexpr const char *whitespace = " \t\r\n";
+                const auto first = token.find_first_not_of(whitespace);
                 if (first == std::string::npos)
                 {
                     return std::string{};
                 }
-                const auto last = token.find_last_not_of(" 	
-");
+                const auto last = token.find_last_not_of(whitespace);
                 token = token.substr(first, last - first + 1);
                 std::transform(token.begin(), token.end(), token.begin(), [](unsigned char c)
                                { return static_cast<char>(std::tolower(c)); });
