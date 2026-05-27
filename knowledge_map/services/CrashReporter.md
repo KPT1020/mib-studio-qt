@@ -56,6 +56,25 @@ Sentry is not compiled in — they remain safe to sprinkle through services.
   uploaded.
 - Override environment label with `MIB_CRASH_ENV` (defaults to
   `production` for Release / `development` for Debug).
+- Override performance transaction sampling with
+  `MIB_SENTRY_TRACES_SAMPLE_RATE` (`0.0` to `1.0`, default `0.20`).
+
+## Performance Monitoring
+
+CrashReporter enables Sentry Performance transactions when Sentry is
+configured. The current instrumentation covers:
+
+- `experiment.stop` (`ui.action`) — total time spent stopping/saving an
+  experiment.
+- `hdf5.append_frames` (`hdf5.write`) — HDF5 append duration with valid,
+  invalid, and multi-image series counts/timings in `perf_data`.
+- `hdf5.close_file` (`hdf5.close`) — HDF5 close/flush duration.
+- `playback.degraded` (`ui.render`) — throttled to at most once per minute
+  when display FPS drops below 30, average latency exceeds 250 ms, dropped
+  frames are detected, or overlay compute exceeds 30 ms.
+
+In Sentry, look under **Performance** or filter transactions by
+`release:mib_studio_qt@<version>` and `environment:production`.
 
 ### How the DSN reaches production installs
 

@@ -31,6 +31,7 @@
 
 #include "backend/AppBackend.h"
 #include "backend/services/CaptureService.h"
+#include "backend/services/CrashReporter.h"
 #include "backend/services/PlaybackService.h"
 #include "backend/services/ProcessingService.h"
 #include "backend/playback/FrameStore.h"
@@ -1324,6 +1325,23 @@ void PlaybackPanel::onLogMetrics()
                                         : static_cast<uint64_t>(std::max(0, imgW)) * static_cast<uint64_t>(std::max(0, imgH));
     SPDLOG_INFO("Playback metrics: display_fps={:.1f}, avg_latency_ms={:.2f}, drops={} (window_drops={}), overlay_ms={:.2f}, roi_area={}, img={}x{}, overlay={}x{}, overlay_mode={}",
                 displayFps, avgLatencyMs, totalDrops_, windowDrops, lastOverlayComputeMs_, roiArea, imgW, imgH, ovW, ovH, static_cast<int>(overlayMode_));
+
+    const bool degraded = (displayFps > 0.0 && displayFps < 30.0) ||
+                          avgLatencyMs > 250.0 ||
+                          windowDrops > 0 ||
+                          lastOverlayComputeMs_ > 30.0;
+    static uint64_t lastSentryPerfUs = 0;
+    const uint64_t nowUs = backend::Tools::getTimestamp();
+    if (degraded && nowUs - lastSentryPerfUs >= 60'000'000ULL)
+    {
+        const std::string data = fmt::format(
+            "{{\"display_fps\":{:.3f},\"avg_latency_ms\":{:.3f},\"total_drops\":{},\"window_drops\":{},\"overlay_ms\":{:.3f},\"roi_area\":{},\"image_width\":{},\"image_height\":{},\"overlay_width\":{},\"overlay_height\":{},\"overlay_mode\":{}}}",
+            displayFps, avgLatencyMs, totalDrops_, windowDrops, lastOverlayComputeMs_,
+            roiArea, imgW, imgH, ovW, ovH, static_cast<int>(overlayMode_));
+        backend::services::CrashReporter::capturePerformanceTransaction(
+            "playback.degraded", "ui.render", windowDurationSeconds * 1000.0, data);
+        lastSentryPerfUs = nowUs;
+    }
 }
 
 QString PlaybackPanel::getConfigPath() const {

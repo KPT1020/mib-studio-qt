@@ -22,6 +22,7 @@ public:
         std::string environment{"production"};
         std::filesystem::path crashDir;     // where .dmp / .json are written
         std::filesystem::path databaseDir;  // Sentry/Crashpad working dir
+        double tracesSampleRate{0.20};      // Sentry performance sample rate.
         bool uploadPendingOnStart{true};
         bool installSignalHandlers{true};
         bool installQtMessageHandler{true};
@@ -54,6 +55,10 @@ public:
     // top-level try/catch.
     static void captureMessage(std::string_view message);
     static void captureException(std::string_view what);
+    static void capturePerformanceTransaction(std::string_view name,
+                                              std::string_view operation,
+                                              double durationMs,
+                                              std::string_view jsonData = {});
 
     // For tests and the debug menu: writes a state snapshot + a fake stack
     // trace to crashDir without aborting.

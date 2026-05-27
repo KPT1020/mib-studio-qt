@@ -99,6 +99,17 @@ matching event should appear in Sentry within ~30 s with symbolicated
 frames and a `state_snapshot` extra field summarizing live service
 state.
 
+Performance monitoring is also enabled for Sentry builds. The default
+transaction sample rate is `0.20`; override it on a test machine with:
+
+```powershell
+[Environment]::SetEnvironmentVariable('MIB_SENTRY_TRACES_SAMPLE_RATE','1.0','Machine')
+```
+
+Restart the app after changing the value. In Sentry, check **Performance**
+for transactions such as `experiment.stop`, `hdf5.append_frames`,
+`hdf5.close_file`, and `playback.degraded`.
+
 ## Local development
 
 For local debug builds you don't usually want events sent to production
