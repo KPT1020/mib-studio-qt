@@ -2,6 +2,54 @@
 
 This guide explains how to trace and diagnose crashes in the installed MIB Studio Qt application.
 
+## Automatic crash capture (Sentry + local minidumps)
+
+Starting with the crash-monitoring change (branch
+`claude/crash-monitoring-logging-jUziR`), the app installs a process-level
+crash handler at startup. Every unrecoverable failure — SEH access
+violation, stack overflow, heap corruption, signal, uncaught C++
+exception, Qt fatal — produces:
+
+1. A Windows minidump (`.dmp`) capturing the faulting thread's stack and
+   register state.
+2. A JSON sidecar (`.json`) with a snapshot of live service state
+   (frame counts, queue depth, HDF5 open/path, autofocus port,
+   recording mode, etc.).
+
+Artifacts land here:
+
+```
+%LOCALAPPDATA%\MIB_Studio_Qt\crashes\
+    20260522T143015-pid12345-seh.dmp
+    20260522T143015-pid12345-seh.json
+```
+
+When the installer was built with a Sentry DSN baked in (the system
+env var `MIB_SENTRY_DSN` is set), dumps are forwarded to Sentry by
+the `crashpad_handler.exe` that lives next to the application. Pending
+dumps from previous runs are drained on the next launch. With matching
+PDBs uploaded by the release pipeline, Sentry symbolicates the stack
+frames automatically.
+
+Quick checks:
+
+```powershell
+# Is the DSN configured for this install?
+[System.Environment]::GetEnvironmentVariable('MIB_SENTRY_DSN','Machine')
+
+# How many unsent crashes have piled up locally?
+Get-ChildItem "$env:LOCALAPPDATA\MIB_Studio_Qt\crashes" -Filter *.dmp |
+    Where-Object { $_.Name -notlike '*.uploaded' } | Measure-Object
+
+# Inspect the JSON sidecar for the most recent crash
+Get-ChildItem "$env:LOCALAPPDATA\MIB_Studio_Qt\crashes\*.json" |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1 |
+    Get-Content | ConvertFrom-Json | Format-List
+```
+
+To configure / change the Sentry project, see
+[sentry-setup.md](sentry-setup.md).
+
 ## Log File Location
 
 The application writes logs to:

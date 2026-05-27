@@ -28,6 +28,7 @@ Jump to the notes that match your task:
 | Live charts during a run | [[frontend/ExperimentMonitoringTab]] |
 | Autofocus / nanopositioner | [[services/AutofocusService]] + [[frontend/NanopositionerTab]] |
 | Syringe pumps | [[services/SyringePumpService]] + [[frontend/SyringePumpTab]] |
+| Crashes / observability | [[services/CrashReporter]] + [[diagnostics/CrashStateMirror]] |
 | Build / deploy | [[build-and-run/Build]], [[build-and-run/Run-Modes]] |
 
 ## Step 4 — Before you write code

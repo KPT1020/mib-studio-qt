@@ -40,6 +40,11 @@ following `[[WikiLinks]]`. If you are a new agent, start here:
 - [[data-model/FrameStore]]
 - [[data-model/HDF5-Storage]]
 
+### Diagnostics
+- [[diagnostics/_MOC|Diagnostics MOC]]
+- [[diagnostics/CrashStateMirror]] — lock-free service-state snapshot
+- [[services/CrashReporter]] — process-level crash handler + Sentry
+
 ### Domain
 - [[domain/Glossary]]
 - [[domain/Microscopy-Pipeline]]

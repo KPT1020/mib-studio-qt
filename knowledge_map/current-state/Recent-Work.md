@@ -14,6 +14,46 @@
   when disabled. Files: `src/frontend/core/main.cpp`,
   `src/frontend/core/MainWindow.cpp`.
 
+- **Sentry build-pipeline wiring** (2026-05-22, same branch) — Wired
+  the Sentry DSN end-to-end so installed builds report crashes without
+  per-machine setup. CMake gained `MIB_SENTRY_DSN` and
+  `MIB_SENTRY_ENVIRONMENT` cache vars that get forwarded to ISCC; both
+  `mib-studio-qt.iss` and `mib-studio-qt-update.iss` now ship
+  `crashpad_handler.exe` and emit a `[Registry]` entry writing
+  `HKLM\…\Environment\MIB_SENTRY_DSN` (cleanly removed on uninstall).
+  `.github/workflows/build-windows.yml` injects the DSN at configure
+  time from the `SENTRY_DSN` repo secret, verifies the build produced
+  `mib_studio_qt.pdb` + `crashpad_handler.exe`, and runs
+  `sentry-cli debug-files upload` + `sentry-cli releases new/finalize`
+  using `SENTRY_AUTH_TOKEN`/`SENTRY_URL`/`SENTRY_ORG`/`SENTRY_PROJECT`
+  (skips cleanly when the auth token is absent). The setup is
+  documented for operators in `docs/howto/sentry-setup.md`, with the
+  troubleshooting guide updated to point at the new structured crash
+  artifacts under `%LOCALAPPDATA%/MIB_Studio_Qt/crashes/`.
+
+- **Crash monitoring + remote logging** (2026-05-22, branch
+  `claude/crash-monitoring-logging-jUziR`) — Added a process-level crash
+  pipeline that captures Windows minidumps and a JSON snapshot of live
+  service state on any unrecoverable failure (SEH, signals, uncaught C++
+  exceptions, Qt fatal). New [[../services/CrashReporter]] installs the
+  handlers via `dbghelp` / `std::signal` / `std::set_terminate` /
+  `qInstallMessageHandler` and optionally forwards events to Sentry via
+  `sentry-native` (CMake-managed clone, off by default if the fetch fails or
+  `MIB_USE_SENTRY=OFF`). New [[../diagnostics/CrashStateMirror]] gives
+  every service a lock-free atomic slot so the crash handler can read
+  state without taking any locks; `CaptureService`, `ProcessingService`,
+  `Hdf5Service`, `FrameStore`, `AutofocusService`, and `AppBackend`
+  recording all write to their slots at existing lifecycle hot-spots.
+  CMake now emits `/Zi + /DEBUG /OPT:REF /OPT:ICF` for Release builds so
+  the produced `mib_studio_qt.pdb` can be archived for later
+  symbolication via `sentry-cli upload-dif`. Crash dumps land under
+  `%LOCALAPPDATA%/MIB_Studio_Qt/crashes/` and (when a DSN is configured
+  via the `MIB_SENTRY_DSN` env var) pending dumps from prior runs are
+  drained on next launch. Files: new `CrashReporter.{h,cpp}`,
+  `CrashStateMirror.{h,cpp}`, `cmake/Sentry.cmake`; modified
+  `CMakeLists.txt`, `src/frontend/core/main.cpp`,
+  `src/backend/AppBackend.cpp`, and the five services above.
+
 - **Recording HDF5 mask regeneration in Review** (2026-05-11) - The
   Review tab now keeps "Regenerate Masks" enabled for recording-mode HDF5
   files. `BatchMaskDialog` resolves the active HDF5 source dataset and uses

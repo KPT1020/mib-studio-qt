@@ -1,6 +1,8 @@
 #include "backend/AppBackend.h"
 
 #include "backend/services/Logger.h"
+#include "backend/services/CrashReporter.h"
+#include "backend/diagnostics/CrashStateMirror.h"
 #include "backend/services/SqliteService.h"
 #include "backend/services/Hdf5Service.h"
 #include "backend/services/CaptureService.h"
@@ -326,25 +328,25 @@ namespace backend
             processingService_->setBackgroundCaptureCallback({});
         }
 
+        auto toLower = [](std::string value)
+        {
+            std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c)
+                           { return static_cast<char>(std::tolower(c)); });
+            return value;
+        };
+
+        std::string cameraMode = "hardware";
+        if (const char *envMode = std::getenv("MIB_CAMERA_MODE"))
+        {
+            cameraMode = toLower(envMode);
+        }
+
         if (bootCapture)
         {
             // Wire capture -> frame store for playback/display
             captureService_->setFrameStore(frameStore_);
 
             // Configure camera source (hardware or mock) before we start streaming.
-            auto toLower = [](std::string value)
-            {
-                std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c)
-                               { return static_cast<char>(std::tolower(c)); });
-                return value;
-            };
-
-            std::string cameraMode = "hardware";
-            if (const char *envMode = std::getenv("MIB_CAMERA_MODE"))
-            {
-                cameraMode = toLower(envMode);
-            }
-
 #if !MIB_HAS_EGRABBER
             if (cameraMode != "mock")
             {
@@ -420,6 +422,7 @@ namespace backend
         else
         {
             SPDLOG_WARN("AppBackend: capture bootstrap disabled by MIB_DISABLED_SERVICES");
+            cameraMode = "disabled";
             selectedIfIndex_ = -1;
             selectedDevIndex_ = -1;
             selectedLabel_.clear();
@@ -433,6 +436,23 @@ namespace backend
         else
         {
             SPDLOG_WARN("AppBackend: playback bootstrap disabled by MIB_DISABLED_SERVICES");
+        }
+
+        // Wire up the crash-state mirror so post-crash dumps include the
+        // current camera / data-dir context. (CrashReporter::init() runs
+        // earlier in main(), before AppBackend exists.)
+        {
+            auto& mirror = backend::diagnostics::CrashStateMirror::instance();
+            mirror.setDataDir(dataDir);
+            mirror.app.mockCamera.store(mockCameraConfigured_);
+            mirror.app.selectedInterface.store(selectedIfIndex_);
+            mirror.app.selectedDevice.store(selectedDevIndex_);
+            mirror.setCameraLabel(selectedLabel_);
+            mirror.frameStore.capacity.store(5000);
+            backend::services::CrashReporter::setTag("camera_mode", cameraMode);
+            backend::services::CrashReporter::setTag("data_dir", dataDir);
+            backend::services::CrashReporter::breadcrumb("lifecycle",
+                "AppBackend initialized");
         }
 
         SPDLOG_INFO("Backend initialized.");
@@ -477,7 +497,22 @@ namespace backend
         selectedDevIndex_ = -1;
         selectedLabel_.clear();
         mockCameraConfigured_ = true;
+        {
+            auto& mirror = backend::diagnostics::CrashStateMirror::instance();
+            mirror.app.selectedInterface.store(-1);
+            mirror.app.selectedDevice.store(-1);
+            mirror.app.mockCamera.store(true);
+            mirror.setCameraLabel("");
+        }
         return;
+#else
+        {
+            auto& mirror = backend::diagnostics::CrashStateMirror::instance();
+            mirror.app.selectedInterface.store(interfaceIndex);
+            mirror.app.selectedDevice.store(deviceIndex);
+            mirror.app.mockCamera.store(false);
+            mirror.setCameraLabel(label);
+        }
 #endif
 
         selectedIfIndex_ = interfaceIndex;
@@ -569,6 +604,14 @@ namespace backend
         frameRecordingWritten_.store(0);
         frameRecordingFiltered_.store(0);
         frameRecordingRunning_.store(true);
+        {
+            auto& m = backend::diagnostics::CrashStateMirror::instance().recorder;
+            m.recording.store(true);
+            m.framesWritten.store(0);
+            m.framesFiltered.store(0);
+        }
+        backend::services::CrashReporter::breadcrumb("recording",
+            "frame recording started", path);
 
         // Launch recording thread
         frameRecordingThread_ = std::make_unique<std::thread>([this]() {
@@ -686,6 +729,14 @@ namespace backend
             frameRecordingThread_->join();
         }
         frameRecordingThread_.reset();
+        {
+            auto& m = backend::diagnostics::CrashStateMirror::instance().recorder;
+            m.recording.store(false);
+            m.framesWritten.store(frameRecordingWritten_.load());
+            m.framesFiltered.store(frameRecordingFiltered_.load());
+        }
+        backend::services::CrashReporter::breadcrumb("recording",
+            "frame recording stopped");
     }
 
     bool AppBackend::isFrameRecording() const {

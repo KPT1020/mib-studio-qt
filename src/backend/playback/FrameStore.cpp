@@ -1,5 +1,6 @@
 #include "backend/playback/FrameStore.h"
 
+#include "backend/diagnostics/CrashStateMirror.h"
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -15,7 +16,9 @@
 namespace backend::playback {
 
 FrameStore::FrameStore(size_t capacity)
-    : capacity_(capacity), ring_(capacity) {}
+    : capacity_(capacity), ring_(capacity) {
+    backend::diagnostics::CrashStateMirror::instance().frameStore.capacity.store(capacity_);
+}
 
 void FrameStore::pushFrame(const uint8_t* src,
                            size_t size,
@@ -41,12 +44,21 @@ void FrameStore::pushFrame(const uint8_t* src,
             if (frameFilter_(tmp)) {
                 // Frame is empty / should be skipped
                 totalFiltered_.fetch_add(1, std::memory_order_relaxed);
+                backend::diagnostics::CrashStateMirror::instance().frameStore.totalFiltered
+                    .fetch_add(1, std::memory_order_relaxed);
                 return;
             }
         }
     }
 
     const uint64_t w = totalWritten_.fetch_add(1) + 1; // next write count
+    {
+        auto& fs = backend::diagnostics::CrashStateMirror::instance().frameStore;
+        fs.totalWritten.store(w, std::memory_order_relaxed);
+        fs.latestIndex.store(w - 1, std::memory_order_relaxed);
+        fs.earliestIndex.store(w > capacity_ ? w - capacity_ : 0,
+                               std::memory_order_relaxed);
+    }
     const size_t idx = static_cast<size_t>((w - 1) % capacity_);
     std::scoped_lock lk(mutex_);
     Frame& f = ring_[idx];
@@ -550,6 +562,7 @@ bool FrameStore::resize(size_t newCapacity) {
 
     ring_ = std::move(newRing);
     capacity_ = newCapacity;
+    backend::diagnostics::CrashStateMirror::instance().frameStore.capacity.store(capacity_);
 
     return true;
 }

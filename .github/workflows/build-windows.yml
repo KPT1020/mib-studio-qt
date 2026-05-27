@@ -168,10 +168,110 @@ jobs:
           key: conan-${{ runner.os }}-msvc194-${{ hashFiles('conanfile.txt') }}
 
       - name: CMake configure
-        run: cmake --preset windows-default
+        env:
+          MIB_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          MIB_SENTRY_ENV: ${{ steps.version.outputs.channel == 'stable' && 'production' || 'beta' }}
+        run: |
+          # Bake the Sentry DSN into the installer (HKLM env var) so installed
+          # builds report crashes without per-user configuration. The DSN is a
+          # public identifier on the Sentry side, but we still treat it as a
+          # secret because anyone who knows it can submit events that count
+          # against quota.
+          $args = @('--preset', 'windows-default')
+          if ($env:MIB_SENTRY_DSN) {
+            $args += "-DMIB_SENTRY_DSN=$env:MIB_SENTRY_DSN"
+            $args += "-DMIB_SENTRY_ENVIRONMENT=$env:MIB_SENTRY_ENV"
+            Write-Host "Sentry DSN injected into installer (env=$env:MIB_SENTRY_ENV)"
+          } else {
+            Write-Host "WARNING: SENTRY_DSN secret not set; installer will ship without DSN (local-only crash mode)" -ForegroundColor Yellow
+          }
+          cmake @args
+        shell: pwsh
 
       - name: CMake build
         run: cmake --build build --config Release --target mib_studio_qt
+
+      - name: Verify crash-reporting artifacts
+        run: |
+          $required = @(
+            'build\Release\mib_studio_qt.exe',
+            'build\Release\mib_studio_qt.pdb'
+          )
+          $missing = @()
+          foreach ($p in $required) {
+            if (Test-Path $p) {
+              $size = (Get-Item $p).Length / 1MB
+              Write-Host ("OK: {0} ({1:N1} MB)" -f $p, $size)
+            } else {
+              $missing += $p
+            }
+          }
+          if (Test-Path 'build\Release\crashpad_handler.exe') {
+            Write-Host "OK: crashpad_handler.exe present"
+          } else {
+            Write-Host "WARN: crashpad_handler.exe missing — sentry-native fetch may have failed; crashes will use the local-only minidump path" -ForegroundColor Yellow
+          }
+          if ($missing.Count -gt 0) {
+            Write-Host "ERROR: missing required build artifacts:" -ForegroundColor Red
+            $missing | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
+            exit 1
+          }
+        shell: pwsh
+
+      # ── Sentry symbol upload ──────────────────────────────────
+      # Upload mib_studio_qt.pdb (and the sentry-native runtime PDBs if
+      # built) so remote minidumps can be symbolicated. Also creates a
+      # Sentry release tagged with the same version so crashes group by
+      # release in the dashboard.
+      #
+      # Required secrets:
+      #   SENTRY_AUTH_TOKEN  — auth token with project:releases and
+      #                        project:write scopes
+      #   SENTRY_DSN         — used at runtime; also used here for upload
+      #   SENTRY_URL         — base URL of the self-hosted instance
+      #                        (e.g. https://sentry.yofo.bio). Omit for
+      #                        sentry.io.
+      #   SENTRY_ORG         — org slug
+      #   SENTRY_PROJECT     — project slug
+      - name: Upload debug symbols + create Sentry release
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_URL: ${{ secrets.SENTRY_URL }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: |
+          # Secrets aren't accessible in step-level `if:` conditions, so we
+          # gate inside the shell instead — skip cleanly when the auth token
+          # is missing (e.g. local fork builds without secret access).
+          if (-not $env:SENTRY_AUTH_TOKEN) {
+            Write-Host "Skipping Sentry symbol upload: SENTRY_AUTH_TOKEN not set" -ForegroundColor Yellow
+            exit 0
+          }
+          if (-not $env:SENTRY_ORG -or -not $env:SENTRY_PROJECT) {
+            Write-Host "ERROR: SENTRY_AUTH_TOKEN is set but SENTRY_ORG / SENTRY_PROJECT are missing." -ForegroundColor Red
+            exit 1
+          }
+          if (-not $env:SENTRY_URL) {
+            Write-Host "SENTRY_URL not set; defaulting to sentry.io" -ForegroundColor Yellow
+          }
+
+          npm install -g @sentry/cli
+          sentry-cli --version
+
+          $version = "${{ steps.version.outputs.version }}"
+          $release = "mib_studio_qt@$version"
+
+          # debug-files upload walks the directory and uploads every PDB /
+          # EXE it finds. --include-sources embeds the original source paths
+          # into the symbol map for nicer stack frames.
+          sentry-cli debug-files upload --include-sources build\Release
+
+          # Tie this build to a Sentry release so events arriving with
+          # release="mib_studio_qt@$version" group cleanly in the UI.
+          sentry-cli releases new $release
+          sentry-cli releases set-commits $release --auto --ignore-missing
+          sentry-cli releases finalize $release
+        shell: pwsh
 
       - name: Install InnoSetup
         run: choco install innosetup -y --no-progress

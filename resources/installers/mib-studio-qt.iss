@@ -7,6 +7,15 @@
 #ifndef AppVersion
   #define AppVersion "0.1.0"
 #endif
+; SentryDSN is injected at build time by the release workflow:
+;   ISCC.exe /DSentryDSN=https://<key>@sentry.yofo.bio/<project>
+; Leave empty for builds that should run in local-only crash mode.
+#ifndef SentryDSN
+  #define SentryDSN ""
+#endif
+#ifndef SentryEnvironment
+  #define SentryEnvironment "production"
+#endif
 #define AppPublisher "MIB Studio"
 #define AppURL "https://github.com/your-org/mib-studio-qt"
 #define AppExeName "mib_studio_qt.exe"
@@ -57,6 +66,11 @@ Name: "installegrabber"; Description: "Install eGrabber SDK (required for camera
 ; Main executables
 Source: "{#SourceDir}{#BuildDir}\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
+; Crashpad handler (required for sentry-native dump collection on Windows).
+; "skipifsourcedoesntexist" lets local Debug builds (without crash handler)
+; still package cleanly; release builds always produce it.
+Source: "{#SourceDir}{#BuildDir}\crashpad_handler.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+
 ; Application icon (used for shortcuts)
 Source: "{#SourceDir}resources\favicon\favicon.ico"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -95,6 +109,21 @@ Source: "{#EgrabberPath}"; DestDir: "{tmp}"; Flags: deleteafterinstall; Tasks: i
 ; This is critical for the application to write logs
 Name: "{app}\data"; Flags: uninsneveruninstall
 Name: "{app}\data\logs"; Flags: uninsneveruninstall
+
+[Registry]
+; Persist the Sentry DSN as a SYSTEM environment variable so every process
+; spawned after install (including the application's auto-launched shortcut)
+; picks it up. The entries are only emitted when SentryDSN is non-empty —
+; offline / air-gapped builds can ship without a DSN and the app falls back
+; to local-only crash dumps.
+#if SentryDSN != ""
+Root: HKLM; Subkey: "System\CurrentControlSet\Control\Session Manager\Environment"; \
+    ValueType: string; ValueName: "MIB_SENTRY_DSN"; ValueData: "{#SentryDSN}"; \
+    Flags: uninsdeletevalue
+Root: HKLM; Subkey: "System\CurrentControlSet\Control\Session Manager\Environment"; \
+    ValueType: string; ValueName: "MIB_CRASH_ENV"; ValueData: "{#SentryEnvironment}"; \
+    Flags: uninsdeletevalue
+#endif
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; IconFilename: "{app}\favicon.ico"
@@ -180,4 +209,3 @@ begin
     // Additional post-install checks can be added here if needed
   end;
 end;
-
