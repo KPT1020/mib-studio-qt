@@ -327,16 +327,14 @@ jobs:
           }
         shell: pwsh
 
-      - name: Publish full installer to rustfs
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      - name: Skip full installer rustfs publish
         run: |
-          $version = "${{ steps.version.outputs.version }}"
-          $channel = "${{ steps.version.outputs.channel }}"
           $setupInstaller = Get-ChildItem "build\dist\MIB_Studio_Qt_Setup_v*.exe" | Select-Object -First 1
           if ($setupInstaller) {
-            .\publish-update.ps1 -Installer $setupInstaller.FullName -Version $version -Channel $channel
+            $sizeMb = [math]::Round($setupInstaller.Length / 1MB, 1)
+            Write-Host "Full installer: $($setupInstaller.Name) ($sizeMb MiB)"
+            Write-Host "Skipping RustFS upload for the full installer because s3.yofo.bio rejects large single PUTs."
+            Write-Host "The full installer remains attached to the GitHub Release; RustFS latest.json points to the update package."
           } else {
             Write-Host "WARNING: Full installer not found, skipping" -ForegroundColor Yellow
           }
