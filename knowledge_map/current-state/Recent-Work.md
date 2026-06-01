@@ -5,6 +5,13 @@
 
 ## Features shipped
 
+- **Backend-only Linux build/test path** (2026-06-01) - Added
+  `MIB_BUILD_BACKEND_ONLY` in `CMakeLists.txt` so backend workflows can skip
+  frontend executable generation. Added `linux-backend-only` configure/build/test
+  presets and a `mib_backend_smoke_test` CTest target (`backend` label) for
+  backend-only verification loops. Updated Linux build docs and build/run vault
+  notes accordingly.
+
 - **Crash-resilient HDF5 checkpoints for experiment/recording writes**
   (2026-06-01) - `Hdf5Service` now flushes after each append/metadata write and
   copies a rolling recovery snapshot to `<file>.recovery.h5`. `loadFile()`

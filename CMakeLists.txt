@@ -75,6 +75,9 @@ endif()
 option(MIB_ENABLE_WINDOWS_PACKAGING
     "Enable Windows runtime deployment and InnoSetup packaging targets"
     ${MIB_ENABLE_WINDOWS_PACKAGING_DEFAULT})
+option(MIB_BUILD_BACKEND_ONLY
+    "Build only backend targets (no frontend executables)"
+    OFF)
 
 # Preserve PDBs and address-to-source mapping for Release builds so that
 # minidumps from end-user crashes can be symbolicated. /Zi generates the
@@ -92,7 +95,11 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(Sentry)
 
-find_package(Qt6 COMPONENTS Core Widgets Gui Charts Network Concurrent SerialPort REQUIRED)
+set(MIB_QT_COMPONENTS Core Gui SerialPort)
+if(NOT MIB_BUILD_BACKEND_ONLY)
+    list(APPEND MIB_QT_COMPONENTS Widgets Charts Network Concurrent)
+endif()
+find_package(Qt6 COMPONENTS ${MIB_QT_COMPONENTS} REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG QUIET)
 find_package(OpenCV CONFIG REQUIRED)
@@ -123,6 +130,8 @@ find_package(HDF5 CONFIG QUIET)
 if(NOT HDF5_FOUND)
     find_package(HDF5 MODULE QUIET)
 endif()
+
+include(CTest)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 if(MIB_HAS_EGRABBER)
@@ -297,6 +306,17 @@ else()
     endif()
 endif()
 
+# Backend smoke test (no frontend dependencies).
+if(BUILD_TESTING)
+    add_executable(mib_backend_smoke_test
+        src/tests/backend_smoke_test.cpp
+    )
+    target_link_libraries(mib_backend_smoke_test PRIVATE mib_backend)
+    add_test(NAME backend.smoke COMMAND mib_backend_smoke_test)
+    set_tests_properties(backend.smoke PROPERTIES LABELS "backend")
+endif()
+
+if(NOT MIB_BUILD_BACKEND_ONLY)
 # Frontend application (Qt Widgets)
 set(FRONTEND_COMMON_SOURCES
     # Core
@@ -883,4 +903,5 @@ if(WIN32 AND MIB_ENABLE_WINDOWS_PACKAGING)
         message(STATUS "InnoSetup not found - installer target will not be available")
         message(STATUS "Install InnoSetup from https://jrsoftware.org/isdl.php to enable installer generation")
     endif()
+endif()
 endif()

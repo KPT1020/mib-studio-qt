@@ -37,6 +37,15 @@ Kedro pipeline under `scripts/kedro_frame_detection/`) log to MLflow at
 `MLFLOW_TRACKING_USERNAME`, `MLFLOW_TRACKING_PASSWORD` — never hard-code.
 See top-level `CLAUDE.md`.
 
+## Backend-only validation mode (build/test)
+
+For backend CI loops without Qt Widgets/Charts frontend binaries:
+
+- Configure/build preset: `linux-backend-only`, `linux-backend-only-build`
+- Test preset: `linux-backend-only-test`
+- Backend tests can be selected by label:
+  `ctest --preset linux-backend-only-test -L backend`
+
 ## Troubleshooting
 
 - `docs/howto/troubleshoot-crashes.md`
