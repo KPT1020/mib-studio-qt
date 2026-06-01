@@ -760,6 +760,10 @@ void MainWindow::onStopExperiment()
         size_t totalInvalid = invalidFrames.size();
         // Note: We can't easily track total frames written via append, so we use current counts
         // In a production system, you'd want to track cumulative counts
+        if (!hdf5.flush())
+        {
+            SPDLOG_WARN("stop-lag: H5Fflush before writeExperimentInfo failed");
+        }
         auto processingConfig = processing.getProcessingConfig();
         auto roi = processing.getRealtimeRoi();
         cv::Mat bg = processing.getRealtimeBackgroundGray();
