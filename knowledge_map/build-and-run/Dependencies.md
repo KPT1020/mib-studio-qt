@@ -24,6 +24,9 @@
 
 - `CMakeLists.txt` calls `find_package(Qt6 ...)` and so on; Conan
   generates the toolchain (`build/conan_toolchain.cmake`).
+- Backend-only builds (`MIB_BUILD_BACKEND_ONLY=ON`) require only Qt
+  `Core+Gui+SerialPort` components (frontend-only modules `Widgets`, `Charts`,
+  `Network`, `Concurrent` are not required).
 - Qt shared DLLs + plugins are deployed next to the exe via
   `windeployqt.exe` in a post-build step.
 - OpenCV and HDF5 DLLs are also copied next to the exe (see

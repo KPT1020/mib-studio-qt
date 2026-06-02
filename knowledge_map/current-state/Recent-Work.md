@@ -5,6 +5,22 @@
 
 ## Features shipped
 
+- **Backend-only Linux build/test path** (2026-06-01) - Added
+  `MIB_BUILD_BACKEND_ONLY` in `CMakeLists.txt` so backend workflows can skip
+  frontend executable generation. Added `linux-backend-only` configure/build/test
+  presets and a `mib_backend_smoke_test` CTest target (`backend` label) for
+  backend-only verification loops. Updated Linux build docs and build/run vault
+  notes accordingly.
+
+- **Crash-resilient HDF5 checkpoints for experiment/recording writes**
+  (2026-06-01) - `Hdf5Service` now flushes after each append/metadata write and
+  copies a rolling recovery snapshot to `<file>.recovery.h5`. `loadFile()`
+  falls back to this checkpoint if opening the primary `.h5` fails, allowing
+  post-crash retrieval of the latest persisted data. Recording metadata writes
+  were also hardened to open/create existing groups/attributes instead of
+  failing on reruns. `MainWindow::onStopExperiment` now flushes before writing
+  final experiment metadata.
+
 - **GUI-configurable boot disable list** (2026-05-22) - Added a Settings menu
   action (**Boot Service Toggles...**) that persists disabled startup services
   in `QSettings` (`Startup/DisabledServices`). `main.cpp` now applies that

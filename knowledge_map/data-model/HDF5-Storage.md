@@ -32,9 +32,12 @@
   `writeExperimentInfo(...)` →
   optional `writeConfigJson(...)`.
   Called from `ProcessingService::flushBufferedFrames`.
+  Each write step flushes and updates a rolling sidecar checkpoint at
+  `<experiment>.recovery.h5`.
 - **Recording mode**: `initializeRecordingDatasets()` →
   `appendRecordingFrames(images, metadata)` →
   `writeRecordingInfo(...)`.
+  Recording writes also update `<recording>.recovery.h5` after each append.
 
 ## Read paths (scalable)
 
@@ -55,6 +58,8 @@
 
 - `writeConfigJson` **must** be called after `writeExperimentInfo` — see
   header docstring.
+- If opening the primary file fails, `Hdf5Service::loadFile` attempts
+  `<path>.recovery.h5` automatically.
 - Don't use `readValidFrames` (full load) on files > 1 GB; prefer the
   scalable hyperslab APIs. See task
   `knowledge_map/task/review_2gb_scalability.md`.

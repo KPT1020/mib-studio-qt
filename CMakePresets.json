@@ -39,6 +39,26 @@
       }
     },
     {
+      "name": "linux-backend-only",
+      "displayName": "Linux Backend-only (system packages)",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/linux-backend",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_IGNORE_PREFIX_PATH": "/home/gavin/miniconda3;/home/linuxbrew/.linuxbrew",
+        "MIB_BUILD_BACKEND_ONLY": "ON",
+        "BUILD_TESTING": "ON",
+        "MIB_ENABLE_HARDWARE_SDKS": "OFF",
+        "MIB_ENABLE_WINDOWS_PACKAGING": "OFF",
+        "MIB_USE_SENTRY": "OFF"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
       "name": "linux-sentry-release",
       "displayName": "Linux Release (Conan, sentry-native)",
       "inherits": "linux-release",
@@ -70,6 +90,11 @@
       "name": "linux-system-release-build",
       "displayName": "Build Linux Release from system packages",
       "configurePreset": "linux-system-release"
+    },
+    {
+      "name": "linux-backend-only-build",
+      "displayName": "Build Linux Backend-only",
+      "configurePreset": "linux-backend-only"
     },
     {
       "name": "linux-sentry-release-build",
@@ -105,6 +130,17 @@
       "name": "linux-system-test",
       "displayName": "Test Linux Release from system packages",
       "configurePreset": "linux-system-release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 30
+      }
+    },
+    {
+      "name": "linux-backend-only-test",
+      "displayName": "Test Linux Backend-only",
+      "configurePreset": "linux-backend-only",
       "output": {
         "outputOnFailure": true
       },

@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <chrono>
 #include <sstream>
+#include <filesystem>
 
 namespace backend::services
 {
@@ -40,6 +41,33 @@ namespace backend::services
             }
         }
     };
+
+    namespace
+    {
+        std::string recoveryPathFor(const std::string &filePath)
+        {
+            return filePath + ".recovery.h5";
+        }
+
+        bool writeRecoveryCheckpoint(const std::string &filePath)
+        {
+            if (filePath.empty())
+            {
+                return false;
+            }
+
+            std::error_code ec;
+            std::filesystem::copy_file(filePath, recoveryPathFor(filePath),
+                                       std::filesystem::copy_options::overwrite_existing, ec);
+            if (ec)
+            {
+                SPDLOG_WARN("Failed to write HDF5 recovery checkpoint for {}: {}",
+                            filePath, ec.message());
+                return false;
+            }
+            return true;
+        }
+    } // namespace
 
     Hdf5Service::Hdf5Service() : impl_(std::make_unique<Impl>())
     {
@@ -75,6 +103,15 @@ namespace backend::services
         impl_->filePath_ = filePath;
         impl_->isOpen_ = true;
         impl_->datasetsInitialized_ = false;
+        {
+            std::error_code ec;
+            std::filesystem::remove(recoveryPathFor(filePath), ec);
+            if (ec)
+            {
+                SPDLOG_WARN("Failed to clear stale recovery checkpoint for {}: {}",
+                            filePath, ec.message());
+            }
+        }
         impl_->validFramesWritten_ = 0;
         impl_->invalidFramesWritten_ = 0;
         impl_->seriesImagesWritten_ = 0;
@@ -1039,6 +1076,15 @@ namespace backend::services
                 "hdf5.append_frames", "hdf5.write", msTotal, data.str());
         }
 
+        if (!validFrames.empty() || !invalidFrames.empty())
+        {
+            if (!flush())
+            {
+                SPDLOG_WARN("appendFrames: post-write flush failed");
+            }
+            writeRecoveryCheckpoint(impl_->filePath_);
+        }
+
         return true;
     }
 
@@ -1308,6 +1354,12 @@ namespace backend::services
             }
         }
 
+        if (!flush())
+        {
+            SPDLOG_WARN("writeExperimentInfo: post-write flush failed");
+        }
+        writeRecoveryCheckpoint(impl_->filePath_);
+
         SPDLOG_DEBUG("Wrote experiment info, processing config, and ROI to HDF5");
         return true;
     }
@@ -1341,8 +1393,12 @@ namespace backend::services
         H5Tset_cset(strType, H5T_CSET_UTF8);
 
         hid_t scalarSpace = H5Screate(H5S_SCALAR);
-        hid_t attr = H5Acreate2(groupId, "config_json", strType, scalarSpace,
-                                H5P_DEFAULT, H5P_DEFAULT);
+        hid_t attr = H5Aopen(groupId, "config_json", H5P_DEFAULT);
+        if (attr < 0)
+        {
+            attr = H5Acreate2(groupId, "config_json", strType, scalarSpace,
+                              H5P_DEFAULT, H5P_DEFAULT);
+        }
         bool ok = false;
         if (attr >= 0)
         {
@@ -1356,9 +1412,18 @@ namespace backend::services
         H5Gclose(groupId);
 
         if (ok)
+        {
+            if (!flush())
+            {
+                SPDLOG_WARN("writeConfigJson: post-write flush failed");
+            }
+            writeRecoveryCheckpoint(impl_->filePath_);
             SPDLOG_DEBUG("Wrote config JSON ({} bytes) to HDF5 metadata", jsonContent.size());
+        }
         else
+        {
             SPDLOG_WARN("Failed to write config JSON attribute");
+        }
         return ok;
     }
 
@@ -1372,15 +1437,29 @@ namespace backend::services
 
         // Open existing file for reading
         impl_->fileId_ = H5Fopen(filePath.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        std::string openedPath = filePath;
         if (impl_->fileId_ < 0)
         {
-            SPDLOG_ERROR("Failed to open HDF5 file for reading: {}", filePath);
-            return false;
+            const std::string recoveryPath = recoveryPathFor(filePath);
+            if (std::filesystem::exists(recoveryPath))
+            {
+                impl_->fileId_ = H5Fopen(recoveryPath.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+                if (impl_->fileId_ >= 0)
+                {
+                    openedPath = recoveryPath;
+                    SPDLOG_WARN("Primary HDF5 open failed; loaded recovery checkpoint instead: {}", recoveryPath);
+                }
+            }
+            if (impl_->fileId_ < 0)
+            {
+                SPDLOG_ERROR("Failed to open HDF5 file for reading: {}", filePath);
+                return false;
+            }
         }
 
-        impl_->filePath_ = filePath;
+        impl_->filePath_ = openedPath;
         impl_->isOpen_ = true;
-        SPDLOG_INFO("HDF5 file opened for reading: {}", filePath);
+        SPDLOG_INFO("HDF5 file opened for reading: {}", openedPath);
         return true;
     }
 
@@ -2643,10 +2722,21 @@ namespace backend::services {
             return false;
         }
 
-        // Create /recorded_frames group
-        hid_t groupId = H5Gcreate2(impl_->fileId_, "/recorded_frames", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        // Create/open /recorded_frames group
+        hid_t groupId = H5Gopen2(impl_->fileId_, "/recorded_frames", H5P_DEFAULT);
+        if (groupId < 0)
+        {
+            groupId = H5Gcreate2(impl_->fileId_, "/recorded_frames", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        }
         if (groupId >= 0)
+        {
             H5Gclose(groupId);
+        }
+        else
+        {
+            SPDLOG_ERROR("Failed to create/open /recorded_frames group");
+            return false;
+        }
 
         SPDLOG_DEBUG("HDF5 recording datasets initialized");
         return true;
@@ -2780,6 +2870,11 @@ namespace backend::services {
 
         if (alreadyWritten == 0)
             impl_->validFramesWritten_ = images.size();
+        if (!flush())
+        {
+            SPDLOG_WARN("appendRecordingFrames: post-write flush failed");
+        }
+        writeRecoveryCheckpoint(impl_->filePath_);
         SPDLOG_DEBUG("Recording: appended {} frames (total: {})", images.size(), impl_->validFramesWritten_);
         return true;
     }
@@ -2790,7 +2885,11 @@ namespace backend::services {
         if (!isFileOpen())
             return false;
 
-        hid_t infoGroupId = H5Gcreate2(impl_->fileId_, "/recording_info", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        hid_t infoGroupId = H5Gopen2(impl_->fileId_, "/recording_info", H5P_DEFAULT);
+        if (infoGroupId < 0)
+        {
+            infoGroupId = H5Gcreate2(impl_->fileId_, "/recording_info", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        }
         if (infoGroupId < 0)
         {
             SPDLOG_ERROR("Failed to create recording_info group");
@@ -2800,8 +2899,12 @@ namespace backend::services {
         hid_t scalarSpaceId = H5Screate(H5S_SCALAR);
 
         auto writeAttr = [&](const char* name, uint64_t value) {
-            hid_t attr = H5Acreate2(infoGroupId, name, H5T_NATIVE_UINT64, scalarSpaceId,
-                                    H5P_DEFAULT, H5P_DEFAULT);
+            hid_t attr = H5Aopen(infoGroupId, name, H5P_DEFAULT);
+            if (attr < 0)
+            {
+                attr = H5Acreate2(infoGroupId, name, H5T_NATIVE_UINT64, scalarSpaceId,
+                                  H5P_DEFAULT, H5P_DEFAULT);
+            }
             if (attr >= 0)
             {
                 H5Awrite(attr, H5T_NATIVE_UINT64, &value);
@@ -2818,8 +2921,12 @@ namespace backend::services {
         const char* mode = "frame_recording";
         hid_t strType = H5Tcopy(H5T_C_S1);
         H5Tset_size(strType, std::strlen(mode) + 1);
-        hid_t modeAttr = H5Acreate2(infoGroupId, "mode", strType, scalarSpaceId,
-                                     H5P_DEFAULT, H5P_DEFAULT);
+        hid_t modeAttr = H5Aopen(infoGroupId, "mode", H5P_DEFAULT);
+        if (modeAttr < 0)
+        {
+            modeAttr = H5Acreate2(infoGroupId, "mode", strType, scalarSpaceId,
+                                  H5P_DEFAULT, H5P_DEFAULT);
+        }
         if (modeAttr >= 0)
         {
             H5Awrite(modeAttr, strType, mode);
@@ -2830,6 +2937,11 @@ namespace backend::services {
         H5Sclose(scalarSpaceId);
         H5Gclose(infoGroupId);
 
+        if (!flush())
+        {
+            SPDLOG_WARN("writeRecordingInfo: post-write flush failed");
+        }
+        writeRecoveryCheckpoint(impl_->filePath_);
         SPDLOG_INFO("Recording info written: recorded={}, filtered={}", totalFrames, filteredFrames);
         return true;
     }

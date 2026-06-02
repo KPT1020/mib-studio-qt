@@ -9,9 +9,12 @@
 
 From `CMakePresets.json`:
 - `windows-default` — VS2022 x64, uses `build/conan_toolchain.cmake`
+- `linux-backend-only` — Linux backend-only configure (`mib_backend` + tests;
+  skips frontend executables)
 - Build presets: `windows-default-build` (Debug),
-  `windows-default-build-release` (Release)
-- Test preset: `windows-test`
+  `windows-default-build-release` (Release),
+  `linux-backend-only-build`
+- Test presets: `windows-test`, `linux-backend-only-test`
 
 ## Targets
 
@@ -20,9 +23,13 @@ From `CMakePresets.json`:
 | `mib_backend` | STATIC library | Core: services, camera abstraction, processing |
 | `mib_studio_qt` | executable (`WIN32` on Windows) | Production app |
 | `mock_studio_qt` | executable | Dev app with mock-camera GUI selector |
+| `mib_backend_smoke_test` | executable test | Backend-only HDF5/open/flush smoke test (`ctest -L backend`) |
 
 `mib_backend` is linked by both executables. Source is in
 `src/backend/`, `src/camera/`, and `src/backend/playback/`.
+
+Backend-only builds set `MIB_BUILD_BACKEND_ONLY=ON` and skip frontend target
+generation entirely.
 
 ## Commands
 
@@ -35,6 +42,11 @@ cmake --build build --config Debug
 
 # Build Release
 cmake --build build --preset windows-default-build-release
+
+# Backend-only (Linux)
+cmake --preset linux-backend-only
+cmake --build --preset linux-backend-only-build --target mib_backend mib_backend_smoke_test
+ctest --preset linux-backend-only-test -L backend --output-on-failure
 
 # Deploy Qt runtime (CMake auto-triggers post-build; can run manually)
 windeployqt.exe --release build/Release/mib_studio_qt.exe

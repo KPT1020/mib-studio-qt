@@ -19,6 +19,15 @@ sudo apt install cmake build-essential ninja-build pkg-config git \
   libopencv-dev libhdf5-dev libspdlog-dev nlohmann-json3-dev libsqlite3-dev
 ```
 
+For backend-only build/test loops (no frontend binaries), this smaller set is
+enough:
+
+```bash
+sudo apt install cmake build-essential pkg-config git \
+  qt6-base-dev qt6-serialport-dev \
+  libopencv-dev libhdf5-dev libspdlog-dev nlohmann-json3-dev libsqlite3-dev
+```
+
 ## Configure And Build
 
 Fast local build from system packages:
