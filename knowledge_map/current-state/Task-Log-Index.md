@@ -38,6 +38,7 @@
 - `task/ui-status-stats.md`
 - `task/diagnostic-logging.md`
 - `task/review_logging_improvements.md`
+- `task/2026-05-22-crash-monitoring.md`
 
 ### Nanopositioner
 - `task/2025-11-19-nanopositioner-tab.md`
@@ -45,12 +46,13 @@
 ### HDF Review scalability & crashes
 - `task/review_2gb_scalability.md`
 - `task/review_hdf_thumbnail_spacer_crash.md`
+- `task/2026-06-02-long-run-frame-growth.md`
 
 ### Trigger / realtime performance
 - `task/2026-04-15-trigger-timing-bug.md`
 - `task/2026-04-16-thread-performance-audit.md`
 
-## By filename (all 25)
+## By filename (all 30)
 
 ```
 2025-11-14-safe-start-stop-egrabber.md
@@ -65,6 +67,10 @@
 2026-05-05-hdf5-exporter-linux-macos-build.md
 2026-05-22-boot-service-toggles-gui.md
 2026-05-22-boot-service-toggles.md
+2026-05-22-crash-monitoring.md
+2026-06-01-backend-only-build-test-mode.md
+2026-06-01-hdf5-crash-recovery-checkpoints.md
+2026-06-02-long-run-frame-growth.md
 camera-reset.md
 diagnostic-logging.md
 external-config-browse.md

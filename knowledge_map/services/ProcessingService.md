@@ -53,15 +53,20 @@ All gates in one struct. Notable fields:
 
 - **Monitoring rings** — `monitoringValidFrames_` / `monitoringInvalidFrames_`,
   fixed 1000-frame capacity. Always on when realtime is running.
-- **Experiment accumulation** — unbounded vectors; populated while
-  `experimentActive_` is true. Flushed to HDF5 periodically via
-  `flushBufferedFrames(Hdf5Service&)` (default every 100 frames).
+- **Experiment accumulation** — bounded vectors populated while
+  `experimentActive_` is true. `flushBufferedFrames(Hdf5Service&)` drains them
+  periodically (default every 100 frames). `maxBufferedFrames_` is derived from
+  the flush interval (at least the interval; normally capped to a 1000-5000
+  frame backlog) so a slow or failing HDF5 append cannot grow RAM without
+  bound.
 - Invalid frame sampling rate defaults to 1-in-100 to bound HDF5 size.
 
 ## Metrics exposed
 
 1-second rolling window: `getAlgoFps1s`, `getValidFps1s`, `getInvalidFps1s`,
-`getAlgoAvgUs1s`. Plus `getTotalValidFlushed` for experiment totals.
+`getAlgoAvgUs1s`. Plus `getBufferedFrameCounts()` for cheap UI/status polling,
+`getTotalValidFlushed` for experiment totals, and dropped-frame counters for
+the bounded experiment backlog.
 
 ## Batch processing (offline / re-runs)
 
@@ -90,6 +95,10 @@ they're safe to run concurrently with live capture.
 ## Gotchas
 
 - Realtime drop-frames mode is ignored while an experiment is active.
+- When the experiment backlog reaches `maxBufferedFrames_`, sampled invalid
+  frames are dropped first. Valid frames can evict old invalid frames; valid
+  drops only happen if the backlog is entirely valid and still over cap. This
+  is a last-resort RAM safety valve for long runs where HDF5 is slow or failing.
 - `pixelToMicronFactor_` default is `0.4886` — UI lets users change this.
 - YOLO is a separate service ([[YoloService]]); this pipeline does not use it.
 - **Callback ordering invariant**: `TargetGroupCallback` and

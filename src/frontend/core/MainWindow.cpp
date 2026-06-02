@@ -824,8 +824,7 @@ void MainWindow::onUpdateStats()
     const auto &s = cap.stats();
     auto &proc = backend_.processing();
     const uint64_t tFetchStartUs = backend::Tools::getTimestamp();
-    auto validFrames = proc.getValidFrames();
-    auto invalidFrames = proc.getInvalidFrames();
+    const auto bufferedFrames = proc.getBufferedFrameCounts();
     const uint64_t tFetchEndUs = backend::Tools::getTimestamp();
     const double fetchMs = static_cast<double>(tFetchEndUs - tFetchStartUs) / 1000.0;
 
@@ -871,8 +870,8 @@ void MainWindow::onUpdateStats()
         data.cameraDataRateMBps = s.lastDataRateMBps.load();
         data.meanRingRatio = backend_.autofocus().getMedianRingRatio();
         data.experimentActive = experimentActive_;
-        data.validBuffered = validFrames.size();
-        data.invalidBuffered = invalidFrames.size();
+        data.validBuffered = bufferedFrames.valid;
+        data.invalidBuffered = bufferedFrames.invalid;
         data.flushInProgress = flushInProgress_;
         data.experimentRuntimeSeconds = experimentRuntimeSeconds;
         data.algoAvgUsAgeMs = algoAvgUsAgeMs;
@@ -907,7 +906,7 @@ void MainWindow::onUpdateStats()
 
     if (experimentActive_)
     {
-        size_t totalBuffered = validFrames.size() + invalidFrames.size();
+        size_t totalBuffered = bufferedFrames.total();
 
         // Check if we need to flush (round-robin buffer)
         // Only start a new flush if one isn't already in progress
@@ -941,8 +940,8 @@ void MainWindow::onUpdateStats()
         }
 
         status += QString(" | Experiment: active | buffered: valid=%1, invalid=%2")
-                      .arg(validFrames.size())
-                      .arg(invalidFrames.size());
+                      .arg(bufferedFrames.valid)
+                      .arg(bufferedFrames.invalid);
         if (flushInProgress_)
         {
             status += " (flushing...)";
@@ -956,8 +955,8 @@ void MainWindow::onUpdateStats()
             size_t count = 0;
             backend_.playback().queryRange(earliest, latest, count);
             const double memMB = backend::Tools::getProcessMemoryMB();
-            SPDLOG_INFO("MainWindow stats: buffer_fetch_ms={:.3f}, valid={}, invalid={}, total={}, playback_range=[{},{}] count={}, flush_interval={}, flushing={}, mem_mb={:.1f}",
-                        fetchMs, validFrames.size(), invalidFrames.size(), totalBuffered, earliest, latest, count, flushNeeded, flushInProgress_ ? 1 : 0, memMB);
+            SPDLOG_INFO("MainWindow stats: buffer_fetch_ms={:.3f}, valid={}, invalid={}, total={}, playback_range=[{},{}] count={}, flush_interval={}, max_buffered={}, flushing={}, mem_mb={:.1f}",
+                        fetchMs, bufferedFrames.valid, bufferedFrames.invalid, totalBuffered, earliest, latest, count, flushNeeded, proc.getMaxBufferedFrames(), flushInProgress_ ? 1 : 0, memMB);
             lastDiagLogUs = nowUs;
         }
     }

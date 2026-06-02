@@ -27,8 +27,7 @@ namespace frontend
         const auto &s = cap.stats();
         auto &proc = backend_.processing();
         const uint64_t tFetchStartUs = backend::Tools::getTimestamp();
-        auto validFrames = proc.getValidFrames();
-        auto invalidFrames = proc.getInvalidFrames();
+        const auto bufferedFrames = proc.getBufferedFrameCounts();
         const uint64_t tFetchEndUs = backend::Tools::getTimestamp();
         lastFetchTimeMs_ = static_cast<double>(tFetchEndUs - tFetchStartUs) / 1000.0;
 
@@ -73,11 +72,11 @@ namespace frontend
 
         if (experimentActive)
         {
-            size_t totalBuffered = validFrames.size() + invalidFrames.size();
+            size_t totalBuffered = bufferedFrames.total();
 
             status += QString(" | Experiment: active | buffered: valid=%1, invalid=%2")
-                          .arg(validFrames.size())
-                          .arg(invalidFrames.size());
+                          .arg(bufferedFrames.valid)
+                          .arg(bufferedFrames.invalid);
             if (flushInProgress)
             {
                 status += " (flushing...)";
@@ -92,8 +91,8 @@ namespace frontend
                 backend_.playback().queryRange(earliest, latest, count);
                 const double memMB = backend::Tools::getProcessMemoryMB();
                 size_t flushNeeded = proc.getFlushInterval();
-                SPDLOG_DEBUG("MainWindow stats: buffer_fetch_ms={:.3f}, valid={}, invalid={}, total={}, playback_range=[{},{}] count={}, flush_interval={}, flushing={}, mem_mb={:.1f}",
-                             lastFetchTimeMs_, validFrames.size(), invalidFrames.size(), totalBuffered, earliest, latest, count, flushNeeded, flushInProgress ? 1 : 0, memMB);
+                SPDLOG_DEBUG("MainWindow stats: buffer_fetch_ms={:.3f}, valid={}, invalid={}, total={}, playback_range=[{},{}] count={}, flush_interval={}, max_buffered={}, flushing={}, mem_mb={:.1f}",
+                             lastFetchTimeMs_, bufferedFrames.valid, bufferedFrames.invalid, totalBuffered, earliest, latest, count, flushNeeded, proc.getMaxBufferedFrames(), flushInProgress ? 1 : 0, memMB);
                 lastDiagLogUs = nowUs;
             }
         }

@@ -10,6 +10,8 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
+#include <iterator>
+#include <limits>
 #include <tuple>
 #include <cmath>
 
@@ -18,6 +20,21 @@
 #endif
 
 namespace backend::services {
+
+namespace {
+
+size_t defaultMaxBufferedFrames(size_t flushInterval) {
+    constexpr size_t kMinBufferedFrames = 1000;
+    constexpr size_t kSoftMaxBufferedFrames = 5000;
+
+    const size_t scaled = flushInterval > (std::numeric_limits<size_t>::max() / 4)
+                              ? std::numeric_limits<size_t>::max()
+                              : flushInterval * 4;
+    const size_t preferred = std::max(kMinBufferedFrames, scaled);
+    return std::max(flushInterval, std::min(preferred, kSoftMaxBufferedFrames));
+}
+
+} // namespace
 
 ProcessingService::ProcessingService() = default;
 ProcessingService::~ProcessingService() { stop(); }
@@ -169,27 +186,40 @@ void ProcessingService::startExperiment() {
     std::scoped_lock lk(framesMutex_);
     validFrames_.clear();
     invalidFrames_.clear();
-    // Reserve capacity to avoid frequent reallocations during accumulation
-    // Estimate: at 5000 fps, 1000 frame flush interval = ~0.2 seconds = ~1000 frames
-    validFrames_.reserve(flushInterval_.load());
-    invalidFrames_.reserve(flushInterval_.load() * 10); // More invalid frames expected
+    // Reserve within the same cap used at runtime; invalid frames are sampled
+    // and may dominate sparse-valid runs, but should not pre-allocate beyond
+    // the bounded backlog.
+    const size_t flushInterval = flushInterval_.load(std::memory_order_relaxed);
+    const size_t maxBuffered = maxBufferedFrames_.load(std::memory_order_relaxed);
+    const size_t validReserve = std::min(flushInterval, maxBuffered);
+    validFrames_.reserve(validReserve);
+    invalidFrames_.reserve(maxBuffered - validReserve);
     framesSinceLastFlush_.store(0);
     invalidFrameCounter_.store(0);
     totalValidFlushed_.store(0, std::memory_order_relaxed);
+    droppedValidFrames_.store(0, std::memory_order_relaxed);
+    droppedInvalidFrames_.store(0, std::memory_order_relaxed);
+    lastDropLogUs_.store(0, std::memory_order_relaxed);
     resetRealtimeMetrics();
     // Reset auto-capture counter when experiment starts
     consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
     experimentActive_.store(true);
     backend::diagnostics::CrashStateMirror::instance().processing.experimentActive.store(true);
-    SPDLOG_INFO("ProcessingService: experiment started, frame buffers cleared (flush interval: {} frames, invalid sampling: every {}th)",
-                flushInterval_.load(), invalidFrameSamplingRate_.load());
+    SPDLOG_INFO("ProcessingService: experiment started, frame buffers cleared (flush interval: {} frames, max buffered: {}, invalid sampling: every {}th)",
+                flushInterval, maxBuffered, invalidFrameSamplingRate_.load());
 }
 
 void ProcessingService::endExperiment() {
     experimentActive_.store(false);
     backend::diagnostics::CrashStateMirror::instance().processing.experimentActive.store(false);
+    BufferedFrameCounts counts{};
+    {
+        std::scoped_lock lk(framesMutex_);
+        counts.valid = validFrames_.size();
+        counts.invalid = invalidFrames_.size();
+    }
     SPDLOG_INFO("ProcessingService: experiment ended, valid frames: {}, invalid frames: {}",
-                validFrames_.size(), invalidFrames_.size());
+                counts.valid, counts.invalid);
 }
 
 std::vector<ProcessedFrame> ProcessingService::getValidFrames() const {
@@ -202,10 +232,16 @@ std::vector<ProcessedFrame> ProcessingService::getInvalidFrames() const {
     return invalidFrames_;
 }
 
+BufferedFrameCounts ProcessingService::getBufferedFrameCounts() const {
+    std::scoped_lock lk(framesMutex_);
+    return BufferedFrameCounts{validFrames_.size(), invalidFrames_.size()};
+}
+
 void ProcessingService::clearAccumulatedFrames() {
     std::scoped_lock lk(framesMutex_);
     validFrames_.clear();
     invalidFrames_.clear();
+    framesSinceLastFlush_.store(0, std::memory_order_relaxed);
 }
 
 std::vector<ProcessedFrame> ProcessingService::getMonitoringValidFrames() const {
@@ -442,6 +478,107 @@ void ProcessingService::setBackgroundCaptureCallback(BackgroundCaptureCallback c
     backgroundCaptureCallback_ = std::move(callback);
 }
 
+ProcessingService::DroppedFrameCounts ProcessingService::trimExperimentBuffersLocked(size_t maxBufferedFrames) {
+    DroppedFrameCounts dropped{};
+    if (maxBufferedFrames == 0) {
+        maxBufferedFrames = 1;
+    }
+
+    while (validFrames_.size() + invalidFrames_.size() > maxBufferedFrames && !invalidFrames_.empty()) {
+        invalidFrames_.erase(invalidFrames_.begin());
+        ++dropped.invalid;
+    }
+
+    while (validFrames_.size() + invalidFrames_.size() > maxBufferedFrames && !validFrames_.empty()) {
+        validFrames_.erase(validFrames_.begin());
+        ++dropped.valid;
+    }
+
+    if (dropped.valid > 0) {
+        droppedValidFrames_.fetch_add(static_cast<uint64_t>(dropped.valid), std::memory_order_relaxed);
+    }
+    if (dropped.invalid > 0) {
+        droppedInvalidFrames_.fetch_add(static_cast<uint64_t>(dropped.invalid), std::memory_order_relaxed);
+    }
+
+    framesSinceLastFlush_.store(validFrames_.size() + invalidFrames_.size(), std::memory_order_relaxed);
+    return dropped;
+}
+
+void ProcessingService::logDroppedExperimentFrames(const DroppedFrameCounts& dropped,
+                                                   size_t bufferedTotal,
+                                                   size_t maxBufferedFrames) {
+    if (dropped.valid == 0 && dropped.invalid == 0) {
+        return;
+    }
+
+    const uint64_t nowUs = backend::Tools::getTimestamp();
+    uint64_t lastUs = lastDropLogUs_.load(std::memory_order_relaxed);
+    if (nowUs - lastUs < 1'000'000ULL ||
+        !lastDropLogUs_.compare_exchange_strong(lastUs, nowUs, std::memory_order_relaxed)) {
+        return;
+    }
+
+    SPDLOG_WARN("Experiment frame backlog capped: dropped valid={}, invalid={} "
+                "(buffered={}, max={}, total_dropped_valid={}, total_dropped_invalid={})",
+                dropped.valid,
+                dropped.invalid,
+                bufferedTotal,
+                maxBufferedFrames,
+                droppedValidFrames_.load(std::memory_order_relaxed),
+                droppedInvalidFrames_.load(std::memory_order_relaxed));
+}
+
+bool ProcessingService::appendExperimentFrame(ProcessedFrame&& frame, bool isValid) {
+    DroppedFrameCounts dropped{};
+    size_t bufferedTotal = 0;
+    bool stored = false;
+    const size_t maxBufferedFrames = std::max<size_t>(1, maxBufferedFrames_.load(std::memory_order_relaxed));
+
+    {
+        std::scoped_lock framesLk(framesMutex_);
+        const size_t currentTotal = validFrames_.size() + invalidFrames_.size();
+
+        if (currentTotal >= maxBufferedFrames) {
+            if (isValid && !invalidFrames_.empty()) {
+                invalidFrames_.erase(invalidFrames_.begin());
+                ++dropped.invalid;
+            } else {
+                if (isValid) {
+                    ++dropped.valid;
+                    droppedValidFrames_.fetch_add(1, std::memory_order_relaxed);
+                } else {
+                    ++dropped.invalid;
+                    droppedInvalidFrames_.fetch_add(1, std::memory_order_relaxed);
+                }
+                bufferedTotal = currentTotal;
+                framesSinceLastFlush_.store(bufferedTotal, std::memory_order_relaxed);
+            }
+        }
+
+        if (bufferedTotal == 0) {
+            if (isValid) {
+                validFrames_.emplace_back(std::move(frame));
+            } else {
+                invalidFrames_.emplace_back(std::move(frame));
+            }
+            if (dropped.invalid > 0) {
+                droppedInvalidFrames_.fetch_add(static_cast<uint64_t>(dropped.invalid), std::memory_order_relaxed);
+            }
+
+            DroppedFrameCounts extraDropped = trimExperimentBuffersLocked(maxBufferedFrames);
+            dropped.valid += extraDropped.valid;
+            dropped.invalid += extraDropped.invalid;
+            bufferedTotal = validFrames_.size() + invalidFrames_.size();
+            framesSinceLastFlush_.store(bufferedTotal, std::memory_order_relaxed);
+            stored = true;
+        }
+    }
+
+    logDroppedExperimentFrames(dropped, bufferedTotal, maxBufferedFrames);
+    return stored;
+}
+
 size_t ProcessingService::flushBufferedFrames(class Hdf5Service& hdf5) {
     std::vector<ProcessedFrame> validToFlush;
     std::vector<ProcessedFrame> invalidToFlush;
@@ -474,18 +611,35 @@ size_t ProcessingService::flushBufferedFrames(class Hdf5Service& hdf5) {
 
         if (ok) {
             size_t flushed = validCount + invalidCount;
-            framesSinceLastFlush_.store(0, std::memory_order_relaxed);
             if (validCount > 0) {
                 totalValidFlushed_.fetch_add(static_cast<uint64_t>(validCount), std::memory_order_relaxed);
+            }
+            {
+                std::scoped_lock lk(framesMutex_);
+                framesSinceLastFlush_.store(validFrames_.size() + invalidFrames_.size(), std::memory_order_relaxed);
             }
             SPDLOG_INFO("HDF5 flush end: flushed={} (valid={}, invalid={}) duration_ms={:.3f} mem_mb_after={:.1f}",
                         flushed, validCount, invalidCount, ms, memAfterMB);
             return flushed;
         } else {
-            // Flush failed, put frames back
-            std::scoped_lock lk(framesMutex_);
-            validFrames_.insert(validFrames_.end(), validToFlush.begin(), validToFlush.end());
-            invalidFrames_.insert(invalidFrames_.end(), invalidToFlush.begin(), invalidToFlush.end());
+            DroppedFrameCounts dropped{};
+            size_t bufferedTotal = 0;
+            const size_t maxBufferedFrames = std::max<size_t>(1, maxBufferedFrames_.load(std::memory_order_relaxed));
+            {
+                // Restore failed frames ahead of frames accumulated during the write,
+                // then re-apply the backlog cap so a persistent HDF5 failure cannot
+                // retry itself into unbounded RAM growth.
+                std::scoped_lock lk(framesMutex_);
+                validFrames_.insert(validFrames_.begin(),
+                                    std::make_move_iterator(validToFlush.begin()),
+                                    std::make_move_iterator(validToFlush.end()));
+                invalidFrames_.insert(invalidFrames_.begin(),
+                                      std::make_move_iterator(invalidToFlush.begin()),
+                                      std::make_move_iterator(invalidToFlush.end()));
+                dropped = trimExperimentBuffersLocked(maxBufferedFrames);
+                bufferedTotal = validFrames_.size() + invalidFrames_.size();
+            }
+            logDroppedExperimentFrames(dropped, bufferedTotal, maxBufferedFrames);
             SPDLOG_ERROR("HDF5 flush failed after {:.3f} ms; frames restored (valid={}, invalid={}), mem_mb_after_fail={:.1f}",
                          ms, validCount, invalidCount, memAfterMB);
             return 0;
@@ -498,11 +652,17 @@ size_t ProcessingService::flushBufferedFrames(class Hdf5Service& hdf5) {
 void ProcessingService::setFlushInterval(size_t frames) {
     if (frames == 0) frames = 1; // Minimum 1
     flushInterval_.store(frames);
-    SPDLOG_INFO("Flush interval set to: {} frames", frames);
+    const size_t maxBuffered = defaultMaxBufferedFrames(frames);
+    maxBufferedFrames_.store(maxBuffered, std::memory_order_relaxed);
+    SPDLOG_INFO("Flush interval set to: {} frames (max buffered backlog: {})", frames, maxBuffered);
 }
 
 size_t ProcessingService::getFlushInterval() const {
     return flushInterval_.load();
+}
+
+size_t ProcessingService::getMaxBufferedFrames() const {
+    return maxBufferedFrames_.load(std::memory_order_relaxed);
 }
 
 void ProcessingService::setInvalidFrameSamplingRate(size_t rate) {
@@ -1094,17 +1254,8 @@ void ProcessingService::realtimeLoop() {
                         multiImagePending = false;
                         SPDLOG_DEBUG("Multi-image series complete (ROI path): trigger_idx={}, series_size={}",
                                     pendingMultiImageFrame.index, pendingMultiImageFrame.seriesImages.size());
-                        {
-                            std::scoped_lock framesLk(framesMutex_);
-                            validFrames_.emplace_back(std::move(pendingMultiImageFrame));
-                            pendingMultiImageFrame = ProcessedFrame{};
-
-                            size_t totalFrames = validFrames_.size() + invalidFrames_.size();
-                            size_t interval = flushInterval_.load(std::memory_order_relaxed);
-                            if (interval > 0 && totalFrames >= interval) {
-                                framesSinceLastFlush_.store(totalFrames, std::memory_order_relaxed);
-                            }
-                        }
+                        appendExperimentFrame(std::move(pendingMultiImageFrame), true);
+                        pendingMultiImageFrame = ProcessedFrame{};
                     }
                 } else {
                     bool shouldSave = false;
@@ -1149,20 +1300,7 @@ void ProcessingService::realtimeLoop() {
                         frame.originalImage = fullGray.clone();
                         frame.processedImage = fullMask.clone();
 
-                        {
-                            std::scoped_lock framesLk(framesMutex_);
-                            if (validation.isValid) {
-                                validFrames_.emplace_back(std::move(frame));
-                            } else {
-                                invalidFrames_.emplace_back(std::move(frame));
-                            }
-
-                            size_t totalFrames = validFrames_.size() + invalidFrames_.size();
-                            size_t interval = flushInterval_.load(std::memory_order_relaxed);
-                            if (interval > 0 && totalFrames >= interval) {
-                                framesSinceLastFlush_.store(totalFrames, std::memory_order_relaxed);
-                            }
-                        }
+                        appendExperimentFrame(std::move(frame), validation.isValid);
                     }
                 }
             } else if (multiImagePending) {
@@ -1171,11 +1309,8 @@ void ProcessingService::realtimeLoop() {
                             pendingMultiImageFrame.index, pendingMultiImageFrame.seriesImages.size());
                 multiImagePending = false;
                 multiImageRemaining = 0;
-                {
-                    std::scoped_lock framesLk(framesMutex_);
-                    validFrames_.emplace_back(std::move(pendingMultiImageFrame));
-                    pendingMultiImageFrame = ProcessedFrame{};
-                }
+                appendExperimentFrame(std::move(pendingMultiImageFrame), true);
+                pendingMultiImageFrame = ProcessedFrame{};
             }
 
                 // Publish snapshot
@@ -1458,20 +1593,7 @@ void ProcessingService::realtimeLoop() {
                         frame.originalImage = gray.clone();
                         frame.processedImage = mask.clone();
                         
-                        {
-                            std::scoped_lock framesLk(framesMutex_);
-                            if (validation.isValid) {
-                                validFrames_.emplace_back(std::move(frame));
-                            } else {
-                                invalidFrames_.emplace_back(std::move(frame));
-                            }
-                            
-                            size_t totalFrames = validFrames_.size() + invalidFrames_.size();
-                            size_t interval = flushInterval_.load(std::memory_order_relaxed);
-                            if (interval > 0 && totalFrames >= interval) {
-                                framesSinceLastFlush_.store(totalFrames, std::memory_order_relaxed);
-                            }
-                        }
+                        appendExperimentFrame(std::move(frame), validation.isValid);
                     }
                 }
 
@@ -1685,17 +1807,8 @@ void ProcessingService::realtimeLoop() {
                             multiImagePending = false;
                             SPDLOG_DEBUG("Multi-image series complete (with empty frames): trigger_idx={}, series_size={}",
                                         pendingMultiImageFrame.index, pendingMultiImageFrame.seriesImages.size());
-                            {
-                                std::scoped_lock framesLk(framesMutex_);
-                                validFrames_.emplace_back(std::move(pendingMultiImageFrame));
-                                pendingMultiImageFrame = ProcessedFrame{};
-
-                                size_t totalFrames = validFrames_.size() + invalidFrames_.size();
-                                size_t interval = flushInterval_.load(std::memory_order_relaxed);
-                                if (interval > 0 && totalFrames >= interval) {
-                                    framesSinceLastFlush_.store(totalFrames, std::memory_order_relaxed);
-                                }
-                            }
+                            appendExperimentFrame(std::move(pendingMultiImageFrame), true);
+                            pendingMultiImageFrame = ProcessedFrame{};
                         }
                     }
 
@@ -1836,17 +1949,8 @@ void ProcessingService::realtimeLoop() {
                             multiImagePending = false;
                             SPDLOG_DEBUG("Multi-image series complete: trigger_idx={}, series_size={}",
                                         pendingMultiImageFrame.index, pendingMultiImageFrame.seriesImages.size());
-                            {
-                                std::scoped_lock framesLk(framesMutex_);
-                                validFrames_.emplace_back(std::move(pendingMultiImageFrame));
-                                pendingMultiImageFrame = ProcessedFrame{}; // reset
-
-                                size_t totalFrames = validFrames_.size() + invalidFrames_.size();
-                                size_t interval = flushInterval_.load(std::memory_order_relaxed);
-                                if (interval > 0 && totalFrames >= interval) {
-                                    framesSinceLastFlush_.store(totalFrames, std::memory_order_relaxed);
-                                }
-                            }
+                            appendExperimentFrame(std::move(pendingMultiImageFrame), true);
+                            pendingMultiImageFrame = ProcessedFrame{}; // reset
                         }
                         // Skip normal valid/invalid save for this frame — it's part of the series
                     } else {
@@ -1886,20 +1990,7 @@ void ProcessingService::realtimeLoop() {
                             frame.originalImage = gray.clone();
                             frame.processedImage = mask.clone();
 
-                            {
-                                std::scoped_lock framesLk(framesMutex_);
-                                if (validation.isValid) {
-                                    validFrames_.emplace_back(std::move(frame));
-                                } else {
-                                    invalidFrames_.emplace_back(std::move(frame));
-                                }
-
-                                size_t totalFrames = validFrames_.size() + invalidFrames_.size();
-                                size_t interval = flushInterval_.load(std::memory_order_relaxed);
-                                if (interval > 0 && totalFrames >= interval) {
-                                    framesSinceLastFlush_.store(totalFrames, std::memory_order_relaxed);
-                                }
-                            }
+                            appendExperimentFrame(std::move(frame), validation.isValid);
                         }
                     }
                 } else if (multiImagePending) {
@@ -1909,11 +2000,8 @@ void ProcessingService::realtimeLoop() {
                                 pendingMultiImageFrame.seriesImages.size() + multiImageRemaining);
                     multiImagePending = false;
                     multiImageRemaining = 0;
-                    {
-                        std::scoped_lock framesLk(framesMutex_);
-                        validFrames_.emplace_back(std::move(pendingMultiImageFrame));
-                        pendingMultiImageFrame = ProcessedFrame{};
-                    }
+                    appendExperimentFrame(std::move(pendingMultiImageFrame), true);
+                    pendingMultiImageFrame = ProcessedFrame{};
                 }
 
                 // Publish snapshot

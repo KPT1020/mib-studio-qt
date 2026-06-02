@@ -38,9 +38,10 @@
   UI reads latest via `getLatestSnapshot`.
 - **Monitoring ring buffers** — fixed 1000-frame ring for live charts in
   [[../frontend/ExperimentMonitoringTab]]; active whenever realtime is on.
-- **Experiment accumulation** — unbounded vectors collected while
+- **Experiment accumulation** — bounded vectors collected while
   `experimentActive_ == true`, periodically flushed to HDF5 via
-  `flushBufferedFrames`.
+  `flushBufferedFrames`. The realtime thread drops sampled invalid frames first
+  if HDF5 falls behind and the backlog reaches its cap.
 
 ## Shutdown order
 

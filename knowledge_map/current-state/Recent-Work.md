@@ -5,6 +5,13 @@
 
 ## Features shipped
 
+- **Long-run experiment backlog hardening** (2026-06-02) - `ProcessingService`
+  now bounds the in-memory experiment frame backlog derived from the flush
+  interval, drops sampled invalid frames before valid frames when HDF5 cannot
+  keep up, and exposes count-only buffered-frame stats. `MainWindow` and
+  `StatsDisplayManager` use the count API so 500 ms status polling no longer
+  deep-copies full OpenCV frame payloads during long experiments.
+
 - **Backend-only Linux build/test path** (2026-06-01) - Added
   `MIB_BUILD_BACKEND_ONLY` in `CMakeLists.txt` so backend workflows can skip
   frontend executable generation. Added `linux-backend-only` configure/build/test
