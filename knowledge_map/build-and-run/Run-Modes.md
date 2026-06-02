@@ -51,3 +51,22 @@ For backend CI loops without Qt Widgets/Charts frontend binaries:
 - `docs/howto/troubleshoot-crashes.md`
 - `docs/howto/safe-start-stop-egrabber.md`
 - `knowledge_map/task/qt_qpa_platform_plugin_missing_windows.md`
+
+## Backend crash-durability validation (headless)
+
+Use `hdf5_abrupt_stop_tool` in backend-only Linux builds to run SIGKILL-style
+HDF5 durability checks and frame-content validation against mock source frames.
+
+```bash
+# writer modes (run in one shell; kill externally)
+hdf5_abrupt_stop_tool run-experiment /tmp/test_exp.h5
+hdf5_abrupt_stop_tool run-recording /tmp/test_rec.h5
+
+# post-kill validators
+hdf5_abrupt_stop_tool check-checkpoint /tmp/test_exp.h5
+hdf5_abrupt_stop_tool check-experiment /tmp/test_exp.h5
+hdf5_abrupt_stop_tool check-recording /tmp/test_rec.h5
+```
+
+Each `check-*` mode writes a contact-sheet preview to `<file>.preview.png` for
+visual spot-checking and enforces non-empty recovery checkpoint files.

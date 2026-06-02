@@ -16,9 +16,10 @@
   (`initializeDatasets` + `appendFrames`).
 - Stores experiment metadata: start/end time (ns), totals, `ProcessingConfig`,
   ROI, optional background image; plus raw config JSON via `writeConfigJson`.
-- After each successful append/metadata write, forces an HDF5 flush and writes
-  a rolling checkpoint copy to `<file>.recovery.h5` so abrupt crashes leave a
-  recoverable snapshot.
+- After each successful append/metadata write, forces an HDF5 flush and updates
+  a rolling recovery checkpoint using an atomic promotion flow:
+  `<file>.recovery.h5.tmp` (staging) -> `.recovery.h5` (active), with
+  `.recovery.h5.bak` retained during rotation.
 - Review reads: `readValidFrames`, `readInvalidFrames`, plus scalable
   `readImageByIndex` / `readImagesRange` using hyperslabs.
 - Metadata-only reads (`readValidMetadata` / `readInvalidMetadata`) skip
@@ -45,8 +46,10 @@ Blocking I/O on whichever thread calls it. In practice:
 ## Gotchas
 
 - `writeConfigJson` must follow `writeExperimentInfo`.
-- `loadFile(path)` now auto-falls back to `path + ".recovery.h5"` if the
-  primary file cannot be opened (e.g. interrupted write/corruption).
+- `loadFile(path)` tries the primary file first, then
+  `path + ".recovery.h5"`, then `path + ".recovery.h5.bak"` if needed.
+- `.recovery.h5.tmp` may exist after an abrupt kill, but should be ignored;
+  only `.recovery.h5` / `.bak` are considered for load fallback.
 - Scalable reads (`readImageByIndex`, `readImagesRange`) support both 3D
   `(N,H,W)` and 4D `(N,H,W,C)` datasets — use them for large files instead
   of `readValidFrames` to avoid OOM. See task

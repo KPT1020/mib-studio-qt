@@ -314,6 +314,11 @@ if(BUILD_TESTING)
     target_link_libraries(mib_backend_smoke_test PRIVATE mib_backend)
     add_test(NAME backend.smoke COMMAND mib_backend_smoke_test)
     set_tests_properties(backend.smoke PROPERTIES LABELS "backend")
+
+    add_executable(hdf5_abrupt_stop_tool
+        src/tests/hdf5_abrupt_stop_tool.cpp
+    )
+    target_link_libraries(hdf5_abrupt_stop_tool PRIVATE mib_backend)
 endif()
 
 if(NOT MIB_BUILD_BACKEND_ONLY)

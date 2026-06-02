@@ -23,6 +23,7 @@ From `CMakePresets.json`:
 | `mib_backend` | STATIC library | Core: services, camera abstraction, processing |
 | `mib_studio_qt` | executable (`WIN32` on Windows) | Production app |
 | `mock_studio_qt` | executable | Dev app with mock-camera GUI selector |
+| `hdf5_abrupt_stop_tool` | executable | Kill-style HDF5 durability validator (crash + visual integrity checks) |
 | `mib_backend_smoke_test` | executable test | Backend-only HDF5/open/flush smoke test (`ctest -L backend`) |
 
 `mib_backend` is linked by both executables. Source is in
