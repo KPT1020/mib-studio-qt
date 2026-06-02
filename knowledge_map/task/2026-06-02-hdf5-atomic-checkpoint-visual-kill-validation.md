@@ -36,9 +36,12 @@ recovery artifacts were never left as active zero-byte files.
      - `check-experiment <h5>`
      - `check-recording <h5>`
    - Visual/content checks:
-     - samples saved frames from HDF5
-     - compares sampled frames to mock source images (MAD threshold)
-     - writes contact-sheet preview to `<file>.preview.png`
+     - loads mock reference frames using the same grayscale conversion path
+       as `MockCamera`
+     - compares each saved frame to the corresponding input frame using
+       metadata index mapping
+     - enforces bit-identical pixel equality (not similarity threshold)
+     - writes side-by-side preview rows to `<file>.preview.png`
 
 3. Documentation updates:
    - `knowledge_map/services/Hdf5Service.md`
@@ -54,5 +57,5 @@ recovery artifacts were never left as active zero-byte files.
 - Repeated `SIGKILL` loops for both experiment and recording modes passed:
   - checkpoint file remained non-empty
   - HDF5 datasets readable
-  - sampled frames matched mock references
-  - preview contact sheets produced.
+  - per-frame input-vs-saved comparisons were bit-identical
+  - side-by-side preview sheets were produced.

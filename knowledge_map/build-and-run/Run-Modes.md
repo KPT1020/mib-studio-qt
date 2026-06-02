@@ -55,7 +55,8 @@ For backend CI loops without Qt Widgets/Charts frontend binaries:
 ## Backend crash-durability validation (headless)
 
 Use `hdf5_abrupt_stop_tool` in backend-only Linux builds to run SIGKILL-style
-HDF5 durability checks and frame-content validation against mock source frames.
+HDF5 durability checks and strict frame-identity validation against mock source
+frames (input frame index -> saved frame index).
 
 ```bash
 # writer modes (run in one shell; kill externally)
@@ -68,5 +69,6 @@ hdf5_abrupt_stop_tool check-experiment /tmp/test_exp.h5
 hdf5_abrupt_stop_tool check-recording /tmp/test_rec.h5
 ```
 
-Each `check-*` mode writes a contact-sheet preview to `<file>.preview.png` for
-visual spot-checking and enforces non-empty recovery checkpoint files.
+Each `check-*` mode writes a side-by-side preview to `<file>.preview.png`
+(input/reference vs saved frame) and enforces non-empty recovery checkpoint
+files plus bit-identical frame equality.

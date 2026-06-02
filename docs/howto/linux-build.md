@@ -95,6 +95,6 @@ build/linux-backend/hdf5_abrupt_stop_tool check-experiment /tmp/kill_exp.h5
 build/linux-backend/hdf5_abrupt_stop_tool check-recording /tmp/kill_rec.h5
 ```
 
-`check-experiment` and `check-recording` emit `<file>.preview.png` contact
-sheets and compare sampled frames to mock-source frames to detect scrambled
-content beyond basic HDF5 readability checks.
+`check-experiment` and `check-recording` emit `<file>.preview.png` side-by-side
+input-vs-saved previews and enforce bit-identical pixel comparison between each
+saved frame and its corresponding mock input frame (by metadata index).

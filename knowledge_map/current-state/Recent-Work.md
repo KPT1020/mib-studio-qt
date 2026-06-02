@@ -11,9 +11,9 @@
   checkpoint to `.recovery.h5` so abrupt kill timing cannot leave a truncated
   active recovery file. `loadFile()` now falls back through primary -> recovery
   -> backup. Added `hdf5_abrupt_stop_tool` (backend test target) with
-  `check-experiment` / `check-recording` modes that validate sampled frame
-  content against mock-source imagery and export contact-sheet previews for
-  visual review.
+  `check-experiment` / `check-recording` modes that enforce bit-identical
+  input-vs-saved frame equality (mapped by metadata index) and export
+  side-by-side previews for audit.
 
 - **Backend-only Linux build/test path** (2026-06-01) - Added
   `MIB_BUILD_BACKEND_ONLY` in `CMakeLists.txt` so backend workflows can skip

@@ -3,18 +3,22 @@
 #include "backend/services/Hdf5Service.h"
 #include "backend/services/ProcessingService.h"
 
+#include <QImage>
+#include <QImageReader>
+#include <QString>
+
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
-#include <cctype>
 #include <atomic>
 #include <chrono>
+#include <cctype>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
-#include <random>
 #include <string>
 #include <thread>
 #include <vector>
@@ -25,14 +29,23 @@ using namespace std::chrono_literals;
 
 constexpr const char *kMockDir = "/workspace/data/mock_frames";
 
-std::string makeTempPath(const std::string &prefix)
+QString toQString(const std::filesystem::path &path)
 {
-    std::random_device rd;
-    std::mt19937_64 gen(rd());
-    std::uniform_int_distribution<unsigned long long> dist;
-    return (std::filesystem::temp_directory_path() /
-            (prefix + "_" + std::to_string(dist(gen)) + ".h5"))
-        .string();
+#ifdef _WIN32
+    return QString::fromStdWString(path.wstring());
+#else
+    return QString::fromUtf8(path.u8string().c_str());
+#endif
+}
+
+bool hasSupportedExtension(const std::filesystem::path &path)
+{
+    static const std::vector<std::string> exts = {
+        ".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"};
+    std::string ext = path.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c)
+                   { return static_cast<char>(std::tolower(c)); });
+    return std::find(exts.begin(), exts.end(), ext) != exts.end();
 }
 
 void configureMockEnvironment()
@@ -94,29 +107,56 @@ std::vector<cv::Mat> loadMockReferenceFrames()
     {
         return refs;
     }
+
     for (const auto &entry : std::filesystem::directory_iterator(dir))
     {
         if (!entry.is_regular_file())
         {
             continue;
         }
-        const auto ext = entry.path().extension().string();
-        std::string lower = ext;
-        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        if (lower == ".png" || lower == ".jpg" || lower == ".jpeg" || lower == ".tif" || lower == ".tiff")
+        if (!hasSupportedExtension(entry.path()))
         {
-            files.push_back(entry.path());
+            continue;
         }
+        files.push_back(entry.path());
     }
     std::sort(files.begin(), files.end());
-    for (const auto &f : files)
+
+    for (const auto &path : files)
     {
-        cv::Mat img = cv::imread(f.string(), cv::IMREAD_GRAYSCALE);
-        if (!img.empty())
+        std::string ext = path.extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c)
+                       { return static_cast<char>(std::tolower(c)); });
+
+        QImageReader reader(toQString(path));
+        reader.setAutoTransform(true);
+        QImage image = reader.read();
+
+        cv::Mat gray;
+        if (!image.isNull())
         {
-            refs.push_back(img);
+            QImage mono = image.convertToFormat(QImage::Format_Grayscale8);
+            cv::Mat wrapped(mono.height(), mono.width(), CV_8UC1,
+                            const_cast<uchar *>(mono.constBits()),
+                            static_cast<size_t>(mono.bytesPerLine()));
+            gray = wrapped.clone();
+        }
+        else if (ext == ".tif" || ext == ".tiff")
+        {
+            // MockCamera only falls back to OpenCV for TIFF files.
+            cv::Mat fallback = cv::imread(path.string(), cv::IMREAD_GRAYSCALE);
+            if (!fallback.empty())
+            {
+                gray = fallback;
+            }
+        }
+
+        if (!gray.empty())
+        {
+            refs.push_back(gray);
         }
     }
+
     return refs;
 }
 
@@ -145,83 +185,104 @@ cv::Mat toGray8(const cv::Mat &src)
     return gray;
 }
 
-double bestMadToReferences(const cv::Mat &frameGray, const std::vector<cv::Mat> &refs)
+bool areMatsBitIdentical(const cv::Mat &lhs, const cv::Mat &rhs)
 {
-    double bestMad = 1e12;
-    for (const auto &refRaw : refs)
-    {
-        if (refRaw.empty())
-        {
-            continue;
-        }
-        cv::Mat ref = toGray8(refRaw);
-        if (ref.empty())
-        {
-            continue;
-        }
-
-        cv::Mat refMatched;
-        if (ref.size() == frameGray.size())
-        {
-            refMatched = ref;
-        }
-        else
-        {
-            cv::resize(ref, refMatched, frameGray.size(), 0.0, 0.0, cv::INTER_LINEAR);
-        }
-
-        cv::Mat diff;
-        cv::absdiff(frameGray, refMatched, diff);
-        const double mad = cv::mean(diff)[0];
-        bestMad = std::min(bestMad, mad);
-    }
-    return bestMad;
-}
-
-bool writeContactSheet(const std::vector<cv::Mat> &frames, const std::string &outPath)
-{
-    if (frames.empty())
+    if (lhs.empty() || rhs.empty())
     {
         return false;
     }
-    constexpr int cols = 4;
-    const int rows = static_cast<int>((frames.size() + cols - 1) / cols);
+    if (lhs.type() != rhs.type() || lhs.rows != rhs.rows || lhs.cols != rhs.cols)
+    {
+        return false;
+    }
+
+    const size_t rowBytes = static_cast<size_t>(lhs.cols) * lhs.elemSize();
+    for (int r = 0; r < lhs.rows; ++r)
+    {
+        const uint8_t *a = lhs.ptr<uint8_t>(r);
+        const uint8_t *b = rhs.ptr<uint8_t>(r);
+        if (std::memcmp(a, b, rowBytes) != 0)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+struct IdentityPreviewRow
+{
+    size_t datasetIndex{0};
+    uint64_t sourceIndex{0};
+    bool identical{false};
+    cv::Mat expected;
+    cv::Mat actual;
+};
+
+bool writeIdentityComparisonSheet(const std::vector<IdentityPreviewRow> &rows, const std::string &outPath)
+{
+    if (rows.empty())
+    {
+        return false;
+    }
+
     constexpr int tileW = 220;
     constexpr int tileH = 220;
-    cv::Mat canvas(rows * tileH, cols * tileW, CV_8UC1, cv::Scalar(0));
+    constexpr int headerH = 38;
+    constexpr int colGap = 12;
+    const int canvasW = (tileW * 2) + colGap;
+    const int canvasH = static_cast<int>(rows.size()) * (tileH + headerH);
+    cv::Mat canvas(canvasH, canvasW, CV_8UC3, cv::Scalar(12, 12, 12));
 
-    for (size_t i = 0; i < frames.size(); ++i)
+    for (size_t i = 0; i < rows.size(); ++i)
     {
-        cv::Mat gray = toGray8(frames[i]);
-        if (gray.empty())
+        const auto &row = rows[i];
+        const int y0 = static_cast<int>(i) * (tileH + headerH);
+
+        const std::string label = "src=" + std::to_string(row.sourceIndex) +
+                                  " saved=" + std::to_string(row.datasetIndex) +
+                                  (row.identical ? " OK" : " DIFF");
+        const cv::Scalar textColor = row.identical ? cv::Scalar(80, 220, 80) : cv::Scalar(80, 80, 255);
+        cv::putText(canvas, label, cv::Point(8, y0 + 24), cv::FONT_HERSHEY_SIMPLEX, 0.6, textColor, 1, cv::LINE_AA);
+
+        if (!row.expected.empty())
         {
-            continue;
+            cv::Mat expectedResized;
+            cv::resize(row.expected, expectedResized, cv::Size(tileW, tileH), 0.0, 0.0, cv::INTER_AREA);
+            cv::Mat expectedBgr;
+            cv::cvtColor(expectedResized, expectedBgr, cv::COLOR_GRAY2BGR);
+            expectedBgr.copyTo(canvas(cv::Rect(0, y0 + headerH, tileW, tileH)));
         }
-        cv::Mat resized;
-        cv::resize(gray, resized, cv::Size(tileW, tileH), 0.0, 0.0, cv::INTER_AREA);
-        const int r = static_cast<int>(i / cols);
-        const int c = static_cast<int>(i % cols);
-        resized.copyTo(canvas(cv::Rect(c * tileW, r * tileH, tileW, tileH)));
+
+        if (!row.actual.empty())
+        {
+            cv::Mat actualResized;
+            cv::resize(row.actual, actualResized, cv::Size(tileW, tileH), 0.0, 0.0, cv::INTER_AREA);
+            cv::Mat actualBgr;
+            cv::cvtColor(actualResized, actualBgr, cv::COLOR_GRAY2BGR);
+            actualBgr.copyTo(canvas(cv::Rect(tileW + colGap, y0 + headerH, tileW, tileH)));
+        }
     }
+
     return cv::imwrite(outPath, canvas);
 }
 
-struct DatasetVisualCheckResult
+struct DatasetIdentityCheckResult
 {
     bool readable{false};
-    bool visuallyConsistent{false};
-    size_t sampledFrames{0};
-    size_t matchedFrames{0};
-    double worstMad{0.0};
+    bool identical{false};
+    size_t comparedFrames{0};
+    size_t identicalFrames{0};
+    size_t mismatchFrames{0};
     std::string previewPath;
 };
 
-DatasetVisualCheckResult validateDatasetVisuals(backend::services::Hdf5Service &hdf5,
-                                                const std::string &datasetPath,
-                                                const std::string &previewPath,
-                                                const std::vector<cv::Mat> &refs)
+DatasetIdentityCheckResult validateDatasetIdentity(backend::services::Hdf5Service &hdf5,
+                                                   const std::string &datasetPath,
+                                                   const std::vector<backend::services::ProcessedFrame> &metadata,
+                                                   const std::string &previewPath,
+                                                   const std::vector<cv::Mat> &refs)
 {
-    DatasetVisualCheckResult result;
+    DatasetIdentityCheckResult result;
     result.previewPath = previewPath;
 
     size_t count = 0;
@@ -234,61 +295,64 @@ DatasetVisualCheckResult validateDatasetVisuals(backend::services::Hdf5Service &
     }
     result.readable = true;
 
-    const size_t sampleCount = std::min<size_t>(count, 16);
-    std::vector<cv::Mat> sampled;
-    sampled.reserve(sampleCount);
-
-    for (size_t i = 0; i < sampleCount; ++i)
+    if (refs.empty() || metadata.empty())
     {
-        cv::Mat frame;
-        if (!hdf5.readImageByIndex(datasetPath, i, frame))
-        {
-            continue;
-        }
-        cv::Mat gray = toGray8(frame);
-        if (gray.empty())
-        {
-            continue;
-        }
-        sampled.push_back(gray);
-    }
-
-    result.sampledFrames = sampled.size();
-    if (result.sampledFrames == 0)
-    {
+        SPDLOG_ERROR("Identity check cannot run (refs={}, metadata={})", refs.size(), metadata.size());
         return result;
     }
 
-    bool wrotePreview = writeContactSheet(sampled, previewPath);
-    if (!wrotePreview)
-    {
-        SPDLOG_WARN("Failed to write preview contact sheet: {}", previewPath);
-    }
+    const size_t compareCount = std::min(count, metadata.size());
+    std::vector<IdentityPreviewRow> previewRows;
+    previewRows.reserve(8);
 
-    double worstMad = 0.0;
-    size_t matched = 0;
-    for (const auto &gray : sampled)
+    for (size_t i = 0; i < compareCount; ++i)
     {
-        cv::Scalar mean;
-        cv::Scalar stddev;
-        cv::meanStdDev(gray, mean, stddev);
-        const bool nonFlat = stddev[0] > 1.0;
-        if (!nonFlat)
+        cv::Mat saved;
+        if (!hdf5.readImageByIndex(datasetPath, i, saved))
         {
+            result.mismatchFrames += 1;
             continue;
         }
-        const double mad = refs.empty() ? 0.0 : bestMadToReferences(gray, refs);
-        worstMad = std::max(worstMad, mad);
-        if (refs.empty() || mad < 5.0)
+
+        cv::Mat actual = toGray8(saved);
+        if (actual.empty())
         {
-            ++matched;
+            result.mismatchFrames += 1;
+            continue;
+        }
+
+        const uint64_t sourceIndex = metadata[i].index;
+        const cv::Mat &expectedRef = refs[sourceIndex % refs.size()];
+        if (expectedRef.empty())
+        {
+            result.mismatchFrames += 1;
+            continue;
+        }
+
+        const bool identical = areMatsBitIdentical(expectedRef, actual);
+        result.comparedFrames += 1;
+        if (identical)
+        {
+            result.identicalFrames += 1;
+        }
+        else
+        {
+            result.mismatchFrames += 1;
+        }
+
+        if (previewRows.size() < 8)
+        {
+            previewRows.push_back(IdentityPreviewRow{
+                i, sourceIndex, identical, expectedRef, actual});
         }
     }
 
-    result.matchedFrames = matched;
-    result.worstMad = worstMad;
-    const size_t minimumMatches = std::max<size_t>(1, (result.sampledFrames * 8) / 10);
-    result.visuallyConsistent = matched >= minimumMatches;
+    if (!previewRows.empty() && !writeIdentityComparisonSheet(previewRows, previewPath))
+    {
+        SPDLOG_WARN("Failed to write identity comparison sheet: {}", previewPath);
+    }
+
+    result.identical = (count > 0 && metadata.size() >= count && result.comparedFrames == count && result.mismatchFrames == 0);
     return result;
 }
 
@@ -392,16 +456,27 @@ int checkExperiment(const std::string &path)
         return 2;
     }
 
+    std::vector<backend::services::ProcessedFrame> metadata;
+    const bool metadataOk =
+        (datasetPath == "/valid_frames/images") ? hdf5.readValidMetadata(metadata)
+                                                 : hdf5.readInvalidMetadata(metadata);
+
     const auto refs = loadMockReferenceFrames();
-    const auto visual = validateDatasetVisuals(hdf5, datasetPath, path + ".preview.png", refs);
+    const auto identity = validateDatasetIdentity(hdf5, datasetPath, metadata, path + ".preview.png", refs);
     hdf5.closeFile();
 
-    SPDLOG_INFO("Experiment check: valid={} invalid={} sampled={} matched={} worst_mad={:.3f} preview={}",
-                validCount, invalidCount, visual.sampledFrames, visual.matchedFrames,
-                visual.worstMad, visual.previewPath);
-    if (!visual.readable || !visual.visuallyConsistent)
+    SPDLOG_INFO("Experiment check: valid={} invalid={} metadata={} compared={} identical={} mismatches={} preview={}",
+                validCount, invalidCount, metadata.size(), identity.comparedFrames,
+                identity.identicalFrames, identity.mismatchFrames, identity.previewPath);
+
+    if (!metadataOk || metadata.empty())
     {
-        SPDLOG_ERROR("Experiment check failed: dataset unreadable or visually inconsistent");
+        SPDLOG_ERROR("Experiment check failed: metadata not readable");
+        return 4;
+    }
+    if (!identity.readable || !identity.identical)
+    {
+        SPDLOG_ERROR("Experiment check failed: input and saved frames are not bit-identical");
         return 3;
     }
     return 0;
@@ -427,21 +502,22 @@ int checkRecording(const std::string &path)
     const bool metadataOk = hdf5.readRecordingMetadata(metadata);
 
     const auto refs = loadMockReferenceFrames();
-    const auto visual = validateDatasetVisuals(hdf5, "/recorded_frames/images", path + ".preview.png", refs);
+    const auto identity = validateDatasetIdentity(hdf5, "/recorded_frames/images", metadata,
+                                                  path + ".preview.png", refs);
     hdf5.closeFile();
 
-    SPDLOG_INFO("Recording check: images={} metadata={} sampled={} matched={} worst_mad={:.3f} preview={}",
-                imageCount, metadata.size(), visual.sampledFrames, visual.matchedFrames,
-                visual.worstMad, visual.previewPath);
+    SPDLOG_INFO("Recording check: images={} metadata={} compared={} identical={} mismatches={} preview={}",
+                imageCount, metadata.size(), identity.comparedFrames,
+                identity.identicalFrames, identity.mismatchFrames, identity.previewPath);
 
     if (!imagesOk || imageCount == 0 || !metadataOk || metadata.empty())
     {
         SPDLOG_ERROR("Recording check failed: missing readable image/metadata datasets");
         return 2;
     }
-    if (!visual.readable || !visual.visuallyConsistent)
+    if (!identity.readable || !identity.identical)
     {
-        SPDLOG_ERROR("Recording check failed: dataset unreadable or visually inconsistent");
+        SPDLOG_ERROR("Recording check failed: input and saved frames are not bit-identical");
         return 3;
     }
     return 0;
