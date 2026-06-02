@@ -69,3 +69,32 @@ This keeps Windows SDKs and packaging disabled but enables `MIB_USE_SENTRY`.
 If sentry-native or system curl dependencies are unavailable, use the regular
 `linux-release` preset for the quick compile loop and keep the Windows workflow
 for final release packaging.
+
+
+## Kill-style HDF5 durability validation
+
+Build the abrupt-stop validator in backend-only mode:
+
+```bash
+cmake --preset linux-backend-only
+cmake --build --preset linux-backend-only-build --target hdf5_abrupt_stop_tool
+```
+
+Then run a writer mode, SIGKILL it from another shell, and validate:
+
+```bash
+# shell A
+build/linux-backend/hdf5_abrupt_stop_tool run-experiment /tmp/kill_exp.h5
+
+# shell B
+pkill -9 -f "hdf5_abrupt_stop_tool run-experiment /tmp/kill_exp.h5"
+build/linux-backend/hdf5_abrupt_stop_tool check-checkpoint /tmp/kill_exp.h5
+build/linux-backend/hdf5_abrupt_stop_tool check-experiment /tmp/kill_exp.h5
+
+# recording mode check
+build/linux-backend/hdf5_abrupt_stop_tool check-recording /tmp/kill_rec.h5
+```
+
+`check-experiment` and `check-recording` emit `<file>.preview.png` side-by-side
+input-vs-saved previews and enforce bit-identical pixel comparison between each
+saved frame and its corresponding mock input frame (by metadata index).

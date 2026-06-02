@@ -49,6 +49,28 @@ namespace backend::services
             return filePath + ".recovery.h5";
         }
 
+        std::string recoveryTempPathFor(const std::string &filePath)
+        {
+            return filePath + ".recovery.h5.tmp";
+        }
+
+        std::string recoveryBackupPathFor(const std::string &filePath)
+        {
+            return filePath + ".recovery.h5.bak";
+        }
+
+        bool isNonEmptyRegularFile(const std::string &path)
+        {
+            std::error_code ec;
+            const std::filesystem::path fsPath(path);
+            if (!std::filesystem::is_regular_file(fsPath, ec) || ec)
+            {
+                return false;
+            }
+            const auto size = std::filesystem::file_size(fsPath, ec);
+            return !ec && size > 0;
+        }
+
         bool writeRecoveryCheckpoint(const std::string &filePath)
         {
             if (filePath.empty())
@@ -56,15 +78,61 @@ namespace backend::services
                 return false;
             }
 
-            std::error_code ec;
-            std::filesystem::copy_file(filePath, recoveryPathFor(filePath),
-                                       std::filesystem::copy_options::overwrite_existing, ec);
-            if (ec)
+            if (!isNonEmptyRegularFile(filePath))
             {
-                SPDLOG_WARN("Failed to write HDF5 recovery checkpoint for {}: {}",
-                            filePath, ec.message());
+                SPDLOG_WARN("Recovery checkpoint skipped; source file is empty or missing: {}", filePath);
                 return false;
             }
+
+            const std::filesystem::path sourcePath(filePath);
+            const std::filesystem::path recoveryPath(recoveryPathFor(filePath));
+            const std::filesystem::path tempPath(recoveryTempPathFor(filePath));
+            const std::filesystem::path backupPath(recoveryBackupPathFor(filePath));
+            std::error_code ec;
+
+            std::filesystem::remove(tempPath, ec);
+            ec.clear();
+            std::filesystem::copy_file(sourcePath, tempPath, std::filesystem::copy_options::overwrite_existing, ec);
+            if (ec || !isNonEmptyRegularFile(tempPath.string()))
+            {
+                SPDLOG_WARN("Failed to stage recovery checkpoint {} -> {}: {}",
+                            sourcePath.string(), tempPath.string(), ec ? ec.message() : "empty temp file");
+                std::filesystem::remove(tempPath, ec);
+                return false;
+            }
+
+            ec.clear();
+            if (std::filesystem::exists(recoveryPath, ec) && !ec)
+            {
+                std::filesystem::remove(backupPath, ec);
+                ec.clear();
+                std::filesystem::rename(recoveryPath, backupPath, ec);
+                if (ec)
+                {
+                    SPDLOG_WARN("Failed to rotate previous recovery checkpoint {} -> {}: {}",
+                                recoveryPath.string(), backupPath.string(), ec.message());
+                    std::filesystem::remove(tempPath, ec);
+                    return false;
+                }
+            }
+
+            ec.clear();
+            std::filesystem::rename(tempPath, recoveryPath, ec);
+            if (ec)
+            {
+                SPDLOG_WARN("Failed to promote recovery checkpoint {} -> {}: {}",
+                            tempPath.string(), recoveryPath.string(), ec.message());
+                std::error_code rollbackEc;
+                if (std::filesystem::exists(backupPath, rollbackEc) && !rollbackEc)
+                {
+                    std::filesystem::rename(backupPath, recoveryPath, rollbackEc);
+                }
+                std::filesystem::remove(tempPath, rollbackEc);
+                return false;
+            }
+
+            std::filesystem::remove(backupPath, ec);
+            SPDLOG_DEBUG("Recovery checkpoint updated: {}", recoveryPath.string());
             return true;
         }
     } // namespace
@@ -92,6 +160,15 @@ namespace backend::services
             return false;
         }
 
+        {
+            // Starting a new write run should not reuse stale recovery artifacts
+            // from an earlier file with the same path.
+            std::error_code ec;
+            std::filesystem::remove(recoveryPathFor(filePath), ec);
+            std::filesystem::remove(recoveryTempPathFor(filePath), ec);
+            std::filesystem::remove(recoveryBackupPathFor(filePath), ec);
+        }
+
         // Create file, overwriting if it exists
         impl_->fileId_ = H5Fcreate(filePath.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
         if (impl_->fileId_ < 0)
@@ -103,15 +180,6 @@ namespace backend::services
         impl_->filePath_ = filePath;
         impl_->isOpen_ = true;
         impl_->datasetsInitialized_ = false;
-        {
-            std::error_code ec;
-            std::filesystem::remove(recoveryPathFor(filePath), ec);
-            if (ec)
-            {
-                SPDLOG_WARN("Failed to clear stale recovery checkpoint for {}: {}",
-                            filePath, ec.message());
-            }
-        }
         impl_->validFramesWritten_ = 0;
         impl_->invalidFramesWritten_ = 0;
         impl_->seriesImagesWritten_ = 0;
@@ -482,6 +550,11 @@ namespace backend::services
 
         SPDLOG_INFO("Saved {} valid frames and {} invalid frames to HDF5",
                     validFrames.size(), invalidFrames.size());
+        if (!flush())
+        {
+            SPDLOG_WARN("saveFrames: post-write flush failed");
+        }
+        writeRecoveryCheckpoint(impl_->filePath_);
         return true;
     }
 
@@ -1435,26 +1508,36 @@ namespace backend::services
             return false;
         }
 
-        // Open existing file for reading
-        impl_->fileId_ = H5Fopen(filePath.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
-        std::string openedPath = filePath;
+        const std::vector<std::string> candidates{
+            filePath,
+            recoveryPathFor(filePath),
+            recoveryBackupPathFor(filePath)
+        };
+
+        std::string openedPath;
+        for (const auto &candidate : candidates)
+        {
+            if (candidate != filePath && !isNonEmptyRegularFile(candidate))
+            {
+                continue;
+            }
+            const hid_t candidateFile = H5Fopen(candidate.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+            if (candidateFile >= 0)
+            {
+                impl_->fileId_ = candidateFile;
+                openedPath = candidate;
+                if (candidate != filePath)
+                {
+                    SPDLOG_WARN("Loaded fallback HDF5 file after primary open failure: {}", candidate);
+                }
+                break;
+            }
+        }
+
         if (impl_->fileId_ < 0)
         {
-            const std::string recoveryPath = recoveryPathFor(filePath);
-            if (std::filesystem::exists(recoveryPath))
-            {
-                impl_->fileId_ = H5Fopen(recoveryPath.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
-                if (impl_->fileId_ >= 0)
-                {
-                    openedPath = recoveryPath;
-                    SPDLOG_WARN("Primary HDF5 open failed; loaded recovery checkpoint instead: {}", recoveryPath);
-                }
-            }
-            if (impl_->fileId_ < 0)
-            {
-                SPDLOG_ERROR("Failed to open HDF5 file for reading: {}", filePath);
-                return false;
-            }
+            SPDLOG_ERROR("Failed to open HDF5 file and fallbacks for reading: {}", filePath);
+            return false;
         }
 
         impl_->filePath_ = openedPath;
@@ -2722,21 +2805,14 @@ namespace backend::services {
             return false;
         }
 
-        // Create/open /recorded_frames group
+        // Create /recorded_frames group
         hid_t groupId = H5Gopen2(impl_->fileId_, "/recorded_frames", H5P_DEFAULT);
         if (groupId < 0)
         {
             groupId = H5Gcreate2(impl_->fileId_, "/recorded_frames", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
         }
         if (groupId >= 0)
-        {
             H5Gclose(groupId);
-        }
-        else
-        {
-            SPDLOG_ERROR("Failed to create/open /recorded_frames group");
-            return false;
-        }
 
         SPDLOG_DEBUG("HDF5 recording datasets initialized");
         return true;
@@ -2870,11 +2946,13 @@ namespace backend::services {
 
         if (alreadyWritten == 0)
             impl_->validFramesWritten_ = images.size();
+
         if (!flush())
         {
             SPDLOG_WARN("appendRecordingFrames: post-write flush failed");
         }
         writeRecoveryCheckpoint(impl_->filePath_);
+
         SPDLOG_DEBUG("Recording: appended {} frames (total: {})", images.size(), impl_->validFramesWritten_);
         return true;
     }
@@ -2942,6 +3020,7 @@ namespace backend::services {
             SPDLOG_WARN("writeRecordingInfo: post-write flush failed");
         }
         writeRecoveryCheckpoint(impl_->filePath_);
+
         SPDLOG_INFO("Recording info written: recorded={}, filtered={}", totalFrames, filteredFrames);
         return true;
     }
