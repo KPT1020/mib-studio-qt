@@ -35,13 +35,16 @@ While an experiment is active
 ([[../frontend/Controllers]] `ExperimentController::State::Active`):
 
 1. Every frame is processed (realtime drop-frames mode is ignored).
-2. Valid + invalid `ProcessedFrame` objects accumulate in-memory.
+2. Valid + invalid `ProcessedFrame` objects accumulate in-memory up to
+   `ProcessingService`'s bounded experiment backlog.
 3. Every `flushInterval` frames (default 100),
    `flushBufferedFrames(hdf5)` drains accumulated frames to HDF5 via
    `Hdf5Service::appendFrames`.
 4. Invalid frames are sampled: one in every `invalidFrameSamplingRate`
    (default 100) is retained to bound file size.
-5. On stop, any remaining accumulated frames are flushed and
+5. If HDF5 is slow or failing and the backlog reaches its cap, sampled invalid
+   frames are dropped before valid frames to avoid unbounded RAM growth.
+6. On stop, any remaining accumulated frames are flushed and
    `writeExperimentInfo` / `writeConfigJson` record metadata.
 
 ## Monitoring path

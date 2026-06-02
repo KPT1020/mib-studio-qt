@@ -18,8 +18,10 @@
   [[Controllers]] `ExperimentController`. Stop path now issues an explicit
   `Hdf5Service::flush()` immediately before `writeExperimentInfo()` to reduce
   risk of metadata writes invalidating already-persisted frame batches.
-- `onUpdateStats` — timer tick; pulls `CaptureStats`, `ProcessingStats`, and
-  autofocus state for the status bar.
+- `onUpdateStats` — timer tick; pulls `CaptureStats`, count-only
+  `ProcessingService::getBufferedFrameCounts()`, and autofocus state for the
+  status bar/sidebar. It must not copy full `ProcessedFrame` buffers on the
+  500 ms UI timer.
 - `onTabChanged(index)` — starts/stops the realtime loop when entering or
   leaving the experiment-related tabs (ExperimentController state).
 - `onNoCamerasFound` — shows a friendly dialog when

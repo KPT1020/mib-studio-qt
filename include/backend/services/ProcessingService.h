@@ -99,6 +99,13 @@ struct ProcessedFrame {
     std::vector<cv::Mat> seriesImages;
 };
 
+struct BufferedFrameCounts {
+    size_t valid{0};
+    size_t invalid{0};
+
+    size_t total() const { return valid + invalid; }
+};
+
 class ProcessingService {
 public:
     using Job = std::function<void()>;
@@ -145,6 +152,7 @@ public:
     // Frame accumulation access
     std::vector<ProcessedFrame> getValidFrames() const;
     std::vector<ProcessedFrame> getInvalidFrames() const;
+    BufferedFrameCounts getBufferedFrameCounts() const;
     void clearAccumulatedFrames();
     
     // Monitoring frames (always available, even without experiment)
@@ -159,6 +167,7 @@ public:
     // Configuration for round-robin buffer
     void setFlushInterval(size_t frames); // Flush every N frames (default: 1000)
     size_t getFlushInterval() const;
+    size_t getMaxBufferedFrames() const;
     
     // Invalid frame sampling (save every Nth invalid frame to reduce file size)
     void setInvalidFrameSamplingRate(size_t rate); // Save every Nth invalid frame (default: 100, 1 = save all)
@@ -186,6 +195,8 @@ public:
     
     // Totals for current experiment
     uint64_t getTotalValidFlushed() const { return totalValidFlushed_.load(std::memory_order_relaxed); }
+    uint64_t getDroppedValidFrames() const { return droppedValidFrames_.load(std::memory_order_relaxed); }
+    uint64_t getDroppedInvalidFrames() const { return droppedInvalidFrames_.load(std::memory_order_relaxed); }
     // Average algorithm processing time per frame over last 1s window (microseconds)
     double getAlgoAvgUs1s() const { return algoAvgUs1s_.load(std::memory_order_relaxed); }
     // Monotonic timestamp (microseconds) when algoAvgUs1s_ was last published; 0 if never
@@ -254,8 +265,16 @@ public:
     void setBackgroundCaptureCallback(BackgroundCaptureCallback callback);
 
 private:
+    struct DroppedFrameCounts {
+        size_t valid{0};
+        size_t invalid{0};
+    };
+
     void workerLoop();
     void realtimeLoop();
+    bool appendExperimentFrame(ProcessedFrame&& frame, bool isValid);
+    DroppedFrameCounts trimExperimentBuffersLocked(size_t maxBufferedFrames);
+    void logDroppedExperimentFrames(const DroppedFrameCounts& dropped, size_t bufferedTotal, size_t maxBufferedFrames);
     FilterResult filterProcessedImage(const cv::Mat& processedImage, const cv::Rect& roi, 
                                       const ProcessingConfig& config, const cv::Mat& originalImage);
     BrightnessQuantiles calculateBrightnessQuantiles(const cv::Mat& originalImage, const cv::Mat& mask);
@@ -344,6 +363,7 @@ private:
     // Round-robin buffer for periodic flushing
     std::atomic<size_t> flushInterval_{100}; // Flush every 100 frames by default
     std::atomic<size_t> framesSinceLastFlush_{0};
+    std::atomic<size_t> maxBufferedFrames_{1000};
     
     // Invalid frame sampling
     std::atomic<size_t> invalidFrameSamplingRate_{100}; // Save every 100th invalid frame by default
@@ -375,6 +395,9 @@ private:
     
     // Experiment totals
     std::atomic<uint64_t> totalValidFlushed_{0};
+    std::atomic<uint64_t> droppedValidFrames_{0};
+    std::atomic<uint64_t> droppedInvalidFrames_{0};
+    std::atomic<uint64_t> lastDropLogUs_{0};
     
     // Pixel to micron conversion factor (default: 0.4886)
     std::atomic<double> pixelToMicronFactor_{0.4886};
