@@ -43,6 +43,7 @@
 #include "backend/AppBackend.h"
 #include "frontend/models/JsonTableModel.h"
 #include "frontend/utils/JsonFlatten.h"
+#include "frontend/utils/FileIOUtils.h"
 
 namespace frontend {
 
@@ -382,8 +383,8 @@ void ConfigTabs::onReloadJson() {
     const QString path = currentJsonPath();
     if (path == defaultJsonPath()) {
         QString err;
-        if (!ensureDefaultsFile(path, ":/defaults/config.json", &err)) {
-            SPDLOG_WARN("ensureDefaultsFile(config.json) failed: {}", err.toStdString());
+        if (!FileIOUtils::ensureDefaultJsonFile(path, ":/defaults/config.json", &err)) {
+            SPDLOG_WARN("ensureDefaultJsonFile(config.json) failed: {}", err.toStdString());
         }
     }
     QString err;
