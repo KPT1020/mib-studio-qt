@@ -121,6 +121,26 @@ public:
         FilterResult validation;
     };
 
+    struct BatchPipelineConfig {
+        size_t batchSize{16};
+        size_t workerCount{1};
+        size_t maxQueuedFrames{1024};
+        ProcessingConfig processingConfig{};
+        Roi roi{};
+        cv::Mat backgroundGray;
+    };
+
+    struct BatchPipelineStats {
+        uint64_t framesEnqueued{0};
+        uint64_t framesDropped{0};
+        uint64_t framesProcessed{0};
+        uint64_t batchesProcessed{0};
+        size_t queuedFrames{0};
+        bool running{false};
+    };
+
+    using BatchResultCallback = std::function<void(std::vector<ProcessedFrame>&&)>;
+
     ProcessingService();
     ~ProcessingService();
 
@@ -249,6 +269,31 @@ public:
         const Roi& roi = Roi{0, 0, 0, 0},
         BatchProgressCallback progress = {});
 
+    // ---- Async batch pipeline ----
+    // Decouples camera ingest from image processing. enqueueBatchFrame copies
+    // the raw frame into a bounded queue and returns immediately; workers drain
+    // queued frames in batches and emit ProcessedFrame results through
+    // BatchResultCallback. The existing computeProcessedFrame() helper is used
+    // for every queued frame, so area/deformability/ring metrics match the
+    // offline batch path.
+    void configureBatchPipeline(const BatchPipelineConfig& config);
+    BatchPipelineConfig getBatchPipelineConfig() const;
+    void startBatchPipeline();
+    void startBatchPipeline(const BatchPipelineConfig& config);
+    void stopBatchPipeline();
+    bool isBatchPipelineRunning() const { return batchRunning_.load(std::memory_order_relaxed); }
+    void setBatchResultCallback(BatchResultCallback callback);
+    bool enqueueBatchFrame(const uint8_t* data,
+                           size_t size,
+                           uint64_t width,
+                           uint64_t height,
+                           size_t linePitch,
+                           uint64_t pixelFormat,
+                           uint64_t timestampNs,
+                           uint64_t index = 0);
+    bool enqueueBatchFrame(const backend::playback::Frame& frame, uint64_t index = 0);
+    BatchPipelineStats getBatchPipelineStats() const;
+
     // Ring ratio callback for autofocus (called when validated frames are processed)
     using RingRatioCallback = std::function<void(double ringRatio, int64_t timestampNs)>;
     void setRingRatioCallback(RingRatioCallback callback);
@@ -271,6 +316,7 @@ private:
     };
 
     void workerLoop();
+    void batchWorkerLoop();
     void realtimeLoop();
     bool appendExperimentFrame(ProcessedFrame&& frame, bool isValid);
     DroppedFrameCounts trimExperimentBuffersLocked(size_t maxBufferedFrames);
@@ -282,6 +328,12 @@ private:
     std::tuple<std::vector<std::vector<cv::Point>>, bool, std::vector<std::vector<cv::Point>>, std::vector<int>, 
                std::vector<std::vector<cv::Point>>, std::vector<cv::Vec4i>> 
         findContours(const cv::Mat& processedImage);
+    static BatchPipelineConfig normalizeBatchPipelineConfig(const BatchPipelineConfig& config);
+    static cv::Mat copyGrayFramePayload(const uint8_t* data,
+                                        size_t size,
+                                        uint64_t width,
+                                        uint64_t height,
+                                        size_t linePitch);
 
     std::vector<std::thread> workers_;
     std::queue<Job> queue_;
@@ -290,6 +342,25 @@ private:
     std::atomic<bool> running_{false};
 
     ProcessingStats stats_{};
+
+    struct QueuedBatchFrame {
+        uint64_t index{0};
+        uint64_t timestampNs{0};
+        cv::Mat gray;
+    };
+
+    std::vector<std::thread> batchWorkers_;
+    std::deque<QueuedBatchFrame> batchQueue_;
+    mutable std::mutex batchMutex_;
+    std::condition_variable_any batchCv_;
+    BatchPipelineConfig batchConfig_{};
+    std::atomic<bool> batchRunning_{false};
+    std::atomic<uint64_t> batchFramesEnqueued_{0};
+    std::atomic<uint64_t> batchFramesDropped_{0};
+    std::atomic<uint64_t> batchFramesProcessed_{0};
+    std::atomic<uint64_t> batchBatchesProcessed_{0};
+    mutable std::mutex batchCallbackMutex_;
+    BatchResultCallback batchResultCallback_;
 
     // Realtime processing state
     std::thread realtimeThread_;
