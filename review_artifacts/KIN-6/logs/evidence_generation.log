@@ -1,0 +1,5 @@
+[2026-06-04 17:30:55.138] [info] [ProcessingService.cpp:584] Async batch pipeline started: workers=2, batch_size=2, max_queue=8
+[2026-06-04 17:30:55.140] [info] [ProcessingService.cpp:610] Async batch pipeline stopped: enqueued=3, processed=3, dropped=0, batches=2
+KIN-6 async batch evidence generated at review_artifacts/KIN-6
+accepted=3 processed=3 dropped=0 batches=2 enqueue_us=92
+sample area_px2=458.500 deformability=0.022 ring_width_px=47.048

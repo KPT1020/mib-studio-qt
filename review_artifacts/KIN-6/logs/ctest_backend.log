@@ -1,0 +1,12 @@
+Test project /home/gavin/Service/symphony/workspaces/KIN-6/build/linux-backend
+    Start 1: backend.smoke
+1/2 Test #1: backend.smoke .......................   Passed    0.02 sec
+    Start 2: backend.processing_batch_pipeline
+2/2 Test #2: backend.processing_batch_pipeline ...   Passed    0.08 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Label Time Summary:
+backend    =   0.09 sec*proc (2 tests)
+
+Total Test time (real) =   0.09 sec

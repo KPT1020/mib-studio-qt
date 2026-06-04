@@ -1,0 +1,21 @@
+Preset CMake variables:
+
+  BUILD_TESTING="ON"
+  CMAKE_BUILD_TYPE="Release"
+  CMAKE_IGNORE_PREFIX_PATH="/home/gavin/miniconda3;/home/linuxbrew/.linuxbrew"
+  MIB_BUILD_BACKEND_ONLY="ON"
+  MIB_ENABLE_HARDWARE_SDKS="OFF"
+  MIB_ENABLE_WINDOWS_PACKAGING="OFF"
+  MIB_USE_SENTRY="OFF"
+
+-- Using default version (git tag not available): 1.0.1
+-- sentry-native: disabled by MIB_USE_SENTRY=OFF
+-- Could NOT find XKB (missing: XKB_LIBRARY XKB_INCLUDE_DIR) (Required is at least version "0.5.0")
+-- Hardware SDK integrations: OFF
+CMake Warning at CMakeLists.txt:260 (message):
+  onnxruntime::onnxruntime target not found - building with YoloService stub
+
+
+-- Configuring done (0.4s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/gavin/Service/symphony/workspaces/KIN-6/build/linux-backend

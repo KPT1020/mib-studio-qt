@@ -1,0 +1,25 @@
+[  0%] Built target mib_backend_autogen_timestamp_deps
+[  4%] Automatic MOC and UIC for target mib_backend
+[  4%] Built target mib_backend_autogen
+[100%] Built target mib_backend
+[  0%] Built target mib_backend_autogen_timestamp_deps
+[  3%] Built target mib_backend_autogen
+[ 86%] Built target mib_backend
+[ 86%] Built target mib_backend_smoke_test_autogen_timestamp_deps
+[ 89%] Automatic MOC and UIC for target mib_backend_smoke_test
+[ 89%] Built target mib_backend_smoke_test_autogen
+[100%] Built target mib_backend_smoke_test
+[  0%] Built target mib_backend_autogen_timestamp_deps
+[  3%] Built target mib_backend_autogen
+[ 86%] Built target mib_backend
+[ 86%] Built target processing_batch_pipeline_test_autogen_timestamp_deps
+[ 89%] Automatic MOC and UIC for target processing_batch_pipeline_test
+[ 89%] Built target processing_batch_pipeline_test_autogen
+[100%] Built target processing_batch_pipeline_test
+[  0%] Built target mib_backend_autogen_timestamp_deps
+[  3%] Built target mib_backend_autogen
+[ 86%] Built target mib_backend
+[ 86%] Built target kin6_batch_pipeline_evidence_autogen_timestamp_deps
+[ 89%] Automatic MOC and UIC for target kin6_batch_pipeline_evidence
+[ 89%] Built target kin6_batch_pipeline_evidence_autogen
+[100%] Built target kin6_batch_pipeline_evidence

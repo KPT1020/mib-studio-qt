@@ -1,0 +1,42 @@
+{
+  "pipeline": {
+    "batch_size": 2,
+    "worker_count": 2,
+    "max_queued_frames": 8
+  },
+  "enqueue": {
+    "accepted_frames": 3,
+    "rejected_frames": 0,
+    "elapsed_us": 92
+  },
+  "stats": {
+    "frames_enqueued": 3,
+    "frames_dropped": 0,
+    "frames_processed": 3,
+    "batches_processed": 2,
+    "queued_frames": 0,
+    "running": false
+  },
+  "callback_batch_sizes": [1, 2],
+  "sample_frame": {
+    "index": 100,
+    "timestamp_ns": 1000000,
+    "is_valid": true,
+    "area_px2": 458.500000,
+    "deformability": 0.021538,
+    "ring_width_px": 47.047848,
+    "area_ratio": 1.018889,
+    "inner_contour_count": 1,
+    "brightness": {
+      "q1": 240.000000,
+      "q2": 240.000000,
+      "q3": 240.000000,
+      "q4": 240.000000
+    }
+  },
+  "artifacts": {
+    "input": "input_ring.png",
+    "processed_mask": "processed_mask.png",
+    "contour_overlay": "contour_overlay.png"
+  }
+}
