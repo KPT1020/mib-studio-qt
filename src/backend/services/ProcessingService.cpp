@@ -34,6 +34,118 @@ size_t defaultMaxBufferedFrames(size_t flushInterval) {
     return std::max(flushInterval, std::min(preferred, kSoftMaxBufferedFrames));
 }
 
+double rectArea(const cv::Rect2d& rect) {
+    return std::max(0.0, rect.width) * std::max(0.0, rect.height);
+}
+
+double rectIou(const cv::Rect2d& a, const cv::Rect2d& b) {
+    const double x1 = std::max(a.x, b.x);
+    const double y1 = std::max(a.y, b.y);
+    const double x2 = std::min(a.x + a.width, b.x + b.width);
+    const double y2 = std::min(a.y + a.height, b.y + b.height);
+    const double intersection = std::max(0.0, x2 - x1) * std::max(0.0, y2 - y1);
+    const double unionArea = rectArea(a) + rectArea(b) - intersection;
+    return unionArea > 0.0 ? intersection / unionArea : 0.0;
+}
+
+cv::Rect2d resultBbox(const FilterResult& result) {
+    return cv::Rect2d(result.bboxX, result.bboxY, result.bboxWidth, result.bboxHeight);
+}
+
+double centroidDistance(const FilterResult& result, const cv::Point2d& centroid) {
+    const double dx = result.centroidX - centroid.x;
+    const double dy = result.centroidY - centroid.y;
+    return std::sqrt(dx * dx + dy * dy);
+}
+
+void populateGeometry(FilterResult& result, const std::vector<cv::Point>& contour) {
+    if (contour.empty()) {
+        return;
+    }
+
+    const cv::Rect bbox = cv::boundingRect(contour);
+    result.bboxX = static_cast<double>(bbox.x);
+    result.bboxY = static_cast<double>(bbox.y);
+    result.bboxWidth = static_cast<double>(bbox.width);
+    result.bboxHeight = static_cast<double>(bbox.height);
+
+    const cv::Moments moments = cv::moments(contour);
+    if (std::abs(moments.m00) > std::numeric_limits<double>::epsilon()) {
+        result.centroidX = moments.m10 / moments.m00;
+        result.centroidY = moments.m01 / moments.m00;
+    } else {
+        result.centroidX = result.bboxX + result.bboxWidth * 0.5;
+        result.centroidY = result.bboxY + result.bboxHeight * 0.5;
+    }
+}
+
+struct BatchTrack {
+    int id{-1};
+    uint64_t firstFrame{0};
+    uint64_t lastFrame{0};
+    int observations{0};
+    cv::Rect2d lastBbox;
+    cv::Point2d lastCentroid;
+    size_t outputIndex{0};
+};
+
+void applyTrackState(ProcessedFrame& frame, const BatchTrack& track) {
+    frame.validation.trackId = track.id;
+    frame.validation.trackFirstFrame = track.firstFrame;
+    frame.validation.trackLastFrame = track.lastFrame;
+    frame.validation.trackObservationCount = track.observations;
+}
+
+int findMatchingTrack(const std::vector<BatchTrack>& tracks,
+                      const std::vector<bool>& matchedThisFrame,
+                      const FilterResult& detection,
+                      uint64_t frameIndex) {
+    constexpr uint64_t kMaxFrameGap = 5;
+    constexpr double kMinIou = 0.08;
+    constexpr double kBaseCentroidThresholdPx = 24.0;
+
+    const cv::Rect2d bbox = resultBbox(detection);
+    if (rectArea(bbox) <= 0.0) {
+        return -1;
+    }
+
+    int bestTrack = -1;
+    double bestScore = std::numeric_limits<double>::max();
+    for (size_t i = 0; i < tracks.size(); ++i) {
+        const auto& track = tracks[i];
+        if (i < matchedThisFrame.size() && matchedThisFrame[i]) {
+            continue;
+        }
+        if (frameIndex <= track.lastFrame) {
+            continue;
+        }
+
+        const uint64_t frameGap = frameIndex - track.lastFrame;
+        if (frameGap > kMaxFrameGap) {
+            continue;
+        }
+
+        const double iou = rectIou(bbox, track.lastBbox);
+        const double distance = centroidDistance(detection, track.lastCentroid);
+        const double motionThreshold = std::max(
+            kBaseCentroidThresholdPx,
+            std::max(track.lastBbox.width, track.lastBbox.height) * 1.25 +
+                static_cast<double>(frameGap) * 8.0);
+        if (iou < kMinIou && distance > motionThreshold) {
+            continue;
+        }
+
+        const double score = (1.0 - std::min(1.0, iou)) +
+                             (distance / std::max(1.0, motionThreshold)) +
+                             static_cast<double>(frameGap) * 0.05;
+        if (score < bestScore) {
+            bestScore = score;
+            bestTrack = static_cast<int>(i);
+        }
+    }
+    return bestTrack;
+}
+
 } // namespace
 
 ProcessingService::ProcessingService() = default;
@@ -447,6 +559,8 @@ std::vector<ProcessedFrame> ProcessingService::processBatch(
 
     std::vector<ProcessedFrame> results;
     results.reserve(grayImages.size());
+    std::vector<BatchTrack> tracks;
+    int nextTrackId = 1;
 
     const size_t total = grayImages.size();
     if (progress) progress(BatchProgress{0, total});
@@ -477,6 +591,7 @@ std::vector<ProcessedFrame> ProcessingService::processBatch(
         if (objectResults.empty()) {
             results.emplace_back(std::move(base));
         } else {
+            std::vector<bool> matchedThisFrame(tracks.size(), false);
             for (auto& validation : objectResults) {
                 ProcessedFrame objectFrame;
                 objectFrame.index = base.index;
@@ -484,14 +599,48 @@ std::vector<ProcessedFrame> ProcessingService::processBatch(
                 objectFrame.originalImage = base.originalImage.clone();
                 objectFrame.processedImage = base.processedImage.clone();
                 objectFrame.validation = std::move(validation);
+                if (!objectFrame.validation.isValid) {
+                    results.emplace_back(std::move(objectFrame));
+                    continue;
+                }
+
+                const int trackIdx = findMatchingTrack(
+                    tracks, matchedThisFrame, objectFrame.validation, objectFrame.index);
+                if (trackIdx >= 0) {
+                    auto& track = tracks[static_cast<size_t>(trackIdx)];
+                    track.lastFrame = objectFrame.index;
+                    track.lastBbox = resultBbox(objectFrame.validation);
+                    track.lastCentroid = cv::Point2d(objectFrame.validation.centroidX,
+                                                     objectFrame.validation.centroidY);
+                    ++track.observations;
+                    if (static_cast<size_t>(trackIdx) >= matchedThisFrame.size()) {
+                        matchedThisFrame.resize(tracks.size(), false);
+                    }
+                    matchedThisFrame[static_cast<size_t>(trackIdx)] = true;
+                    applyTrackState(results[track.outputIndex], track);
+                    continue;
+                }
+
+                BatchTrack track;
+                track.id = nextTrackId++;
+                track.firstFrame = objectFrame.index;
+                track.lastFrame = objectFrame.index;
+                track.observations = 1;
+                track.lastBbox = resultBbox(objectFrame.validation);
+                track.lastCentroid = cv::Point2d(objectFrame.validation.centroidX,
+                                                 objectFrame.validation.centroidY);
+                track.outputIndex = results.size();
+                applyTrackState(objectFrame, track);
                 results.emplace_back(std::move(objectFrame));
+                tracks.push_back(std::move(track));
+                matchedThisFrame.push_back(true);
             }
         }
         if (progress) progress(BatchProgress{i + 1, total});
     }
 
-    SPDLOG_INFO("processBatch: processed {} images into {} records (roi={}x{} at {},{}, background={})",
-                total, results.size(), roi.w, roi.h, roi.x, roi.y, !background.empty());
+    SPDLOG_INFO("processBatch: processed {} images into {} records across {} tracks (roi={}x{} at {},{}, background={})",
+                total, results.size(), tracks.size(), roi.w, roi.h, roi.x, roi.y, !background.empty());
     return results;
 }
 
@@ -840,6 +989,11 @@ FilterResult ProcessingService::evaluateInnerContourObject(const ContourAnalysis
 
     const cv::Mat objectMask = makeObjectMask(processedImage.size(), analysis.filteredContours,
                                               innerFilteredIdx, parentIdx, true);
+    const auto& geometryContour =
+        (parentIdx >= 0 && parentIdx < static_cast<int>(analysis.filteredContours.size()))
+            ? analysis.filteredContours[static_cast<size_t>(parentIdx)]
+            : innerContour;
+    populateGeometry(result, geometryContour);
     if (!originalImage.empty()) {
         result.brightness = calculateBrightnessQuantiles(originalImage, objectMask);
     }
@@ -926,6 +1080,7 @@ FilterResult ProcessingService::evaluateOuterContourObject(const ContourAnalysis
     const auto& contour = analysis.filteredContours[contourIdx];
     const cv::Mat objectMask = makeObjectMask(processedImage.size(), analysis.filteredContours,
                                               static_cast<int>(contourIdx), -1, false);
+    populateGeometry(result, contour);
     if (!originalImage.empty()) {
         result.brightness = calculateBrightnessQuantiles(originalImage, objectMask);
     }

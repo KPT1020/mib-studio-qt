@@ -76,6 +76,16 @@ struct FilterResult {
     int innerContourCount{0};
     int objectId{-1};
     int objectCount{0};
+    int trackId{-1};
+    uint64_t trackFirstFrame{0};
+    uint64_t trackLastFrame{0};
+    int trackObservationCount{0};
+    double bboxX{0.0};
+    double bboxY{0.0};
+    double bboxWidth{0.0};
+    double bboxHeight{0.0};
+    double centroidX{0.0};
+    double centroidY{0.0};
     double deformability{0.0};
     double area{0.0};
     double areaRatio{0.0};
