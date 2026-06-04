@@ -18,6 +18,8 @@ Uniform JSON format for processing pipeline metrics so **mib-studio-qt** pipelin
 | `frame_type` | string | `"valid"` or `"invalid"` (passed validation or not). |
 | `index` | integer | Frame index from acquisition (monotonic). |
 | `timestamp_ns` | integer | Timestamp in nanoseconds. |
+| `object_id` | integer | One-based object candidate within the source frame/ROI, ordered left-to-right then top-to-bottom; `-1` when no object candidate was selected. |
+| `object_count` | integer | Number of object candidates emitted for the source frame/ROI. |
 | `deformability` | number | 1.0 − circularity; dimensionless. |
 | `area` | number | Hull area in **pixels**. |
 | `area_um2` | number | Area in **µm²** (optional; = area × pixel_to_micron²). |
@@ -37,7 +39,16 @@ Field names align with `FilterResult` and `BrightnessQuantiles` in [ProcessingSe
 
 ### Processing pipeline (nested contours)
 
-When `require_single_inner_contour` (or equivalent) is enabled, the pipeline keeps any object that has **at least one** nested (inner) contour. Metrics (area, deformability, area_ratio, ring_ratio) are computed using **only the first** nested contour. The field `has_single_inner_contour` is informational: it is true only when there is exactly one inner contour; acceptance is based on having at least one nested contour.
+When `require_single_inner_contour` (or equivalent) is enabled, the pipeline keeps any object that has **at least one** nested (inner) contour. Batch metrics are computed per nested contour/object candidate. Frame-level realtime snapshots still expose the first selected object for compatibility. The field `has_single_inner_contour` is informational: it is true only when there is exactly one inner contour; acceptance is based on having at least one nested contour.
+
+### Multi-object ROI records
+
+Batch processing emits one metrics record per detected object candidate. Multiple records can therefore share the same `index` and `timestamp_ns`; use one-based `object_id` values from `1` to `object_count` to distinguish duplicate detections from the same source frame/ROI. Each object candidate is validated independently, so an edge-touching object can be rejected while another object in the same ROI remains valid.
+
+Known failure modes:
+
+- **Edge touch**: contours within two pixels of the ROI border are marked `touches_border` and rejected when border checking is enabled because the object may be cropped.
+- **Overlapping halos**: touching or overlapping rings/halos can merge into one contour hierarchy. In that case the pipeline may emit fewer object records than the true object count or attach an inner contour to the wrong outer contour.
 
 ## Workflow (summary)
 

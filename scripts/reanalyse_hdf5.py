@@ -712,9 +712,16 @@ def metrics_for_detected_objects(
         frame_result["metricsMode"] = "objects"
         return [frame_result]
 
+    object_order = sorted(
+        range(object_count),
+        key=lambda idx: (*cv2.boundingRect(inner_contours[idx])[:2], idx),
+    )
+
     rows: list[dict[str, Any]] = []
-    for object_id, c in enumerate(inner_contours):
-        parent_idx = parent_indices[object_id] if object_id < len(parent_indices) else -1
+    for ordinal, object_idx in enumerate(object_order, start=1):
+        c = inner_contours[object_idx]
+        object_id = ordinal
+        parent_idx = parent_indices[object_idx] if object_idx < len(parent_indices) else -1
         contour_area = cv2.contourArea(c)
         hull = cv2.convexHull(c)
         hull_area = cv2.contourArea(hull)
@@ -734,7 +741,7 @@ def metrics_for_detected_objects(
         valid = (not touches_border) and area_ok and ring_ok and deform_ok
 
         q1, q2, q3, q4 = _contour_brightness_quantiles(original_gray, c)
-        selected_idx = inner_filtered_indices[object_id] if object_id < len(inner_filtered_indices) else -1
+        selected_idx = inner_filtered_indices[object_idx] if object_idx < len(inner_filtered_indices) else -1
         result = {
             "isValid": bool(valid),
             "touchesBorder": bool(touches_border),
@@ -891,7 +898,7 @@ def process_one_frame_set(
                 row["timestampNs"] = timestamp_ns
             metrics_list.extend(frame_rows)
         else:
-            rec_metrics["objectId"] = 0 if rec_metrics.get("contourUsed") != "none" else -1
+            rec_metrics["objectId"] = 1 if rec_metrics.get("contourUsed") != "none" else -1
             rec_metrics["objectCount"] = rec_metrics.get("innerContourCount", 0)
             rec_metrics["metricsMode"] = "frame"
             metrics_list.append(rec_metrics)

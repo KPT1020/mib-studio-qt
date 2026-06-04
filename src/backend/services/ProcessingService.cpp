@@ -452,14 +452,46 @@ std::vector<ProcessedFrame> ProcessingService::processBatch(
     if (progress) progress(BatchProgress{0, total});
 
     for (size_t i = 0; i < total; ++i) {
-        ProcessedFrame pf = computeProcessedFrame(grayImages[i], background, config, roi,
-                                                  static_cast<uint64_t>(i), 0);
-        results.emplace_back(std::move(pf));
+        ProcessedFrame base = computeProcessedFrame(grayImages[i], background, config, roi,
+                                                    static_cast<uint64_t>(i), 0);
+        if (base.originalImage.empty() || base.processedImage.empty()) {
+            results.emplace_back(std::move(base));
+            if (progress) progress(BatchProgress{i + 1, total});
+            continue;
+        }
+
+        Roi normalizedRoi = roi;
+        if (normalizedRoi.w <= 0 || normalizedRoi.h <= 0) {
+            normalizedRoi.x = 0;
+            normalizedRoi.y = 0;
+            normalizedRoi.w = base.originalImage.cols;
+            normalizedRoi.h = base.originalImage.rows;
+        }
+        normalizedRoi.x = std::max(0, std::min(normalizedRoi.x, base.originalImage.cols - 1));
+        normalizedRoi.y = std::max(0, std::min(normalizedRoi.y, base.originalImage.rows - 1));
+        normalizedRoi.w = std::max(1, std::min(normalizedRoi.w, base.originalImage.cols - normalizedRoi.x));
+        normalizedRoi.h = std::max(1, std::min(normalizedRoi.h, base.originalImage.rows - normalizedRoi.y));
+        const cv::Rect cvRoi(normalizedRoi.x, normalizedRoi.y, normalizedRoi.w, normalizedRoi.h);
+
+        auto objectResults = filterProcessedObjects(base.processedImage, cvRoi, config, base.originalImage);
+        if (objectResults.empty()) {
+            results.emplace_back(std::move(base));
+        } else {
+            for (auto& validation : objectResults) {
+                ProcessedFrame objectFrame;
+                objectFrame.index = base.index;
+                objectFrame.timestampNs = base.timestampNs;
+                objectFrame.originalImage = base.originalImage.clone();
+                objectFrame.processedImage = base.processedImage.clone();
+                objectFrame.validation = std::move(validation);
+                results.emplace_back(std::move(objectFrame));
+            }
+        }
         if (progress) progress(BatchProgress{i + 1, total});
     }
 
-    SPDLOG_INFO("processBatch: processed {} images (roi={}x{} at {},{}, background={})",
-                total, roi.w, roi.h, roi.x, roi.y, !background.empty());
+    SPDLOG_INFO("processBatch: processed {} images into {} records (roi={}x{} at {},{}, background={})",
+                total, results.size(), roi.w, roi.h, roi.x, roi.y, !background.empty());
     return results;
 }
 
@@ -678,55 +710,42 @@ size_t ProcessingService::getInvalidFrameSamplingRate() const {
 double ProcessingService::calculateRingRatio(const std::vector<cv::Point>& innerContour, const std::vector<cv::Point>& outerContour) {
     double innerArea = cv::contourArea(innerContour);
     double outerArea = cv::contourArea(outerContour);
-    if (outerArea <= 0) return 0.0;
+    if (outerArea <= innerArea) return 0.0;
     return std::sqrt(outerArea - innerArea);
 }
 
-std::tuple<std::vector<std::vector<cv::Point>>, bool, std::vector<std::vector<cv::Point>>, std::vector<int>, 
-           std::vector<std::vector<cv::Point>>, std::vector<cv::Vec4i>> 
-ProcessingService::findContours(const cv::Mat& processedImage) {
-    std::vector<std::vector<cv::Point>> contours;
-    std::vector<cv::Vec4i> hierarchy;
-    cv::findContours(processedImage, contours, hierarchy, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
+ProcessingService::ContourAnalysis ProcessingService::findContours(const cv::Mat& processedImage) {
+    ContourAnalysis analysis;
+    cv::findContours(processedImage, analysis.allContours, analysis.hierarchy, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
 
     const double minNoiseArea = 10.0;
-    std::vector<std::vector<cv::Point>> filteredContours;
-    std::vector<cv::Vec4i> filteredHierarchy;
-    std::vector<size_t> originalIndices; // maps filtered index → original index
 
-    for (size_t i = 0; i < contours.size(); i++) {
-        double area = cv::contourArea(contours[i]);
+    for (size_t i = 0; i < analysis.allContours.size(); i++) {
+        double area = cv::contourArea(analysis.allContours[i]);
         if (area >= minNoiseArea) {
-            filteredContours.push_back(contours[i]);
-            originalIndices.push_back(i);
-            if (i < hierarchy.size()) {
-                filteredHierarchy.push_back(hierarchy[i]);
-            }
+            analysis.filteredContours.push_back(analysis.allContours[i]);
+            analysis.originalIndices.push_back(i);
         }
     }
 
-    bool hasNestedContours = false;
-    std::vector<std::vector<cv::Point>> innerContours;
-    std::vector<int> parentIndices;
-
-    for (size_t i = 0; i < originalIndices.size(); i++) {
-        size_t origIdx = originalIndices[i];
-        if (origIdx < hierarchy.size() && hierarchy[origIdx][3] > -1) {
-            hasNestedContours = true;
-            innerContours.push_back(filteredContours[i]);
-            int parentOrigIdx = hierarchy[origIdx][3];
+    for (size_t i = 0; i < analysis.originalIndices.size(); i++) {
+        size_t origIdx = analysis.originalIndices[i];
+        if (origIdx < analysis.hierarchy.size() && analysis.hierarchy[origIdx][3] > -1) {
+            analysis.innerContours.push_back(analysis.filteredContours[i]);
+            analysis.innerFilteredIndices.push_back(static_cast<int>(i));
+            int parentOrigIdx = analysis.hierarchy[origIdx][3];
             int filteredParentIdx = -1;
-            for (size_t j = 0; j < originalIndices.size(); j++) {
-                if (originalIndices[j] == static_cast<size_t>(parentOrigIdx)) {
+            for (size_t j = 0; j < analysis.originalIndices.size(); j++) {
+                if (analysis.originalIndices[j] == static_cast<size_t>(parentOrigIdx)) {
                     filteredParentIdx = static_cast<int>(j);
                     break;
                 }
             }
-            parentIndices.push_back(filteredParentIdx);
+            analysis.parentIndices.push_back(filteredParentIdx);
         }
     }
 
-    return std::make_tuple(filteredContours, hasNestedContours, innerContours, parentIndices, contours, hierarchy);
+    return analysis;
 }
 
 BrightnessQuantiles ProcessingService::calculateBrightnessQuantiles(const cv::Mat& originalImage, const cv::Mat& mask) {
@@ -761,177 +780,289 @@ BrightnessQuantiles ProcessingService::calculateBrightnessQuantiles(const cv::Ma
     return result;
 }
 
-FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedImage, const cv::Rect& roi, 
-                                                     const ProcessingConfig& config, const cv::Mat& originalImage) {
-    FilterResult result{};
-
-    auto [filteredContours, hasNestedContours, innerContours, parentIndices, allContours, hierarchy] = findContours(processedImage);
-    
-    // Store all contours and hierarchy for snapshot/display
-    result.allContours = allContours;
-    result.hierarchy = hierarchy;
-    
-    // Use filteredContours for the rest of the function (renamed from contours to avoid confusion)
-    const auto& contours = filteredContours;
-    
-    result.innerContourCount = static_cast<int>(innerContours.size());
-    result.hasSingleInnerContour = (innerContours.size() == 1);
-
-    if (!originalImage.empty()) {
-        result.brightness = calculateBrightnessQuantiles(originalImage, processedImage);
+cv::Mat ProcessingService::makeObjectMask(const cv::Size& size,
+                                          const std::vector<std::vector<cv::Point>>& contours,
+                                          int contourIdx,
+                                          int parentIdx,
+                                          bool nested) const {
+    cv::Mat mask(size, CV_8UC1, cv::Scalar(0));
+    if (nested && parentIdx >= 0 && parentIdx < static_cast<int>(contours.size())) {
+        cv::drawContours(mask, contours, parentIdx, cv::Scalar(255), cv::FILLED);
+        if (contourIdx >= 0 && contourIdx < static_cast<int>(contours.size())) {
+            cv::drawContours(mask, contours, contourIdx, cv::Scalar(0), cv::FILLED);
+        }
+    } else if (contourIdx >= 0 && contourIdx < static_cast<int>(contours.size())) {
+        cv::drawContours(mask, contours, contourIdx, cv::Scalar(255), cv::FILLED);
     }
+    return mask;
+}
 
-    if (config.require_single_inner_contour && innerContours.empty()) {
+bool ProcessingService::contourTouchesRoiBorder(const std::vector<cv::Point>& contour, const cv::Rect& roi) const {
+    constexpr int borderThreshold = 2;
+    for (const auto& point : contour) {
+        const int x = point.x - roi.x;
+        const int y = point.y - roi.y;
+        if (x >= 0 && x < roi.width && y >= 0 && y < roi.height) {
+            if (x < borderThreshold || x >= roi.width - borderThreshold ||
+                y < borderThreshold || y >= roi.height - borderThreshold) {
+                return true;
+            }
+        } else {
+            return true;
+        }
+    }
+    return false;
+}
+
+FilterResult ProcessingService::evaluateInnerContourObject(const ContourAnalysis& analysis,
+                                                           size_t innerIdx,
+                                                           int objectId,
+                                                           int objectCount,
+                                                           const cv::Mat& processedImage,
+                                                           const cv::Rect& roi,
+                                                           const ProcessingConfig& config,
+                                                           const cv::Mat& originalImage) {
+    FilterResult result{};
+    result.allContours = analysis.allContours;
+    result.hierarchy = analysis.hierarchy;
+    result.innerContourCount = static_cast<int>(analysis.innerContours.size());
+    result.hasSingleInnerContour = (analysis.innerContours.size() == 1);
+    result.objectId = objectId;
+    result.objectCount = objectCount;
+
+    if (innerIdx >= analysis.innerContours.size()) {
         return result;
     }
 
-    // Border check
-    if (config.enable_border_check) {
-        const int borderThreshold = 2;
-        if (!innerContours.empty()) {
-            const auto& innerContour = innerContours[0];
-            for (const auto& point : innerContour) {
-                int x = point.x - roi.x;
-                int y = point.y - roi.y;
-                if (x >= 0 && x < roi.width && y >= 0 && y < roi.height) {
-                    if (x < borderThreshold || x >= roi.width - borderThreshold ||
-                        y < borderThreshold || y >= roi.height - borderThreshold) {
-                        result.touchesBorder = true;
-                        break;
-                    }
-                } else {
-                    result.touchesBorder = true;
-                    break;
-                }
-            }
-        } else if (!contours.empty()) {
-            for (const auto& contour : contours) {
-                for (const auto& point : contour) {
-                    int x = point.x - roi.x;
-                    int y = point.y - roi.y;
-                    if (x >= 0 && x < roi.width && y >= 0 && y < roi.height) {
-                        if (x < borderThreshold || x >= roi.width - borderThreshold ||
-                            y < borderThreshold || y >= roi.height - borderThreshold) {
-                            result.touchesBorder = true;
-                            break;
-                        }
-                    } else {
-                        result.touchesBorder = true;
-                        break;
-                    }
-                }
-                if (result.touchesBorder) break;
-            }
-        }
+    const auto& innerContour = analysis.innerContours[innerIdx];
+    const int parentIdx = innerIdx < analysis.parentIndices.size() ? analysis.parentIndices[innerIdx] : -1;
+    const int innerFilteredIdx = innerIdx < analysis.innerFilteredIndices.size() ? analysis.innerFilteredIndices[innerIdx] : -1;
+
+    const cv::Mat objectMask = makeObjectMask(processedImage.size(), analysis.filteredContours,
+                                              innerFilteredIdx, parentIdx, true);
+    if (!originalImage.empty()) {
+        result.brightness = calculateBrightnessQuantiles(originalImage, objectMask);
     }
 
-    if (!result.touchesBorder || !config.enable_border_check) {
-        if (!innerContours.empty()) {
-            double contourArea = cv::contourArea(innerContours[0]);
-            std::vector<cv::Point> hull;
-            cv::convexHull(innerContours[0], hull);
-            double hullArea = cv::contourArea(hull);
-            result.areaRatio = hullArea / contourArea;
-            double perimeter = cv::arcLength(hull, true);
-            double circularity = (perimeter > 0) ? std::sqrt(4 * M_PI * hullArea) / perimeter : 0.0;
-            result.deformability = 1.0 - circularity;
-            result.area = hullArea;
+    if (config.enable_border_check && contourTouchesRoiBorder(innerContour, roi)) {
+        result.touchesBorder = true;
+        return result;
+    }
 
-            if (parentIndices.size() > 0) {
-                int parentIdx = parentIndices[0];
-                if (parentIdx >= 0 && parentIdx < static_cast<int>(contours.size())) {
-                    result.ringRatio = calculateRingRatio(innerContours[0], contours[parentIdx]);
-                }
-            }
+    const double contourArea = cv::contourArea(innerContour);
+    if (contourArea <= 0.0) {
+        return result;
+    }
 
-            // Convert pixel area to μm² so config thresholds match scatter plot units
-            double pxToUm = pixelToMicronFactor_.load(std::memory_order_relaxed);
-            double areaUm = hullArea * pxToUm * pxToUm;
+    std::vector<cv::Point> hull;
+    cv::convexHull(innerContour, hull);
+    const double hullArea = cv::contourArea(hull);
+    result.areaRatio = hullArea / contourArea;
+    const double perimeter = cv::arcLength(hull, true);
+    const double circularity = (perimeter > 0.0) ? std::sqrt(4 * M_PI * hullArea) / perimeter : 0.0;
+    result.deformability = 1.0 - circularity;
+    result.area = hullArea;
 
-            bool areaInRange = !config.enable_area_range_check ||
-                              (areaUm >= config.area_threshold_min && areaUm <= config.area_threshold_max);
-            bool ringRatioInRange = !config.enable_ring_ratio_check ||
-                              (result.ringRatio > config.ring_ratio_min && result.ringRatio < config.ring_ratio_max);
-            bool deformabilityInRange = !config.enable_deformability_range_check ||
-                              (result.deformability >= config.deformability_threshold_min &&
-                               result.deformability <= config.deformability_threshold_max);
-            bool areaRatioInRange = !config.enable_area_ratio_check ||
-                              (result.areaRatio <= config.area_ratio_threshold_max);
+    if (parentIdx >= 0 && parentIdx < static_cast<int>(analysis.filteredContours.size())) {
+        result.ringRatio = calculateRingRatio(innerContour, analysis.filteredContours[parentIdx]);
+    }
 
-            if (areaInRange && ringRatioInRange && deformabilityInRange && areaRatioInRange) {
-                result.inRange = true;
-                result.isValid = true;
-            }
-            // Compute Young's modulus from LUT if available
-            if (eModulusLut_.isLoaded()) {
-                result.youngsModulus = eModulusLut_.lookup(areaUm, result.deformability);
-            }
-            if (result.isValid && config.enable_target_group) {
-                bool tgArea = (areaUm >= config.target_group_area_min &&
-                               areaUm <= config.target_group_area_max);
-                bool tgDeform = (result.deformability >= config.target_group_deformability_min &&
-                                 result.deformability <= config.target_group_deformability_max);
-                bool tgEmod = !config.enable_target_group_emodulus ||
-                              (!std::isnan(result.youngsModulus) &&
-                               result.youngsModulus >= config.target_group_emodulus_min &&
-                               result.youngsModulus <= config.target_group_emodulus_max);
-                result.isTargetGroup = tgArea && tgDeform && tgEmod;
-            }
-        } else if (!contours.empty() && !config.require_single_inner_contour) {
-            size_t largestIdx = 0;
-            double largestOuterArea = 0.0;
-            for (size_t i = 0; i < contours.size(); i++) {
-                double area = cv::contourArea(contours[i]);
-                if (area > largestOuterArea) {
-                    largestOuterArea = area;
-                    largestIdx = i;
-                }
-            }
+    const double pxToUm = pixelToMicronFactor_.load(std::memory_order_relaxed);
+    const double areaUm = hullArea * pxToUm * pxToUm;
 
-            double contourArea = cv::contourArea(contours[largestIdx]);
-            std::vector<cv::Point> hull;
-            cv::convexHull(contours[largestIdx], hull);
-            double hullArea = cv::contourArea(hull);
-            result.areaRatio = hullArea / contourArea;
-            double perimeter = cv::arcLength(hull, true);
-            double circularity = (perimeter > 0) ? std::sqrt(4 * M_PI * hullArea) / perimeter : 0.0;
-            result.deformability = 1.0 - circularity;
-            result.area = hullArea;
+    const bool areaInRange = !config.enable_area_range_check ||
+        (areaUm >= config.area_threshold_min && areaUm <= config.area_threshold_max);
+    const bool ringRatioInRange = !config.enable_ring_ratio_check ||
+        (result.ringRatio > config.ring_ratio_min && result.ringRatio < config.ring_ratio_max);
+    const bool deformabilityInRange = !config.enable_deformability_range_check ||
+        (result.deformability >= config.deformability_threshold_min &&
+         result.deformability <= config.deformability_threshold_max);
+    const bool areaRatioInRange = !config.enable_area_ratio_check ||
+        (result.areaRatio <= config.area_ratio_threshold_max);
 
-            // Convert pixel area to μm² so config thresholds match scatter plot units
-            double pxToUm = pixelToMicronFactor_.load(std::memory_order_relaxed);
-            double areaUm = hullArea * pxToUm * pxToUm;
+    if (areaInRange && ringRatioInRange && deformabilityInRange && areaRatioInRange) {
+        result.inRange = true;
+        result.isValid = true;
+    }
 
-            bool areaInRange = !config.enable_area_range_check ||
-                (areaUm >= config.area_threshold_min && areaUm <= config.area_threshold_max);
-            bool deformabilityInRange = !config.enable_deformability_range_check ||
-                (result.deformability >= config.deformability_threshold_min &&
-                 result.deformability <= config.deformability_threshold_max);
-            bool areaRatioInRange = !config.enable_area_ratio_check ||
-                (result.areaRatio <= config.area_ratio_threshold_max);
-            if (areaInRange && deformabilityInRange && areaRatioInRange) {
-                result.inRange = true;
-                result.isValid = true;
-            }
-            // Compute Young's modulus from LUT if available
-            if (eModulusLut_.isLoaded()) {
-                result.youngsModulus = eModulusLut_.lookup(areaUm, result.deformability);
-            }
-            if (result.isValid && config.enable_target_group) {
-                bool tgArea = (areaUm >= config.target_group_area_min &&
-                               areaUm <= config.target_group_area_max);
-                bool tgDeform = (result.deformability >= config.target_group_deformability_min &&
-                                 result.deformability <= config.target_group_deformability_max);
-                bool tgEmod = !config.enable_target_group_emodulus ||
-                              (!std::isnan(result.youngsModulus) &&
-                               result.youngsModulus >= config.target_group_emodulus_min &&
-                               result.youngsModulus <= config.target_group_emodulus_max);
-                result.isTargetGroup = tgArea && tgDeform && tgEmod;
-            }
-        }
+    if (eModulusLut_.isLoaded()) {
+        result.youngsModulus = eModulusLut_.lookup(areaUm, result.deformability);
+    }
+    if (result.isValid && config.enable_target_group) {
+        const bool tgArea = (areaUm >= config.target_group_area_min &&
+                             areaUm <= config.target_group_area_max);
+        const bool tgDeform = (result.deformability >= config.target_group_deformability_min &&
+                               result.deformability <= config.target_group_deformability_max);
+        const bool tgEmod = !config.enable_target_group_emodulus ||
+            (!std::isnan(result.youngsModulus) &&
+             result.youngsModulus >= config.target_group_emodulus_min &&
+             result.youngsModulus <= config.target_group_emodulus_max);
+        result.isTargetGroup = tgArea && tgDeform && tgEmod;
     }
 
     return result;
+}
+
+FilterResult ProcessingService::evaluateOuterContourObject(const ContourAnalysis& analysis,
+                                                           size_t contourIdx,
+                                                           int objectId,
+                                                           int objectCount,
+                                                           const cv::Mat& processedImage,
+                                                           const cv::Rect& roi,
+                                                           const ProcessingConfig& config,
+                                                           const cv::Mat& originalImage) {
+    FilterResult result{};
+    result.allContours = analysis.allContours;
+    result.hierarchy = analysis.hierarchy;
+    result.innerContourCount = static_cast<int>(analysis.innerContours.size());
+    result.hasSingleInnerContour = (analysis.innerContours.size() == 1);
+    result.objectId = objectId;
+    result.objectCount = objectCount;
+
+    if (contourIdx >= analysis.filteredContours.size()) {
+        return result;
+    }
+
+    const auto& contour = analysis.filteredContours[contourIdx];
+    const cv::Mat objectMask = makeObjectMask(processedImage.size(), analysis.filteredContours,
+                                              static_cast<int>(contourIdx), -1, false);
+    if (!originalImage.empty()) {
+        result.brightness = calculateBrightnessQuantiles(originalImage, objectMask);
+    }
+
+    if (config.enable_border_check && contourTouchesRoiBorder(contour, roi)) {
+        result.touchesBorder = true;
+        return result;
+    }
+
+    const double contourArea = cv::contourArea(contour);
+    if (contourArea <= 0.0) {
+        return result;
+    }
+
+    std::vector<cv::Point> hull;
+    cv::convexHull(contour, hull);
+    const double hullArea = cv::contourArea(hull);
+    result.areaRatio = hullArea / contourArea;
+    const double perimeter = cv::arcLength(hull, true);
+    const double circularity = (perimeter > 0.0) ? std::sqrt(4 * M_PI * hullArea) / perimeter : 0.0;
+    result.deformability = 1.0 - circularity;
+    result.area = hullArea;
+
+    const double pxToUm = pixelToMicronFactor_.load(std::memory_order_relaxed);
+    const double areaUm = hullArea * pxToUm * pxToUm;
+
+    const bool areaInRange = !config.enable_area_range_check ||
+        (areaUm >= config.area_threshold_min && areaUm <= config.area_threshold_max);
+    const bool deformabilityInRange = !config.enable_deformability_range_check ||
+        (result.deformability >= config.deformability_threshold_min &&
+         result.deformability <= config.deformability_threshold_max);
+    const bool areaRatioInRange = !config.enable_area_ratio_check ||
+        (result.areaRatio <= config.area_ratio_threshold_max);
+
+    if (areaInRange && deformabilityInRange && areaRatioInRange) {
+        result.inRange = true;
+        result.isValid = true;
+    }
+
+    if (eModulusLut_.isLoaded()) {
+        result.youngsModulus = eModulusLut_.lookup(areaUm, result.deformability);
+    }
+    if (result.isValid && config.enable_target_group) {
+        const bool tgArea = (areaUm >= config.target_group_area_min &&
+                             areaUm <= config.target_group_area_max);
+        const bool tgDeform = (result.deformability >= config.target_group_deformability_min &&
+                               result.deformability <= config.target_group_deformability_max);
+        const bool tgEmod = !config.enable_target_group_emodulus ||
+            (!std::isnan(result.youngsModulus) &&
+             result.youngsModulus >= config.target_group_emodulus_min &&
+             result.youngsModulus <= config.target_group_emodulus_max);
+        result.isTargetGroup = tgArea && tgDeform && tgEmod;
+    }
+
+    return result;
+}
+
+std::vector<FilterResult> ProcessingService::filterProcessedObjects(const cv::Mat& processedImage, const cv::Rect& roi,
+                                                                    const ProcessingConfig& config,
+                                                                    const cv::Mat& originalImage) {
+    const ContourAnalysis analysis = findContours(processedImage);
+
+    FilterResult emptyResult{};
+    emptyResult.allContours = analysis.allContours;
+    emptyResult.hierarchy = analysis.hierarchy;
+    emptyResult.innerContourCount = static_cast<int>(analysis.innerContours.size());
+    emptyResult.hasSingleInnerContour = (analysis.innerContours.size() == 1);
+    if (!originalImage.empty()) {
+        emptyResult.brightness = calculateBrightnessQuantiles(originalImage, processedImage);
+    }
+
+    if (config.require_single_inner_contour && analysis.innerContours.empty()) {
+        return {std::move(emptyResult)};
+    }
+
+    if (!analysis.innerContours.empty()) {
+        std::vector<size_t> objectOrder;
+        objectOrder.reserve(analysis.innerContours.size());
+        for (size_t i = 0; i < analysis.innerContours.size(); ++i) {
+            objectOrder.push_back(i);
+        }
+        std::sort(objectOrder.begin(), objectOrder.end(), [&](size_t lhs, size_t rhs) {
+            const cv::Rect lhsBox = cv::boundingRect(analysis.innerContours[lhs]);
+            const cv::Rect rhsBox = cv::boundingRect(analysis.innerContours[rhs]);
+            return std::tie(lhsBox.x, lhsBox.y, lhs) < std::tie(rhsBox.x, rhsBox.y, rhs);
+        });
+
+        std::vector<FilterResult> results;
+        results.reserve(objectOrder.size());
+        const int objectCount = static_cast<int>(analysis.innerContours.size());
+        for (size_t i = 0; i < objectOrder.size(); ++i) {
+            results.push_back(evaluateInnerContourObject(analysis, objectOrder[i], static_cast<int>(i + 1), objectCount,
+                                                         processedImage, roi, config, originalImage));
+        }
+        return results;
+    }
+
+    if (!analysis.filteredContours.empty() && !config.require_single_inner_contour) {
+        std::vector<size_t> topLevelContours;
+        for (size_t i = 0; i < analysis.filteredContours.size(); ++i) {
+            const size_t origIdx = i < analysis.originalIndices.size() ? analysis.originalIndices[i] : 0;
+            const bool hasParent = origIdx < analysis.hierarchy.size() && analysis.hierarchy[origIdx][3] > -1;
+            if (!hasParent) {
+                topLevelContours.push_back(i);
+            }
+        }
+        if (topLevelContours.empty()) {
+            for (size_t i = 0; i < analysis.filteredContours.size(); ++i) {
+                topLevelContours.push_back(i);
+            }
+        }
+        std::sort(topLevelContours.begin(), topLevelContours.end(), [&](size_t lhs, size_t rhs) {
+            const cv::Rect lhsBox = cv::boundingRect(analysis.filteredContours[lhs]);
+            const cv::Rect rhsBox = cv::boundingRect(analysis.filteredContours[rhs]);
+            return std::tie(lhsBox.x, lhsBox.y, lhs) < std::tie(rhsBox.x, rhsBox.y, rhs);
+        });
+
+        std::vector<FilterResult> results;
+        results.reserve(topLevelContours.size());
+        const int objectCount = static_cast<int>(topLevelContours.size());
+        for (size_t i = 0; i < topLevelContours.size(); ++i) {
+            results.push_back(evaluateOuterContourObject(analysis, topLevelContours[i], static_cast<int>(i + 1),
+                                                         objectCount, processedImage, roi, config, originalImage));
+        }
+        return results;
+    }
+
+    return {std::move(emptyResult)};
+}
+
+FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedImage, const cv::Rect& roi,
+                                                     const ProcessingConfig& config, const cv::Mat& originalImage) {
+    auto results = filterProcessedObjects(processedImage, roi, config, originalImage);
+    if (results.empty()) {
+        return {};
+    }
+    return std::move(results.front());
 }
 
 void ProcessingService::realtimeLoop() {

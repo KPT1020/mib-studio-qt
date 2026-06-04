@@ -74,6 +74,8 @@ struct FilterResult {
     bool hasSingleInnerContour{false};
     bool inRange{false};
     int innerContourCount{0};
+    int objectId{-1};
+    int objectCount{0};
     double deformability{0.0};
     double area{0.0};
     double areaRatio{0.0};
@@ -239,9 +241,10 @@ public:
     };
     using BatchProgressCallback = std::function<void(const BatchProgress&)>;
 
-    // Run computeProcessedFrame on each image in order. Does not modify
-    // realtime config, monitoring buffers, experiment state, or fire any
-    // callback. Safe to call from any thread.
+    // Process each image in order and emit one ProcessedFrame per detected
+    // object candidate. Multiple records can share the same source index and
+    // timestamp. Does not modify realtime config, monitoring buffers,
+    // experiment state, or fire any callback. Safe to call from any thread.
     std::vector<ProcessedFrame> processBatch(
         const std::vector<cv::Mat>& grayImages,
         const ProcessingConfig& config,
@@ -270,6 +273,16 @@ private:
         size_t invalid{0};
     };
 
+    struct ContourAnalysis {
+        std::vector<std::vector<cv::Point>> filteredContours;
+        std::vector<std::vector<cv::Point>> innerContours;
+        std::vector<int> parentIndices;
+        std::vector<int> innerFilteredIndices;
+        std::vector<std::vector<cv::Point>> allContours;
+        std::vector<cv::Vec4i> hierarchy;
+        std::vector<size_t> originalIndices;
+    };
+
     void workerLoop();
     void realtimeLoop();
     bool appendExperimentFrame(ProcessedFrame&& frame, bool isValid);
@@ -277,11 +290,33 @@ private:
     void logDroppedExperimentFrames(const DroppedFrameCounts& dropped, size_t bufferedTotal, size_t maxBufferedFrames);
     FilterResult filterProcessedImage(const cv::Mat& processedImage, const cv::Rect& roi, 
                                       const ProcessingConfig& config, const cv::Mat& originalImage);
+    std::vector<FilterResult> filterProcessedObjects(const cv::Mat& processedImage, const cv::Rect& roi,
+                                                     const ProcessingConfig& config, const cv::Mat& originalImage);
     BrightnessQuantiles calculateBrightnessQuantiles(const cv::Mat& originalImage, const cv::Mat& mask);
     double calculateRingRatio(const std::vector<cv::Point>& innerContour, const std::vector<cv::Point>& outerContour);
-    std::tuple<std::vector<std::vector<cv::Point>>, bool, std::vector<std::vector<cv::Point>>, std::vector<int>, 
-               std::vector<std::vector<cv::Point>>, std::vector<cv::Vec4i>> 
-        findContours(const cv::Mat& processedImage);
+    cv::Mat makeObjectMask(const cv::Size& size,
+                           const std::vector<std::vector<cv::Point>>& contours,
+                           int contourIdx,
+                           int parentIdx,
+                           bool nested) const;
+    bool contourTouchesRoiBorder(const std::vector<cv::Point>& contour, const cv::Rect& roi) const;
+    FilterResult evaluateInnerContourObject(const ContourAnalysis& analysis,
+                                            size_t innerIdx,
+                                            int objectId,
+                                            int objectCount,
+                                            const cv::Mat& processedImage,
+                                            const cv::Rect& roi,
+                                            const ProcessingConfig& config,
+                                            const cv::Mat& originalImage);
+    FilterResult evaluateOuterContourObject(const ContourAnalysis& analysis,
+                                            size_t contourIdx,
+                                            int objectId,
+                                            int objectCount,
+                                            const cv::Mat& processedImage,
+                                            const cv::Rect& roi,
+                                            const ProcessingConfig& config,
+                                            const cv::Mat& originalImage);
+    ContourAnalysis findContours(const cv::Mat& processedImage);
 
     std::vector<std::thread> workers_;
     std::queue<Job> queue_;
