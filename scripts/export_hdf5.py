@@ -109,6 +109,11 @@ def read_hdf5_metadata(h5_file: h5py.File, dataset_path: str) -> Optional[np.nda
     return dataset[:]  # Read entire dataset into memory
 
 
+def metadata_value(row: np.void, field: str, default):
+    names = row.dtype.names or ()
+    return row[field] if field in names else default
+
+
 def read_hdf5_images(h5_file: h5py.File, dataset_path: str) -> Optional[np.ndarray]:
     """
     Read images from HDF5 dataset.
@@ -174,7 +179,7 @@ def export_metrics_to_csv(
     
     with open(output_path, 'w', encoding='utf-8') as f:
         # Write CSV header (matching C++ format exactly)
-        f.write("Frame Type,Index,Timestamp,Deformability,Area,Area (um²),Area Ratio,Ring Ratio,")
+        f.write("Frame Type,Index,Timestamp,Object Id,Object Count,Deformability,Area,Area (um²),Area Ratio,Ring Ratio,")
         f.write("Valid,Touches Border,Single Inner,In Range,Inner Count,")
         f.write("Bright Q1,Bright Q2,Bright Q3,Bright Q4\n")
         
@@ -188,6 +193,8 @@ def export_metrics_to_csv(
                 f.write("Valid,")
                 f.write(f"{row['index']},")
                 f.write(f"{row['timestampNs']},")
+                f.write(f"{metadata_value(row, 'objectId', -1)},")
+                f.write(f"{metadata_value(row, 'objectCount', 0)},")
                 f.write(f"{row['deformability']:.3f},")
                 f.write(f"{row['area']:.2f},")
                 f.write(f"{area_microns:.2f},")
@@ -211,6 +218,8 @@ def export_metrics_to_csv(
                 f.write("Invalid,")
                 f.write(f"{row['index']},")
                 f.write(f"{row['timestampNs']},")
+                f.write(f"{metadata_value(row, 'objectId', -1)},")
+                f.write(f"{metadata_value(row, 'objectCount', 0)},")
                 f.write(f"{row['deformability']:.3f},")
                 f.write(f"{row['area']:.2f},")
                 f.write(f"{area_microns:.2f},")

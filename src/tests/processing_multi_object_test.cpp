@@ -1,9 +1,12 @@
 #include "backend/services/ProcessingService.h"
+#include "backend/services/Hdf5Service.h"
 
 #include <opencv2/imgproc.hpp>
 
 #include <cmath>
+#include <filesystem>
 #include <iostream>
+#include <random>
 #include <vector>
 
 namespace
@@ -34,6 +37,16 @@ backend::services::ProcessingConfig permissiveRingConfig()
     config.enable_border_check = true;
     config.require_single_inner_contour = true;
     return config;
+}
+
+std::string makeTempPath()
+{
+    std::random_device rd;
+    std::mt19937_64 gen(rd());
+    std::uniform_int_distribution<unsigned long long> dist;
+    return (std::filesystem::temp_directory_path() /
+            ("mib_processing_multi_object_" + std::to_string(dist(gen)) + ".h5"))
+        .string();
 }
 } // namespace
 
@@ -68,10 +81,16 @@ int main()
                       << frame.index << "\n";
             return 2;
         }
+        if (validation.objectId != static_cast<int>(i) || validation.objectCount != 2)
+        {
+            std::cerr << "record " << i << " has object metadata objectId="
+                      << validation.objectId << " objectCount=" << validation.objectCount << "\n";
+            return 3;
+        }
         if (!validation.isValid)
         {
             std::cerr << "record " << i << " should be valid\n";
-            return 3;
+            return 4;
         }
         if (validation.area <= 0.0 || validation.ringRatio <= 0.0 ||
             !std::isfinite(validation.deformability))
@@ -79,7 +98,69 @@ int main()
             std::cerr << "record " << i << " missing per-object metrics: area="
                       << validation.area << " ringRatio=" << validation.ringRatio
                       << " deformability=" << validation.deformability << "\n";
-            return 4;
+            return 5;
+        }
+    }
+
+    backend::services::Hdf5Service hdf5;
+    const std::string path = makeTempPath();
+    if (!hdf5.openFile(path))
+    {
+        std::cerr << "failed to open temporary HDF5 file\n";
+        return 6;
+    }
+    if (!hdf5.appendFrames(results, {}))
+    {
+        std::cerr << "failed to create per-object frames through append path\n";
+        hdf5.closeFile();
+        return 7;
+    }
+    if (!hdf5.appendFrames(results, {}))
+    {
+        std::cerr << "failed to append per-object frames\n";
+        hdf5.closeFile();
+        return 8;
+    }
+    hdf5.closeFile();
+
+    if (!hdf5.loadFile(path))
+    {
+        std::cerr << "failed to reload temporary HDF5 file\n";
+        std::filesystem::remove(path);
+        return 9;
+    }
+    std::vector<backend::services::ProcessedFrame> reloaded;
+    if (!hdf5.readValidMetadata(reloaded))
+    {
+        std::cerr << "failed to read valid metadata\n";
+        hdf5.closeFile();
+        std::filesystem::remove(path);
+        return 10;
+    }
+    hdf5.closeFile();
+    std::filesystem::remove(path);
+
+    if (reloaded.size() != 4)
+    {
+        std::cerr << "expected 4 reloaded metadata rows after append, got " << reloaded.size() << "\n";
+        return 11;
+    }
+    for (size_t i = 0; i < reloaded.size(); ++i)
+    {
+        const auto& validation = reloaded[i].validation;
+        const int expectedObjectId = static_cast<int>(i % 2);
+        if (reloaded[i].index != 0 ||
+            validation.objectId != expectedObjectId ||
+            validation.objectCount != 2 ||
+            validation.area <= 0.0 ||
+            validation.ringRatio <= 0.0)
+        {
+            std::cerr << "bad reloaded object row " << i << ": index=" << reloaded[i].index
+                      << " objectId=" << validation.objectId
+                      << " objectCount=" << validation.objectCount
+                      << " area=" << validation.area
+                      << " ringRatio=" << validation.ringRatio << "\n";
+            return 12;
         }
     }
 
