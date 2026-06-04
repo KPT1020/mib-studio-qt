@@ -34,6 +34,112 @@ size_t defaultMaxBufferedFrames(size_t flushInterval) {
     return std::max(flushInterval, std::min(preferred, kSoftMaxBufferedFrames));
 }
 
+bool contourTouchesRoiBorder(const std::vector<cv::Point>& contour, const cv::Rect& roi) {
+    constexpr int kBorderThreshold = 2;
+    for (const auto& point : contour) {
+        const int x = point.x - roi.x;
+        const int y = point.y - roi.y;
+        if (x >= 0 && x < roi.width && y >= 0 && y < roi.height) {
+            if (x < kBorderThreshold || x >= roi.width - kBorderThreshold ||
+                y < kBorderThreshold || y >= roi.height - kBorderThreshold) {
+                return true;
+            }
+        } else {
+            return true;
+        }
+    }
+    return false;
+}
+
+cv::Point2d contourCentroid(const std::vector<cv::Point>& contour) {
+    const cv::Moments moments = cv::moments(contour);
+    if (moments.m00 == 0.0) {
+        const cv::Rect box = cv::boundingRect(contour);
+        return cv::Point2d(box.x + (box.width * 0.5), box.y + (box.height * 0.5));
+    }
+    return cv::Point2d(moments.m10 / moments.m00, moments.m01 / moments.m00);
+}
+
+double distancePx(const cv::Point2d& a, const cv::Point2d& b) {
+    const double dx = a.x - b.x;
+    const double dy = a.y - b.y;
+    return std::sqrt((dx * dx) + (dy * dy));
+}
+
+struct ActiveBatchTrack {
+    ProcessingService::BatchTrack summary;
+    cv::Point2d lastCentroid{0.0, 0.0};
+    size_t lastFrameOffset{0};
+    bool matchedInCurrentFrame{false};
+};
+
+void assignBatchTracks(std::vector<ProcessedFrame>& frames,
+                       std::vector<ProcessingService::BatchTrack>& tracks,
+                       const ProcessingService::BatchProcessingOptions& options) {
+    tracks.clear();
+    std::vector<ActiveBatchTrack> activeTracks;
+    uint64_t nextTrackId = 1;
+    const double maxDistance = std::max(0.0, options.maxTrackingDistancePx);
+
+    for (size_t frameOffset = 0; frameOffset < frames.size(); ++frameOffset) {
+        auto& frame = frames[frameOffset];
+        for (auto& track : activeTracks) {
+            track.matchedInCurrentFrame = false;
+        }
+
+        for (auto& object : frame.detections) {
+            int bestTrack = -1;
+            double bestDistance = std::numeric_limits<double>::max();
+
+            for (size_t i = 0; i < activeTracks.size(); ++i) {
+                auto& track = activeTracks[i];
+                if (track.matchedInCurrentFrame || frameOffset < track.lastFrameOffset) {
+                    continue;
+                }
+                const size_t gap = frameOffset - track.lastFrameOffset - (frameOffset > track.lastFrameOffset ? 1 : 0);
+                if (gap > options.maxTrackGapFrames) {
+                    continue;
+                }
+
+                const double d = distancePx(object.centroid, track.lastCentroid);
+                if (d <= maxDistance && d < bestDistance) {
+                    bestDistance = d;
+                    bestTrack = static_cast<int>(i);
+                }
+            }
+
+            if (bestTrack < 0) {
+                ActiveBatchTrack track;
+                track.summary.trackId = nextTrackId++;
+                track.summary.firstFrameOffset = frameOffset;
+                track.summary.lastFrameOffset = frameOffset;
+                track.summary.firstFrameIndex = frame.index;
+                track.summary.lastFrameIndex = frame.index;
+                track.summary.observations = 1;
+                track.lastCentroid = object.centroid;
+                track.lastFrameOffset = frameOffset;
+                track.matchedInCurrentFrame = true;
+                object.trackId = track.summary.trackId;
+                activeTracks.push_back(track);
+            } else {
+                auto& track = activeTracks[static_cast<size_t>(bestTrack)];
+                object.trackId = track.summary.trackId;
+                track.summary.lastFrameOffset = frameOffset;
+                track.summary.lastFrameIndex = frame.index;
+                track.summary.observations += 1;
+                track.lastCentroid = object.centroid;
+                track.lastFrameOffset = frameOffset;
+                track.matchedInCurrentFrame = true;
+            }
+        }
+    }
+
+    tracks.reserve(activeTracks.size());
+    for (const auto& track : activeTracks) {
+        tracks.push_back(track.summary);
+    }
+}
+
 } // namespace
 
 ProcessingService::ProcessingService() = default;
@@ -428,12 +534,14 @@ ProcessedFrame ProcessingService::computeProcessedFrame(
     }
 
     cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+    out.foregroundPixelCount = cv::countNonZero(thresh);
     cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
     cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
     cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
     // Validation + contour/metric extraction (same helper as realtime)
     out.validation = filterProcessedImage(mask, cvRoi, config, gray);
+    out.detections = detectObjectsInProcessedImage(mask, cvRoi, config, gray);
     out.processedImage = std::move(mask);
     return out;
 }
@@ -461,6 +569,140 @@ std::vector<ProcessedFrame> ProcessingService::processBatch(
     SPDLOG_INFO("processBatch: processed {} images (roi={}x{} at {},{}, background={})",
                 total, roi.w, roi.h, roi.x, roi.y, !background.empty());
     return results;
+}
+
+ProcessingService::BatchProcessingResult ProcessingService::processBatchOffline(
+    const std::vector<cv::Mat>& grayImages,
+    const ProcessingConfig& config,
+    const cv::Mat& background,
+    const Roi& roi,
+    const BatchProcessingOptions& options,
+    BatchProgressCallback progress) {
+
+    BatchProcessingResult result;
+    result.totalInputFrames = grayImages.size();
+
+    const size_t total = grayImages.size();
+    if (progress) progress(BatchProgress{0, total});
+    if (total == 0) {
+        return result;
+    }
+
+    size_t workerCount = options.workerCount;
+    if (workerCount == 0) {
+        workerCount = std::max<size_t>(1, std::thread::hardware_concurrency());
+    }
+    workerCount = std::max<size_t>(1, std::min(workerCount, total));
+
+    std::vector<ProcessedFrame> indexedFrames(total);
+    std::vector<uint8_t> keepFrame(total, 0);
+    std::atomic<size_t> nextIndex{0};
+    std::atomic<size_t> done{0};
+    std::atomic<size_t> discarded{0};
+    std::mutex progressMutex;
+
+    auto worker = [&]() {
+        while (true) {
+            const size_t i = nextIndex.fetch_add(1, std::memory_order_relaxed);
+            if (i >= total) {
+                break;
+            }
+
+            ProcessedFrame frame = computeProcessedFrame(
+                grayImages[i],
+                background,
+                config,
+                roi,
+                static_cast<uint64_t>(i),
+                0);
+
+            if (!options.detectObjects) {
+                frame.detections.clear();
+            }
+
+            const bool isEmpty = frame.foregroundPixelCount < config.empty_frame_pixel_threshold;
+            if (options.discardEmptyFrames && isEmpty) {
+                frame.discardedEmpty = true;
+                discarded.fetch_add(1, std::memory_order_relaxed);
+            } else {
+                keepFrame[i] = 1;
+            }
+
+            indexedFrames[i] = std::move(frame);
+
+            const size_t complete = done.fetch_add(1, std::memory_order_relaxed) + 1;
+            if (progress) {
+                std::scoped_lock lk(progressMutex);
+                progress(BatchProgress{complete, total});
+            }
+        }
+    };
+
+    std::vector<std::thread> workers;
+    workers.reserve(workerCount);
+    for (size_t i = 0; i < workerCount; ++i) {
+        workers.emplace_back(worker);
+    }
+    for (auto& thread : workers) {
+        if (thread.joinable()) {
+            thread.join();
+        }
+    }
+
+    result.discardedEmptyFrames = discarded.load(std::memory_order_relaxed);
+    result.frames.reserve(total - result.discardedEmptyFrames);
+    for (size_t i = 0; i < total; ++i) {
+        if (keepFrame[i]) {
+            result.frames.emplace_back(std::move(indexedFrames[i]));
+        }
+    }
+
+    result.processedFrameCount = result.frames.size();
+    for (const auto& frame : result.frames) {
+        result.detectionCount += frame.detections.size();
+    }
+
+    if (options.trackObjects && options.detectObjects) {
+        assignBatchTracks(result.frames, result.tracks, options);
+        result.uniqueObjectCount = result.tracks.size();
+    } else {
+        result.uniqueObjectCount = result.detectionCount;
+    }
+
+    SPDLOG_INFO("processBatchOffline: inputs={}, retained={}, discarded_empty={}, detections={}, tracks={} "
+                "(workers={}, roi={}x{} at {},{}, background={})",
+                result.totalInputFrames,
+                result.processedFrameCount,
+                result.discardedEmptyFrames,
+                result.detectionCount,
+                result.uniqueObjectCount,
+                workerCount,
+                roi.w,
+                roi.h,
+                roi.x,
+                roi.y,
+                !background.empty());
+    return result;
+}
+
+std::future<ProcessingService::BatchProcessingResult> ProcessingService::processBatchAsync(
+    std::vector<cv::Mat> grayImages,
+    ProcessingConfig config,
+    cv::Mat background,
+    Roi roi,
+    BatchProcessingOptions options,
+    BatchProgressCallback progress) {
+
+    return std::async(std::launch::async,
+                      [this,
+                       grayImages = std::move(grayImages),
+                       config,
+                       background = std::move(background),
+                       roi,
+                       options,
+                       progress = std::move(progress)]() mutable {
+                          return processBatchOffline(grayImages, config, background, roi, options, std::move(progress));
+                      });
 }
 
 void ProcessingService::setRingRatioCallback(RingRatioCallback callback) {
@@ -759,6 +1001,110 @@ BrightnessQuantiles ProcessingService::calculateBrightnessQuantiles(const cv::Ma
     result.q4 = brightness[n - 1];
 
     return result;
+}
+
+BrightnessQuantiles ProcessingService::calculateBrightnessQuantiles(const cv::Mat& originalImage,
+                                                                    const std::vector<cv::Point>& contour) {
+    BrightnessQuantiles result;
+    if (originalImage.empty() || contour.empty()) {
+        return result;
+    }
+
+    cv::Mat grayImage;
+    if (originalImage.channels() == 3) {
+        cv::cvtColor(originalImage, grayImage, cv::COLOR_BGR2GRAY);
+    } else {
+        grayImage = originalImage.clone();
+    }
+
+    cv::Mat contourMask(grayImage.rows, grayImage.cols, CV_8UC1, cv::Scalar(0));
+    cv::drawContours(contourMask, std::vector<std::vector<cv::Point>>{contour}, 0, cv::Scalar(255), -1);
+    return calculateBrightnessQuantiles(grayImage, contourMask);
+}
+
+std::vector<DetectedObject> ProcessingService::detectObjectsInProcessedImage(
+    const cv::Mat& processedImage,
+    const cv::Rect& roi,
+    const ProcessingConfig& config,
+    const cv::Mat& originalImage) {
+
+    std::vector<DetectedObject> detections;
+    if (processedImage.empty()) {
+        return detections;
+    }
+
+    auto [filteredContours, hasNestedContours, innerContours, parentIndices, allContours, hierarchy] =
+        findContours(processedImage);
+    (void)hasNestedContours;
+    (void)allContours;
+    (void)hierarchy;
+
+    auto appendDetection = [&](const std::vector<cv::Point>& contour,
+                               int parentIdx,
+                               uint64_t objectId) {
+        if (contour.empty()) {
+            return;
+        }
+
+        DetectedObject object;
+        object.objectId = objectId;
+        object.boundingBox = cv::boundingRect(contour);
+        object.centroid = contourCentroid(contour);
+        object.touchesBorder = config.enable_border_check && contourTouchesRoiBorder(contour, roi);
+
+        const double contourArea = cv::contourArea(contour);
+        std::vector<cv::Point> hull;
+        cv::convexHull(contour, hull);
+        const double hullArea = cv::contourArea(hull);
+        object.area = hullArea;
+        object.areaRatio = (contourArea > 0.0) ? (hullArea / contourArea) : 0.0;
+
+        const double perimeter = cv::arcLength(hull, true);
+        const double circularity = (perimeter > 0.0)
+            ? std::sqrt(4 * M_PI * hullArea) / perimeter
+            : 0.0;
+        object.deformability = 1.0 - circularity;
+
+        if (parentIdx >= 0 && parentIdx < static_cast<int>(filteredContours.size())) {
+            object.ringRatio = calculateRingRatio(contour, filteredContours[static_cast<size_t>(parentIdx)]);
+        }
+
+        const double pxToUm = pixelToMicronFactor_.load(std::memory_order_relaxed);
+        const double areaUm = hullArea * pxToUm * pxToUm;
+        const bool areaInRange = !config.enable_area_range_check ||
+            (areaUm >= config.area_threshold_min && areaUm <= config.area_threshold_max);
+        const bool ringInRange = !config.enable_ring_ratio_check ||
+            (object.ringRatio > config.ring_ratio_min && object.ringRatio < config.ring_ratio_max);
+        const bool deformabilityInRange = !config.enable_deformability_range_check ||
+            (object.deformability >= config.deformability_threshold_min &&
+             object.deformability <= config.deformability_threshold_max);
+        const bool areaRatioInRange = !config.enable_area_ratio_check ||
+            (object.areaRatio <= config.area_ratio_threshold_max);
+
+        object.inRange = areaInRange && ringInRange && deformabilityInRange && areaRatioInRange;
+        object.isValid = (!object.touchesBorder || !config.enable_border_check) && object.inRange;
+        object.brightness = calculateBrightnessQuantiles(originalImage, contour);
+
+        if (eModulusLut_.isLoaded()) {
+            object.youngsModulus = eModulusLut_.lookup(areaUm, object.deformability);
+        }
+
+        detections.push_back(std::move(object));
+    };
+
+    uint64_t objectId = 0;
+    if (!innerContours.empty()) {
+        for (size_t i = 0; i < innerContours.size(); ++i) {
+            const int parentIdx = (i < parentIndices.size()) ? parentIndices[i] : -1;
+            appendDetection(innerContours[i], parentIdx, objectId++);
+        }
+    } else if (!config.require_single_inner_contour) {
+        for (const auto& contour : filteredContours) {
+            appendDetection(contour, -1, objectId++);
+        }
+    }
+
+    return detections;
 }
 
 FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedImage, const cv::Rect& roi, 

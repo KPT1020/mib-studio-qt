@@ -314,6 +314,13 @@ if(BUILD_TESTING)
     target_link_libraries(mib_backend_smoke_test PRIVATE mib_backend)
     add_test(NAME backend.smoke COMMAND mib_backend_smoke_test)
     set_tests_properties(backend.smoke PROPERTIES LABELS "backend")
+
+    add_executable(mib_offline_batch_processing_test
+        src/tests/offline_batch_processing_test.cpp
+    )
+    target_link_libraries(mib_offline_batch_processing_test PRIVATE mib_backend)
+    add_test(NAME backend.offline_batch_processing COMMAND mib_offline_batch_processing_test)
+    set_tests_properties(backend.offline_batch_processing PROPERTIES LABELS "backend")
 endif()
 
 if(NOT MIB_BUILD_BACKEND_ONLY)
