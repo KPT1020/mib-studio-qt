@@ -5,7 +5,7 @@
 
 ## Realtime acquisition & analysis
 - [[CaptureService]] — dedicated thread; `camera->grabFrame()` → FrameStore
-- [[ProcessingService]] — worker pool + realtime loop; OpenCV pipeline
+- [[ProcessingService]] — worker pool + realtime loop + async batch queue; OpenCV pipeline
 - [[PlaybackService]] — UI-facing wrapper over FrameStore
 
 ## Persistence

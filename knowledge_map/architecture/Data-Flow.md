@@ -29,6 +29,28 @@
                        TriggerService ──▶ camera digital output pulse
 ```
 
+## Async batch path (opt-in)
+
+```
+┌───────────┐    grabFrame()     ┌──────────────┐ FrameCallback
+│  ICamera  ├───────────────────▶│CaptureService├──────────────┐
+└───────────┘                    └──────┬───────┘              │
+                                        │ pushFrame()           │ enqueueBatchFrame()
+                                        ▼                       ▼
+                                  ┌────────────┐       ┌───────────────────┐
+                                  │ FrameStore │       │ ProcessingService │
+                                  │ preview    │       │ bounded queue     │
+                                  └────────────┘       │ batch workers     │
+                                                       └─────────┬─────────┘
+                                                                 │
+                                                BatchResultCallback(vector<ProcessedFrame>)
+```
+
+The batch path is currently backend-only and opt-in. It preserves FrameStore
+for preview/playback, but moves heavier segmentation/metric work behind a
+bounded queue so capture enqueue returns without waiting for processing
+throughput. See [[Batch-Pipeline]].
+
 ## Experiment path
 
 While an experiment is active
