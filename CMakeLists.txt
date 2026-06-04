@@ -321,6 +321,11 @@ if(BUILD_TESTING)
     target_link_libraries(processing_batch_pipeline_test PRIVATE mib_backend)
     add_test(NAME backend.processing_batch_pipeline COMMAND processing_batch_pipeline_test)
     set_tests_properties(backend.processing_batch_pipeline PROPERTIES LABELS "backend")
+
+    add_executable(kin6_batch_pipeline_evidence
+        tools/kin6_batch_pipeline_evidence.cpp
+    )
+    target_link_libraries(kin6_batch_pipeline_evidence PRIVATE mib_backend)
 endif()
 
 if(NOT MIB_BUILD_BACKEND_ONLY)
