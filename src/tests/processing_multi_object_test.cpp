@@ -81,7 +81,7 @@ int main()
                       << frame.index << "\n";
             return 2;
         }
-        if (validation.objectId != static_cast<int>(i) || validation.objectCount != 2)
+        if (validation.objectId != static_cast<int>(i + 1) || validation.objectCount != 2)
         {
             std::cerr << "record " << i << " has object metadata objectId="
                       << validation.objectId << " objectCount=" << validation.objectCount << "\n";
@@ -148,7 +148,7 @@ int main()
     for (size_t i = 0; i < reloaded.size(); ++i)
     {
         const auto& validation = reloaded[i].validation;
-        const int expectedObjectId = static_cast<int>(i % 2);
+        const int expectedObjectId = static_cast<int>((i % 2) + 1);
         if (reloaded[i].index != 0 ||
             validation.objectId != expectedObjectId ||
             validation.objectCount != 2 ||

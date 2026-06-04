@@ -81,8 +81,8 @@ def gate_row(
     deform_min: float,
     deform_max: float,
 ) -> tuple[bool, list[str], bool]:
-    object_id = parse_int(row, "Object Id", default=0)
-    is_instance = object_id >= 0
+    object_id = parse_int(row, "Object Id", default=-1)
+    is_instance = object_id > 0
     area = parse_float(row, "Area")
     deformability = parse_float(row, "Deformability")
 

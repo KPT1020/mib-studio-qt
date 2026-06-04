@@ -18,7 +18,7 @@ Uniform JSON format for processing pipeline metrics so **mib-studio-qt** pipelin
 | `frame_type` | string | `"valid"` or `"invalid"` (passed validation or not). |
 | `index` | integer | Frame index from acquisition (monotonic). |
 | `timestamp_ns` | integer | Timestamp in nanoseconds. |
-| `object_id` | integer | Zero-based object candidate within the source frame/ROI; `-1` when no object candidate was selected. |
+| `object_id` | integer | One-based object candidate within the source frame/ROI, ordered left-to-right then top-to-bottom; `-1` when no object candidate was selected. |
 | `object_count` | integer | Number of object candidates emitted for the source frame/ROI. |
 | `deformability` | number | 1.0 − circularity; dimensionless. |
 | `area` | number | Hull area in **pixels**. |
@@ -43,7 +43,7 @@ When `require_single_inner_contour` (or equivalent) is enabled, the pipeline kee
 
 ### Multi-object ROI records
 
-Batch processing emits one metrics record per detected object candidate. Multiple records can therefore share the same `index` and `timestamp_ns`; use `object_id` and `object_count` to distinguish duplicate detections from the same source frame/ROI. Each object candidate is validated independently, so an edge-touching object can be rejected while another object in the same ROI remains valid.
+Batch processing emits one metrics record per detected object candidate. Multiple records can therefore share the same `index` and `timestamp_ns`; use one-based `object_id` values from `1` to `object_count` to distinguish duplicate detections from the same source frame/ROI. Each object candidate is validated independently, so an edge-touching object can be rejected while another object in the same ROI remains valid.
 
 Known failure modes:
 

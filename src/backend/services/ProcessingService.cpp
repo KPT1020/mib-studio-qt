@@ -1002,11 +1002,22 @@ std::vector<FilterResult> ProcessingService::filterProcessedObjects(const cv::Ma
     }
 
     if (!analysis.innerContours.empty()) {
-        std::vector<FilterResult> results;
-        results.reserve(analysis.innerContours.size());
-        const int objectCount = static_cast<int>(analysis.innerContours.size());
+        std::vector<size_t> objectOrder;
+        objectOrder.reserve(analysis.innerContours.size());
         for (size_t i = 0; i < analysis.innerContours.size(); ++i) {
-            results.push_back(evaluateInnerContourObject(analysis, i, static_cast<int>(i), objectCount,
+            objectOrder.push_back(i);
+        }
+        std::sort(objectOrder.begin(), objectOrder.end(), [&](size_t lhs, size_t rhs) {
+            const cv::Rect lhsBox = cv::boundingRect(analysis.innerContours[lhs]);
+            const cv::Rect rhsBox = cv::boundingRect(analysis.innerContours[rhs]);
+            return std::tie(lhsBox.x, lhsBox.y, lhs) < std::tie(rhsBox.x, rhsBox.y, rhs);
+        });
+
+        std::vector<FilterResult> results;
+        results.reserve(objectOrder.size());
+        const int objectCount = static_cast<int>(analysis.innerContours.size());
+        for (size_t i = 0; i < objectOrder.size(); ++i) {
+            results.push_back(evaluateInnerContourObject(analysis, objectOrder[i], static_cast<int>(i + 1), objectCount,
                                                          processedImage, roi, config, originalImage));
         }
         return results;
@@ -1026,12 +1037,17 @@ std::vector<FilterResult> ProcessingService::filterProcessedObjects(const cv::Ma
                 topLevelContours.push_back(i);
             }
         }
+        std::sort(topLevelContours.begin(), topLevelContours.end(), [&](size_t lhs, size_t rhs) {
+            const cv::Rect lhsBox = cv::boundingRect(analysis.filteredContours[lhs]);
+            const cv::Rect rhsBox = cv::boundingRect(analysis.filteredContours[rhs]);
+            return std::tie(lhsBox.x, lhsBox.y, lhs) < std::tie(rhsBox.x, rhsBox.y, rhs);
+        });
 
         std::vector<FilterResult> results;
         results.reserve(topLevelContours.size());
         const int objectCount = static_cast<int>(topLevelContours.size());
         for (size_t i = 0; i < topLevelContours.size(); ++i) {
-            results.push_back(evaluateOuterContourObject(analysis, topLevelContours[i], static_cast<int>(i),
+            results.push_back(evaluateOuterContourObject(analysis, topLevelContours[i], static_cast<int>(i + 1),
                                                          objectCount, processedImage, roi, config, originalImage));
         }
         return results;
