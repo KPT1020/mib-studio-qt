@@ -18,6 +18,9 @@
 - **Realtime thread** (`startRealtime(frameStore)`) — polls FrameStore
   write-index; processes every frame or only latest depending on
   `setRealtimeDropFrames`. Experiments force every-frame.
+- **Async batch workers** (`startBatchPipeline(config)`) — drain a bounded
+  frame queue in configurable batch sizes and emit `ProcessedFrame` vectors via
+  `BatchResultCallback`.
 
 ## Pipeline (per frame)
 
@@ -92,9 +95,35 @@ button that drives this via `BatchMaskDialog`.
 Batch calls do **not** touch realtime state or monitoring buffers, so
 they're safe to run concurrently with live capture.
 
+## Async batch pipeline
+
+For capture-rate decoupling, use:
+
+- `ProcessingService::startBatchPipeline(BatchPipelineConfig)` — starts
+  `workerCount` batch workers. `batchSize` controls the maximum number of
+  queued frames drained by one worker at a time. `maxQueuedFrames` bounds RAM.
+- `ProcessingService::enqueueBatchFrame(...)` — copies one raw grayscale frame
+  into the queue and returns immediately. If the queue is full, it returns
+  `false` and increments `framesDropped`; it never waits for worker throughput.
+- `ProcessingService::setBatchResultCallback(callback)` — receives moved
+  `std::vector<ProcessedFrame>` batches after workers call
+  `computeProcessedFrame()` for each queued frame.
+- `ProcessingService::getBatchPipelineStats()` — reports enqueued, dropped,
+  processed, batches processed, queued frames, and running state.
+
+The intended ingest bridge is `CaptureService::setFrameCallback()` ->
+`enqueueBatchFrame(...)`. The existing `FrameStore` write can continue in
+parallel for preview/playback while batch workers own heavier analysis.
+
+See [[../architecture/Batch-Pipeline]] for the migration path from
+background subtract -> ROI -> contours and for current boundaries.
+
 ## Gotchas
 
 - Realtime drop-frames mode is ignored while an experiment is active.
+- Async batch workers can emit batches out of frame-index order when
+  `workerCount > 1`; consumers that require monotonic order should re-sequence
+  by `ProcessedFrame::index`.
 - When the experiment backlog reaches `maxBufferedFrames_`, sampled invalid
   frames are dropped first. Valid frames can evict old invalid frames; valid
   drops only happen if the backlog is entirely valid and still over cap. This

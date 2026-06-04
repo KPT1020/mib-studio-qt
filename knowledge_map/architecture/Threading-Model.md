@@ -14,6 +14,7 @@
 | Capture | [[../services/CaptureService]] `run()` | `camera->grabFrame()` | Acquires frames, pushes to FrameStore, fires callback |
 | Processing workers | [[../services/ProcessingService]] pool | job queue | Generic job executor (size = `hardware_concurrency()` by default) |
 | Realtime processing | [[../services/ProcessingService]] `realtimeLoop()` | FrameStore writeIndex | Low-latency per-frame analysis; drop-frames mode skips to latest |
+| Async batch processing | [[../services/ProcessingService]] `batchWorkerLoop()` | `batchCv_` + bounded frame queue | Drains queued capture frames in configurable batches, runs `computeProcessedFrame`, emits `BatchResultCallback` |
 | Autofocus stats | [[../services/AutofocusService]] `statsLoop()` | `pendingSamplesCV_` + 10 ms drain interval | Drains ring-ratio samples pushed by `ProcessingService` realtime thread, maintains 1000-sample deque, refreshes `{median,average,min,max}RingRatio_` atomics. Runs for the full lifetime of the service, not just while connected. |
 | Autofocus control | [[../services/AutofocusService]] `controlLoop()` | serial COM | Reads ring-ratio stats atomics, writes voltage to nanopositioner. Runs only between `connect()` / `disconnect()`. |
 | Trigger | [[../services/TriggerService]] `triggerLoop()` | `triggerCV_` | Issues camera digital-output pulse on target-group events |
@@ -27,6 +28,9 @@
   [[../data-model/FrameStore]].
 - `ProcessingService` uses `std::condition_variable_any` for the worker
   queue; realtime loop polls FrameStore by absolute write-index.
+- `ProcessingService` async batch enqueue holds `batchMutex_` only long enough
+  to check bounded capacity and push a copied grayscale frame. If full, enqueue
+  fails fast and increments dropped-frame stats instead of waiting for workers.
 - Qt signals from non-GUI threads go through
   [[../frontend/System-Utilities]] `BackgroundCaptureNotifier` (signal bridge).
 
