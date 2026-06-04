@@ -326,6 +326,13 @@ if(BUILD_TESTING)
         src/tests/kin6_batch_pipeline_evidence.cpp
     )
     target_link_libraries(kin6_batch_pipeline_evidence PRIVATE mib_backend)
+
+    add_executable(kin6_mib_app_capture_proof
+        src/tests/kin6_mib_app_capture_proof.cpp
+    )
+    target_link_libraries(kin6_mib_app_capture_proof PRIVATE mib_backend)
+    add_test(NAME backend.kin6_mib_app_capture_proof COMMAND kin6_mib_app_capture_proof)
+    set_tests_properties(backend.kin6_mib_app_capture_proof PROPERTIES LABELS "backend")
 endif()
 
 if(NOT MIB_BUILD_BACKEND_ONLY)

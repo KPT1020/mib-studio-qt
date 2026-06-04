@@ -84,6 +84,17 @@ analysis where complete batches are acceptable. Trigger-critical realtime
 behavior can continue using `startRealtime()` until downstream emit/storage code
 is ready to consume `BatchResultCallback` output directly.
 
+The app-level proof path uses the same production objects that mib studio starts
+at runtime:
+
+```text
+AppBackend -> CaptureService -> MockCamera -> capture callback
+  -> ProcessingService::enqueueBatchFrame -> batch workers -> BatchResultCallback
+```
+
+This keeps the queue contract executable through mib studio backend/runtime code
+without requiring a hardware camera or blocking the Qt UI thread.
+
 ## Validation Hooks
 
 `processing_batch_pipeline_test` verifies:
@@ -97,3 +108,9 @@ is ready to consume `BatchResultCallback` output directly.
 `tools/kin6_generate_hf_evidence.sh` verifies the Hugging Face
 `gavinlouuu/512x96stream` 5,000-frame evidence run and writes reviewer-facing
 visuals, metrics, and capture-loop timing under `review_artifacts/KIN-6/`.
+
+`kin6_mib_app_capture_proof` boots `AppBackend`, configures `MockCamera`, starts
+`CaptureService`, and enqueues every capture callback into the async batch
+pipeline. With the Hugging Face bundle it verifies 5,000 capture callbacks,
+5,000 accepted enqueues, zero drops, a configured 5,000-frame batch, and 5,000
+processed outputs through mib studio software code.

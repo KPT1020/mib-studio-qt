@@ -3,6 +3,7 @@ set -euo pipefail
 
 OUT_DIR="${1:-review_artifacts/KIN-6}"
 BINARY="${2:-build/linux-backend/kin6_batch_pipeline_evidence}"
+APP_PROOF_BINARY="${3:-}"
 
 mkdir -p "${OUT_DIR}" "${OUT_DIR}/logs"
 
@@ -117,6 +118,25 @@ fi
 
 "${BINARY}" "${OUT_DIR}" "${OUT_DIR}/hf_image_downloads.tsv"
 
+if [[ -n "${APP_PROOF_BINARY}" ]]; then
+    if [[ ! -x "${APP_PROOF_BINARY}" ]]; then
+        echo "MIB app capture proof binary is not executable: ${APP_PROOF_BINARY}" >&2
+        exit 1
+    fi
+
+    MOCK_FRAME_DIR="${OUT_DIR}/mib_app_mock_frames"
+    rm -rf "${MOCK_FRAME_DIR}"
+    mkdir -p "${MOCK_FRAME_DIR}"
+    while IFS=$'\t' read -r row_idx image_path width height; do
+        if [[ "${row_idx}" == "row_idx" ]]; then
+            continue
+        fi
+        ln -s "$(realpath "${image_path}")" "${MOCK_FRAME_DIR}/hf_row_${row_idx}.jpg"
+    done < "${OUT_DIR}/hf_image_downloads.tsv"
+
+    "${APP_PROOF_BINARY}" "${MOCK_FRAME_DIR}" "${OUT_DIR}" 5000 5000
+fi
+
 cat > "${OUT_DIR}/README.md" <<EOF
 # KIN-6 Review Evidence
 
@@ -126,8 +146,8 @@ Generated from Hugging Face dataset \`gavinlouuu/512x96stream\`, config \`defaul
 
 \`\`\`bash
 cmake --preset linux-backend-only
-cmake --build --preset linux-backend-only-build --target kin6_batch_pipeline_evidence
-tools/kin6_generate_hf_evidence.sh ${OUT_DIR} ${BINARY}
+cmake --build --preset linux-backend-only-build --target kin6_batch_pipeline_evidence kin6_mib_app_capture_proof
+tools/kin6_generate_hf_evidence.sh ${OUT_DIR} ${BINARY} ${APP_PROOF_BINARY:-build/linux-backend/kin6_mib_app_capture_proof}
 \`\`\`
 
 ## Files
@@ -136,5 +156,9 @@ tools/kin6_generate_hf_evidence.sh ${OUT_DIR} ${BINARY}
 - \`processed_mask_sample.png\` - processed mask emitted by async batch workers.
 - \`contour_overlay_sample.png\` - contour overlay for reviewer inspection.
 - \`metrics.json\` - 5,000-frame batch stats, capture-loop probe stats, and per-frame metrics.
+- \`mib_app_input_sample.png\` - frame streamed through the mib studio \`AppBackend\`/\`CaptureService\` mock-camera runtime.
+- \`mib_app_processed_mask_sample.png\` - mask emitted after the app capture callback enqueued into the async batch pipeline.
+- \`mib_app_contour_overlay_sample.png\` - contour overlay from the app-level proof run.
+- \`mib_app_capture_proof.json\` - app runtime counters for capture callbacks, enqueue acceptance, drops, worker batch size, and processed frames.
 - \`hf_size.json\`, \`hf_splits.json\`, \`hf_rows.jsonl\`, \`hf_image_downloads.tsv\` - Dataset Viewer metadata and image manifest.
 EOF
