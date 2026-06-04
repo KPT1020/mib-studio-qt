@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -87,12 +88,31 @@ struct FilterResult {
     std::vector<cv::Vec4i> hierarchy;
 };
 
+struct DetectedObject {
+    uint64_t objectId{0}; // Stable within a frame, ordered by contour discovery.
+    uint64_t trackId{0};  // Assigned by offline batch tracking when enabled.
+    cv::Rect boundingBox;
+    cv::Point2d centroid{0.0, 0.0};
+    bool isValid{false};
+    bool touchesBorder{false};
+    bool inRange{false};
+    double deformability{0.0};
+    double area{0.0};
+    double areaRatio{0.0};
+    double ringRatio{0.0};
+    double youngsModulus{0.0};
+    BrightnessQuantiles brightness;
+};
+
 struct ProcessedFrame {
     uint64_t index{0};
     uint64_t timestampNs{0};
     cv::Mat originalImage;
     cv::Mat processedImage; // mask
     FilterResult validation;
+    int foregroundPixelCount{0};
+    bool discardedEmpty{false};
+    std::vector<DetectedObject> detections;
     // Multi-image series: additional images captured after the trigger frame.
     // seriesImages[0] is the trigger image (same as originalImage), followed by subsequent frames.
     // Empty when multi-image mode is disabled.
@@ -249,6 +269,55 @@ public:
         const Roi& roi = Roi{0, 0, 0, 0},
         BatchProgressCallback progress = {});
 
+    struct BatchProcessingOptions {
+        bool discardEmptyFrames{true};
+        bool detectObjects{true};
+        bool trackObjects{true};
+        size_t workerCount{0}; // 0 = choose from hardware_concurrency.
+        double maxTrackingDistancePx{32.0};
+        size_t maxTrackGapFrames{2};
+    };
+
+    struct BatchTrack {
+        uint64_t trackId{0};
+        size_t firstFrameOffset{0};
+        size_t lastFrameOffset{0};
+        uint64_t firstFrameIndex{0};
+        uint64_t lastFrameIndex{0};
+        size_t observations{0};
+    };
+
+    struct BatchProcessingResult {
+        size_t totalInputFrames{0};
+        size_t discardedEmptyFrames{0};
+        size_t processedFrameCount{0};
+        size_t detectionCount{0};
+        size_t uniqueObjectCount{0};
+        std::vector<ProcessedFrame> frames;
+        std::vector<BatchTrack> tracks;
+    };
+
+    // Offline recognition pipeline for recorded image sets. It computes masks,
+    // discards empty frames before exposing detections, detects multiple object
+    // candidates per frame, and optionally assigns track IDs for deduplication.
+    BatchProcessingResult processBatchOffline(
+        const std::vector<cv::Mat>& grayImages,
+        const ProcessingConfig& config,
+        const cv::Mat& background,
+        const Roi& roi,
+        const BatchProcessingOptions& options,
+        BatchProgressCallback progress = {});
+
+    // Async wrapper for processBatchOffline. Inputs are passed by value so the
+    // background task does not depend on caller-owned cv::Mat lifetimes.
+    std::future<BatchProcessingResult> processBatchAsync(
+        std::vector<cv::Mat> grayImages,
+        ProcessingConfig config,
+        cv::Mat background,
+        Roi roi,
+        BatchProcessingOptions options,
+        BatchProgressCallback progress = {});
+
     // Ring ratio callback for autofocus (called when validated frames are processed)
     using RingRatioCallback = std::function<void(double ringRatio, int64_t timestampNs)>;
     void setRingRatioCallback(RingRatioCallback callback);
@@ -277,7 +346,13 @@ private:
     void logDroppedExperimentFrames(const DroppedFrameCounts& dropped, size_t bufferedTotal, size_t maxBufferedFrames);
     FilterResult filterProcessedImage(const cv::Mat& processedImage, const cv::Rect& roi, 
                                       const ProcessingConfig& config, const cv::Mat& originalImage);
+    std::vector<DetectedObject> detectObjectsInProcessedImage(const cv::Mat& processedImage,
+                                                              const cv::Rect& roi,
+                                                              const ProcessingConfig& config,
+                                                              const cv::Mat& originalImage);
     BrightnessQuantiles calculateBrightnessQuantiles(const cv::Mat& originalImage, const cv::Mat& mask);
+    BrightnessQuantiles calculateBrightnessQuantiles(const cv::Mat& originalImage,
+                                                     const std::vector<cv::Point>& contour);
     double calculateRingRatio(const std::vector<cv::Point>& innerContour, const std::vector<cv::Point>& outerContour);
     std::tuple<std::vector<std::vector<cv::Point>>, bool, std::vector<std::vector<cv::Point>>, std::vector<int>, 
                std::vector<std::vector<cv::Point>>, std::vector<cv::Vec4i>> 

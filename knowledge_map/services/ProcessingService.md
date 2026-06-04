@@ -83,6 +83,16 @@ TIFFs — use:
   — wraps `computeProcessedFrame` over a vector of grayscale `cv::Mat`
   inputs, returns `std::vector<ProcessedFrame>`. Progress is reported via
   `BatchProgressCallback(BatchProgress{done, total})`.
+- `ProcessingService::processBatchOffline(grayImages, config, background, roi, options, progressCb)`
+  — recorded/offline recognition path. It runs frame processing across a worker
+  pool, discards frames whose foreground pixels fall below
+  `empty_frame_pixel_threshold`, emits per-object `DetectedObject` rows for all
+  detected inner contours, and assigns nearest-centroid `trackId` values so
+  repeated detections can be deduplicated across ordered frames.
+- `ProcessingService::processBatchAsync(...)`
+  — launches `processBatchOffline` on a background `std::future`. Inputs are
+  passed by value so caller-owned `cv::Mat` lifetimes do not leak into the
+  async task.
 
 Input/output adapters live in [[BatchMaskSources]] —
 `loadFromHdf5` / `loadFromFolder` (input), `saveMaskImages` /
