@@ -16,7 +16,7 @@ import shutil
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 DATASET_NAME = "gavinlouuu/512x96stream"
@@ -335,7 +335,12 @@ def run_detection(
 def _clean_output_dir(output_dir: Path) -> None:
     for name in ("frames", "masks", "overlays"):
         shutil.rmtree(output_dir / name, ignore_errors=True)
-    for name in ("metrics.json", "manifest.json", "README.md"):
+    for name in (
+        "metrics.json",
+        "manifest.json",
+        "sample_array_manifest.json",
+        "README.md",
+    ):
         path = output_dir / name
         if path.exists():
             path.unlink()
@@ -371,6 +376,237 @@ def _representative_sample_index(
     if detected_indices:
         return detected_indices[0]
     return samples[0].sample_index
+
+
+def _records_by_sample(
+    records_by_condition: dict[str, list[DetectionRecord]],
+) -> dict[int, dict[str, DetectionRecord]]:
+    records_by_sample: dict[int, dict[str, DetectionRecord]] = {}
+    for condition, records in records_by_condition.items():
+        for record in records:
+            records_by_sample.setdefault(record.sample_index, {})[condition] = record
+    return records_by_sample
+
+
+def _first_sample_matching(
+    samples: list[DatasetSample],
+    records_by_sample: dict[int, dict[str, DetectionRecord]],
+    predicate: Callable[[dict[str, DetectionRecord]], bool],
+) -> int | None:
+    for sample in samples:
+        if predicate(records_by_sample.get(sample.sample_index, {})):
+            return sample.sample_index
+    return None
+
+
+def _representative_sample_cases(
+    samples: list[DatasetSample],
+    records_by_condition: dict[str, list[DetectionRecord]],
+) -> list[dict[str, Any]]:
+    """Pick stable sample cases that summarize empty, cell, and failure behavior."""
+    records_by_sample = _records_by_sample(records_by_condition)
+    cases: list[dict[str, Any]] = []
+    seen_case_keys: set[str] = set()
+
+    def add_case(
+        key: str,
+        title: str,
+        sample_index: int | None,
+        conditions: list[str],
+        reason: str,
+    ) -> None:
+        if sample_index is None or key in seen_case_keys:
+            return
+        available = records_by_sample.get(sample_index, {})
+        selected_conditions = [
+            condition for condition in conditions if condition in available
+        ]
+        if not selected_conditions:
+            return
+        seen_case_keys.add(key)
+        cases.append(
+            {
+                "key": key,
+                "title": title,
+                "sample_index": sample_index,
+                "conditions": selected_conditions,
+                "reason": reason,
+                "metrics": {
+                    condition: asdict(available[condition])
+                    for condition in selected_conditions
+                },
+            }
+        )
+
+    empty_index = _first_sample_matching(
+        samples,
+        records_by_sample,
+        lambda records: "baseline" in records and not records["baseline"].detected,
+    )
+    add_case(
+        "empty_baseline_reference",
+        "Empty/no-contour baseline reference",
+        empty_index,
+        ["baseline"],
+        "First sampled HF frame where the baseline detector returned no filtered contours.",
+    )
+
+    detected_index = _first_sample_matching(
+        samples,
+        records_by_sample,
+        lambda records: "baseline" in records and records["baseline"].detected,
+    )
+    add_case(
+        "cell_positive_baseline",
+        "Cell-positive baseline reference",
+        detected_index,
+        [
+            "baseline",
+            "brightness_high",
+            "brightness_extreme_high",
+            "contrast_high",
+            "contrast_extreme_high",
+        ],
+        "First sampled HF frame where the baseline detector returned filtered contours.",
+    )
+
+    standard_low_failure_index = _first_sample_matching(
+        samples,
+        records_by_sample,
+        lambda records: (
+            "baseline" in records
+            and records["baseline"].detected
+            and (
+                (
+                    "brightness_low" in records
+                    and not records["brightness_low"].detected
+                )
+                or ("contrast_low" in records and not records["contrast_low"].detected)
+            )
+        ),
+    )
+    add_case(
+        "standard_low_condition_drop",
+        "Standard low-condition detection drop",
+        standard_low_failure_index,
+        ["baseline", "brightness_low", "contrast_low"],
+        "Cell-positive HF frame where a standard low brightness or contrast condition lost detection.",
+    )
+
+    extreme_low_failure_index = _first_sample_matching(
+        samples,
+        records_by_sample,
+        lambda records: (
+            "baseline" in records
+            and records["baseline"].detected
+            and (
+                (
+                    "brightness_extreme_low" in records
+                    and not records["brightness_extreme_low"].detected
+                )
+                or (
+                    "contrast_extreme_low" in records
+                    and not records["contrast_extreme_low"].detected
+                )
+            )
+        ),
+    )
+    add_case(
+        "extreme_low_condition_drop",
+        "Extreme low-condition detection drop",
+        extreme_low_failure_index,
+        ["baseline", "brightness_extreme_low", "contrast_extreme_low"],
+        "Cell-positive HF frame where extreme low brightness and contrast conditions lose detection.",
+    )
+
+    fallback_conditions = ["baseline"]
+    for sample in samples:
+        if len(cases) >= 3:
+            break
+        add_case(
+            f"fallback_sample_{sample.sample_index:05d}",
+            "Fallback sampled frame",
+            sample.sample_index,
+            fallback_conditions,
+            "Fallback case included to keep at least three reviewer sample cases when available.",
+        )
+
+    return cases
+
+
+def _artifact_paths_for_case(case: dict[str, Any]) -> dict[str, Any]:
+    sample_name = f"sample_{case['sample_index']:05d}"
+    paths_by_condition = {}
+    for condition in case["conditions"]:
+        paths_by_condition[condition] = {
+            "input": str(
+                Path("frames") / condition / f"{sample_name}_input.png"
+            ),
+            "mask": str(Path("masks") / condition / f"{sample_name}_mask.png"),
+            "overlay": str(
+                Path("overlays") / condition / f"{sample_name}_overlay.png"
+            ),
+        }
+    return {
+        **case,
+        "paths": paths_by_condition,
+    }
+
+
+def _read_png_rgb(path: Path) -> Any:
+    import cv2
+
+    image = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    if image is None:
+        raise RuntimeError(f"Failed to read image: {path}")
+    if image.ndim == 2:
+        return cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+    if image.shape[2] == 4:
+        return cv2.cvtColor(image, cv2.COLOR_BGRA2RGB)
+    return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+
+def _sample_case_contact_sheet(
+    output_dir: Path,
+    sample_case: dict[str, Any],
+) -> Any:
+    import cv2
+    import numpy as np
+
+    rows = []
+    for condition in sample_case["conditions"]:
+        paths = sample_case["paths"][condition]
+        images = [
+            _read_png_rgb(output_dir / paths["input"]),
+            _read_png_rgb(output_dir / paths["mask"]),
+            _read_png_rgb(output_dir / paths["overlay"]),
+        ]
+        row = np.concatenate(images, axis=1)
+        label_bar = np.full((22, row.shape[1], 3), 32, dtype=np.uint8)
+        metrics = sample_case["metrics"][condition]
+        label = (
+            f"{sample_case['key']} sample={sample_case['sample_index']} "
+            f"{condition} detected={metrics['detected']} "
+            f"contours={metrics['contour_count']} mask_pixels={metrics['mask_pixels']}"
+        )
+        cv2.putText(
+            label_bar,
+            label,
+            (5, 15),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.42,
+            (255, 255, 255),
+            1,
+        )
+        rows.append(np.concatenate([label_bar, row], axis=0))
+
+    separator = np.full((4, rows[0].shape[1], 3), 64, dtype=np.uint8)
+    separated_rows = []
+    for row in rows:
+        if separated_rows:
+            separated_rows.append(separator)
+        separated_rows.append(row)
+    return np.concatenate(separated_rows, axis=0)
 
 
 def _overlay_image(image: Any, result: Any, config: Any, label: str) -> Any:
@@ -434,6 +670,10 @@ def write_artifacts(
 
     review_sample_index = _representative_sample_index(samples, records_by_condition)
     baseline_detected_indices = _baseline_detected_sample_indices(records_by_condition)
+    sample_cases = [
+        _artifact_paths_for_case(sample_case)
+        for sample_case in _representative_sample_cases(samples, records_by_condition)
+    ]
 
     artifact_paths: dict[str, Path] = {}
     for transform in TRANSFORMS:
@@ -466,6 +706,15 @@ def write_artifacts(
                 artifact_paths[f"{condition}_mask"] = mask_path
                 artifact_paths[f"{condition}_overlay"] = overlay_path
 
+    for sample_case in sample_cases:
+        contact_sheet_path = output_dir / f"sample_case_{sample_case['key']}.png"
+        _write_png(
+            contact_sheet_path,
+            _sample_case_contact_sheet(output_dir, sample_case),
+        )
+        sample_case["contact_sheet"] = str(contact_sheet_path.relative_to(output_dir))
+        artifact_paths[f"sample_case_{sample_case['key']}"] = contact_sheet_path
+
     per_frame = {
         condition: [asdict(record) for record in records]
         for condition, records in records_by_condition.items()
@@ -477,6 +726,7 @@ def write_artifacts(
         "background_sample_count": background_sample_count,
         "baseline_detected_sample_indices": baseline_detected_indices,
         "review_sample_index": review_sample_index,
+        "sample_cases": sample_cases,
         "review_sample_selection": (
             "First sampled frame where the baseline processing path returned "
             "at least one filtered contour; falls back to the first sampled frame."
@@ -505,10 +755,16 @@ def write_artifacts(
         "background_sample_count": background_sample_count,
         "baseline_detected_sample_indices": baseline_detected_indices,
         "review_sample_index": review_sample_index,
+        "sample_cases": sample_cases,
         "transforms": [asdict(transform) for transform in TRANSFORMS],
         "review_paths": {
-            key: str(path.relative_to(output_dir))
-            for key, path in sorted(artifact_paths.items())
+            **{
+                key: str(path.relative_to(output_dir))
+                for key, path in sorted(artifact_paths.items())
+            },
+            "manifest": "manifest.json",
+            "readme": "README.md",
+            "sample_array_manifest": "sample_array_manifest.json",
         },
     }
     manifest_path = output_dir / "manifest.json"
@@ -517,6 +773,24 @@ def write_artifacts(
         encoding="utf-8",
     )
     artifact_paths["manifest"] = manifest_path
+
+    sample_array_manifest = {
+        "issue": "KIN-12",
+        "dataset": dataset_info,
+        "selection": (
+            "Representative sample cases are selected deterministically from the "
+            "requested split slice: first empty baseline, first cell-positive "
+            "baseline, first standard low-condition detection drop, and first "
+            "extreme low-condition detection drop when available."
+        ),
+        "sample_cases": sample_cases,
+    }
+    sample_array_manifest_path = output_dir / "sample_array_manifest.json"
+    sample_array_manifest_path.write_text(
+        json.dumps(sample_array_manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    artifact_paths["sample_array_manifest"] = sample_array_manifest_path
 
     readme_path = output_dir / "README.md"
     readme_path.write_text(
@@ -527,6 +801,7 @@ def write_artifacts(
             command,
             baseline_detected_indices,
             review_sample_index,
+            sample_cases,
         ),
         encoding="utf-8",
     )
@@ -541,7 +816,15 @@ def _readme_text(
     command: str,
     baseline_detected_indices: list[int],
     review_sample_index: int,
+    sample_cases: list[dict[str, Any]],
 ) -> str:
+    sample_case_lines = "\n".join(
+        (
+            f"- `{case['key']}`: sample `{case['sample_index']}`, "
+            f"conditions `{case['conditions']}` - {case['reason']}"
+        )
+        for case in sample_cases
+    )
     return f"""# KIN-12 Synthetic Condition Validation
 
 This bundle validates the existing middle-band contour detection path on
@@ -560,6 +843,10 @@ including standard low/high cases and more extreme low/high cases.
 - Baseline detected sample indices: `{baseline_detected_indices}`
 - Reviewer-facing sample index: `{review_sample_index}`
 
+## Representative Sample Cases
+
+{sample_case_lines}
+
 ## Regenerate
 
 Run from the repository root:
@@ -574,12 +861,15 @@ Run from the repository root:
 - `masks/` contains processed binary masks from the detection path.
 - `overlays/` contains input frames with band boundaries, mask tint, and contours.
 - `metrics.json` reports detection success/failure counts per condition and parity
-  against baseline.
+  against baseline, including matching metrics for the representative sample cases.
 - `manifest.json` records the exact dataset slice, transforms, and review paths.
+- `sample_array_manifest.json` records the deterministic reviewer sample-case
+  array with input, mask, overlay, and per-condition metric paths.
+- `sample_case_*.png` contact sheets show each representative case as input,
+  mask, and overlay columns for the selected conditions.
 
-The manifest review paths point to the first sampled baseline frame with at
-least one detected contour so reviewer-facing images include cell detections
-from the Hugging Face dataset.
+The sample-case array includes cell-positive frames from the Hugging Face
+dataset when the requested slice contains baseline detections.
 """
 
 

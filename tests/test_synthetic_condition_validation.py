@@ -14,6 +14,7 @@ from synthetic_condition_validation import (  # noqa: E402
     DetectionRecord,
     DatasetSample,
     TRANSFORMS,
+    _representative_sample_cases,
     _representative_sample_index,
     apply_brightness_contrast,
     summarize_detection_records,
@@ -92,6 +93,54 @@ def test_representative_sample_falls_back_to_first_sample() -> None:
     }
 
     assert _representative_sample_index(samples, records) == 10
+
+
+def test_representative_sample_cases_include_cells_and_failures() -> None:
+    samples = [
+        DatasetSample(0, np.zeros((2, 2), dtype=np.uint8)),
+        DatasetSample(1, np.ones((2, 2), dtype=np.uint8)),
+        DatasetSample(4, np.full((2, 2), 2, dtype=np.uint8)),
+    ]
+    records = {
+        "baseline": [
+            DetectionRecord(0, "baseline", False, 0, 0, 0, 0.0),
+            DetectionRecord(1, "baseline", True, 3, 52, 52, 24.0),
+            DetectionRecord(4, "baseline", True, 3, 31, 31, 12.0),
+        ],
+        "brightness_low": [
+            DetectionRecord(0, "brightness_low", False, 0, 0, 0, 0.0),
+            DetectionRecord(1, "brightness_low", True, 3, 26, 26, 10.0),
+            DetectionRecord(4, "brightness_low", False, 0, 0, 0, 0.0),
+        ],
+        "contrast_low": [
+            DetectionRecord(0, "contrast_low", False, 0, 0, 0, 0.0),
+            DetectionRecord(1, "contrast_low", True, 3, 24, 24, 9.0),
+            DetectionRecord(4, "contrast_low", False, 0, 0, 0, 0.0),
+        ],
+        "brightness_extreme_low": [
+            DetectionRecord(0, "brightness_extreme_low", False, 0, 0, 0, 0.0),
+            DetectionRecord(1, "brightness_extreme_low", False, 0, 0, 0, 0.0),
+            DetectionRecord(4, "brightness_extreme_low", False, 0, 0, 0, 0.0),
+        ],
+        "contrast_extreme_low": [
+            DetectionRecord(0, "contrast_extreme_low", False, 0, 0, 0, 0.0),
+            DetectionRecord(1, "contrast_extreme_low", False, 0, 0, 0, 0.0),
+            DetectionRecord(4, "contrast_extreme_low", False, 0, 0, 0, 0.0),
+        ],
+    }
+
+    cases = _representative_sample_cases(samples, records)
+    cases_by_key = {case["key"]: case for case in cases}
+
+    assert len(cases) >= 3
+    assert cases_by_key["empty_baseline_reference"]["sample_index"] == 0
+    assert cases_by_key["cell_positive_baseline"]["sample_index"] == 1
+    assert cases_by_key["standard_low_condition_drop"]["sample_index"] == 4
+    assert cases_by_key["extreme_low_condition_drop"]["sample_index"] == 1
+    assert (
+        cases_by_key["cell_positive_baseline"]["metrics"]["baseline"]["detected"]
+        is True
+    )
 
 
 def test_summarize_detection_records_reports_condition_counts_and_parity() -> None:
