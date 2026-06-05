@@ -327,6 +327,11 @@ if(BUILD_TESTING)
     )
     target_link_libraries(kin6_batch_pipeline_evidence PRIVATE mib_backend)
 
+    add_executable(kin7_empty_frame_evidence
+        src/tests/kin7_empty_frame_evidence.cpp
+    )
+    target_link_libraries(kin7_empty_frame_evidence PRIVATE mib_backend)
+
     add_executable(kin10_hf_dataset_pipeline_test
         src/tests/kin10_hf_dataset_pipeline_test.cpp
     )
