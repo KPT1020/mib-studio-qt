@@ -70,6 +70,20 @@ def run_command(command_id: str, argv: list[str]) -> dict:
     }
 
 
+def run_json(argv: list[str]) -> dict | list | None:
+    process = subprocess.run(
+        argv,
+        cwd=REPO_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if process.returncode != 0 or not process.stdout.strip():
+        return None
+    return json.loads(process.stdout)
+
+
 def rel(path: Path) -> str:
     return path.relative_to(REPO_ROOT).as_posix()
 
@@ -169,6 +183,79 @@ def write_flow_diagram() -> Path:
     return path
 
 
+def pr_context() -> dict:
+    view = run_json(
+        [
+            "gh",
+            "pr",
+            "view",
+            "--json",
+            "number,url,headRefOid,isDraft,comments,reviews,statusCheckRollup",
+        ]
+    )
+    if not isinstance(view, dict):
+        return {
+            "available": False,
+            "summary": "No PR was available while generating this bundle.",
+            "checks": [],
+            "ci_status": "not available",
+            "ci_url": "",
+        }
+
+    repo = run_json(["gh", "repo", "view", "--json", "nameWithOwner"])
+    name_with_owner = repo.get("nameWithOwner") if isinstance(repo, dict) else ""
+    inline_comments = []
+    if name_with_owner and view.get("number"):
+        inline = run_json(
+            ["gh", "api", f"repos/{name_with_owner}/pulls/{view['number']}/comments"]
+        )
+        if isinstance(inline, list):
+            inline_comments = inline
+
+    checks = []
+    for item in view.get("statusCheckRollup") or []:
+        checks.append(
+            {
+                "name": item.get("name", "check"),
+                "status": item.get("status", ""),
+                "conclusion": item.get("conclusion", ""),
+                "url": item.get("detailsUrl", ""),
+            }
+        )
+
+    conclusions = {check["conclusion"] for check in checks if check.get("conclusion")}
+    statuses = {check["status"] for check in checks if check.get("status")}
+    if checks and conclusions == {"SUCCESS"}:
+        ci_status = "pass"
+    elif any(value in conclusions for value in {"FAILURE", "CANCELLED", "TIMED_OUT"}):
+        ci_status = "fail"
+    elif any(value != "COMPLETED" for value in statuses):
+        ci_status = "pending"
+    else:
+        ci_status = "not available"
+
+    feedback_count = len(view.get("comments") or []) + len(view.get("reviews") or []) + len(inline_comments)
+    if feedback_count == 0:
+        summary = "No top-level PR comments, reviews, or inline review comments were present."
+    else:
+        summary = (
+            f"Found {len(view.get('comments') or [])} top-level comments, "
+            f"{len(view.get('reviews') or [])} reviews, and {len(inline_comments)} inline comments."
+        )
+
+    return {
+        "available": True,
+        "number": view.get("number"),
+        "url": view.get("url", ""),
+        "head_sha": view.get("headRefOid", ""),
+        "is_draft": view.get("isDraft", False),
+        "summary": summary,
+        "checks": checks,
+        "ci_status": ci_status,
+        "ci_url": next((check["url"] for check in checks if check.get("url")), ""),
+    }
+
+
 def file_size(path: Path) -> int:
     return path.stat().st_size if path.exists() else 0
 
@@ -190,6 +277,7 @@ def write_report(
     samples: list[dict],
     flow_path: Path,
     manifest_path: Path,
+    pull_request: dict,
 ) -> Path:
     report_path = REVIEW_DIR / "report.html"
     failures = metrics.get("failures", [])
@@ -200,6 +288,13 @@ def write_report(
         f"<td>{html.escape(command['finished_at'])}</td><td><a href=\"{html.escape(report_rel(command['log_path']))}\">log</a></td></tr>"
         for command in commands
     )
+    check_rows = "\n".join(
+        f"<tr><td>{html.escape(check['name'])}</td><td>{html.escape(check['status'])}</td>"
+        f"<td>{html.escape(check['conclusion'])}</td><td><a href=\"{html.escape(check['url'])}\">details</a></td></tr>"
+        for check in pull_request.get("checks", [])
+    )
+    if not check_rows:
+        check_rows = "<tr><td colspan=\"4\">No remote checks were available.</td></tr>"
     sample_rows = "\n".join(
         f"<tr><td>{html.escape(sample['sample_id'])}</td><td>{sample['row_index']}</td>"
         f"<td>{html.escape(sample['case_type'])}</td><td>{sample['mask_pixels']}</td>"
@@ -243,7 +338,7 @@ def write_report(
 <body>
   <h1>KIN-11 Recorded Image Verification Artifacts</h1>
   <p class="verdict">Summary verdict: {verdict}</p>
-  <p>Issue: KIN-11. Commit: <code>{html.escape(git_short_sha())}</code>. CI status: local validation only; no remote CI link was available while generating this bundle.</p>
+  <p>Issue: KIN-11. Commit: <code>{html.escape(git_short_sha())}</code>. PR: {f'<a href="{html.escape(pull_request.get("url", ""))}">#{pull_request.get("number")}</a>' if pull_request.get("available") else 'not available'}. CI status: {html.escape(pull_request.get("ci_status", "not available"))}.</p>
 
   <h2>Command Table</h2>
   <table>
@@ -258,7 +353,11 @@ def write_report(
   <p>The HF dataset integration test writes durable artifacts to <code>{html.escape(rel(ARTIFACT_DIR))}</code> and verifies sample dimensions, masks, contours, and metric ranges.</p>
 
   <h2>PR Feedback Sweep</h2>
-  <p>No PR existed when this bundle was generated. The final handoff sweep should inspect top-level comments, inline comments, review summaries, and checks after the PR is opened.</p>
+  <p>{html.escape(pull_request.get("summary", "No PR sweep data available."))}</p>
+  <table>
+    <thead><tr><th>Check</th><th>Status</th><th>Conclusion</th><th>Details</th></tr></thead>
+    <tbody>{check_rows}</tbody>
+  </table>
 
   <h2>Flow Diagram</h2>
   <p><a href="{html.escape(report_rel(flow_path))}">Open SVG</a></p>
@@ -293,6 +392,7 @@ def write_manifest(
     metrics_path: Path,
     flow_path: Path,
     samples: list[dict],
+    pull_request: dict,
 ) -> Path:
     manifest_path = REVIEW_DIR / "manifest.json"
     artifacts = [
@@ -336,6 +436,7 @@ def write_manifest(
             }
             for command in commands
         ],
+        "pull_request": pull_request,
         "samples": [
             {
                 "sample_id": sample["sample_id"],
@@ -395,10 +496,11 @@ def main() -> int:
     metrics = read_metrics()
     metrics_path, samples = copy_review_inputs(metrics)
     flow_path = write_flow_diagram()
+    pull_request = pr_context()
     placeholder_manifest = REVIEW_DIR / "manifest.json"
-    report_path = write_report(commands, metrics, samples, flow_path, placeholder_manifest)
-    manifest_path = write_manifest(commands, report_path, metrics_path, flow_path, samples)
-    write_report(commands, metrics, samples, flow_path, manifest_path)
+    report_path = write_report(commands, metrics, samples, flow_path, placeholder_manifest, pull_request)
+    manifest_path = write_manifest(commands, report_path, metrics_path, flow_path, samples, pull_request)
+    write_report(commands, metrics, samples, flow_path, manifest_path, pull_request)
 
     failed = [command for command in commands if command["exit_code"] != 0]
     if failed or metrics.get("failures"):
