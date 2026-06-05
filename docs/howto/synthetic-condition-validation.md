@@ -21,10 +21,11 @@ python scripts/synthetic_condition_validation.py \
   --dataset gavinlouuu/512x96stream \
   --dataset-config default \
   --split train \
-  --sample-start 0 \
-  --sample-count 8 \
+  --sample-start 21 \
+  --sample-count 3 \
   --output-dir review_artifacts/KIN-12 \
   --background-mode transformed \
+  --background-sample-start 0 \
   --background-sample-count 1 \
   --min-area 1
 ```
@@ -52,9 +53,12 @@ python scripts/synthetic_condition_validation.py \
 Detection success is defined as at least one filtered contour returned by the
 existing middle-band processing path. The default background mode builds a
 condition-matched background from the first sampled frame for each transform.
-The example uses `--min-area 1` because the stream slice contains small
-components that the default `min-area=100` setting filters out before the
-success/failure count stage.
+The example uses `--sample-start 21 --sample-count 3` to cover
+reviewer-requested cell-containing frames 21-23. It uses
+`--background-sample-start 0 --background-sample-count 1` so the first target
+frame is not consumed as its own background. It uses `--min-area 1` because the
+stream slice contains small components that the default `min-area=100` setting
+filters out before the success/failure count stage.
 
 The full bundle still writes every sampled frame for every condition. The
 sample-array manifest highlights stable sample IDs and condition paths for

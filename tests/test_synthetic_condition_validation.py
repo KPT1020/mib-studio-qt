@@ -11,6 +11,9 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from synthetic_condition_validation import (  # noqa: E402
+    DEFAULT_BACKGROUND_SAMPLE_START,
+    DEFAULT_SAMPLE_COUNT,
+    DEFAULT_SAMPLE_START,
     DetectionRecord,
     DatasetSample,
     TRANSFORMS,
@@ -19,6 +22,12 @@ from synthetic_condition_validation import (  # noqa: E402
     apply_brightness_contrast,
     summarize_detection_records,
 )
+
+
+def test_default_review_slice_uses_cell_containing_frames_21_to_23() -> None:
+    assert DEFAULT_SAMPLE_START == 21
+    assert DEFAULT_SAMPLE_COUNT == 3
+    assert DEFAULT_BACKGROUND_SAMPLE_START == 0
 
 
 def test_apply_brightness_contrast_is_deterministic_uint8() -> None:
@@ -141,6 +150,33 @@ def test_representative_sample_cases_include_cells_and_failures() -> None:
         cases_by_key["cell_positive_baseline"]["metrics"]["baseline"]["detected"]
         is True
     )
+
+
+def test_representative_sample_cases_cover_distinct_cell_frames() -> None:
+    samples = [
+        DatasetSample(21, np.zeros((2, 2), dtype=np.uint8)),
+        DatasetSample(22, np.ones((2, 2), dtype=np.uint8)),
+        DatasetSample(23, np.full((2, 2), 2, dtype=np.uint8)),
+    ]
+    records = {
+        condition: [
+            DetectionRecord(21, condition, True, 1, 8, 8, 4.0),
+            DetectionRecord(22, condition, True, 1, 9, 9, 4.0),
+            DetectionRecord(23, condition, True, 1, 10, 10, 4.0),
+        ]
+        for condition in (
+            "baseline",
+            "brightness_low",
+            "brightness_high",
+            "contrast_low",
+            "contrast_high",
+        )
+    }
+
+    cases = _representative_sample_cases(samples, records)
+    covered_sample_ids = {case["sample_index"] for case in cases}
+
+    assert {21, 22, 23}.issubset(covered_sample_ids)
 
 
 def test_summarize_detection_records_reports_condition_counts_and_parity() -> None:

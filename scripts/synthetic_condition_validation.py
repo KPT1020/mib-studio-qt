@@ -27,8 +27,9 @@ DATASET_NAME = "gavinlouuu/512x96stream"
 DATASET_CONFIG = "default"
 DATASET_SPLIT = "train"
 DEFAULT_OUTPUT_DIR = "review_artifacts/KIN-12"
-DEFAULT_SAMPLE_START = 0
-DEFAULT_SAMPLE_COUNT = 8
+DEFAULT_SAMPLE_START = 21
+DEFAULT_SAMPLE_COUNT = 3
+DEFAULT_BACKGROUND_SAMPLE_START = 0
 DEFAULT_BACKGROUND_SAMPLE_COUNT = 1
 
 
@@ -266,6 +267,7 @@ def _condition_frames(
 
 def run_detection(
     samples: list[DatasetSample],
+    background_samples: list[DatasetSample],
     config: Any,
     background_mode: str,
     background_sample_count: int,
@@ -282,17 +284,25 @@ def run_detection(
 
     if background_sample_count < 1:
         raise ValueError("--background-sample-count must be >= 1")
-    if background_sample_count > len(samples):
-        raise ValueError("--background-sample-count cannot exceed --sample-count")
+    if background_sample_count > len(background_samples):
+        raise ValueError(
+            "--background-sample-count cannot exceed loaded background samples"
+        )
 
     frames_by_condition = {
         transform.name: _condition_frames(samples, transform)
         for transform in TRANSFORMS
     }
+    background_frames_by_condition = {
+        transform.name: _condition_frames(background_samples, transform)
+        for transform in TRANSFORMS
+    }
     baseline_background = build_background(
         [
             ensure_grayscale(frame)
-            for frame in frames_by_condition["baseline"][:background_sample_count]
+            for frame in background_frames_by_condition["baseline"][
+                :background_sample_count
+            ]
         ]
     )
 
@@ -308,7 +318,9 @@ def run_detection(
             background = build_background(
                 [
                     ensure_grayscale(frame)
-                    for frame in frames[:background_sample_count]
+                    for frame in background_frames_by_condition[condition][
+                        :background_sample_count
+                    ]
                 ]
             )
 
@@ -468,13 +480,7 @@ def _representative_sample_cases(
         "cell_positive_baseline",
         "Cell-positive baseline reference",
         detected_index,
-        [
-            "baseline",
-            "brightness_high",
-            "brightness_extreme_high",
-            "contrast_high",
-            "contrast_extreme_high",
-        ],
+        [transform.name for transform in TRANSFORMS],
         "First sampled HF frame where the baseline detector returned filtered contours.",
     )
 
@@ -527,10 +533,23 @@ def _representative_sample_cases(
         "Cell-positive HF frame where extreme low brightness and contrast conditions lose detection.",
     )
 
-    fallback_conditions = ["baseline"]
+    fallback_conditions = [
+        "baseline",
+        "brightness_low",
+        "brightness_high",
+        "contrast_low",
+        "contrast_high",
+    ]
+    target_unique_samples = min(3, len(samples))
+
+    def unique_sample_count() -> int:
+        return len({case["sample_index"] for case in cases})
+
     for sample in samples:
-        if len(cases) >= 3:
+        if len(cases) >= 3 and unique_sample_count() >= target_unique_samples:
             break
+        if any(case["sample_index"] == sample.sample_index for case in cases):
+            continue
         add_case(
             f"fallback_sample_{sample.sample_index:05d}",
             "Fallback sampled frame",
@@ -684,7 +703,7 @@ def _artifact_record(
     return record
 
 
-def _write_flow_diagram(output_dir: Path) -> Path:
+def _write_flow_diagram(output_dir: Path, split_expression: str) -> Path:
     path = output_dir / "flow_diagram.svg"
     path.write_text(
         """<svg xmlns="http://www.w3.org/2000/svg" width="980" height="360" viewBox="0 0 980 360" role="img" aria-labelledby="title desc">
@@ -706,7 +725,7 @@ def _write_flow_diagram(output_dir: Path) -> Path:
   <rect x="30" y="48" width="165" height="92" class="box"/>
   <text x="48" y="78" class="label">HF dataset slice</text>
   <text x="48" y="104" class="small">gavinlouuu/512x96stream</text>
-  <text x="48" y="122" class="small">default train[0:8]</text>
+  <text x="48" y="122" class="small">default __SPLIT_EXPRESSION__</text>
   <path d="M195 94 H260" class="arrow"/>
   <rect x="260" y="48" width="175" height="92" class="accent"/>
   <text x="278" y="78" class="label">Synthetic variants</text>
@@ -733,7 +752,7 @@ def _write_flow_diagram(output_dir: Path) -> Path:
   <text x="613" y="274" class="small">summary, commands, checks</text>
   <text x="613" y="292" class="small">metrics table and limitations</text>
 </svg>
-""",
+""".replace("__SPLIT_EXPRESSION__", html.escape(split_expression)),
         encoding="utf-8",
     )
     return path
@@ -776,19 +795,20 @@ def _write_report_html(
 ) -> Path:
     report_path = output_dir / "report.html"
     dataset = metrics["dataset"]
+    background_dataset = metrics["background_dataset"]
     condition_summary = metrics["condition_summary"]
     ci_summary = _read_json_if_present(output_dir / "logs" / "ci-summary.json")
     pull_request = ci_summary.get("pull_request", {})
     commit = _git_value(["rev-parse", "--short", "HEAD"]) or "unknown"
     branch = _git_value(["branch", "--show-current"]) or "unknown"
     baseline = condition_summary.get("baseline", {})
-    extreme_low = condition_summary.get("brightness_extreme_low", {})
     verdict = (
         "Pass: deterministic synthetic validation generated for "
         f"{dataset['name']} {dataset['split_expression']}; baseline "
         f"{baseline.get('detection_success_count', 0)}/"
-        f"{baseline.get('total_frames', 0)} frames detected cells and "
-        "extreme low brightness/contrast cases report detection drops."
+        f"{baseline.get('total_frames', 0)} target frames detected cells. "
+        "Condition summaries report success/failure counts for every "
+        "brightness and contrast transform."
     )
 
     command_table = _html_table(
@@ -904,7 +924,8 @@ def _write_report_html(
       <tr><th>Pull Request</th><td>{html.escape(str(pull_request.get('url', 'pending')))}</td></tr>
       <tr><th>CI Status</th><td>{html.escape(str(pull_request.get('checks_status', 'pending')))}</td></tr>
       <tr><th>Dataset</th><td>{html.escape(dataset['name'])}</td></tr>
-      <tr><th>Split/Samples</th><td>{html.escape(dataset['split_expression'])} indices {html.escape(str(dataset['sample_indices']))}</td></tr>
+      <tr><th>Target Split/Samples</th><td>{html.escape(dataset['split_expression'])} indices {html.escape(str(dataset['sample_indices']))}</td></tr>
+      <tr><th>Background Split/Samples</th><td>{html.escape(background_dataset['split_expression'])} indices {html.escape(str(background_dataset['sample_indices']))}</td></tr>
       <tr><th>Dataset Revision</th><td>{html.escape(str(dataset['revision']))}</td></tr>
       <tr><th>Generated At</th><td>{_utc_timestamp()}</td></tr>
     </table>
@@ -1066,6 +1087,7 @@ def _write_manifest(
         "generated_at": _utc_timestamp(),
         "command": command,
         "dataset": metrics["dataset"],
+        "background_dataset": metrics["background_dataset"],
         "background_mode": metrics["background_mode"],
         "background_sample_count": metrics["background_sample_count"],
         "baseline_detected_sample_indices": metrics[
@@ -1149,6 +1171,7 @@ def write_artifacts(
     records_by_condition: dict[str, list[DetectionRecord]],
     results_by_condition: dict[str, list[Any]],
     dataset_info: dict[str, Any],
+    background_dataset_info: dict[str, Any],
     processing_config: Any,
     background_mode: str,
     background_sample_count: int,
@@ -1213,6 +1236,7 @@ def write_artifacts(
     }
     metrics = {
         "dataset": dataset_info,
+        "background_dataset": background_dataset_info,
         "processing_config": dict(vars(processing_config)),
         "background_mode": background_mode,
         "background_sample_count": background_sample_count,
@@ -1242,6 +1266,7 @@ def write_artifacts(
     sample_array_manifest = {
         "issue": "KIN-12",
         "dataset": dataset_info,
+        "background_dataset": background_dataset_info,
         "selection": (
             "Representative sample cases are selected deterministically from the "
             "requested split slice: first empty baseline, first cell-positive "
@@ -1261,6 +1286,7 @@ def write_artifacts(
     readme_path.write_text(
         _readme_text(
             dataset_info,
+            background_dataset_info,
             background_mode,
             background_sample_count,
             command,
@@ -1272,7 +1298,10 @@ def write_artifacts(
     )
     artifact_paths["readme"] = readme_path
 
-    flow_diagram_path = _write_flow_diagram(output_dir)
+    flow_diagram_path = _write_flow_diagram(
+        output_dir,
+        dataset_info["split_expression"],
+    )
     artifact_paths["flow_diagram"] = flow_diagram_path
     report_path = _write_report_html(output_dir, metrics, command, flow_diagram_path)
     artifact_paths["report"] = report_path
@@ -1283,6 +1312,7 @@ def write_artifacts(
 
 def _readme_text(
     dataset_info: dict[str, Any],
+    background_dataset_info: dict[str, Any],
     background_mode: str,
     background_sample_count: int,
     command: str,
@@ -1310,6 +1340,8 @@ including standard low/high cases and more extreme low/high cases.
 - Split expression: `{dataset_info['split_expression']}`
 - Sample indices: `{dataset_info['sample_indices']}`
 - Dataset revision: `{dataset_info['revision']}`
+- Background split expression: `{background_dataset_info['split_expression']}`
+- Background sample indices: `{background_dataset_info['sample_indices']}`
 - Background mode: `{background_mode}`
 - Background sample count: `{background_sample_count}`
 - Baseline detected sample indices: `{baseline_detected_indices}`
@@ -1368,6 +1400,15 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--background-sample-start",
+        type=int,
+        default=DEFAULT_BACKGROUND_SAMPLE_START,
+        help=(
+            "Starting row for the deterministic background slice. This is "
+            "loaded separately from the target validation slice."
+        ),
+    )
+    parser.add_argument(
         "--background-sample-count",
         type=int,
         default=DEFAULT_BACKGROUND_SAMPLE_COUNT,
@@ -1408,6 +1449,8 @@ def _regeneration_command(args: argparse.Namespace) -> str:
         args.output_dir,
         "--background-mode",
         args.background_mode,
+        "--background-sample-start",
+        str(args.background_sample_start),
         "--background-sample-count",
         str(args.background_sample_count),
         "--blur",
@@ -1447,8 +1490,16 @@ def main() -> None:
         args.sample_start,
         args.sample_count,
     )
+    background_samples, background_dataset_info = load_samples(
+        args.dataset,
+        args.dataset_config,
+        args.split,
+        args.background_sample_start,
+        args.background_sample_count,
+    )
     frames_by_condition, records_by_condition, results_by_condition = run_detection(
         samples,
+        background_samples,
         processing_config,
         args.background_mode,
         args.background_sample_count,
@@ -1460,6 +1511,7 @@ def main() -> None:
         records_by_condition,
         results_by_condition,
         dataset_info,
+        background_dataset_info,
         processing_config,
         args.background_mode,
         args.background_sample_count,
@@ -1468,6 +1520,7 @@ def main() -> None:
     )
 
     print(f"Dataset: {dataset_info['name']} {dataset_info['split_expression']}")
+    print(f"Background: {background_dataset_info['split_expression']}")
     print(f"Dataset revision: {dataset_info['revision']}")
     print(f"Review bundle: {Path(args.output_dir)}")
     print(f"Metrics: {artifact_paths['metrics']}")
