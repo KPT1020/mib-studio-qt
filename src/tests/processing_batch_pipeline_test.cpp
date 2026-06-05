@@ -1,4 +1,5 @@
 #include "backend/services/ProcessingService.h"
+#include "backend/playback/FrameStore.h"
 
 #include <atomic>
 #include <chrono>
@@ -26,6 +27,49 @@ cv::Mat makeRingFrame(int width = 96, int height = 96)
     return image;
 }
 
+cv::Mat makeEdgeBackground(int edgeX, int width = 512, int height = 96)
+{
+    cv::Mat image(height, width, CV_8UC1, cv::Scalar(18));
+    edgeX = std::max(0, std::min(edgeX, width));
+    if (edgeX < width) {
+        image(cv::Rect(edgeX, 0, width - edgeX, height)).setTo(cv::Scalar(118));
+    }
+    return image;
+}
+
+cv::Mat makeRingOnBackground(const cv::Mat& background)
+{
+    cv::Mat image = background.clone();
+    const cv::Point center(256, 48);
+    cv::circle(image, center, 24, cv::Scalar(255), cv::FILLED);
+    cv::circle(image, center, 11, cv::Scalar(18), cv::FILLED);
+    return image;
+}
+
+cv::Mat makeSparseNoiseOnBackground(const cv::Mat& background)
+{
+    cv::Mat image = background.clone();
+    int written = 0;
+    for (int y = 8; y < image.rows && written < 220; y += 7) {
+        for (int x = 12; x < image.cols - 20 && written < 220; x += 23) {
+            image.at<uchar>(y, x) = 72;
+            ++written;
+        }
+    }
+    return image;
+}
+
+backend::playback::Frame toPlaybackFrame(const cv::Mat& image)
+{
+    backend::playback::Frame frame;
+    cv::Mat contiguous = image.isContinuous() ? image : image.clone();
+    frame.width = static_cast<uint64_t>(contiguous.cols);
+    frame.height = static_cast<uint64_t>(contiguous.rows);
+    frame.linePitch = static_cast<size_t>(contiguous.step);
+    frame.data.assign(contiguous.datastart, contiguous.dataend);
+    return frame;
+}
+
 ProcessingConfig makeTestConfig()
 {
     ProcessingConfig config;
@@ -39,6 +83,30 @@ ProcessingConfig makeTestConfig()
     config.enable_area_ratio_check = false;
     config.require_single_inner_contour = true;
     config.empty_frame_pixel_threshold = 1;
+    return config;
+}
+
+ProcessingConfig makeEmptyFrameConfig()
+{
+    ProcessingConfig config;
+    config.gaussian_blur_size = 3;
+    config.bg_subtract_threshold = 8;
+    config.morph_kernel_size = 3;
+    config.morph_iterations = 1;
+    config.enable_area_range_check = false;
+    config.enable_deformability_range_check = false;
+    config.enable_ring_ratio_check = false;
+    config.enable_area_ratio_check = false;
+    config.enable_border_check = false;
+    config.require_single_inner_contour = true;
+    config.empty_frame_pixel_threshold = 100;
+    config.empty_frame_min_morph_pixels = 160;
+    config.empty_frame_min_roi_occupancy = 0.003;
+    config.empty_frame_min_diff_mean = 0.35;
+    config.empty_frame_threshold_sensitivity_step = 16;
+    config.empty_frame_min_threshold_stable_ratio = 0.25;
+    config.background_alignment_max_shift_px = 3;
+    config.background_alignment_min_improvement = 0.25;
     return config;
 }
 
@@ -269,6 +337,78 @@ bool testMetricsAreEmittedFromBatchPath()
     return ok;
 }
 
+bool testShiftedBackgroundEdgeIsDiscardedBeforeContours()
+{
+    ProcessingService service;
+    const ProcessingConfig config = makeEmptyFrameConfig();
+    const cv::Mat background = makeEdgeBackground(500);
+    const cv::Mat shiftedEmpty = makeEdgeBackground(498);
+    const ProcessingService::Roi roi{0, 0, shiftedEmpty.cols, shiftedEmpty.rows};
+
+    const ProcessedFrame result = service.computeProcessedFrame(shiftedEmpty, background, config, roi, 7, 0);
+    bool ok = true;
+    ok &= require(result.validation.emptyFrameDiscarded,
+                  "shifted background edge should be discarded by pre-contour empty gate");
+    ok &= require(cv::countNonZero(result.processedImage) == 0,
+                  "discarded shifted background edge should produce an empty mask");
+    ok &= require(result.validation.allContours.empty(),
+                  "discarded shifted background edge should not carry contours");
+    ok &= require(result.validation.backgroundShiftX >= 1,
+                  "background alignment should compensate the shifted vertical edge");
+    ok &= require(ProcessingService::isFrameEmpty(toPlaybackFrame(shiftedEmpty), config, roi, background),
+                  "raw save filter should classify shifted background edge as empty");
+
+    const auto batchResults = service.processBatch({shiftedEmpty}, config, background, roi);
+    ok &= require(batchResults.size() == 1, "empty batch frame should still emit one frame record");
+    ok &= require(batchResults.front().validation.emptyFrameDiscarded,
+                  "batch path should preserve pre-contour empty discard state");
+    ok &= require(batchResults.front().validation.allContours.empty(),
+                  "batch path should not re-run contours for a pre-contour discard");
+    return ok;
+}
+
+bool testSparseThresholdNoiseIsDiscarded()
+{
+    ProcessingService service;
+    const ProcessingConfig config = makeEmptyFrameConfig();
+    const cv::Mat background = makeEdgeBackground(500);
+    const cv::Mat noisyEmpty = makeSparseNoiseOnBackground(background);
+    const ProcessingService::Roi roi{0, 0, noisyEmpty.cols, noisyEmpty.rows};
+
+    const ProcessedFrame result = service.computeProcessedFrame(noisyEmpty, background, config, roi, 8, 0);
+    bool ok = true;
+    ok &= require(result.validation.emptyFrameDiscarded,
+                  "sparse threshold noise should be discarded by morph/occupancy heuristic");
+    ok &= require(result.validation.emptyFrameForegroundPixels >= config.empty_frame_pixel_threshold,
+                  "noise regression should exceed the legacy raw pixel threshold");
+    ok &= require(result.validation.emptyFrameMorphPixels < config.empty_frame_min_morph_pixels,
+                  "noise regression should be rejected after morphology");
+    return ok;
+}
+
+bool testKnownGoodRingIsNotDiscarded()
+{
+    ProcessingService service;
+    const ProcessingConfig config = makeEmptyFrameConfig();
+    const cv::Mat background = makeEdgeBackground(500);
+    const cv::Mat ring = makeRingOnBackground(background);
+    const ProcessingService::Roi roi{0, 0, ring.cols, ring.rows};
+
+    const ProcessedFrame result = service.computeProcessedFrame(ring, background, config, roi, 9, 0);
+    bool ok = true;
+    ok &= require(!result.validation.emptyFrameDiscarded,
+                  "known-good ring should not be discarded by empty gate");
+    ok &= require(!ProcessingService::isFrameEmpty(toPlaybackFrame(ring), config, roi, background),
+                  "raw save filter should keep known-good ring");
+    ok &= require(cv::countNonZero(result.processedImage) >= config.empty_frame_min_morph_pixels,
+                  "known-good ring should produce enough mask occupancy");
+    ok &= require(result.validation.innerContourCount >= 1,
+                  "known-good ring should retain nested contour evidence after precheck");
+    ok &= require(result.validation.isValid,
+                  "known-good ring should remain valid under permissive validation gates");
+    return ok;
+}
+
 } // namespace
 
 int main()
@@ -284,6 +424,15 @@ int main()
     }
     if (!testMetricsAreEmittedFromBatchPath()) {
         return 4;
+    }
+    if (!testShiftedBackgroundEdgeIsDiscardedBeforeContours()) {
+        return 5;
+    }
+    if (!testSparseThresholdNoiseIsDiscarded()) {
+        return 6;
+    }
+    if (!testKnownGoodRingIsNotDiscarded()) {
+        return 7;
     }
     return 0;
 }

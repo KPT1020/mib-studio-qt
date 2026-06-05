@@ -222,14 +222,30 @@ namespace frontend
 					pcfg.deformability_threshold_max = ip.value("deformability_threshold_max").toDouble(pcfg.deformability_threshold_max);
 				if (ip.contains("area_ratio_threshold_max"))
 					pcfg.area_ratio_threshold_max = ip.value("area_ratio_threshold_max").toDouble(pcfg.area_ratio_threshold_max);
-				if (ip.contains("ring_ratio_min"))
-					pcfg.ring_ratio_min = ip.value("ring_ratio_min").toDouble(pcfg.ring_ratio_min);
-				if (ip.contains("ring_ratio_max"))
-					pcfg.ring_ratio_max = ip.value("ring_ratio_max").toDouble(pcfg.ring_ratio_max);
-				if (ip.contains("empty_frame_pixel_threshold"))
-					pcfg.empty_frame_pixel_threshold = ip.value("empty_frame_pixel_threshold").toInt(pcfg.empty_frame_pixel_threshold);
-				if (ip.contains("auto_background_enabled"))
-					pcfg.auto_background_enabled = ip.value("auto_background_enabled").toBool(pcfg.auto_background_enabled);
+					if (ip.contains("ring_ratio_min"))
+						pcfg.ring_ratio_min = ip.value("ring_ratio_min").toDouble(pcfg.ring_ratio_min);
+					if (ip.contains("ring_ratio_max"))
+						pcfg.ring_ratio_max = ip.value("ring_ratio_max").toDouble(pcfg.ring_ratio_max);
+					if (ip.contains("empty_frame_pixel_threshold"))
+						pcfg.empty_frame_pixel_threshold = ip.value("empty_frame_pixel_threshold").toInt(pcfg.empty_frame_pixel_threshold);
+					if (ip.contains("enable_empty_frame_precheck"))
+						pcfg.enable_empty_frame_precheck = ip.value("enable_empty_frame_precheck").toBool(pcfg.enable_empty_frame_precheck);
+					if (ip.contains("empty_frame_min_morph_pixels"))
+						pcfg.empty_frame_min_morph_pixels = ip.value("empty_frame_min_morph_pixels").toInt(pcfg.empty_frame_min_morph_pixels);
+					if (ip.contains("empty_frame_min_roi_occupancy"))
+						pcfg.empty_frame_min_roi_occupancy = ip.value("empty_frame_min_roi_occupancy").toDouble(pcfg.empty_frame_min_roi_occupancy);
+					if (ip.contains("empty_frame_min_diff_mean"))
+						pcfg.empty_frame_min_diff_mean = ip.value("empty_frame_min_diff_mean").toDouble(pcfg.empty_frame_min_diff_mean);
+					if (ip.contains("empty_frame_threshold_sensitivity_step"))
+						pcfg.empty_frame_threshold_sensitivity_step = ip.value("empty_frame_threshold_sensitivity_step").toInt(pcfg.empty_frame_threshold_sensitivity_step);
+					if (ip.contains("empty_frame_min_threshold_stable_ratio"))
+						pcfg.empty_frame_min_threshold_stable_ratio = ip.value("empty_frame_min_threshold_stable_ratio").toDouble(pcfg.empty_frame_min_threshold_stable_ratio);
+					if (ip.contains("background_alignment_max_shift_px"))
+						pcfg.background_alignment_max_shift_px = ip.value("background_alignment_max_shift_px").toInt(pcfg.background_alignment_max_shift_px);
+					if (ip.contains("background_alignment_min_improvement"))
+						pcfg.background_alignment_min_improvement = ip.value("background_alignment_min_improvement").toDouble(pcfg.background_alignment_min_improvement);
+					if (ip.contains("auto_background_enabled"))
+						pcfg.auto_background_enabled = ip.value("auto_background_enabled").toBool(pcfg.auto_background_enabled);
 				if (ip.contains("auto_background_empty_frames"))
 					pcfg.auto_background_empty_frames = ip.value("auto_background_empty_frames").toInt(pcfg.auto_background_empty_frames);
 				if (ip.contains("auto_background_cooldown_frames"))
@@ -280,15 +296,17 @@ namespace frontend
 						pcfg.multi_image_count = std::max(1, mi.value("count").toInt(pcfg.multi_image_count));
 				}
 			}
-		}
-		backend_.processing().setProcessingConfig(pcfg);
-		SPDLOG_INFO("AppConfigWatcher: applied ProcessingConfig (blur={}, thresh={}, morph={}x{}, area=[{},{} um2], deform=[{:.2f},{:.2f}] enabled={}, areaRatio_max={:.2f} enabled={}, ring=[{:.1f},{:.1f}] enabled={}, empty_px={})",
-					pcfg.gaussian_blur_size, pcfg.bg_subtract_threshold, pcfg.morph_kernel_size, pcfg.morph_iterations,
-					pcfg.area_threshold_min, pcfg.area_threshold_max,
-					pcfg.deformability_threshold_min, pcfg.deformability_threshold_max, pcfg.enable_deformability_range_check,
-					pcfg.area_ratio_threshold_max, pcfg.enable_area_ratio_check,
-					pcfg.ring_ratio_min, pcfg.ring_ratio_max, pcfg.enable_ring_ratio_check,
-					pcfg.empty_frame_pixel_threshold);
+			}
+			backend_.processing().setProcessingConfig(pcfg);
+			SPDLOG_INFO("AppConfigWatcher: applied ProcessingConfig (blur={}, thresh={}, morph={}x{}, area=[{},{} um2], deform=[{:.2f},{:.2f}] enabled={}, areaRatio_max={:.2f} enabled={}, ring=[{:.1f},{:.1f}] enabled={}, empty_px={}, empty_precheck={}, empty_morph_px={}, empty_occ={:.4f}, bg_shift_px={})",
+						pcfg.gaussian_blur_size, pcfg.bg_subtract_threshold, pcfg.morph_kernel_size, pcfg.morph_iterations,
+						pcfg.area_threshold_min, pcfg.area_threshold_max,
+						pcfg.deformability_threshold_min, pcfg.deformability_threshold_max, pcfg.enable_deformability_range_check,
+						pcfg.area_ratio_threshold_max, pcfg.enable_area_ratio_check,
+						pcfg.ring_ratio_min, pcfg.ring_ratio_max, pcfg.enable_ring_ratio_check,
+						pcfg.empty_frame_pixel_threshold, pcfg.enable_empty_frame_precheck,
+						pcfg.empty_frame_min_morph_pixels, pcfg.empty_frame_min_roi_occupancy,
+						pcfg.background_alignment_max_shift_px);
 		SPDLOG_INFO("AppConfigWatcher: target_group enabled={}, area=[{},{} um2], deform=[{:.2f},{:.2f}], emod_enabled={}, emod=[{:.1f},{:.1f}]",
 					pcfg.enable_target_group, pcfg.target_group_area_min, pcfg.target_group_area_max,
 					pcfg.target_group_deformability_min, pcfg.target_group_deformability_max,
@@ -505,12 +523,21 @@ namespace frontend
 		// Update image_processing section
 		QJsonObject ip = root.value("image_processing").toObject();
 		ip.insert("area_threshold_min", pcfg.area_threshold_min);
-		ip.insert("area_threshold_max", pcfg.area_threshold_max);
-		ip.insert("deformability_threshold_min", pcfg.deformability_threshold_min);
-		ip.insert("deformability_threshold_max", pcfg.deformability_threshold_max);
-		ip.insert("area_ratio_threshold_max", pcfg.area_ratio_threshold_max);
-		ip.insert("ring_ratio_min", pcfg.ring_ratio_min);
-		ip.insert("ring_ratio_max", pcfg.ring_ratio_max);
+			ip.insert("area_threshold_max", pcfg.area_threshold_max);
+			ip.insert("deformability_threshold_min", pcfg.deformability_threshold_min);
+			ip.insert("deformability_threshold_max", pcfg.deformability_threshold_max);
+			ip.insert("area_ratio_threshold_max", pcfg.area_ratio_threshold_max);
+			ip.insert("ring_ratio_min", pcfg.ring_ratio_min);
+			ip.insert("ring_ratio_max", pcfg.ring_ratio_max);
+			ip.insert("empty_frame_pixel_threshold", pcfg.empty_frame_pixel_threshold);
+			ip.insert("enable_empty_frame_precheck", pcfg.enable_empty_frame_precheck);
+			ip.insert("empty_frame_min_morph_pixels", pcfg.empty_frame_min_morph_pixels);
+			ip.insert("empty_frame_min_roi_occupancy", pcfg.empty_frame_min_roi_occupancy);
+			ip.insert("empty_frame_min_diff_mean", pcfg.empty_frame_min_diff_mean);
+			ip.insert("empty_frame_threshold_sensitivity_step", pcfg.empty_frame_threshold_sensitivity_step);
+			ip.insert("empty_frame_min_threshold_stable_ratio", pcfg.empty_frame_min_threshold_stable_ratio);
+			ip.insert("background_alignment_max_shift_px", pcfg.background_alignment_max_shift_px);
+			ip.insert("background_alignment_min_improvement", pcfg.background_alignment_min_improvement);
 
 		// Update filters sub-object
 		QJsonObject fl = ip.value("filters").toObject();

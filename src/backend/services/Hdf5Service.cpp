@@ -1287,6 +1287,78 @@ namespace backend::services
             H5Aclose(attr14a);
         }
 
+        uint8_t enableEmptyFramePrecheck = processingConfig.enable_empty_frame_precheck ? 1 : 0;
+        hid_t attrEmptyPrecheck = H5Acreate2(infoGroupId, "processing_config_enable_empty_frame_precheck", H5T_NATIVE_UINT8, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attrEmptyPrecheck >= 0)
+        {
+            H5Awrite(attrEmptyPrecheck, H5T_NATIVE_UINT8, &enableEmptyFramePrecheck);
+            H5Aclose(attrEmptyPrecheck);
+        }
+
+        int32_t emptyFrameMinMorphPixels = static_cast<int32_t>(processingConfig.empty_frame_min_morph_pixels);
+        hid_t attrEmptyMinMorph = H5Acreate2(infoGroupId, "processing_config_empty_frame_min_morph_pixels", H5T_NATIVE_INT32, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attrEmptyMinMorph >= 0)
+        {
+            H5Awrite(attrEmptyMinMorph, H5T_NATIVE_INT32, &emptyFrameMinMorphPixels);
+            H5Aclose(attrEmptyMinMorph);
+        }
+
+        double emptyFrameMinRoiOccupancy = processingConfig.empty_frame_min_roi_occupancy;
+        hid_t attrEmptyMinOccupancy = H5Acreate2(infoGroupId, "processing_config_empty_frame_min_roi_occupancy", H5T_NATIVE_DOUBLE, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attrEmptyMinOccupancy >= 0)
+        {
+            H5Awrite(attrEmptyMinOccupancy, H5T_NATIVE_DOUBLE, &emptyFrameMinRoiOccupancy);
+            H5Aclose(attrEmptyMinOccupancy);
+        }
+
+        double emptyFrameMinDiffMean = processingConfig.empty_frame_min_diff_mean;
+        hid_t attrEmptyMinDiffMean = H5Acreate2(infoGroupId, "processing_config_empty_frame_min_diff_mean", H5T_NATIVE_DOUBLE, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attrEmptyMinDiffMean >= 0)
+        {
+            H5Awrite(attrEmptyMinDiffMean, H5T_NATIVE_DOUBLE, &emptyFrameMinDiffMean);
+            H5Aclose(attrEmptyMinDiffMean);
+        }
+
+        int32_t emptyFrameThresholdSensitivityStep = static_cast<int32_t>(processingConfig.empty_frame_threshold_sensitivity_step);
+        hid_t attrEmptySensitivityStep = H5Acreate2(infoGroupId, "processing_config_empty_frame_threshold_sensitivity_step", H5T_NATIVE_INT32, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attrEmptySensitivityStep >= 0)
+        {
+            H5Awrite(attrEmptySensitivityStep, H5T_NATIVE_INT32, &emptyFrameThresholdSensitivityStep);
+            H5Aclose(attrEmptySensitivityStep);
+        }
+
+        double emptyFrameMinThresholdStableRatio = processingConfig.empty_frame_min_threshold_stable_ratio;
+        hid_t attrEmptyStableRatio = H5Acreate2(infoGroupId, "processing_config_empty_frame_min_threshold_stable_ratio", H5T_NATIVE_DOUBLE, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attrEmptyStableRatio >= 0)
+        {
+            H5Awrite(attrEmptyStableRatio, H5T_NATIVE_DOUBLE, &emptyFrameMinThresholdStableRatio);
+            H5Aclose(attrEmptyStableRatio);
+        }
+
+        int32_t backgroundAlignmentMaxShiftPx = static_cast<int32_t>(processingConfig.background_alignment_max_shift_px);
+        hid_t attrBgAlignShift = H5Acreate2(infoGroupId, "processing_config_background_alignment_max_shift_px", H5T_NATIVE_INT32, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attrBgAlignShift >= 0)
+        {
+            H5Awrite(attrBgAlignShift, H5T_NATIVE_INT32, &backgroundAlignmentMaxShiftPx);
+            H5Aclose(attrBgAlignShift);
+        }
+
+        double backgroundAlignmentMinImprovement = processingConfig.background_alignment_min_improvement;
+        hid_t attrBgAlignImprovement = H5Acreate2(infoGroupId, "processing_config_background_alignment_min_improvement", H5T_NATIVE_DOUBLE, scalarSpaceId,
+                                 H5P_DEFAULT, H5P_DEFAULT);
+        if (attrBgAlignImprovement >= 0)
+        {
+            H5Awrite(attrBgAlignImprovement, H5T_NATIVE_DOUBLE, &backgroundAlignmentMinImprovement);
+            H5Aclose(attrBgAlignImprovement);
+        }
+
         // Write ROI attributes
         int32_t roiX = static_cast<int32_t>(roi.x);
         hid_t attr14 = H5Acreate2(infoGroupId, "roi_x", H5T_NATIVE_INT32, scalarSpaceId,

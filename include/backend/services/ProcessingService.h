@@ -49,6 +49,14 @@ struct ProcessingConfig {
     bool enable_ring_ratio_check{true};
     bool require_single_inner_contour{true};
     int empty_frame_pixel_threshold{100};
+    bool enable_empty_frame_precheck{true};
+    int empty_frame_min_morph_pixels{160};
+    double empty_frame_min_roi_occupancy{0.003};
+    double empty_frame_min_diff_mean{0.35};
+    int empty_frame_threshold_sensitivity_step{16};
+    double empty_frame_min_threshold_stable_ratio{0.25};
+    int background_alignment_max_shift_px{3};
+    double background_alignment_min_improvement{0.25};
     bool auto_background_enabled{false};
     int auto_background_empty_frames{30};
     int auto_background_cooldown_frames{1000};
@@ -93,6 +101,16 @@ struct FilterResult {
     double youngsModulus{0.0}; // Young's modulus (kPa) from LUT lookup
     BrightnessQuantiles brightness;
     bool isTargetGroup{false}; // True if valid AND matches target group criteria
+    bool emptyFrameDiscarded{false};
+    int emptyFrameForegroundPixels{0};
+    int emptyFrameMorphPixels{0};
+    double emptyFrameRoiOccupancy{0.0};
+    double emptyFrameDiffMean{0.0};
+    double emptyFrameThresholdStableRatio{0.0};
+    int backgroundShiftX{0};
+    int backgroundShiftY{0};
+    double backgroundAlignmentScore{0.0};
+    double backgroundAlignmentImprovement{0.0};
     // Contours found during processing (for snapshot/display)
     // These are in the same coordinate space as the processedImage mask
     std::vector<std::vector<cv::Point>> allContours;

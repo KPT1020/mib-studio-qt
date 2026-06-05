@@ -73,6 +73,173 @@ void populateGeometry(FilterResult& result, const std::vector<cv::Point>& contou
     }
 }
 
+int oddKernel(int v) {
+    if (v < 1) {
+        v = 1;
+    }
+    if ((v % 2) == 0) {
+        ++v;
+    }
+    return v;
+}
+
+struct BackgroundDiffResult {
+    cv::Mat diff;
+    int shiftX{0};
+    int shiftY{0};
+    double score{0.0};
+    double improvement{0.0};
+};
+
+double meanAbsDifference(const cv::Mat& lhs, const cv::Mat& rhs) {
+    cv::Mat absDiff;
+    cv::absdiff(lhs, rhs, absDiff);
+    return cv::mean(absDiff)[0];
+}
+
+BackgroundDiffResult makeBackgroundDiff(const cv::Mat& blurredCurr,
+                                        const cv::Mat& backgroundGray,
+                                        const cv::Rect& roi,
+                                        int blurK,
+                                        const ProcessingConfig& config) {
+    BackgroundDiffResult result;
+    if (blurredCurr.empty()) {
+        return result;
+    }
+    if (backgroundGray.empty() || backgroundGray.type() != CV_8UC1 ||
+        roi.x < 0 || roi.y < 0 || roi.x + roi.width > backgroundGray.cols ||
+        roi.y + roi.height > backgroundGray.rows) {
+        result.diff = blurredCurr;
+        return result;
+    }
+
+    cv::Mat blurredBgFull;
+    cv::GaussianBlur(backgroundGray, blurredBgFull, cv::Size(blurK, blurK), 0);
+
+    const int maxShift = std::max(0, config.background_alignment_max_shift_px);
+    cv::Mat paddedBg;
+    cv::copyMakeBorder(blurredBgFull, paddedBg, maxShift, maxShift, maxShift, maxShift,
+                       cv::BORDER_REPLICATE);
+
+    auto shiftedRect = [&](int dx, int dy) {
+        return cv::Rect(roi.x + maxShift + dx, roi.y + maxShift + dy, roi.width, roi.height);
+    };
+
+    const cv::Mat zeroShiftBg = paddedBg(shiftedRect(0, 0));
+    const double zeroScore = meanAbsDifference(blurredCurr, zeroShiftBg);
+    double bestScore = zeroScore;
+    int bestDx = 0;
+    int bestDy = 0;
+
+    for (int dy = -maxShift; dy <= maxShift; ++dy) {
+        for (int dx = -maxShift; dx <= maxShift; ++dx) {
+            if (dx == 0 && dy == 0) {
+                continue;
+            }
+            const double score = meanAbsDifference(blurredCurr, paddedBg(shiftedRect(dx, dy)));
+            const int movement = std::abs(dx) + std::abs(dy);
+            const int bestMovement = std::abs(bestDx) + std::abs(bestDy);
+            const bool betterTie =
+                std::abs(score - bestScore) <= std::numeric_limits<double>::epsilon() &&
+                std::make_tuple(movement, std::abs(dy), std::abs(dx)) <
+                    std::make_tuple(bestMovement, std::abs(bestDy), std::abs(bestDx));
+            if (score < bestScore || betterTie) {
+                bestScore = score;
+                bestDx = dx;
+                bestDy = dy;
+            }
+        }
+    }
+
+    const double improvement = zeroScore - bestScore;
+    if (improvement < std::max(0.0, config.background_alignment_min_improvement)) {
+        bestDx = 0;
+        bestDy = 0;
+        bestScore = zeroScore;
+    }
+
+    cv::subtract(blurredCurr, paddedBg(shiftedRect(bestDx, bestDy)), result.diff);
+    result.shiftX = bestDx;
+    result.shiftY = bestDy;
+    result.score = bestScore;
+    result.improvement = std::max(0.0, zeroScore - bestScore);
+    return result;
+}
+
+struct EmptyFrameDecision {
+    bool isEmpty{false};
+    int thresholdPixels{0};
+    int morphPixels{0};
+    int highThresholdPixels{0};
+    double roiOccupancy{0.0};
+    double diffMean{0.0};
+    double thresholdStableRatio{0.0};
+};
+
+EmptyFrameDecision classifyEmptyFrame(const cv::Mat& diff,
+                                      const cv::Mat& thresholdMask,
+                                      const cv::Mat& morphMask,
+                                      int thresholdValue,
+                                      const ProcessingConfig& config) {
+    EmptyFrameDecision decision;
+    const int roiArea = std::max(0, morphMask.rows * morphMask.cols);
+    decision.thresholdPixels = thresholdMask.empty() ? 0 : cv::countNonZero(thresholdMask);
+    decision.morphPixels = morphMask.empty() ? 0 : cv::countNonZero(morphMask);
+    decision.roiOccupancy = roiArea > 0
+                                ? static_cast<double>(decision.morphPixels) / static_cast<double>(roiArea)
+                                : 0.0;
+    decision.diffMean = diff.empty() ? 0.0 : cv::mean(diff)[0];
+
+    const int sensitivityStep = std::max(0, config.empty_frame_threshold_sensitivity_step);
+    if (!diff.empty() && sensitivityStep > 0) {
+        cv::Mat highThreshold;
+        const int highValue = std::min(255, std::max(0, thresholdValue) + sensitivityStep);
+        cv::threshold(diff, highThreshold, highValue, 255, cv::THRESH_BINARY);
+        decision.highThresholdPixels = cv::countNonZero(highThreshold);
+    } else {
+        decision.highThresholdPixels = decision.thresholdPixels;
+    }
+    decision.thresholdStableRatio = decision.thresholdPixels > 0
+                                        ? static_cast<double>(decision.highThresholdPixels) /
+                                              static_cast<double>(decision.thresholdPixels)
+                                        : 0.0;
+
+    if (!config.enable_empty_frame_precheck) {
+        return decision;
+    }
+
+    const bool belowRawPixels =
+        decision.thresholdPixels < std::max(0, config.empty_frame_pixel_threshold);
+    const bool belowMorphPixels =
+        decision.morphPixels < std::max(0, config.empty_frame_min_morph_pixels);
+    const bool belowOccupancy =
+        decision.roiOccupancy < std::max(0.0, config.empty_frame_min_roi_occupancy);
+    const bool weakDiffEnergy =
+        decision.diffMean < std::max(0.0, config.empty_frame_min_diff_mean);
+    const bool thresholdSensitive =
+        decision.thresholdStableRatio < std::max(0.0, config.empty_frame_min_threshold_stable_ratio);
+
+    decision.isEmpty = belowRawPixels || belowMorphPixels ||
+                       (weakDiffEnergy && belowOccupancy) ||
+                       (thresholdSensitive && belowOccupancy);
+    return decision;
+}
+
+void populateEmptyFrameMetrics(FilterResult& result,
+                               const EmptyFrameDecision& decision,
+                               const BackgroundDiffResult& diffResult) {
+    result.emptyFrameDiscarded = decision.isEmpty;
+    result.emptyFrameForegroundPixels = decision.thresholdPixels;
+    result.emptyFrameMorphPixels = decision.morphPixels;
+    result.emptyFrameRoiOccupancy = decision.roiOccupancy;
+    result.emptyFrameDiffMean = decision.diffMean;
+    result.emptyFrameThresholdStableRatio = decision.thresholdStableRatio;
+    result.backgroundShiftX = diffResult.shiftX;
+    result.backgroundShiftY = diffResult.shiftY;
+    result.backgroundAlignmentScore = diffResult.score;
+    result.backgroundAlignmentImprovement = diffResult.improvement;
+}
+
 struct BatchTrack {
     int id{-1};
     uint64_t firstFrame{0};
@@ -469,22 +636,24 @@ bool ProcessingService::isFrameEmpty(const backend::playback::Frame& frame,
     cv::Rect cvRoi(effectiveRoi.x, effectiveRoi.y, effectiveRoi.w, effectiveRoi.h);
     cv::Mat roiCurr = gray(cvRoi);
 
-    // Apply same processing as realtime loop
-    cv::Mat blurredCurr, blurredBg, diff, thresh;
-    cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(3, 3), 0);
-    
-    if (!background.empty() && background.size() == gray.size() && background.type() == CV_8UC1) {
-        cv::GaussianBlur(background(cvRoi), blurredBg, cv::Size(3, 3), 0);
-        cv::subtract(blurredCurr, blurredBg, diff);
-    } else {
-        diff = blurredCurr;
-    }
-    
-    cv::threshold(diff, thresh, config.bg_subtract_threshold, 255, cv::THRESH_BINARY);
-    
-    // Count non-zero pixels
-    int pixelCount = cv::countNonZero(thresh);
-    return pixelCount < config.empty_frame_pixel_threshold;
+    const int blurK = oddKernel(config.gaussian_blur_size);
+    const int morphK = oddKernel(config.morph_kernel_size);
+    const int morphIter = std::max(1, config.morph_iterations);
+    const int threshVal = std::max(0, config.bg_subtract_threshold);
+
+    cv::Mat blurredCurr;
+    cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(blurK, blurK), 0);
+    BackgroundDiffResult diffResult = makeBackgroundDiff(
+        blurredCurr, background, cvRoi, blurK, config);
+
+    cv::Mat thresh;
+    cv::threshold(diffResult.diff, thresh, threshVal, 255, cv::THRESH_BINARY);
+    cv::Mat morphMask;
+    const cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+    cv::morphologyEx(thresh, morphMask, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
+    cv::morphologyEx(morphMask, morphMask, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
+
+    return classifyEmptyFrame(diffResult.diff, thresh, morphMask, threshVal, config).isEmpty;
 }
 
 ProcessedFrame ProcessingService::computeProcessedFrame(
@@ -530,9 +699,8 @@ ProcessedFrame ProcessingService::computeProcessedFrame(
     const cv::Rect cvRoi(roi.x, roi.y, roi.w, roi.h);
 
     // Kernel sizing (same rules as realtimeLoop)
-    auto toOdd = [](int v) -> int { if (v < 1) v = 1; if ((v % 2) == 0) v += 1; return v; };
-    const int blurK = toOdd(config.gaussian_blur_size);
-    const int morphK = toOdd(config.morph_kernel_size);
+    const int blurK = oddKernel(config.gaussian_blur_size);
+    const int morphK = oddKernel(config.morph_kernel_size);
     const int morphIter = std::max(1, config.morph_iterations);
     const int threshVal = std::max(0, config.bg_subtract_threshold);
 
@@ -541,27 +709,35 @@ ProcessedFrame ProcessingService::computeProcessedFrame(
     cv::Mat roiCurr = gray(cvRoi);
     cv::Mat roiDst = mask(cvRoi);
 
-    cv::Mat blurredCurr, diffForProcessing, thresh;
+    cv::Mat blurredCurr, thresh;
     cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(blurK, blurK), 0);
 
     const bool hasBackground = (!backgroundGray.empty()
                                 && backgroundGray.size() == gray.size()
                                 && backgroundGray.type() == CV_8UC1);
+    BackgroundDiffResult diffResult;
     if (hasBackground) {
-        cv::Mat blurredBg;
-        cv::GaussianBlur(backgroundGray(cvRoi), blurredBg, cv::Size(blurK, blurK), 0);
-        cv::subtract(blurredCurr, blurredBg, diffForProcessing);
+        diffResult = makeBackgroundDiff(blurredCurr, backgroundGray, cvRoi, blurK, config);
     } else {
-        diffForProcessing = blurredCurr;
+        diffResult.diff = blurredCurr;
     }
 
-    cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+    cv::threshold(diffResult.diff, thresh, threshVal, 255, cv::THRESH_BINARY);
     cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
     cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
     cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
+    EmptyFrameDecision emptyDecision = classifyEmptyFrame(diffResult.diff, thresh, roiDst, threshVal, config);
+    populateEmptyFrameMetrics(out.validation, emptyDecision, diffResult);
+    if (emptyDecision.isEmpty) {
+        roiDst.setTo(cv::Scalar(0));
+        out.processedImage = std::move(mask);
+        return out;
+    }
+
     // Validation + contour/metric extraction (same helper as realtime)
     out.validation = filterProcessedImage(mask, cvRoi, config, gray);
+    populateEmptyFrameMetrics(out.validation, emptyDecision, diffResult);
     out.processedImage = std::move(mask);
     return out;
 }
@@ -585,6 +761,11 @@ std::vector<ProcessedFrame> ProcessingService::processBatch(
         ProcessedFrame base = computeProcessedFrame(grayImages[i], background, config, roi,
                                                     static_cast<uint64_t>(i), 0);
         if (base.originalImage.empty() || base.processedImage.empty()) {
+            results.emplace_back(std::move(base));
+            if (progress) progress(BatchProgress{i + 1, total});
+            continue;
+        }
+        if (base.validation.emptyFrameDiscarded) {
             results.emplace_back(std::move(base));
             if (progress) progress(BatchProgress{i + 1, total});
             continue;
@@ -1524,11 +1705,10 @@ void ProcessingService::realtimeLoop() {
                 
                 // Create ROI-sized mask (much smaller than full frame)
                 cv::Mat mask(roi.h, roi.w, CV_8UC1, cv::Scalar(0));
-                cv::Mat blurredCurr, blurredBg, thresh;
+                cv::Mat blurredCurr, thresh;
                 const auto algoStart = clock::now();
-                auto toOdd = [](int v) -> int { if (v < 1) v = 1; if ((v % 2) == 0) v += 1; return v; };
-                const int blurK = toOdd(config.gaussian_blur_size);
-                const int morphK = toOdd(config.morph_kernel_size);
+                const int blurK = oddKernel(config.gaussian_blur_size);
+                const int morphK = oddKernel(config.morph_kernel_size);
                 const int morphIter = std::max(1, config.morph_iterations);
                 const int threshVal = std::max(0, config.bg_subtract_threshold);
 
@@ -1536,14 +1716,12 @@ void ProcessingService::realtimeLoop() {
                 bool hasBackground = (bgShared && !bgShared->empty() && bgShared->size() == cv::Size(static_cast<int>(f.width), static_cast<int>(f.height)) && bgShared->type() == CV_8UC1);
                 
                 // For processing: use background subtraction if available
-                cv::Mat diffForProcessing;
+                BackgroundDiffResult processingDiff;
                 if (hasBackground) {
                     cv::Rect bgRoi(roi.x, roi.y, roi.w, roi.h);
-                    cv::Mat bgROI = (*bgShared)(bgRoi);
-                    cv::GaussianBlur(bgROI, blurredBg, cv::Size(blurK, blurK), 0);
-                    cv::subtract(blurredCurr, blurredBg, diffForProcessing);
+                    processingDiff = makeBackgroundDiff(blurredCurr, *bgShared, bgRoi, blurK, config);
                 } else {
-                    diffForProcessing = blurredCurr;
+                    processingDiff.diff = blurredCurr;
                 }
                 
                 // For auto-capture detection: always use frame-to-frame difference when enabled
@@ -1560,18 +1738,21 @@ void ProcessingService::realtimeLoop() {
                         diffForAutoCapture = blurredCurr; // Use current frame for thresholding (will not be empty)
                     }
                 } else {
-                    diffForAutoCapture = diffForProcessing; // Fallback to processing diff
+                    diffForAutoCapture = processingDiff.diff; // Fallback to processing diff
                 }
                 
                 // Use frame-to-frame diff for empty frame detection when auto-capture is enabled
-                cv::Mat diff = (config.auto_background_enabled && !experimentActive_.load()) ? diffForAutoCapture : diffForProcessing;
+                cv::Mat diff = (config.auto_background_enabled && !experimentActive_.load()) ? diffForAutoCapture : processingDiff.diff;
                 cv::threshold(diff, thresh, threshVal, 255, cv::THRESH_BINARY);
-                
-                // Check for empty frame: count non-zero pixels after binary threshold
-                int pixelCount = cv::countNonZero(thresh);
-                if (pixelCount < config.empty_frame_pixel_threshold) {
-                    SPDLOG_TRACE("Empty frame detected (idx={}, pixel_count={}, threshold={}), skipping further processing",
-                                idx, pixelCount, config.empty_frame_pixel_threshold);
+                cv::Mat emptyCheckMask;
+                cv::Mat emptyCheckKernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+                cv::morphologyEx(thresh, emptyCheckMask, cv::MORPH_CLOSE, emptyCheckKernel, cv::Point(-1, -1), morphIter);
+                cv::morphologyEx(emptyCheckMask, emptyCheckMask, cv::MORPH_OPEN, emptyCheckKernel, cv::Point(-1, -1), morphIter);
+
+                EmptyFrameDecision emptyDecision = classifyEmptyFrame(diff, thresh, emptyCheckMask, threshVal, config);
+                if (emptyDecision.isEmpty) {
+                    SPDLOG_TRACE("Empty frame detected (idx={}, foreground_pixels={}, morph_pixels={}, occupancy={:.4f}), skipping further processing",
+                                idx, emptyDecision.thresholdPixels, emptyDecision.morphPixels, emptyDecision.roiOccupancy);
                     
                     // Auto-capture logic (only when experiment is NOT running)
                     if (config.auto_background_enabled && !experimentActive_.load()) {
@@ -1631,15 +1812,18 @@ void ProcessingService::realtimeLoop() {
                 }
                 
                 // Use background subtraction diff for actual processing (morphology, contours, etc.)
-                cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+                cv::threshold(processingDiff.diff, thresh, threshVal, 255, cv::THRESH_BINARY);
                 cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
                 cv::morphologyEx(thresh, mask, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
                 cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
+                EmptyFrameDecision processingEmptyDecision =
+                    classifyEmptyFrame(processingDiff.diff, thresh, mask, threshVal, config);
 
                 // Always run validation for monitoring (even without experiment)
                 // mask is ROI-sized so contour coords are 0-based; use local roi for border check
                 cv::Rect localRoi(0, 0, roi.w, roi.h);
                 FilterResult validation = filterProcessedImage(mask, localRoi, config, grayROI);
+                populateEmptyFrameMetrics(validation, processingEmptyDecision, processingDiff);
 
                 // Extract contours from validation result and adjust coordinates for full-frame snapshot
                 // Contours from filterProcessedImage are in ROI coordinates, need to adjust for full frame
@@ -1869,11 +2053,10 @@ void ProcessingService::realtimeLoop() {
                 cv::Mat mask(gray.rows, gray.cols, CV_8UC1, cv::Scalar(0));
                 cv::Mat roiCurr = gray(cvRoi);
                 cv::Mat roiDst = mask(cvRoi);
-                cv::Mat blurredCurr, blurredBg, thresh;
+                cv::Mat blurredCurr, thresh;
                 const auto algoStart = clock::now();
-                auto toOdd = [](int v) -> int { if (v < 1) v = 1; if ((v % 2) == 0) v += 1; return v; };
-                const int blurK = toOdd(config.gaussian_blur_size);
-                const int morphK = toOdd(config.morph_kernel_size);
+                const int blurK = oddKernel(config.gaussian_blur_size);
+                const int morphK = oddKernel(config.morph_kernel_size);
                 const int morphIter = std::max(1, config.morph_iterations);
                 const int threshVal = std::max(0, config.bg_subtract_threshold);
 
@@ -1881,12 +2064,11 @@ void ProcessingService::realtimeLoop() {
                 bool hasBackground = (bgShared && !bgShared->empty() && bgShared->size() == gray.size() && bgShared->type() == CV_8UC1);
                 
                 // For processing: use background subtraction if available
-                cv::Mat diffForProcessing;
+                BackgroundDiffResult processingDiff;
                 if (hasBackground) {
-                    cv::GaussianBlur((*bgShared)(cvRoi), blurredBg, cv::Size(blurK, blurK), 0);
-                    cv::subtract(blurredCurr, blurredBg, diffForProcessing);
+                    processingDiff = makeBackgroundDiff(blurredCurr, *bgShared, cvRoi, blurK, config);
                 } else {
-                    diffForProcessing = blurredCurr;
+                    processingDiff.diff = blurredCurr;
                 }
                 
                 // For auto-capture detection: always use frame-to-frame difference when enabled
@@ -1903,18 +2085,21 @@ void ProcessingService::realtimeLoop() {
                         diffForAutoCapture = blurredCurr; // Use current frame for thresholding (will not be empty)
                     }
                 } else {
-                    diffForAutoCapture = diffForProcessing; // Fallback to processing diff
+                    diffForAutoCapture = processingDiff.diff; // Fallback to processing diff
                 }
                 
                 // Use frame-to-frame diff for empty frame detection when auto-capture is enabled
-                cv::Mat diff = (config.auto_background_enabled && !experimentActive_.load()) ? diffForAutoCapture : diffForProcessing;
+                cv::Mat diff = (config.auto_background_enabled && !experimentActive_.load()) ? diffForAutoCapture : processingDiff.diff;
                 cv::threshold(diff, thresh, threshVal, 255, cv::THRESH_BINARY);
-                
-                // Check for empty frame: count non-zero pixels after binary threshold
-                int pixelCount = cv::countNonZero(thresh);
-                if (pixelCount < config.empty_frame_pixel_threshold) {
-                    SPDLOG_TRACE("Empty frame detected (idx={}, pixel_count={}, threshold={}), skipping further processing",
-                                idx, pixelCount, config.empty_frame_pixel_threshold);
+                cv::Mat emptyCheckMask;
+                cv::Mat emptyCheckKernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+                cv::morphologyEx(thresh, emptyCheckMask, cv::MORPH_CLOSE, emptyCheckKernel, cv::Point(-1, -1), morphIter);
+                cv::morphologyEx(emptyCheckMask, emptyCheckMask, cv::MORPH_OPEN, emptyCheckKernel, cv::Point(-1, -1), morphIter);
+
+                EmptyFrameDecision emptyDecision = classifyEmptyFrame(diff, thresh, emptyCheckMask, threshVal, config);
+                if (emptyDecision.isEmpty) {
+                    SPDLOG_TRACE("Empty frame detected (idx={}, foreground_pixels={}, morph_pixels={}, occupancy={:.4f}), skipping further processing",
+                                idx, emptyDecision.thresholdPixels, emptyDecision.morphPixels, emptyDecision.roiOccupancy);
                     
                     // Auto-capture logic (only when experiment is NOT running)
                     if (config.auto_background_enabled && !experimentActive_.load()) {
@@ -1974,7 +2159,7 @@ void ProcessingService::realtimeLoop() {
                 }
                 
                 // Use background subtraction diff for actual processing (morphology, contours, etc.)
-                cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+                cv::threshold(processingDiff.diff, thresh, threshVal, 255, cv::THRESH_BINARY);
                 
                 // Update previous frame for frame-to-frame comparison (when no background and auto-capture enabled)
                 if (!hasBackground && config.auto_background_enabled && !experimentActive_.load()) {
@@ -1985,8 +2170,11 @@ void ProcessingService::realtimeLoop() {
                 cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
                 cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
                 cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
+                EmptyFrameDecision processingEmptyDecision =
+                    classifyEmptyFrame(processingDiff.diff, thresh, roiDst, threshVal, config);
 
                 FilterResult validation = filterProcessedImage(mask, cvRoi, config, gray);
+                populateEmptyFrameMetrics(validation, processingEmptyDecision, processingDiff);
                 
                 // Extract contours from validation result for snapshot
                 std::vector<std::vector<cv::Point>> contours = validation.allContours;
@@ -2206,11 +2394,10 @@ void ProcessingService::realtimeLoop() {
                 cv::Mat mask(gray.rows, gray.cols, CV_8UC1, cv::Scalar(0));
                 cv::Mat roiCurr = gray(cvRoi);
                 cv::Mat roiDst = mask(cvRoi);
-                cv::Mat blurredCurr, blurredBg, thresh;
+                cv::Mat blurredCurr, thresh;
                 const auto algoStart = clock::now();
-                auto toOdd = [](int v) -> int { if (v < 1) v = 1; if ((v % 2) == 0) v += 1; return v; };
-                const int blurK = toOdd(config.gaussian_blur_size);
-                const int morphK = toOdd(config.morph_kernel_size);
+                const int blurK = oddKernel(config.gaussian_blur_size);
+                const int morphK = oddKernel(config.morph_kernel_size);
                 const int morphIter = std::max(1, config.morph_iterations);
                 const int threshVal = std::max(0, config.bg_subtract_threshold);
 
@@ -2218,12 +2405,11 @@ void ProcessingService::realtimeLoop() {
                 bool hasBackground = (bgShared && !bgShared->empty() && bgShared->size() == gray.size() && bgShared->type() == CV_8UC1);
                 
                 // For processing: use background subtraction if available
-                cv::Mat diffForProcessing;
+                BackgroundDiffResult processingDiff;
                 if (hasBackground) {
-                    cv::GaussianBlur((*bgShared)(cvRoi), blurredBg, cv::Size(blurK, blurK), 0);
-                    cv::subtract(blurredCurr, blurredBg, diffForProcessing);
+                    processingDiff = makeBackgroundDiff(blurredCurr, *bgShared, cvRoi, blurK, config);
                 } else {
-                    diffForProcessing = blurredCurr;
+                    processingDiff.diff = blurredCurr;
                 }
                 
                 // For auto-capture detection: always use frame-to-frame difference when enabled
@@ -2240,18 +2426,21 @@ void ProcessingService::realtimeLoop() {
                         diffForAutoCapture = blurredCurr; // Use current frame for thresholding (will not be empty)
                     }
                 } else {
-                    diffForAutoCapture = diffForProcessing; // Fallback to processing diff
+                    diffForAutoCapture = processingDiff.diff; // Fallback to processing diff
                 }
                 
                 // Use frame-to-frame diff for empty frame detection when auto-capture is enabled
-                cv::Mat diff = (config.auto_background_enabled && !experimentActive_.load()) ? diffForAutoCapture : diffForProcessing;
+                cv::Mat diff = (config.auto_background_enabled && !experimentActive_.load()) ? diffForAutoCapture : processingDiff.diff;
                 cv::threshold(diff, thresh, threshVal, 255, cv::THRESH_BINARY);
+                cv::Mat emptyCheckMask;
+                cv::Mat emptyCheckKernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+                cv::morphologyEx(thresh, emptyCheckMask, cv::MORPH_CLOSE, emptyCheckKernel, cv::Point(-1, -1), morphIter);
+                cv::morphologyEx(emptyCheckMask, emptyCheckMask, cv::MORPH_OPEN, emptyCheckKernel, cv::Point(-1, -1), morphIter);
 
-                // Check for empty frame: count non-zero pixels after binary threshold
-                int pixelCount = cv::countNonZero(thresh);
-                if (pixelCount < config.empty_frame_pixel_threshold) {
-                    SPDLOG_TRACE("Empty frame detected (idx={}, pixel_count={}, threshold={}), skipping further processing",
-                                idx, pixelCount, config.empty_frame_pixel_threshold);
+                EmptyFrameDecision emptyDecision = classifyEmptyFrame(diff, thresh, emptyCheckMask, threshVal, config);
+                if (emptyDecision.isEmpty) {
+                    SPDLOG_TRACE("Empty frame detected (idx={}, foreground_pixels={}, morph_pixels={}, occupancy={:.4f}), skipping further processing",
+                                idx, emptyDecision.thresholdPixels, emptyDecision.morphPixels, emptyDecision.roiOccupancy);
                     
                     // Auto-capture logic (only when experiment is NOT running)
                     if (config.auto_background_enabled && !experimentActive_.load()) {
@@ -2325,7 +2514,7 @@ void ProcessingService::realtimeLoop() {
                 }
 
                 // Use background subtraction diff for actual processing (morphology, contours, etc.)
-                cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+                cv::threshold(processingDiff.diff, thresh, threshVal, 255, cv::THRESH_BINARY);
 
                 // Update previous frame for frame-to-frame comparison (when no background and auto-capture enabled)
                 if (!hasBackground && config.auto_background_enabled && !experimentActive_.load()) {
@@ -2336,6 +2525,8 @@ void ProcessingService::realtimeLoop() {
                 cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
                 cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
                 cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
+                EmptyFrameDecision processingEmptyDecision =
+                    classifyEmptyFrame(processingDiff.diff, thresh, roiDst, threshVal, config);
 
                 // Always run validation for monitoring (even without experiment)
                 // Use ROI-only data for validation (avoids O(frame_size) findContours/brightness scan)
@@ -2343,6 +2534,7 @@ void ProcessingService::realtimeLoop() {
                 cv::Mat roiMaskForValidation = mask(cvRoi).clone();
                 cv::Rect localRoi(0, 0, cvRoi.width, cvRoi.height);
                 FilterResult validation = filterProcessedImage(roiMaskForValidation, localRoi, config, roiCurr);
+                populateEmptyFrameMetrics(validation, processingEmptyDecision, processingDiff);
 
                 // Extract contours from validation result for snapshot
                 // Contours are in ROI-relative coordinates — adjust to full-frame for snapshot/storage
