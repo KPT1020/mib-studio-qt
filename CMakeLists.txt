@@ -327,6 +327,24 @@ if(BUILD_TESTING)
     )
     target_link_libraries(kin6_batch_pipeline_evidence PRIVATE mib_backend)
 
+    add_executable(kin10_hf_dataset_pipeline_test
+        src/tests/kin10_hf_dataset_pipeline_test.cpp
+    )
+    target_link_libraries(kin10_hf_dataset_pipeline_test PRIVATE mib_backend)
+    if(UNIX)
+        add_test(
+            NAME backend.kin10_hf_dataset_pipeline
+            COMMAND
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/kin10_run_hf_dataset_test.sh
+                ${CMAKE_CURRENT_BINARY_DIR}/kin10_hf_dataset_pipeline
+                $<TARGET_FILE:kin10_hf_dataset_pipeline_test>
+        )
+        set_tests_properties(backend.kin10_hf_dataset_pipeline PROPERTIES
+            LABELS "backend;integration"
+            TIMEOUT 180
+        )
+    endif()
+
     add_executable(kin6_mib_app_capture_proof
         src/tests/kin6_mib_app_capture_proof.cpp
     )

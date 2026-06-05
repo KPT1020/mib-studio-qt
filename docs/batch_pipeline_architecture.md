@@ -114,3 +114,11 @@ visuals, metrics, and capture-loop timing under `review_artifacts/KIN-6/`.
 pipeline. With the Hugging Face bundle it verifies 5,000 capture callbacks,
 5,000 accepted enqueues, zero drops, a configured 5,000-frame batch, and 5,000
 processed outputs through mib studio software code.
+
+`backend.kin10_hf_dataset_pipeline` is the CI/local integration harness for the
+public Hugging Face dataset. It downloads stable sample rows from
+`gavinlouuu/512x96stream` through the Dataset Viewer API without HF login, runs
+them through `ProcessingService::startBatchPipeline()`, and fails with explicit
+accepted/processed/drop, mask, contour, and metric-range regression messages.
+See `docs/howto/hf-dataset-integration-tests.md` for local commands and cache
+layout.
