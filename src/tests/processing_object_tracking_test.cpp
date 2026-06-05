@@ -11,6 +11,7 @@
 #include <iostream>
 #include <random>
 #include <sstream>
+#include <string>
 #include <vector>
 
 namespace
@@ -80,26 +81,100 @@ std::vector<backend::services::ProcessedFrame> invalidFrames(
     return out;
 }
 
-void writeReviewArtifacts(const std::filesystem::path& dir,
-                          const std::vector<cv::Mat>& inputFrames,
-                          const std::vector<backend::services::ProcessedFrame>& tracks)
+struct ReviewSample
 {
-    std::filesystem::create_directories(dir);
+    std::string id;
+    std::string caseType;
+    std::string expected;
+    cv::Mat input;
+    cv::Mat processedMask;
+    int validDetections{0};
+};
 
-    for (size_t i = 0; i < inputFrames.size(); ++i)
+std::string jsonEscape(const std::string& value)
+{
+    std::string out;
+    out.reserve(value.size());
+    for (const char ch : value)
     {
-        std::ostringstream name;
-        name << "input_frame_" << std::setw(3) << std::setfill('0') << i << ".png";
-        cv::imwrite((dir / name.str()).string(), inputFrames[i]);
+        switch (ch)
+        {
+        case '\\':
+            out += "\\\\";
+            break;
+        case '"':
+            out += "\\\"";
+            break;
+        case '\n':
+            out += "\\n";
+            break;
+        default:
+            out += ch;
+            break;
+        }
     }
+    return out;
+}
 
-    if (!tracks.empty())
+std::string samplePath(const std::string& id, const std::string& suffix)
+{
+    return id + "_" + suffix + ".png";
+}
+
+void writeSampleArtifact(const std::filesystem::path& dir, const ReviewSample& sample)
+{
+    cv::imwrite((dir / samplePath(sample.id, "input")).string(), sample.input);
+    cv::imwrite((dir / samplePath(sample.id, "mask")).string(), sample.processedMask);
+
+    if (sample.input.empty())
     {
-        cv::imwrite((dir / "processed_mask_track_001.png").string(), tracks.front().processedImage);
+        return;
     }
 
     cv::Mat overlayBase;
-    cv::cvtColor(inputFrames.front(), overlayBase, cv::COLOR_GRAY2BGR);
+    cv::cvtColor(sample.input, overlayBase, cv::COLOR_GRAY2BGR);
+    cv::Mat overlay;
+    constexpr double kOverlayScale = 3.0;
+    cv::resize(overlayBase, overlay, cv::Size(), kOverlayScale, kOverlayScale, cv::INTER_NEAREST);
+
+    if (!sample.processedMask.empty())
+    {
+        std::vector<std::vector<cv::Point>> contours;
+        cv::findContours(sample.processedMask.clone(), contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+        for (const auto& contour : contours)
+        {
+            const cv::Rect box = cv::boundingRect(contour);
+            cv::rectangle(overlay,
+                          cv::Rect(static_cast<int>(box.x * kOverlayScale),
+                                   static_cast<int>(box.y * kOverlayScale),
+                                   static_cast<int>(box.width * kOverlayScale),
+                                   static_cast<int>(box.height * kOverlayScale)),
+                          cv::Scalar(0, 220, 255), 2);
+        }
+    }
+
+    cv::Mat canvas(overlay.rows + 54, overlay.cols, overlay.type(), cv::Scalar(0, 0, 0));
+    overlay.copyTo(canvas(cv::Rect(0, 0, overlay.cols, overlay.rows)));
+    std::ostringstream label;
+    label << sample.id << " detections " << sample.validDetections;
+    cv::putText(canvas, label.str(), cv::Point(10, overlay.rows + 22),
+                cv::FONT_HERSHEY_SIMPLEX, 0.58, cv::Scalar(0, 220, 255), 1, cv::LINE_AA);
+    cv::putText(canvas, sample.caseType, cv::Point(10, overlay.rows + 46),
+                cv::FONT_HERSHEY_SIMPLEX, 0.52, cv::Scalar(220, 220, 220), 1, cv::LINE_AA);
+    cv::imwrite((dir / samplePath(sample.id, "overlay")).string(), canvas);
+}
+
+void writeTrackingOverlay(const std::filesystem::path& path,
+                          const cv::Mat& inputFrame,
+                          const std::vector<backend::services::ProcessedFrame>& tracks)
+{
+    if (inputFrame.empty())
+    {
+        return;
+    }
+
+    cv::Mat overlayBase;
+    cv::cvtColor(inputFrame, overlayBase, cv::COLOR_GRAY2BGR);
     cv::Mat overlay;
     constexpr double kOverlayScale = 3.0;
     cv::resize(overlayBase, overlay, cv::Size(), kOverlayScale, kOverlayScale, cv::INTER_NEAREST);
@@ -129,7 +204,44 @@ void writeReviewArtifacts(const std::filesystem::path& dir,
                     cv::Point(10, overlay.rows + 22 + static_cast<int>(i) * 22),
                     cv::FONT_HERSHEY_SIMPLEX, 0.58, color, 1, cv::LINE_AA);
     }
-    cv::imwrite((dir / "tracking_overlay.png").string(), canvas);
+    cv::imwrite(path.string(), canvas);
+}
+
+void writeReviewArtifacts(const std::filesystem::path& dir,
+                          const std::vector<cv::Mat>& inputFrames,
+                          const std::vector<backend::services::ProcessedFrame>& tracks,
+                          const std::vector<cv::Mat>& reverseInputFrames,
+                          const std::vector<backend::services::ProcessedFrame>& reverseTracks,
+                          const std::vector<ReviewSample>& samples)
+{
+    std::filesystem::create_directories(dir);
+
+    for (const auto& sample : samples)
+    {
+        writeSampleArtifact(dir, sample);
+    }
+
+    for (size_t i = 0; i < inputFrames.size(); ++i)
+    {
+        std::ostringstream name;
+        name << "input_frame_" << std::setw(3) << std::setfill('0') << i << ".png";
+        cv::imwrite((dir / name.str()).string(), inputFrames[i]);
+    }
+
+    for (size_t i = 0; i < reverseInputFrames.size(); ++i)
+    {
+        std::ostringstream name;
+        name << "reverse_motion_frame_" << std::setw(3) << std::setfill('0') << i << ".png";
+        cv::imwrite((dir / name.str()).string(), reverseInputFrames[i]);
+    }
+
+    if (!tracks.empty())
+    {
+        cv::imwrite((dir / "processed_mask_track_001.png").string(), tracks.front().processedImage);
+    }
+
+    writeTrackingOverlay(dir / "tracking_overlay.png", inputFrames.front(), tracks);
+    writeTrackingOverlay(dir / "reverse_motion_overlay.png", reverseInputFrames.front(), reverseTracks);
 
     std::ofstream metrics(dir / "metrics.json");
     metrics << "{\n"
@@ -137,6 +249,28 @@ void writeReviewArtifacts(const std::filesystem::path& dir,
             << "  \"raw_valid_observations\": 6,\n"
             << "  \"deduped_valid_tracks\": " << tracks.size() << ",\n"
             << "  \"duplicate_detections_suppressed\": " << (6 - tracks.size()) << ",\n"
+            << "  \"reverse_motion_input_frames\": " << reverseInputFrames.size() << ",\n"
+            << "  \"reverse_motion_raw_observations\": 2,\n"
+            << "  \"reverse_motion_tracks\": " << reverseTracks.size() << ",\n"
+            << "  \"reverse_motion_duplicate_detections_suppressed\": " << (2 - reverseTracks.size()) << ",\n"
+            << "  \"sample_cases\": [\n";
+    for (size_t i = 0; i < samples.size(); ++i)
+    {
+        const auto& sample = samples[i];
+        metrics << "    {\"id\": \"" << jsonEscape(sample.id)
+                << "\", \"case_type\": \"" << jsonEscape(sample.caseType)
+                << "\", \"valid_detections\": " << sample.validDetections
+                << ", \"input\": \"" << samplePath(sample.id, "input")
+                << "\", \"mask\": \"" << samplePath(sample.id, "mask")
+                << "\", \"overlay\": \"" << samplePath(sample.id, "overlay")
+                << "\", \"expected\": \"" << jsonEscape(sample.expected) << "\"}";
+        if (i + 1 != samples.size())
+        {
+            metrics << ",";
+        }
+        metrics << "\n";
+    }
+    metrics << "  ],\n"
             << "  \"tracks\": [\n";
     for (size_t i = 0; i < tracks.size(); ++i)
     {
@@ -151,15 +285,33 @@ void writeReviewArtifacts(const std::filesystem::path& dir,
         }
         metrics << "\n";
     }
+    metrics << "  ],\n"
+            << "  \"reverse_motion_track_details\": [\n";
+    for (size_t i = 0; i < reverseTracks.size(); ++i)
+    {
+        const auto& val = reverseTracks[i].validation;
+        metrics << "    {\"track_id\": " << val.trackId
+                << ", \"first_frame\": " << val.trackFirstFrame
+                << ", \"last_frame\": " << val.trackLastFrame
+                << ", \"observations\": " << val.trackObservationCount << "}";
+        if (i + 1 != reverseTracks.size())
+        {
+            metrics << ",";
+        }
+        metrics << "\n";
+    }
     metrics << "  ]\n"
             << "}\n";
 
     std::ofstream manifest(dir / "README.md");
     manifest << "# KIN-9 Review Bundle\n\n"
+             << "- `sample-*_input.png`, `sample-*_mask.png`, `sample-*_overlay.png`: representative per-sample input, processed mask, and contour overlay triples.\n"
              << "- `input_frame_*.png`: synthetic HF-stream-style frame sequence with two moving ring objects and one empty gap frame.\n"
+             << "- `reverse_motion_frame_*.png`: chronological right-to-left overlap sequence that must not deduplicate into one track.\n"
              << "- `processed_mask_track_001.png`: processed mask generated by `ProcessingService` for the first retained track record.\n"
              << "- `tracking_overlay.png`: retained track records with stable IDs and first/last frame spans overlaid on the first input frame.\n"
-             << "- `metrics.json`: raw observation count, deduplicated track count, suppressed duplicate count, and per-track spans.\n\n"
+             << "- `reverse_motion_overlay.png`: reverse-motion records with separate one-observation tracks.\n"
+             << "- `metrics.json`: raw observation count, deduplicated track count, suppressed duplicate count, reverse-motion track count, and per-track spans.\n\n"
              << "Regenerate visuals with `KIN9_REVIEW_BUNDLE=review_artifacts/KIN-9 ./build/linux-backend/mib_processing_object_tracking_test`.\n"
              << "Run the full local bundle flow with `./review_artifacts/KIN-9/regenerate.sh`.\n";
 }
@@ -216,18 +368,87 @@ int main()
         }
     }
 
+    const std::vector<cv::Mat> reverseFrames{
+        makeRingFrame({cv::Point(84, 48)}),
+        makeRingFrame({cv::Point(76, 48)}),
+    };
+    const auto reverseResults = service.processBatch(reverseFrames, config);
+    const auto reverseValid = validFrames(reverseResults);
+    if (reverseValid.size() != 2)
+    {
+        std::cerr << "expected chronological right-to-left motion to start a new track, got "
+                  << reverseValid.size() << " valid tracks from "
+                  << reverseResults.size() << " total records\n";
+        return 5;
+    }
+    for (size_t i = 0; i < reverseValid.size(); ++i)
+    {
+        const auto& val = reverseValid[i].validation;
+        const int expectedTrackId = static_cast<int>(i + 1);
+        const uint64_t expectedFrame = static_cast<uint64_t>(i);
+        if (val.trackId != expectedTrackId ||
+            val.trackFirstFrame != expectedFrame ||
+            val.trackLastFrame != expectedFrame ||
+            val.trackObservationCount != 1)
+        {
+            std::cerr << "bad reverse-motion track metadata for result " << i
+                      << ": trackId=" << val.trackId
+                      << " first=" << val.trackFirstFrame
+                      << " last=" << val.trackLastFrame
+                      << " observations=" << val.trackObservationCount << "\n";
+            return 6;
+        }
+    }
+
+    auto makeReviewSample = [&](std::string id,
+                                std::string caseType,
+                                std::string expected,
+                                const cv::Mat& input) {
+        const auto sampleResults = service.processBatch({input}, config);
+        const auto sampleValid = validFrames(sampleResults);
+        ReviewSample sample;
+        sample.id = std::move(id);
+        sample.caseType = std::move(caseType);
+        sample.expected = std::move(expected);
+        sample.input = input;
+        sample.validDetections = static_cast<int>(sampleValid.size());
+        if (!sampleResults.empty())
+        {
+            sample.processedMask = sampleResults.front().processedImage;
+        }
+        return sample;
+    };
+
+    const std::vector<ReviewSample> reviewSamples{
+        makeReviewSample("sample-001-ltr-start", "normal multi-object",
+                         "two left-to-right objects start stable tracks 1 and 2",
+                         frames[0]),
+        makeReviewSample("sample-002-ltr-reentry", "re-entry after empty frame",
+                         "the same two objects re-enter rightward and update existing tracks",
+                         frames[3]),
+        makeReviewSample("sample-003-empty-gap", "empty/noise frame",
+                         "empty gap remains invalid and does not create a track",
+                         frames[2]),
+        makeReviewSample("sample-004-reverse-start", "reverse-motion start",
+                         "first reverse-motion observation creates track 1",
+                         reverseFrames[0]),
+        makeReviewSample("sample-005-reverse-leftward", "reverse-motion leftward frame",
+                         "later leftward observation creates a separate track instead of deduplicating",
+                         reverseFrames[1]),
+    };
+
     backend::services::Hdf5Service hdf5;
     const std::string path = makeTempPath();
     if (!hdf5.openFile(path))
     {
         std::cerr << "failed to open temporary HDF5 file\n";
-        return 5;
+        return 7;
     }
     if (!hdf5.appendFrames(valid, invalid))
     {
         std::cerr << "failed to append tracked frames\n";
         hdf5.closeFile();
-        return 6;
+        return 8;
     }
     hdf5.closeFile();
 
@@ -235,7 +456,7 @@ int main()
     {
         std::cerr << "failed to reload temporary HDF5 file\n";
         std::filesystem::remove(path);
-        return 7;
+        return 9;
     }
     std::vector<backend::services::ProcessedFrame> reloaded;
     if (!hdf5.readValidMetadata(reloaded))
@@ -243,7 +464,7 @@ int main()
         std::cerr << "failed to read valid metadata\n";
         hdf5.closeFile();
         std::filesystem::remove(path);
-        return 8;
+        return 10;
     }
     hdf5.closeFile();
     std::filesystem::remove(path);
@@ -252,7 +473,7 @@ int main()
     {
         std::cerr << "expected " << valid.size() << " reloaded valid rows, got "
                   << reloaded.size() << "\n";
-        return 9;
+        return 11;
     }
     for (size_t i = 0; i < reloaded.size(); ++i)
     {
@@ -263,13 +484,13 @@ int main()
             val.trackObservationCount != valid[i].validation.trackObservationCount)
         {
             std::cerr << "tracking metadata did not round-trip for row " << i << "\n";
-            return 10;
+            return 12;
         }
     }
 
     if (const char* bundle = std::getenv("KIN9_REVIEW_BUNDLE"))
     {
-        writeReviewArtifacts(bundle, frames, valid);
+        writeReviewArtifacts(bundle, frames, valid, reverseFrames, reverseValid, reviewSamples);
     }
 
     return 0;

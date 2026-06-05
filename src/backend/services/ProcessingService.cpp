@@ -103,6 +103,7 @@ int findMatchingTrack(const std::vector<BatchTrack>& tracks,
     constexpr uint64_t kMaxFrameGap = 5;
     constexpr double kMinIou = 0.08;
     constexpr double kBaseCentroidThresholdPx = 24.0;
+    constexpr double kMaxLeftwardJitterPx = 2.0;
 
     const cv::Rect2d bbox = resultBbox(detection);
     if (rectArea(bbox) <= 0.0) {
@@ -122,6 +123,10 @@ int findMatchingTrack(const std::vector<BatchTrack>& tracks,
 
         const uint64_t frameGap = frameIndex - track.lastFrame;
         if (frameGap > kMaxFrameGap) {
+            continue;
+        }
+
+        if (detection.centroidX + kMaxLeftwardJitterPx < track.lastCentroid.x) {
             continue;
         }
 
