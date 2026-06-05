@@ -15,18 +15,26 @@ cmake --build --preset linux-backend-only-build --target kin10_hf_dataset_pipeli
 ctest --preset linux-backend-only-test -R backend.kin10_hf_dataset_pipeline --output-on-failure
 ```
 
-CTest writes downloaded frames, sample overlays, and `metrics.json` under:
+CTest writes downloaded frames, sample masks, contour overlays, and
+`metrics.json` under:
 
 ```text
-build/linux-backend/kin10_hf_dataset_pipeline/
+artifacts/kin-5/hf_dataset_pipeline/
 ```
 
-To regenerate the same harness output in a review bundle:
+To regenerate the same harness output directly:
 
 ```bash
 tools/kin10_run_hf_dataset_test.sh \
-  review_artifacts/KIN-10/hf_dataset_pipeline \
+  artifacts/kin-5/hf_dataset_pipeline \
   build/linux-backend/kin10_hf_dataset_pipeline_test
+```
+
+To generate the KIN-11 review bundle, including command logs, visual gallery,
+`report.html`, `manifest.json`, `metrics.json`, and `flow_diagram.svg`:
+
+```bash
+python3 tools/kin11_generate_review_bundle.py
 ```
 
 ## Sample Selection And Cache
