@@ -18,6 +18,10 @@
 - **Realtime thread** (`startRealtime(frameStore)`) — polls FrameStore
   write-index; processes every frame or only latest depending on
   `setRealtimeDropFrames`. Experiments force every-frame.
+- **Async batch workers** (`startBatchPipeline`) — consume a bounded frame
+  queue in configured-size batches. `enqueueBatchFrame` returns immediately
+  with accepted/dropped status so capture can keep running while workers process
+  behind it.
 
 ## Pipeline (per frame)
 
@@ -91,6 +95,30 @@ button that drives this via `BatchMaskDialog`.
 
 Batch calls do **not** touch realtime state or monitoring buffers, so
 they're safe to run concurrently with live capture.
+
+## Async batch processing (capture decoupling)
+
+Use `ProcessingService::startBatchPipeline(config, callback)` when capture
+should only enqueue frames and let workers process them later. The config
+contains `batchSize`, `maxQueuedFrames`, `workerCount`, and the same
+`ProcessingConfig` / background / ROI inputs used by `computeProcessedFrame`.
+
+`enqueueBatchFrame(gray, index, timestampNs)` clones the frame into the bounded
+queue and returns:
+
+- `true` when the frame was accepted,
+- `false` when the pipeline is stopped, the frame is empty, or the queue is
+  already full.
+
+Workers wait for `batchSize` queued frames, process with
+`computeProcessedFrame`, and emit `std::vector<ProcessedFrame>` through
+`BatchResultCallback`. `stopBatchPipeline` drains residual partial batches
+before joining workers.
+
+`getBatchPipelineStats()` exposes accepted, dropped, processed, batch count,
+current/max queue depth, batch size, worker count, and running state. See
+`docs/batch_pipeline_architecture.md` for the migration plan from
+`FrameStore -> realtimeLoop` to capture enqueue -> batch worker.
 
 ## Gotchas
 

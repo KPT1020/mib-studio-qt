@@ -53,15 +53,16 @@ bool CaptureService::start() {
 }
 
 void CaptureService::stop() {
-    if (!running_.load()) return;
-    running_.store(false);
-    {
+    const bool wasRunning = running_.exchange(false);
+    if (wasRunning) {
         std::scoped_lock lk(cameraMutex_);
         if (activeCamera_) {
             activeCamera_->stop();
         }
     }
-    if (thread_.joinable()) thread_.join();
+    if (thread_.joinable() && thread_.get_id() != std::this_thread::get_id()) {
+        thread_.join();
+    }
 }
 
 bool CaptureService::isRunning() const { return running_.load(); }

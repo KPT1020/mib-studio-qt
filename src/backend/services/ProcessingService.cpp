@@ -37,7 +37,10 @@ size_t defaultMaxBufferedFrames(size_t flushInterval) {
 } // namespace
 
 ProcessingService::ProcessingService() = default;
-ProcessingService::~ProcessingService() { stop(); }
+ProcessingService::~ProcessingService() {
+    stopBatchPipeline();
+    stop();
+}
 
 void ProcessingService::start(size_t workerCount) {
     if (running_.load()) return;
@@ -493,6 +496,201 @@ std::vector<ProcessedFrame> ProcessingService::processBatch(
     SPDLOG_INFO("processBatch: processed {} images into {} records (roi={}x{} at {},{}, background={})",
                 total, results.size(), roi.w, roi.h, roi.x, roi.y, !background.empty());
     return results;
+}
+
+bool ProcessingService::startBatchPipeline(BatchPipelineConfig config, BatchResultCallback callback) {
+    if (batchRunning_.load(std::memory_order_acquire)) {
+        SPDLOG_WARN("Batch pipeline already running");
+        return false;
+    }
+
+    if (config.batchSize == 0) {
+        config.batchSize = 1;
+    }
+    if (config.maxQueuedFrames == 0) {
+        config.maxQueuedFrames = config.batchSize;
+    }
+    if (config.workerCount == 0) {
+        config.workerCount = 1;
+    }
+
+    {
+        std::scoped_lock lk(batchMutex_);
+        std::queue<QueuedBatchFrame> empty;
+        batchQueue_.swap(empty);
+        batchConfig_ = std::move(config);
+        batchResultCallback_ = std::move(callback);
+        batchFramesAccepted_.store(0, std::memory_order_relaxed);
+        batchFramesDropped_.store(0, std::memory_order_relaxed);
+        batchFramesProcessed_.store(0, std::memory_order_relaxed);
+        batchBatchesProcessed_.store(0, std::memory_order_relaxed);
+        batchMaxQueueDepth_.store(0, std::memory_order_relaxed);
+        batchWorkerCount_.store(batchConfig_.workerCount, std::memory_order_relaxed);
+    }
+
+    batchRunning_.store(true, std::memory_order_release);
+    batchWorkers_.reserve(batchWorkerCount_.load(std::memory_order_relaxed));
+    for (size_t i = 0; i < batchWorkerCount_.load(std::memory_order_relaxed); ++i) {
+        batchWorkers_.emplace_back(&ProcessingService::batchWorkerLoop, this);
+    }
+
+    SPDLOG_INFO("Batch pipeline started: batch_size={}, max_queue={}, workers={}",
+                batchConfig_.batchSize, batchConfig_.maxQueuedFrames, batchConfig_.workerCount);
+    return true;
+}
+
+void ProcessingService::stopBatchPipeline() {
+    if (!batchRunning_.exchange(false, std::memory_order_acq_rel)) {
+        return;
+    }
+
+    batchCv_.notify_all();
+    for (auto& worker : batchWorkers_) {
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+    batchWorkers_.clear();
+
+    {
+        std::scoped_lock lk(batchMutex_);
+        std::queue<QueuedBatchFrame> empty;
+        batchQueue_.swap(empty);
+        batchResultCallback_ = {};
+        batchWorkerCount_.store(0, std::memory_order_relaxed);
+    }
+
+    SPDLOG_INFO("Batch pipeline stopped: accepted={}, processed={}, dropped={}, batches={}",
+                batchFramesAccepted_.load(std::memory_order_relaxed),
+                batchFramesProcessed_.load(std::memory_order_relaxed),
+                batchFramesDropped_.load(std::memory_order_relaxed),
+                batchBatchesProcessed_.load(std::memory_order_relaxed));
+}
+
+bool ProcessingService::enqueueBatchFrame(const cv::Mat& grayImage, uint64_t index, uint64_t timestampNs) {
+    if (!batchRunning_.load(std::memory_order_acquire) || grayImage.empty()) {
+        return false;
+    }
+
+    cv::Mat gray;
+    if (grayImage.type() == CV_8UC1) {
+        gray = grayImage.clone();
+    } else if (grayImage.channels() == 3) {
+        cv::cvtColor(grayImage, gray, cv::COLOR_BGR2GRAY);
+    } else {
+        grayImage.convertTo(gray, CV_8UC1);
+    }
+
+    bool shouldNotify = false;
+    {
+        std::scoped_lock lk(batchMutex_);
+        if (!batchRunning_.load(std::memory_order_relaxed)) {
+            return false;
+        }
+        if (batchQueue_.size() >= batchConfig_.maxQueuedFrames) {
+            batchFramesDropped_.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+
+        batchQueue_.push(QueuedBatchFrame{std::move(gray), index, timestampNs});
+        batchFramesAccepted_.fetch_add(1, std::memory_order_relaxed);
+
+        const size_t depth = batchQueue_.size();
+        size_t observed = batchMaxQueueDepth_.load(std::memory_order_relaxed);
+        while (depth > observed &&
+               !batchMaxQueueDepth_.compare_exchange_weak(observed, depth, std::memory_order_relaxed)) {
+        }
+
+        shouldNotify = depth >= batchConfig_.batchSize;
+    }
+
+    if (shouldNotify) {
+        batchCv_.notify_one();
+    }
+    return true;
+}
+
+bool ProcessingService::enqueueBatchFrame(const backend::playback::Frame& frame, uint64_t index) {
+    if (frame.width == 0 || frame.height == 0 || frame.data.empty()) {
+        return false;
+    }
+
+    cv::Mat gray = makeGrayCopy(frame.width, frame.height, frame.linePitch, frame.data.data());
+    return enqueueBatchFrame(gray, index, frame.timestamp);
+}
+
+ProcessingService::BatchPipelineStats ProcessingService::getBatchPipelineStats() const {
+    BatchPipelineStats stats;
+    stats.framesAccepted = batchFramesAccepted_.load(std::memory_order_relaxed);
+    stats.framesDropped = batchFramesDropped_.load(std::memory_order_relaxed);
+    stats.framesProcessed = batchFramesProcessed_.load(std::memory_order_relaxed);
+    stats.batchesProcessed = batchBatchesProcessed_.load(std::memory_order_relaxed);
+    stats.maxQueueDepth = batchMaxQueueDepth_.load(std::memory_order_relaxed);
+    stats.workerCount = batchWorkerCount_.load(std::memory_order_relaxed);
+    stats.running = batchRunning_.load(std::memory_order_acquire);
+
+    std::scoped_lock lk(batchMutex_);
+    stats.currentQueueDepth = batchQueue_.size();
+    stats.batchSize = batchConfig_.batchSize;
+    if (stats.workerCount == 0 && stats.running) {
+        stats.workerCount = batchConfig_.workerCount;
+    }
+    return stats;
+}
+
+void ProcessingService::batchWorkerLoop() {
+    while (true) {
+        std::vector<QueuedBatchFrame> inputs;
+        BatchPipelineConfig config;
+        BatchResultCallback callback;
+
+        {
+            std::unique_lock lk(batchMutex_);
+            batchCv_.wait(lk, [&] {
+                const size_t batchSize = std::max<size_t>(1, batchConfig_.batchSize);
+                return !batchRunning_.load(std::memory_order_acquire) || batchQueue_.size() >= batchSize;
+            });
+
+            if (batchQueue_.empty() && !batchRunning_.load(std::memory_order_acquire)) {
+                break;
+            }
+
+            const size_t batchSize = std::max<size_t>(1, batchConfig_.batchSize);
+            const size_t desired = batchRunning_.load(std::memory_order_relaxed)
+                                       ? batchSize
+                                       : std::min(batchQueue_.size(), batchSize);
+            if (batchQueue_.size() < desired) {
+                continue;
+            }
+
+            inputs.reserve(desired);
+            for (size_t i = 0; i < desired && !batchQueue_.empty(); ++i) {
+                inputs.emplace_back(std::move(batchQueue_.front()));
+                batchQueue_.pop();
+            }
+            config = batchConfig_;
+            callback = batchResultCallback_;
+        }
+
+        std::vector<ProcessedFrame> results;
+        results.reserve(inputs.size());
+        for (const auto& item : inputs) {
+            results.emplace_back(computeProcessedFrame(item.gray,
+                                                       config.background,
+                                                       config.processing,
+                                                       config.roi,
+                                                       item.index,
+                                                       item.timestampNs));
+        }
+
+        if (!results.empty()) {
+            batchFramesProcessed_.fetch_add(static_cast<uint64_t>(results.size()), std::memory_order_relaxed);
+            batchBatchesProcessed_.fetch_add(1, std::memory_order_relaxed);
+            if (callback) {
+                callback(std::move(results));
+            }
+        }
+    }
 }
 
 void ProcessingService::setRingRatioCallback(RingRatioCallback callback) {
