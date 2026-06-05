@@ -228,6 +228,20 @@ namespace frontend
 					pcfg.ring_ratio_max = ip.value("ring_ratio_max").toDouble(pcfg.ring_ratio_max);
 				if (ip.contains("empty_frame_pixel_threshold"))
 					pcfg.empty_frame_pixel_threshold = ip.value("empty_frame_pixel_threshold").toInt(pcfg.empty_frame_pixel_threshold);
+				if (ip.contains("enable_empty_frame_discard"))
+					pcfg.enable_empty_frame_discard = ip.value("enable_empty_frame_discard").toBool(pcfg.enable_empty_frame_discard);
+				if (ip.contains("empty_frame_min_roi_occupancy"))
+					pcfg.empty_frame_min_roi_occupancy = ip.value("empty_frame_min_roi_occupancy").toDouble(pcfg.empty_frame_min_roi_occupancy);
+				if (ip.contains("empty_frame_min_diff_energy"))
+					pcfg.empty_frame_min_diff_energy = ip.value("empty_frame_min_diff_energy").toDouble(pcfg.empty_frame_min_diff_energy);
+				if (ip.contains("empty_frame_threshold_sensitivity_delta"))
+					pcfg.empty_frame_threshold_sensitivity_delta = ip.value("empty_frame_threshold_sensitivity_delta").toInt(pcfg.empty_frame_threshold_sensitivity_delta);
+				if (ip.contains("empty_frame_min_threshold_retention"))
+					pcfg.empty_frame_min_threshold_retention = ip.value("empty_frame_min_threshold_retention").toDouble(pcfg.empty_frame_min_threshold_retention);
+				if (ip.contains("empty_frame_min_morph_pixels"))
+					pcfg.empty_frame_min_morph_pixels = ip.value("empty_frame_min_morph_pixels").toInt(pcfg.empty_frame_min_morph_pixels);
+				if (ip.contains("empty_frame_min_morph_occupancy"))
+					pcfg.empty_frame_min_morph_occupancy = ip.value("empty_frame_min_morph_occupancy").toDouble(pcfg.empty_frame_min_morph_occupancy);
 				if (ip.contains("auto_background_enabled"))
 					pcfg.auto_background_enabled = ip.value("auto_background_enabled").toBool(pcfg.auto_background_enabled);
 				if (ip.contains("auto_background_empty_frames"))
@@ -282,13 +296,18 @@ namespace frontend
 			}
 		}
 		backend_.processing().setProcessingConfig(pcfg);
-		SPDLOG_INFO("AppConfigWatcher: applied ProcessingConfig (blur={}, thresh={}, morph={}x{}, area=[{},{} um2], deform=[{:.2f},{:.2f}] enabled={}, areaRatio_max={:.2f} enabled={}, ring=[{:.1f},{:.1f}] enabled={}, empty_px={})",
+		SPDLOG_INFO("AppConfigWatcher: applied ProcessingConfig (blur={}, thresh={}, morph={}x{}, area=[{},{} um2], deform=[{:.2f},{:.2f}] enabled={}, areaRatio_max={:.2f} enabled={}, ring=[{:.1f},{:.1f}] enabled={}, empty_px={}, empty_gate={}, empty_roi_occ={:.4f}, empty_diff={:.2f}, empty_delta={}, empty_retention={:.2f}, empty_morph_px={}, empty_morph_occ={:.4f})",
 					pcfg.gaussian_blur_size, pcfg.bg_subtract_threshold, pcfg.morph_kernel_size, pcfg.morph_iterations,
 					pcfg.area_threshold_min, pcfg.area_threshold_max,
 					pcfg.deformability_threshold_min, pcfg.deformability_threshold_max, pcfg.enable_deformability_range_check,
 					pcfg.area_ratio_threshold_max, pcfg.enable_area_ratio_check,
 					pcfg.ring_ratio_min, pcfg.ring_ratio_max, pcfg.enable_ring_ratio_check,
-					pcfg.empty_frame_pixel_threshold);
+					pcfg.empty_frame_pixel_threshold, pcfg.enable_empty_frame_discard,
+					pcfg.empty_frame_min_roi_occupancy, pcfg.empty_frame_min_diff_energy,
+					pcfg.empty_frame_threshold_sensitivity_delta,
+					pcfg.empty_frame_min_threshold_retention,
+					pcfg.empty_frame_min_morph_pixels,
+					pcfg.empty_frame_min_morph_occupancy);
 		SPDLOG_INFO("AppConfigWatcher: target_group enabled={}, area=[{},{} um2], deform=[{:.2f},{:.2f}], emod_enabled={}, emod=[{:.1f},{:.1f}]",
 					pcfg.enable_target_group, pcfg.target_group_area_min, pcfg.target_group_area_max,
 					pcfg.target_group_deformability_min, pcfg.target_group_deformability_max,
@@ -511,6 +530,14 @@ namespace frontend
 		ip.insert("area_ratio_threshold_max", pcfg.area_ratio_threshold_max);
 		ip.insert("ring_ratio_min", pcfg.ring_ratio_min);
 		ip.insert("ring_ratio_max", pcfg.ring_ratio_max);
+		ip.insert("empty_frame_pixel_threshold", pcfg.empty_frame_pixel_threshold);
+		ip.insert("enable_empty_frame_discard", pcfg.enable_empty_frame_discard);
+		ip.insert("empty_frame_min_roi_occupancy", pcfg.empty_frame_min_roi_occupancy);
+		ip.insert("empty_frame_min_diff_energy", pcfg.empty_frame_min_diff_energy);
+		ip.insert("empty_frame_threshold_sensitivity_delta", pcfg.empty_frame_threshold_sensitivity_delta);
+		ip.insert("empty_frame_min_threshold_retention", pcfg.empty_frame_min_threshold_retention);
+		ip.insert("empty_frame_min_morph_pixels", pcfg.empty_frame_min_morph_pixels);
+		ip.insert("empty_frame_min_morph_occupancy", pcfg.empty_frame_min_morph_occupancy);
 
 		// Update filters sub-object
 		QJsonObject fl = ip.value("filters").toObject();

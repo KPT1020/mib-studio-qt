@@ -49,6 +49,13 @@ struct ProcessingConfig {
     bool enable_ring_ratio_check{true};
     bool require_single_inner_contour{true};
     int empty_frame_pixel_threshold{100};
+    bool enable_empty_frame_discard{true};
+    double empty_frame_min_roi_occupancy{0.002};
+    double empty_frame_min_diff_energy{1.0};
+    int empty_frame_threshold_sensitivity_delta{8};
+    double empty_frame_min_threshold_retention{0.25};
+    int empty_frame_min_morph_pixels{250};
+    double empty_frame_min_morph_occupancy{0.005};
     bool auto_background_enabled{false};
     int auto_background_empty_frames{30};
     int auto_background_cooldown_frames{1000};
@@ -73,6 +80,7 @@ struct FilterResult {
     bool touchesBorder{false};
     bool hasSingleInnerContour{false};
     bool inRange{false};
+    bool emptyFrameDiscarded{false};
     int innerContourCount{0};
     int objectId{-1};
     int objectCount{0};
@@ -81,6 +89,13 @@ struct FilterResult {
     double areaRatio{0.0};
     double ringRatio{0.0};
     double youngsModulus{0.0}; // Young's modulus (kPa) from LUT lookup
+    int emptyFrameThresholdPixels{0};
+    int emptyFrameStrongThresholdPixels{0};
+    int emptyFrameMorphPixels{0};
+    double emptyFrameRoiOccupancy{0.0};
+    double emptyFrameStrongOccupancy{0.0};
+    double emptyFrameThresholdRetention{0.0};
+    double emptyFrameDiffEnergy{0.0};
     BrightnessQuantiles brightness;
     bool isTargetGroup{false}; // True if valid AND matches target group criteria
     // Contours found during processing (for snapshot/display)

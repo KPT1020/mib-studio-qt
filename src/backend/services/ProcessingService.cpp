@@ -34,6 +34,111 @@ size_t defaultMaxBufferedFrames(size_t flushInterval) {
     return std::max(flushInterval, std::min(preferred, kSoftMaxBufferedFrames));
 }
 
+struct EmptyFrameDecision {
+    bool discard{false};
+    int thresholdPixels{0};
+    int strongThresholdPixels{0};
+    int morphPixels{0};
+    double roiOccupancy{0.0};
+    double strongOccupancy{0.0};
+    double thresholdRetention{0.0};
+    double diffEnergy{0.0};
+};
+
+double occupancyForPixels(int pixels, const cv::Mat& image) {
+    const int totalPixels = image.rows * image.cols;
+    if (totalPixels <= 0) {
+        return 0.0;
+    }
+    return static_cast<double>(pixels) / static_cast<double>(totalPixels);
+}
+
+EmptyFrameDecision classifyEmptyFrameCheap(const cv::Mat& diff,
+                                           const cv::Mat& thresh,
+                                           const cv::Mat& morphMask,
+                                           const ProcessingConfig& config,
+                                           int thresholdValue) {
+    EmptyFrameDecision decision;
+    if (diff.empty() || thresh.empty() || morphMask.empty()) {
+        decision.discard = config.enable_empty_frame_discard;
+        return decision;
+    }
+
+    decision.thresholdPixels = cv::countNonZero(thresh);
+    decision.morphPixels = cv::countNonZero(morphMask);
+    decision.roiOccupancy = occupancyForPixels(decision.thresholdPixels, thresh);
+    decision.diffEnergy = cv::mean(diff)[0];
+
+    const int sensitivityDelta = std::max(0, config.empty_frame_threshold_sensitivity_delta);
+    if (sensitivityDelta > 0) {
+        cv::Mat strongThresh;
+        const int strongThresholdValue = std::clamp(thresholdValue + sensitivityDelta, 0, 255);
+        cv::threshold(diff, strongThresh, strongThresholdValue, 255, cv::THRESH_BINARY);
+        decision.strongThresholdPixels = cv::countNonZero(strongThresh);
+        decision.strongOccupancy = occupancyForPixels(decision.strongThresholdPixels, strongThresh);
+    } else {
+        decision.strongThresholdPixels = decision.thresholdPixels;
+        decision.strongOccupancy = decision.roiOccupancy;
+    }
+    decision.thresholdRetention = decision.thresholdPixels > 0
+                                      ? static_cast<double>(decision.strongThresholdPixels) /
+                                            static_cast<double>(decision.thresholdPixels)
+                                      : 0.0;
+
+    const int minThresholdPixels = std::max(0, config.empty_frame_pixel_threshold);
+    const int minMorphPixels = std::max(0, config.empty_frame_min_morph_pixels);
+    const double minRoiOccupancy = std::max(0.0, config.empty_frame_min_roi_occupancy);
+    const double minMorphOccupancy = std::max(0.0, config.empty_frame_min_morph_occupancy);
+    const double minDiffEnergy = std::max(0.0, config.empty_frame_min_diff_energy);
+    const double minRetention = std::clamp(config.empty_frame_min_threshold_retention, 0.0, 1.0);
+
+    const bool hasRawEvidence =
+        decision.thresholdPixels >= minThresholdPixels &&
+        decision.roiOccupancy >= minRoiOccupancy;
+    const bool hasMorphEvidence =
+        decision.morphPixels >= minMorphPixels &&
+        occupancyForPixels(decision.morphPixels, morphMask) >= minMorphOccupancy;
+    const bool hasEnergy = decision.diffEnergy >= minDiffEnergy;
+    const bool hasStableThreshold =
+        decision.strongThresholdPixels > 0 &&
+        decision.thresholdRetention >= minRetention;
+
+    // Morphology is still cheap compared with contour hierarchy and object metrics.
+    // Keep a weak-morph candidate only when raw evidence is energetic and stable.
+    const bool rescueWeakMorph =
+        decision.morphPixels > 0 &&
+        hasRawEvidence &&
+        hasEnergy &&
+        hasStableThreshold;
+
+    decision.discard = config.enable_empty_frame_discard &&
+                       !hasMorphEvidence &&
+                       !rescueWeakMorph;
+    return decision;
+}
+
+void applyEmptyFrameDecision(FilterResult& result, const EmptyFrameDecision& decision) {
+    result.emptyFrameDiscarded = decision.discard;
+    result.emptyFrameThresholdPixels = decision.thresholdPixels;
+    result.emptyFrameStrongThresholdPixels = decision.strongThresholdPixels;
+    result.emptyFrameMorphPixels = decision.morphPixels;
+    result.emptyFrameRoiOccupancy = decision.roiOccupancy;
+    result.emptyFrameStrongOccupancy = decision.strongOccupancy;
+    result.emptyFrameThresholdRetention = decision.thresholdRetention;
+    result.emptyFrameDiffEnergy = decision.diffEnergy;
+}
+
+void copyEmptyFrameMetrics(const FilterResult& source, FilterResult& target) {
+    target.emptyFrameDiscarded = source.emptyFrameDiscarded;
+    target.emptyFrameThresholdPixels = source.emptyFrameThresholdPixels;
+    target.emptyFrameStrongThresholdPixels = source.emptyFrameStrongThresholdPixels;
+    target.emptyFrameMorphPixels = source.emptyFrameMorphPixels;
+    target.emptyFrameRoiOccupancy = source.emptyFrameRoiOccupancy;
+    target.emptyFrameStrongOccupancy = source.emptyFrameStrongOccupancy;
+    target.emptyFrameThresholdRetention = source.emptyFrameThresholdRetention;
+    target.emptyFrameDiffEnergy = source.emptyFrameDiffEnergy;
+}
+
 } // namespace
 
 ProcessingService::ProcessingService() = default;
@@ -344,22 +449,30 @@ bool ProcessingService::isFrameEmpty(const backend::playback::Frame& frame,
     cv::Rect cvRoi(effectiveRoi.x, effectiveRoi.y, effectiveRoi.w, effectiveRoi.h);
     cv::Mat roiCurr = gray(cvRoi);
 
-    // Apply same processing as realtime loop
-    cv::Mat blurredCurr, blurredBg, diff, thresh;
-    cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(3, 3), 0);
+    // Apply the same cheap pre-contour empty gate used by batch processing.
+    auto toOdd = [](int v) -> int { if (v < 1) v = 1; if ((v % 2) == 0) v += 1; return v; };
+    const int blurK = toOdd(config.gaussian_blur_size);
+    const int morphK = toOdd(config.morph_kernel_size);
+    const int morphIter = std::max(1, config.morph_iterations);
+    const int threshVal = std::max(0, config.bg_subtract_threshold);
+
+    cv::Mat blurredCurr, blurredBg, diff, thresh, mask;
+    cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(blurK, blurK), 0);
     
     if (!background.empty() && background.size() == gray.size() && background.type() == CV_8UC1) {
-        cv::GaussianBlur(background(cvRoi), blurredBg, cv::Size(3, 3), 0);
+        cv::GaussianBlur(background(cvRoi), blurredBg, cv::Size(blurK, blurK), 0);
         cv::subtract(blurredCurr, blurredBg, diff);
     } else {
         diff = blurredCurr;
     }
     
-    cv::threshold(diff, thresh, config.bg_subtract_threshold, 255, cv::THRESH_BINARY);
-    
-    // Count non-zero pixels
-    int pixelCount = cv::countNonZero(thresh);
-    return pixelCount < config.empty_frame_pixel_threshold;
+    cv::threshold(diff, thresh, threshVal, 255, cv::THRESH_BINARY);
+    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+    cv::morphologyEx(thresh, mask, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
+    cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
+
+    const EmptyFrameDecision decision = classifyEmptyFrameCheap(diff, thresh, mask, config, threshVal);
+    return decision.discard;
 }
 
 ProcessedFrame ProcessingService::computeProcessedFrame(
@@ -435,8 +548,18 @@ ProcessedFrame ProcessingService::computeProcessedFrame(
     cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
     cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
+    const cv::Mat roiMaskForDecision = mask(cvRoi);
+    const EmptyFrameDecision emptyDecision =
+        classifyEmptyFrameCheap(diffForProcessing, thresh, roiMaskForDecision, config, threshVal);
+    if (emptyDecision.discard) {
+        applyEmptyFrameDecision(out.validation, emptyDecision);
+        out.processedImage = std::move(mask);
+        return out;
+    }
+
     // Validation + contour/metric extraction (same helper as realtime)
     out.validation = filterProcessedImage(mask, cvRoi, config, gray);
+    applyEmptyFrameDecision(out.validation, emptyDecision);
     out.processedImage = std::move(mask);
     return out;
 }
@@ -458,6 +581,11 @@ std::vector<ProcessedFrame> ProcessingService::processBatch(
         ProcessedFrame base = computeProcessedFrame(grayImages[i], background, config, roi,
                                                     static_cast<uint64_t>(i), 0);
         if (base.originalImage.empty() || base.processedImage.empty()) {
+            results.emplace_back(std::move(base));
+            if (progress) progress(BatchProgress{i + 1, total});
+            continue;
+        }
+        if (base.validation.emptyFrameDiscarded) {
             results.emplace_back(std::move(base));
             if (progress) progress(BatchProgress{i + 1, total});
             continue;
@@ -486,6 +614,7 @@ std::vector<ProcessedFrame> ProcessingService::processBatch(
                 objectFrame.timestampNs = base.timestampNs;
                 objectFrame.originalImage = base.originalImage.clone();
                 objectFrame.processedImage = base.processedImage.clone();
+                copyEmptyFrameMetrics(base.validation, validation);
                 objectFrame.validation = std::move(validation);
                 results.emplace_back(std::move(objectFrame));
             }

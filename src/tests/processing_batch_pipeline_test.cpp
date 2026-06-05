@@ -5,6 +5,7 @@
 #include <condition_variable>
 #include <iostream>
 #include <mutex>
+#include <random>
 #include <string>
 #include <thread>
 #include <vector>
@@ -26,6 +27,19 @@ cv::Mat makeRingFrame(int width = 96, int height = 96)
     return image;
 }
 
+cv::Mat makeDriftNoiseFrame(int width = 512, int height = 96)
+{
+    cv::Mat image(height, width, CV_8UC1, cv::Scalar(0));
+    std::mt19937 rng(7);
+    std::uniform_int_distribution<int> xdist(0, width - 1);
+    std::uniform_int_distribution<int> ydist(0, height - 1);
+    std::uniform_int_distribution<int> vdist(20, 70);
+    for (int i = 0; i < 650; ++i) {
+        image.at<uchar>(ydist(rng), xdist(rng)) = static_cast<uchar>(vdist(rng));
+    }
+    return image;
+}
+
 ProcessingConfig makeTestConfig()
 {
     ProcessingConfig config;
@@ -39,6 +53,7 @@ ProcessingConfig makeTestConfig()
     config.enable_area_ratio_check = false;
     config.require_single_inner_contour = true;
     config.empty_frame_pixel_threshold = 1;
+    config.enable_empty_frame_discard = true;
     return config;
 }
 
@@ -269,6 +284,65 @@ bool testMetricsAreEmittedFromBatchPath()
     return ok;
 }
 
+bool testNoiseFrameIsDiscardedBeforeContourValidation()
+{
+    ProcessingService service;
+    ProcessingConfig config = makeTestConfig();
+    config.bg_subtract_threshold = 8;
+    config.empty_frame_pixel_threshold = 100;
+    config.empty_frame_min_roi_occupancy = 0.002;
+    config.empty_frame_min_diff_energy = 1.0;
+    config.empty_frame_threshold_sensitivity_delta = 8;
+    config.empty_frame_min_threshold_retention = 0.25;
+    config.empty_frame_min_morph_pixels = 250;
+    config.empty_frame_min_morph_occupancy = 0.005;
+
+    const cv::Mat noise = makeDriftNoiseFrame();
+    const cv::Mat background(noise.rows, noise.cols, CV_8UC1, cv::Scalar(0));
+    const auto result = service.computeProcessedFrame(noise, background, config,
+                                                      ProcessingService::Roi{0, 0, 0, 0},
+                                                      7, 7000);
+
+    bool ok = true;
+    ok &= require(!result.originalImage.empty(), "discarded noise result should preserve original image");
+    ok &= require(!result.processedImage.empty(), "discarded noise result should preserve processed mask");
+    ok &= require(!result.validation.isValid, "discarded noise frame should not be valid");
+    ok &= require(result.validation.emptyFrameDiscarded, "noise frame should be discarded by pre-contour gate");
+    ok &= require(result.validation.emptyFrameThresholdPixels >= config.empty_frame_pixel_threshold,
+                  "test noise should exceed the legacy raw pixel threshold");
+    ok &= require(result.validation.emptyFrameMorphPixels < config.empty_frame_min_morph_pixels,
+                  "test noise should have insufficient post-morph occupancy");
+    ok &= require(result.validation.allContours.empty(),
+                  "pre-contour discard should not populate contour hierarchy metadata");
+    return ok;
+}
+
+bool testMorphologicalObjectIsNotDroppedByRawPixelThreshold()
+{
+    ProcessingService service;
+    ProcessingConfig config = makeTestConfig();
+    config.empty_frame_pixel_threshold = 5000;
+    config.empty_frame_min_morph_pixels = 250;
+    config.empty_frame_min_morph_occupancy = 0.005;
+
+    const cv::Mat frame = makeRingFrame(512, 96);
+    const cv::Mat background(frame.rows, frame.cols, CV_8UC1, cv::Scalar(0));
+    const auto result = service.computeProcessedFrame(frame, background, config,
+                                                      ProcessingService::Roi{0, 0, 0, 0},
+                                                      8, 8000);
+
+    bool ok = true;
+    ok &= require(!result.validation.emptyFrameDiscarded,
+                  "real ring object should not be discarded solely by raw pixel threshold");
+    ok &= require(result.validation.emptyFrameThresholdPixels < config.empty_frame_pixel_threshold,
+                  "test ring should sit below the intentionally strict raw pixel threshold");
+    ok &= require(result.validation.emptyFrameMorphPixels >= config.empty_frame_min_morph_pixels,
+                  "test ring should retain enough post-morph occupancy");
+    ok &= require(result.validation.isValid, "known-good ring should remain valid");
+    ok &= require(result.validation.ringRatio > 0.0, "known-good ring should retain ring metrics");
+    return ok;
+}
+
 } // namespace
 
 int main()
@@ -284,6 +358,12 @@ int main()
     }
     if (!testMetricsAreEmittedFromBatchPath()) {
         return 4;
+    }
+    if (!testNoiseFrameIsDiscardedBeforeContourValidation()) {
+        return 5;
+    }
+    if (!testMorphologicalObjectIsNotDroppedByRawPixelThreshold()) {
+        return 6;
     }
     return 0;
 }
