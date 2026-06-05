@@ -1,6 +1,7 @@
 MIB-Studio/
 build/
 export/
+artifacts/
 data/logs/app.log
 data/empty_detection_results/
 review_artifacts/

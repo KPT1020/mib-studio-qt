@@ -336,7 +336,7 @@ if(BUILD_TESTING)
             NAME backend.kin10_hf_dataset_pipeline
             COMMAND
                 ${CMAKE_CURRENT_SOURCE_DIR}/tools/kin10_run_hf_dataset_test.sh
-                ${CMAKE_CURRENT_BINARY_DIR}/kin10_hf_dataset_pipeline
+                ${CMAKE_CURRENT_SOURCE_DIR}/artifacts/kin-5/hf_dataset_pipeline
                 $<TARGET_FILE:kin10_hf_dataset_pipeline_test>
         )
         set_tests_properties(backend.kin10_hf_dataset_pipeline PROPERTIES

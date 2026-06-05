@@ -34,14 +34,24 @@ struct ImageRecord {
 
 struct SampleMetrics {
     std::string sampleId;
+    uint64_t frameIndex{0};
+    uint64_t timestampNs{0};
     uint64_t rowIndex{0};
     std::string caseType;
     std::string sourcePath;
     std::string inputPath;
     std::string maskPath;
     std::string overlayPath;
+    int objectId{-1};
+    int objectCount{0};
     int width{0};
     int height{0};
+    double bboxX{0.0};
+    double bboxY{0.0};
+    double bboxWidth{0.0};
+    double bboxHeight{0.0};
+    double centroidX{0.0};
+    double centroidY{0.0};
     int maskPixels{0};
     size_t contourCount{0};
     double area{0.0};
@@ -230,11 +240,21 @@ bool writeSampleArtifacts(const std::filesystem::path& outputDir,
 
         SampleMetrics sample;
         sample.sampleId = sampleIdFor(record.rowIndex);
+        sample.frameIndex = frame.index;
+        sample.timestampNs = frame.timestampNs;
         sample.rowIndex = record.rowIndex;
         sample.caseType = record.caseType;
         sample.sourcePath = record.path;
+        sample.objectId = frame.validation.objectId;
+        sample.objectCount = frame.validation.objectCount;
         sample.width = frame.originalImage.cols;
         sample.height = frame.originalImage.rows;
+        sample.bboxX = frame.validation.bboxX;
+        sample.bboxY = frame.validation.bboxY;
+        sample.bboxWidth = frame.validation.bboxWidth;
+        sample.bboxHeight = frame.validation.bboxHeight;
+        sample.centroidX = frame.validation.centroidX;
+        sample.centroidY = frame.validation.centroidY;
         sample.maskPixels = cv::countNonZero(frame.processedImage);
         sample.contourCount = frame.validation.allContours.size();
         sample.area = frame.validation.area;
@@ -358,14 +378,28 @@ void writeMetricsJson(const std::filesystem::path& outputPath,
         const auto& sample = samples[i];
         out << "    {\n";
         out << "      \"sample_id\": \"" << jsonEscape(sample.sampleId) << "\",\n";
+        out << "      \"frame_index\": " << sample.frameIndex << ",\n";
+        out << "      \"timestamp_ns\": " << sample.timestampNs << ",\n";
         out << "      \"row_index\": " << sample.rowIndex << ",\n";
         out << "      \"case_type\": \"" << jsonEscape(sample.caseType) << "\",\n";
         out << "      \"source_path\": \"" << jsonEscape(sample.sourcePath) << "\",\n";
         out << "      \"input_path\": \"" << jsonEscape(sample.inputPath) << "\",\n";
         out << "      \"mask_path\": \"" << jsonEscape(sample.maskPath) << "\",\n";
         out << "      \"overlay_path\": \"" << jsonEscape(sample.overlayPath) << "\",\n";
+        out << "      \"object_id\": " << sample.objectId << ",\n";
+        out << "      \"object_count\": " << sample.objectCount << ",\n";
         out << "      \"width\": " << sample.width << ",\n";
         out << "      \"height\": " << sample.height << ",\n";
+        out << "      \"bbox\": {\n";
+        out << "        \"x\": " << sample.bboxX << ",\n";
+        out << "        \"y\": " << sample.bboxY << ",\n";
+        out << "        \"width\": " << sample.bboxWidth << ",\n";
+        out << "        \"height\": " << sample.bboxHeight << "\n";
+        out << "      },\n";
+        out << "      \"centroid\": {\n";
+        out << "        \"x\": " << sample.centroidX << ",\n";
+        out << "        \"y\": " << sample.centroidY << "\n";
+        out << "      },\n";
         out << "      \"mask_pixels\": " << sample.maskPixels << ",\n";
         out << "      \"contour_count\": " << sample.contourCount << ",\n";
         out << "      \"area\": " << sample.area << ",\n";
@@ -415,6 +449,15 @@ void collectFailures(const std::vector<ImageRecord>& records,
     size_t nonEmptyMasks = 0;
     size_t contourFrames = 0;
     for (const auto& sample : samples) {
+        if (!std::filesystem::exists(sample.inputPath)) {
+            failures.push_back(sample.sampleId + " metrics input_path does not exist: " + sample.inputPath);
+        }
+        if (!std::filesystem::exists(sample.maskPath)) {
+            failures.push_back(sample.sampleId + " metrics mask_path does not exist: " + sample.maskPath);
+        }
+        if (!std::filesystem::exists(sample.overlayPath)) {
+            failures.push_back(sample.sampleId + " metrics overlay_path does not exist: " + sample.overlayPath);
+        }
         if (sample.width != 512 || sample.height != 96) {
             failures.push_back(sample.sampleId + " expected 512x96 image, got " +
                                std::to_string(sample.width) + "x" + std::to_string(sample.height));

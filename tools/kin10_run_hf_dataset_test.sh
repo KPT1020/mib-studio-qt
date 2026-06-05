@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-OUT_DIR="${1:-build/linux-backend/kin10_hf_dataset_pipeline}"
+OUT_DIR="${1:-artifacts/kin-5/hf_dataset_pipeline}"
 BINARY="${2:-build/linux-backend/kin10_hf_dataset_pipeline_test}"
 ROW_INDICES="${3:-${KIN10_HF_ROW_INDICES:-0,1,2,2500,4999}}"
 
@@ -174,3 +174,32 @@ if [[ ! -x "${BINARY}" ]]; then
 fi
 
 "${BINARY}" "${OUT_DIR}" "${OUT_DIR}/hf_sample_manifest.tsv"
+
+cat > "${OUT_DIR}/README.md" <<EOF
+# KIN-5/KIN-11 HF Dataset Pipeline Artifacts
+
+Generated from Hugging Face dataset \`gavinlouuu/512x96stream\`, config
+\`default\`, split \`train\`.
+
+## Regenerate
+
+\`\`\`bash
+cmake --preset linux-backend-only
+cmake --build --preset linux-backend-only-build --target kin10_hf_dataset_pipeline_test
+ctest --preset linux-backend-only-test -R backend.kin10_hf_dataset_pipeline --output-on-failure
+\`\`\`
+
+Or run the harness directly:
+
+\`\`\`bash
+tools/kin10_run_hf_dataset_test.sh ${OUT_DIR} ${BINARY}
+\`\`\`
+
+## Files
+
+- \`metrics.json\` - aggregate batch counters plus per-sample metrics keyed by stable sample ID.
+- \`samples/<sample-id>-input.png\` - downloaded HF input frame.
+- \`samples/<sample-id>-mask.png\` - processed batch mask.
+- \`samples/<sample-id>-overlay.png\` - contour overlay drawn over the input frame.
+- \`hf_sample_manifest.tsv\`, \`hf_rows.jsonl\`, and \`hf_dataset_metadata.json\` - Dataset Viewer provenance.
+EOF
