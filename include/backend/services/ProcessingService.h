@@ -262,6 +262,39 @@ public:
         const Roi& roi = Roi{0, 0, 0, 0},
         BatchProgressCallback progress = {});
 
+    struct BatchPipelineConfig {
+        size_t batchSize{64};
+        size_t maxQueuedFrames{4096};
+        size_t workerCount{1};
+        ProcessingConfig processing;
+        cv::Mat background;
+        Roi roi{0, 0, 0, 0};
+    };
+
+    struct BatchPipelineStats {
+        uint64_t framesAccepted{0};
+        uint64_t framesDropped{0};
+        uint64_t framesProcessed{0};
+        uint64_t batchesProcessed{0};
+        size_t currentQueueDepth{0};
+        size_t maxQueueDepth{0};
+        size_t batchSize{0};
+        size_t workerCount{0};
+        bool running{false};
+    };
+
+    using BatchResultCallback = std::function<void(std::vector<ProcessedFrame>)>;
+
+    // Async batch pipeline for capture-loop integration. enqueueBatchFrame()
+    // copies the frame into a bounded queue and returns immediately. Dedicated
+    // workers form configured-size batches, call computeProcessedFrame(), and
+    // emit completed batches through the callback.
+    bool startBatchPipeline(BatchPipelineConfig config, BatchResultCallback callback);
+    void stopBatchPipeline();
+    bool enqueueBatchFrame(const cv::Mat& grayImage, uint64_t index, uint64_t timestampNs = 0);
+    bool enqueueBatchFrame(const backend::playback::Frame& frame, uint64_t index);
+    BatchPipelineStats getBatchPipelineStats() const;
+
     // Ring ratio callback for autofocus (called when validated frames are processed)
     using RingRatioCallback = std::function<void(double ringRatio, int64_t timestampNs)>;
     void setRingRatioCallback(RingRatioCallback callback);
@@ -283,6 +316,12 @@ private:
         size_t invalid{0};
     };
 
+    struct QueuedBatchFrame {
+        cv::Mat gray;
+        uint64_t index{0};
+        uint64_t timestampNs{0};
+    };
+
     struct ContourAnalysis {
         std::vector<std::vector<cv::Point>> filteredContours;
         std::vector<std::vector<cv::Point>> innerContours;
@@ -294,6 +333,7 @@ private:
     };
 
     void workerLoop();
+    void batchWorkerLoop();
     void realtimeLoop();
     bool appendExperimentFrame(ProcessedFrame&& frame, bool isValid);
     DroppedFrameCounts trimExperimentBuffersLocked(size_t maxBufferedFrames);
@@ -335,6 +375,21 @@ private:
     std::atomic<bool> running_{false};
 
     ProcessingStats stats_{};
+
+    // Async batch processing state
+    std::vector<std::thread> batchWorkers_;
+    std::queue<QueuedBatchFrame> batchQueue_;
+    mutable std::mutex batchMutex_;
+    std::condition_variable batchCv_;
+    BatchPipelineConfig batchConfig_{};
+    BatchResultCallback batchResultCallback_;
+    std::atomic<bool> batchRunning_{false};
+    std::atomic<uint64_t> batchFramesAccepted_{0};
+    std::atomic<uint64_t> batchFramesDropped_{0};
+    std::atomic<uint64_t> batchFramesProcessed_{0};
+    std::atomic<uint64_t> batchBatchesProcessed_{0};
+    std::atomic<size_t> batchMaxQueueDepth_{0};
+    std::atomic<size_t> batchWorkerCount_{0};
 
     // Realtime processing state
     std::thread realtimeThread_;

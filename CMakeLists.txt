@@ -315,6 +315,25 @@ if(BUILD_TESTING)
     add_test(NAME backend.smoke COMMAND mib_backend_smoke_test)
     set_tests_properties(backend.smoke PROPERTIES LABELS "backend")
 
+    add_executable(processing_batch_pipeline_test
+        src/tests/processing_batch_pipeline_test.cpp
+    )
+    target_link_libraries(processing_batch_pipeline_test PRIVATE mib_backend)
+    add_test(NAME backend.processing_batch_pipeline COMMAND processing_batch_pipeline_test)
+    set_tests_properties(backend.processing_batch_pipeline PROPERTIES LABELS "backend")
+
+    add_executable(kin6_batch_pipeline_evidence
+        src/tests/kin6_batch_pipeline_evidence.cpp
+    )
+    target_link_libraries(kin6_batch_pipeline_evidence PRIVATE mib_backend)
+
+    add_executable(kin6_mib_app_capture_proof
+        src/tests/kin6_mib_app_capture_proof.cpp
+    )
+    target_link_libraries(kin6_mib_app_capture_proof PRIVATE mib_backend)
+    add_test(NAME backend.kin6_mib_app_capture_proof COMMAND kin6_mib_app_capture_proof)
+    set_tests_properties(backend.kin6_mib_app_capture_proof PROPERTIES LABELS "backend")
+
     add_executable(mib_processing_multi_object_test
         src/tests/processing_multi_object_test.cpp
     )
