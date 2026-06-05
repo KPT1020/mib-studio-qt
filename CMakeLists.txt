@@ -345,6 +345,13 @@ if(BUILD_TESTING)
     target_link_libraries(mib_processing_multi_object_test PRIVATE mib_backend)
     add_test(NAME backend.processing_multi_object COMMAND mib_processing_multi_object_test)
     set_tests_properties(backend.processing_multi_object PROPERTIES LABELS "backend")
+
+    add_executable(mib_processing_object_tracking_test
+        src/tests/processing_object_tracking_test.cpp
+    )
+    target_link_libraries(mib_processing_object_tracking_test PRIVATE mib_backend)
+    add_test(NAME backend.processing_object_tracking COMMAND mib_processing_object_tracking_test)
+    set_tests_properties(backend.processing_object_tracking PROPERTIES LABELS "backend")
 endif()
 
 if(NOT MIB_BUILD_BACKEND_ONLY)

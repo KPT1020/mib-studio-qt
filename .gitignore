@@ -3,6 +3,9 @@ build/
 export/
 data/logs/app.log
 data/empty_detection_results/
+review_artifacts/
+.cache/
+.python_deps/
 
 # Exclude .exe files in installers directory
 resources/installers/*.exe
