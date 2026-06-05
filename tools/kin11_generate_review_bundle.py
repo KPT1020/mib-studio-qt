@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import html
 import json
@@ -75,6 +76,11 @@ def rel(path: Path) -> str:
 
 def report_rel(path: Path) -> str:
     return path.relative_to(REVIEW_DIR).as_posix()
+
+
+def data_uri(path: Path, content_type: str) -> str:
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{content_type};base64,{encoded}"
 
 
 def read_metrics() -> dict:
@@ -203,9 +209,9 @@ def write_report(
     )
     gallery = "\n".join(
         f"<section class=\"sample\"><h3>{html.escape(sample['sample_id'])} - {html.escape(sample['case_type'])}</h3>"
-        f"<figure><img src=\"{html.escape(report_rel(REPO_ROOT / sample['input_path']))}\" alt=\"{html.escape(sample['sample_id'])} input\"><figcaption>input frame</figcaption></figure>"
-        f"<figure><img src=\"{html.escape(report_rel(REPO_ROOT / sample['mask_path']))}\" alt=\"{html.escape(sample['sample_id'])} mask\"><figcaption>processed mask</figcaption></figure>"
-        f"<figure><img src=\"{html.escape(report_rel(REPO_ROOT / sample['overlay_path']))}\" alt=\"{html.escape(sample['sample_id'])} overlay\"><figcaption>contour overlay</figcaption></figure>"
+        f"<figure><img src=\"{html.escape(data_uri(REPO_ROOT / sample['input_path'], 'image/png'))}\" alt=\"{html.escape(sample['sample_id'])} input\"><figcaption>input frame</figcaption></figure>"
+        f"<figure><img src=\"{html.escape(data_uri(REPO_ROOT / sample['mask_path'], 'image/png'))}\" alt=\"{html.escape(sample['sample_id'])} mask\"><figcaption>processed mask</figcaption></figure>"
+        f"<figure><img src=\"{html.escape(data_uri(REPO_ROOT / sample['overlay_path'], 'image/png'))}\" alt=\"{html.escape(sample['sample_id'])} overlay\"><figcaption>contour overlay</figcaption></figure>"
         "</section>"
         for sample in samples
     )
@@ -256,7 +262,7 @@ def write_report(
 
   <h2>Flow Diagram</h2>
   <p><a href="{html.escape(report_rel(flow_path))}">Open SVG</a></p>
-  <img src="{html.escape(report_rel(flow_path))}" alt="HF dataset artifact flow">
+  <img src="{html.escape(data_uri(flow_path, 'image/svg+xml'))}" alt="HF dataset artifact flow">
 
   <h2>Visual Sample Gallery</h2>
   {gallery}
