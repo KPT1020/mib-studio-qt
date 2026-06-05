@@ -5,8 +5,9 @@ middle-band contour detection path against deterministic image-condition
 variants from the Hugging Face dataset `gavinlouuu/512x96stream`.
 
 The harness loads an exact split slice, keeps the source dataset unchanged,
-generates baseline plus low/high brightness and low/high contrast frames in
-memory, runs the processing path, and writes reviewer-facing images and JSON.
+generates baseline plus low/high and extreme low/high brightness and contrast
+frames in memory, runs the processing path, and writes reviewer-facing images
+and JSON.
 
 ## Regeneration Command
 
@@ -15,6 +16,7 @@ Run from the repository root:
 ```bash
 HF_HOME=.cache/huggingface \
 HF_DATASETS_CACHE=.cache/huggingface/datasets \
+PYTHONPATH=.python_deps \
 python scripts/synthetic_condition_validation.py \
   --dataset gavinlouuu/512x96stream \
   --dataset-config default \
@@ -43,3 +45,8 @@ condition-matched background from the first sampled frame for each transform.
 The example uses `--min-area 1` because the stream slice contains small
 components that the default `min-area=100` setting filters out before the
 success/failure count stage.
+
+The full bundle still writes every sampled frame for every condition. The
+manifest's reviewer-facing paths point to the first sampled baseline frame with
+at least one detected contour, so the highlighted images include cell detections
+from `gavinlouuu/512x96stream`.

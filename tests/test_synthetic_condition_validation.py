@@ -12,6 +12,9 @@ if str(SCRIPTS) not in sys.path:
 
 from synthetic_condition_validation import (  # noqa: E402
     DetectionRecord,
+    DatasetSample,
+    TRANSFORMS,
+    _representative_sample_index,
     apply_brightness_contrast,
     summarize_detection_records,
 )
@@ -38,6 +41,57 @@ def test_contrast_transform_moves_pixels_around_mean() -> None:
 
     assert low.tolist() == [[65, 91], [117, 169]]
     assert high.tolist() == [[16, 70], [124, 232]]
+
+
+def test_transform_suite_includes_extreme_review_cases() -> None:
+    transforms = {transform.name: transform for transform in TRANSFORMS}
+
+    assert (
+        transforms["brightness_extreme_low"].brightness
+        < transforms["brightness_low"].brightness
+    )
+    assert (
+        transforms["brightness_extreme_high"].brightness
+        > transforms["brightness_high"].brightness
+    )
+    assert (
+        transforms["contrast_extreme_low"].contrast
+        < transforms["contrast_low"].contrast
+    )
+    assert (
+        transforms["contrast_extreme_high"].contrast
+        > transforms["contrast_high"].contrast
+    )
+
+
+def test_representative_sample_prefers_baseline_detected_cells() -> None:
+    samples = [
+        DatasetSample(10, np.zeros((2, 2), dtype=np.uint8)),
+        DatasetSample(11, np.ones((2, 2), dtype=np.uint8)),
+    ]
+    records = {
+        "baseline": [
+            DetectionRecord(10, "baseline", False, 0, 0, 0, 0.0),
+            DetectionRecord(11, "baseline", True, 1, 4, 4, 2.0),
+        ]
+    }
+
+    assert _representative_sample_index(samples, records) == 11
+
+
+def test_representative_sample_falls_back_to_first_sample() -> None:
+    samples = [
+        DatasetSample(10, np.zeros((2, 2), dtype=np.uint8)),
+        DatasetSample(11, np.ones((2, 2), dtype=np.uint8)),
+    ]
+    records = {
+        "baseline": [
+            DetectionRecord(10, "baseline", False, 0, 0, 0, 0.0),
+            DetectionRecord(11, "baseline", False, 0, 0, 0, 0.0),
+        ]
+    }
+
+    assert _representative_sample_index(samples, records) == 10
 
 
 def test_summarize_detection_records_reports_condition_counts_and_parity() -> None:

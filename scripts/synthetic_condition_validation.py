@@ -40,8 +40,32 @@ TRANSFORMS: tuple[TransformSpec, ...] = (
     TransformSpec("baseline", 1.0, 1.0, "Unmodified sampled frame."),
     TransformSpec("brightness_low", 0.65, 1.0, "Brightness scaled to 65%."),
     TransformSpec("brightness_high", 1.35, 1.0, "Brightness scaled to 135%."),
+    TransformSpec(
+        "brightness_extreme_low",
+        0.35,
+        1.0,
+        "Brightness scaled to 35% for an extreme low-light case.",
+    ),
+    TransformSpec(
+        "brightness_extreme_high",
+        1.75,
+        1.0,
+        "Brightness scaled to 175% for an extreme bright case.",
+    ),
     TransformSpec("contrast_low", 1.0, 0.65, "Contrast scaled to 65% around frame mean."),
     TransformSpec("contrast_high", 1.0, 1.35, "Contrast scaled to 135% around frame mean."),
+    TransformSpec(
+        "contrast_extreme_low",
+        1.0,
+        0.35,
+        "Contrast scaled to 35% around frame mean for an extreme low-contrast case.",
+    ),
+    TransformSpec(
+        "contrast_extreme_high",
+        1.0,
+        1.75,
+        "Contrast scaled to 175% around frame mean for an extreme high-contrast case.",
+    ),
 )
 
 
@@ -329,6 +353,26 @@ def _write_png(path: Path, image: Any) -> None:
         raise RuntimeError(f"Failed to write image: {path}")
 
 
+def _baseline_detected_sample_indices(
+    records_by_condition: dict[str, list[DetectionRecord]],
+) -> list[int]:
+    return [
+        record.sample_index
+        for record in records_by_condition.get("baseline", [])
+        if record.detected
+    ]
+
+
+def _representative_sample_index(
+    samples: list[DatasetSample],
+    records_by_condition: dict[str, list[DetectionRecord]],
+) -> int:
+    detected_indices = _baseline_detected_sample_indices(records_by_condition)
+    if detected_indices:
+        return detected_indices[0]
+    return samples[0].sample_index
+
+
 def _overlay_image(image: Any, result: Any, config: Any, label: str) -> Any:
     import cv2
     import numpy as np
@@ -388,6 +432,9 @@ def write_artifacts(
     if clean:
         _clean_output_dir(output_dir)
 
+    review_sample_index = _representative_sample_index(samples, records_by_condition)
+    baseline_detected_indices = _baseline_detected_sample_indices(records_by_condition)
+
     artifact_paths: dict[str, Path] = {}
     for transform in TRANSFORMS:
         condition = transform.name
@@ -414,7 +461,7 @@ def write_artifacts(
                 ),
             )
 
-            if sample.sample_index == samples[0].sample_index:
+            if sample.sample_index == review_sample_index:
                 artifact_paths[f"{condition}_input"] = input_path
                 artifact_paths[f"{condition}_mask"] = mask_path
                 artifact_paths[f"{condition}_overlay"] = overlay_path
@@ -428,6 +475,12 @@ def write_artifacts(
         "processing_config": dict(vars(processing_config)),
         "background_mode": background_mode,
         "background_sample_count": background_sample_count,
+        "baseline_detected_sample_indices": baseline_detected_indices,
+        "review_sample_index": review_sample_index,
+        "review_sample_selection": (
+            "First sampled frame where the baseline processing path returned "
+            "at least one filtered contour; falls back to the first sampled frame."
+        ),
         "detection_success_definition": (
             "A frame succeeds when the existing processing path returns at least "
             "one filtered contour in the middle band."
@@ -450,6 +503,8 @@ def write_artifacts(
         "dataset": dataset_info,
         "background_mode": background_mode,
         "background_sample_count": background_sample_count,
+        "baseline_detected_sample_indices": baseline_detected_indices,
+        "review_sample_index": review_sample_index,
         "transforms": [asdict(transform) for transform in TRANSFORMS],
         "review_paths": {
             key: str(path.relative_to(output_dir))
@@ -465,7 +520,14 @@ def write_artifacts(
 
     readme_path = output_dir / "README.md"
     readme_path.write_text(
-        _readme_text(dataset_info, background_mode, background_sample_count, command),
+        _readme_text(
+            dataset_info,
+            background_mode,
+            background_sample_count,
+            command,
+            baseline_detected_indices,
+            review_sample_index,
+        ),
         encoding="utf-8",
     )
     artifact_paths["readme"] = readme_path
@@ -477,11 +539,14 @@ def _readme_text(
     background_mode: str,
     background_sample_count: int,
     command: str,
+    baseline_detected_indices: list[int],
+    review_sample_index: int,
 ) -> str:
     return f"""# KIN-12 Synthetic Condition Validation
 
 This bundle validates the existing middle-band contour detection path on
-`{dataset_info['name']}` with deterministic brightness and contrast variants.
+`{dataset_info['name']}` with deterministic brightness and contrast variants,
+including standard low/high cases and more extreme low/high cases.
 
 ## Dataset Slice
 
@@ -492,6 +557,8 @@ This bundle validates the existing middle-band contour detection path on
 - Dataset revision: `{dataset_info['revision']}`
 - Background mode: `{background_mode}`
 - Background sample count: `{background_sample_count}`
+- Baseline detected sample indices: `{baseline_detected_indices}`
+- Reviewer-facing sample index: `{review_sample_index}`
 
 ## Regenerate
 
@@ -509,6 +576,10 @@ Run from the repository root:
 - `metrics.json` reports detection success/failure counts per condition and parity
   against baseline.
 - `manifest.json` records the exact dataset slice, transforms, and review paths.
+
+The manifest review paths point to the first sampled baseline frame with at
+least one detected contour so reviewer-facing images include cell detections
+from the Hugging Face dataset.
 """
 
 
@@ -556,6 +627,7 @@ def parse_args() -> argparse.Namespace:
 
 def _regeneration_command(args: argparse.Namespace) -> str:
     parts = [
+        "PYTHONPATH=.python_deps",
         "HF_HOME=.cache/huggingface",
         "HF_DATASETS_CACHE=.cache/huggingface/datasets",
         "python",
