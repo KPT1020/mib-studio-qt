@@ -962,7 +962,8 @@ void HdfReviewTab::exportMetricsToCsv(const QString& filePath) {
     const double areaConversionFactor = conversionFactor * conversionFactor;
     
     // CSV header
-    out << "Frame Type,Index,Timestamp,Object Id,Object Count,Deformability,Area,Area (um²),Area Ratio,Ring Ratio,"
+    out << "Frame Type,Index,Timestamp,Object Id,Object Count,Track Id,Track First,Track Last,Track Observations,"
+        << "Deformability,Area,Area (um²),Area Ratio,Ring Ratio,"
         << "Valid,Touches Border,Single Inner,In Range,Inner Count,"
         << "Bright Q1,Bright Q2,Bright Q3,Bright Q4\n";
 
@@ -976,6 +977,10 @@ void HdfReviewTab::exportMetricsToCsv(const QString& filePath) {
         out << frame.timestampNs << ",";
         out << val.objectId << ",";
         out << val.objectCount << ",";
+        out << val.trackId << ",";
+        out << val.trackFirstFrame << ",";
+        out << val.trackLastFrame << ",";
+        out << val.trackObservationCount << ",";
         out << QString::number(val.deformability, 'f', 3) << ",";
         out << QString::number(val.area, 'f', 2) << ",";
         out << QString::number(areaMicrons, 'f', 2) << ",";
@@ -1002,6 +1007,10 @@ void HdfReviewTab::exportMetricsToCsv(const QString& filePath) {
         out << frame.timestampNs << ",";
         out << val.objectId << ",";
         out << val.objectCount << ",";
+        out << val.trackId << ",";
+        out << val.trackFirstFrame << ",";
+        out << val.trackLastFrame << ",";
+        out << val.trackObservationCount << ",";
         out << QString::number(val.deformability, 'f', 3) << ",";
         out << QString::number(val.area, 'f', 2) << ",";
         out << QString::number(areaMicrons, 'f', 2) << ",";
