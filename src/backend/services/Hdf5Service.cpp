@@ -67,6 +67,86 @@ namespace backend::services
             }
             return true;
         }
+
+        struct ProcessedFrameMetadataRecord
+        {
+            uint64_t index;
+            uint64_t timestampNs;
+            int32_t objectId;
+            int32_t objectCount;
+            double deformability;
+            double area;
+            double areaRatio;
+            double ringRatio;
+            uint8_t isValid;
+            uint8_t touchesBorder;
+            uint8_t hasSingleInnerContour;
+            uint8_t inRange;
+            int32_t innerContourCount;
+            double brightness_q1;
+            double brightness_q2;
+            double brightness_q3;
+            double brightness_q4;
+            double youngsModulus;
+            uint8_t isTargetGroup;
+        };
+
+        hid_t createProcessedFrameMetadataType(bool includeBaseFields = true,
+                                               bool includeObjectFields = true)
+        {
+            hid_t compTypeId = H5Tcreate(H5T_COMPOUND, sizeof(ProcessedFrameMetadataRecord));
+            if (includeBaseFields)
+            {
+                H5Tinsert(compTypeId, "index", HOFFSET(ProcessedFrameMetadataRecord, index), H5T_NATIVE_UINT64);
+                H5Tinsert(compTypeId, "timestampNs", HOFFSET(ProcessedFrameMetadataRecord, timestampNs), H5T_NATIVE_UINT64);
+                H5Tinsert(compTypeId, "deformability", HOFFSET(ProcessedFrameMetadataRecord, deformability), H5T_NATIVE_DOUBLE);
+                H5Tinsert(compTypeId, "area", HOFFSET(ProcessedFrameMetadataRecord, area), H5T_NATIVE_DOUBLE);
+                H5Tinsert(compTypeId, "areaRatio", HOFFSET(ProcessedFrameMetadataRecord, areaRatio), H5T_NATIVE_DOUBLE);
+                H5Tinsert(compTypeId, "ringRatio", HOFFSET(ProcessedFrameMetadataRecord, ringRatio), H5T_NATIVE_DOUBLE);
+                H5Tinsert(compTypeId, "isValid", HOFFSET(ProcessedFrameMetadataRecord, isValid), H5T_NATIVE_UINT8);
+                H5Tinsert(compTypeId, "touchesBorder", HOFFSET(ProcessedFrameMetadataRecord, touchesBorder), H5T_NATIVE_UINT8);
+                H5Tinsert(compTypeId, "hasSingleInnerContour", HOFFSET(ProcessedFrameMetadataRecord, hasSingleInnerContour), H5T_NATIVE_UINT8);
+                H5Tinsert(compTypeId, "inRange", HOFFSET(ProcessedFrameMetadataRecord, inRange), H5T_NATIVE_UINT8);
+                H5Tinsert(compTypeId, "innerContourCount", HOFFSET(ProcessedFrameMetadataRecord, innerContourCount), H5T_NATIVE_INT32);
+                H5Tinsert(compTypeId, "brightness_q1", HOFFSET(ProcessedFrameMetadataRecord, brightness_q1), H5T_NATIVE_DOUBLE);
+                H5Tinsert(compTypeId, "brightness_q2", HOFFSET(ProcessedFrameMetadataRecord, brightness_q2), H5T_NATIVE_DOUBLE);
+                H5Tinsert(compTypeId, "brightness_q3", HOFFSET(ProcessedFrameMetadataRecord, brightness_q3), H5T_NATIVE_DOUBLE);
+                H5Tinsert(compTypeId, "brightness_q4", HOFFSET(ProcessedFrameMetadataRecord, brightness_q4), H5T_NATIVE_DOUBLE);
+                H5Tinsert(compTypeId, "youngsModulus", HOFFSET(ProcessedFrameMetadataRecord, youngsModulus), H5T_NATIVE_DOUBLE);
+                H5Tinsert(compTypeId, "isTargetGroup", HOFFSET(ProcessedFrameMetadataRecord, isTargetGroup), H5T_NATIVE_UINT8);
+            }
+            if (includeObjectFields)
+            {
+                H5Tinsert(compTypeId, "objectId", HOFFSET(ProcessedFrameMetadataRecord, objectId), H5T_NATIVE_INT32);
+                H5Tinsert(compTypeId, "objectCount", HOFFSET(ProcessedFrameMetadataRecord, objectCount), H5T_NATIVE_INT32);
+            }
+            return compTypeId;
+        }
+
+        ProcessedFrameMetadataRecord makeMetadataRecord(const ProcessedFrame &frame)
+        {
+            ProcessedFrameMetadataRecord md{};
+            md.index = frame.index;
+            md.timestampNs = frame.timestampNs;
+            md.objectId = frame.validation.objectId;
+            md.objectCount = frame.validation.objectCount;
+            md.deformability = frame.validation.deformability;
+            md.area = frame.validation.area;
+            md.areaRatio = frame.validation.areaRatio;
+            md.ringRatio = frame.validation.ringRatio;
+            md.isValid = frame.validation.isValid ? 1 : 0;
+            md.touchesBorder = frame.validation.touchesBorder ? 1 : 0;
+            md.hasSingleInnerContour = frame.validation.hasSingleInnerContour ? 1 : 0;
+            md.inRange = frame.validation.inRange ? 1 : 0;
+            md.innerContourCount = frame.validation.innerContourCount;
+            md.brightness_q1 = frame.validation.brightness.q1;
+            md.brightness_q2 = frame.validation.brightness.q2;
+            md.brightness_q3 = frame.validation.brightness.q3;
+            md.brightness_q4 = frame.validation.brightness.q4;
+            md.youngsModulus = frame.validation.youngsModulus;
+            md.isTargetGroup = frame.validation.isTargetGroup ? 1 : 0;
+            return md;
+        }
     } // namespace
 
     Hdf5Service::Hdf5Service() : impl_(std::make_unique<Impl>())
@@ -314,47 +394,7 @@ namespace backend::services
         if (frames.empty())
             return true;
 
-        // Create compound datatype for metadata
-        struct FrameMetadata
-        {
-            uint64_t index;
-            uint64_t timestampNs;
-            double deformability;
-            double area;
-            double areaRatio;
-            double ringRatio;
-            uint8_t isValid;
-            uint8_t touchesBorder;
-            uint8_t hasSingleInnerContour;
-            uint8_t inRange;
-            int32_t innerContourCount;
-            double brightness_q1;
-            double brightness_q2;
-            double brightness_q3;
-            double brightness_q4;
-            double youngsModulus;
-            uint8_t isTargetGroup;
-        };
-
-        // Create compound type
-        hid_t compTypeId = H5Tcreate(H5T_COMPOUND, sizeof(FrameMetadata));
-        H5Tinsert(compTypeId, "index", HOFFSET(FrameMetadata, index), H5T_NATIVE_UINT64);
-        H5Tinsert(compTypeId, "timestampNs", HOFFSET(FrameMetadata, timestampNs), H5T_NATIVE_UINT64);
-        H5Tinsert(compTypeId, "deformability", HOFFSET(FrameMetadata, deformability), H5T_NATIVE_DOUBLE);
-        H5Tinsert(compTypeId, "area", HOFFSET(FrameMetadata, area), H5T_NATIVE_DOUBLE);
-        H5Tinsert(compTypeId, "areaRatio", HOFFSET(FrameMetadata, areaRatio), H5T_NATIVE_DOUBLE);
-        H5Tinsert(compTypeId, "ringRatio", HOFFSET(FrameMetadata, ringRatio), H5T_NATIVE_DOUBLE);
-        H5Tinsert(compTypeId, "isValid", HOFFSET(FrameMetadata, isValid), H5T_NATIVE_UINT8);
-        H5Tinsert(compTypeId, "touchesBorder", HOFFSET(FrameMetadata, touchesBorder), H5T_NATIVE_UINT8);
-        H5Tinsert(compTypeId, "hasSingleInnerContour", HOFFSET(FrameMetadata, hasSingleInnerContour), H5T_NATIVE_UINT8);
-        H5Tinsert(compTypeId, "inRange", HOFFSET(FrameMetadata, inRange), H5T_NATIVE_UINT8);
-        H5Tinsert(compTypeId, "innerContourCount", HOFFSET(FrameMetadata, innerContourCount), H5T_NATIVE_INT32);
-        H5Tinsert(compTypeId, "brightness_q1", HOFFSET(FrameMetadata, brightness_q1), H5T_NATIVE_DOUBLE);
-        H5Tinsert(compTypeId, "brightness_q2", HOFFSET(FrameMetadata, brightness_q2), H5T_NATIVE_DOUBLE);
-        H5Tinsert(compTypeId, "brightness_q3", HOFFSET(FrameMetadata, brightness_q3), H5T_NATIVE_DOUBLE);
-        H5Tinsert(compTypeId, "brightness_q4", HOFFSET(FrameMetadata, brightness_q4), H5T_NATIVE_DOUBLE);
-        H5Tinsert(compTypeId, "youngsModulus", HOFFSET(FrameMetadata, youngsModulus), H5T_NATIVE_DOUBLE);
-        H5Tinsert(compTypeId, "isTargetGroup", HOFFSET(FrameMetadata, isTargetGroup), H5T_NATIVE_UINT8);
+        hid_t compTypeId = createProcessedFrameMetadataType();
 
         // Create dataspace with unlimited first dimension for extensibility
         hsize_t dims[1] = {frames.size()};
@@ -385,29 +425,11 @@ namespace backend::services
         }
 
         // Prepare data
-        std::vector<FrameMetadata> metadata;
+        std::vector<ProcessedFrameMetadataRecord> metadata;
         metadata.reserve(frames.size());
         for (const auto &frame : frames)
         {
-            FrameMetadata md{};
-            md.index = frame.index;
-            md.timestampNs = frame.timestampNs;
-            md.deformability = frame.validation.deformability;
-            md.area = frame.validation.area;
-            md.areaRatio = frame.validation.areaRatio;
-            md.ringRatio = frame.validation.ringRatio;
-            md.isValid = frame.validation.isValid ? 1 : 0;
-            md.touchesBorder = frame.validation.touchesBorder ? 1 : 0;
-            md.hasSingleInnerContour = frame.validation.hasSingleInnerContour ? 1 : 0;
-            md.inRange = frame.validation.inRange ? 1 : 0;
-            md.innerContourCount = frame.validation.innerContourCount;
-            md.brightness_q1 = frame.validation.brightness.q1;
-            md.brightness_q2 = frame.validation.brightness.q2;
-            md.brightness_q3 = frame.validation.brightness.q3;
-            md.brightness_q4 = frame.validation.brightness.q4;
-            md.youngsModulus = frame.validation.youngsModulus;
-            md.isTargetGroup = frame.validation.isTargetGroup ? 1 : 0;
-            metadata.push_back(md);
+            metadata.push_back(makeMetadataRecord(frame));
         }
 
         // Write data
@@ -613,27 +635,6 @@ namespace backend::services
         if (frames.empty())
             return true;
 
-        struct FrameMetadata
-        {
-            uint64_t index;
-            uint64_t timestampNs;
-            double deformability;
-            double area;
-            double areaRatio;
-            double ringRatio;
-            uint8_t isValid;
-            uint8_t touchesBorder;
-            uint8_t hasSingleInnerContour;
-            uint8_t inRange;
-            int32_t innerContourCount;
-            double brightness_q1;
-            double brightness_q2;
-            double brightness_q3;
-            double brightness_q4;
-            double youngsModulus;
-            uint8_t isTargetGroup;
-        };
-
         // Open existing dataset
         hid_t datasetId = H5Dopen2(fileId, datasetPath.c_str(), H5P_DEFAULT);
         if (datasetId < 0)
@@ -642,12 +643,11 @@ namespace backend::services
             return false;
         }
 
-        // Get compound type
-        hid_t compTypeId = H5Dget_type(datasetId);
-        if (compTypeId < 0)
+        hid_t memTypeId = createProcessedFrameMetadataType();
+        if (memTypeId < 0)
         {
             H5Dclose(datasetId);
-            SPDLOG_ERROR("Failed to get compound type from dataset {}", datasetPath);
+            SPDLOG_ERROR("Failed to create metadata memory type for {}", datasetPath);
             return false;
         }
 
@@ -661,7 +661,7 @@ namespace backend::services
         herr_t status = H5Dset_extent(datasetId, newDims);
         if (status < 0)
         {
-            H5Tclose(compTypeId);
+            H5Tclose(memTypeId);
             H5Dclose(datasetId);
             SPDLOG_ERROR("Failed to extend metadata dataset {}", datasetPath);
             return false;
@@ -671,24 +671,7 @@ namespace backend::services
         for (size_t i = 0; i < frames.size(); ++i)
         {
             const auto &frame = frames[i];
-            FrameMetadata md{};
-            md.index = frame.index;
-            md.timestampNs = frame.timestampNs;
-            md.deformability = frame.validation.deformability;
-            md.area = frame.validation.area;
-            md.areaRatio = frame.validation.areaRatio;
-            md.ringRatio = frame.validation.ringRatio;
-            md.isValid = frame.validation.isValid ? 1 : 0;
-            md.touchesBorder = frame.validation.touchesBorder ? 1 : 0;
-            md.hasSingleInnerContour = frame.validation.hasSingleInnerContour ? 1 : 0;
-            md.inRange = frame.validation.inRange ? 1 : 0;
-            md.innerContourCount = frame.validation.innerContourCount;
-            md.brightness_q1 = frame.validation.brightness.q1;
-            md.brightness_q2 = frame.validation.brightness.q2;
-            md.brightness_q3 = frame.validation.brightness.q3;
-            md.brightness_q4 = frame.validation.brightness.q4;
-            md.youngsModulus = frame.validation.youngsModulus;
-            md.isTargetGroup = frame.validation.isTargetGroup ? 1 : 0;
+            ProcessedFrameMetadataRecord md = makeMetadataRecord(frame);
 
             filespaceId = H5Dget_space(datasetId);
             hsize_t start[1] = {currentDims[0] + static_cast<hsize_t>(i)};
@@ -696,19 +679,19 @@ namespace backend::services
             H5Sselect_hyperslab(filespaceId, H5S_SELECT_SET, start, nullptr, count, nullptr);
             hid_t memspaceId = H5Screate_simple(1, count, nullptr);
 
-            status = H5Dwrite(datasetId, compTypeId, memspaceId, filespaceId, H5P_DEFAULT, &md);
+            status = H5Dwrite(datasetId, memTypeId, memspaceId, filespaceId, H5P_DEFAULT, &md);
             H5Sclose(memspaceId);
             H5Sclose(filespaceId);
             if (status < 0)
             {
                 SPDLOG_ERROR("Failed to append metadata entry {} to dataset {}", i, datasetPath);
-                H5Tclose(compTypeId);
+                H5Tclose(memTypeId);
                 H5Dclose(datasetId);
                 return false;
             }
         }
 
-        H5Tclose(compTypeId);
+        H5Tclose(memTypeId);
         H5Dclose(datasetId);
 
         // Update tracked size to match actual dataset extent after successful write
@@ -1557,8 +1540,8 @@ namespace backend::services
         }
 
         // Get compound type
-        hid_t compTypeId = H5Dget_type(datasetId);
-        if (compTypeId < 0)
+        hid_t fileTypeId = H5Dget_type(datasetId);
+        if (fileTypeId < 0)
         {
             H5Dclose(datasetId);
             SPDLOG_ERROR("Failed to get compound type from dataset {}", datasetPath);
@@ -1574,45 +1557,49 @@ namespace backend::services
         hsize_t numFrames = dims[0];
         if (numFrames == 0)
         {
-            H5Tclose(compTypeId);
+            H5Tclose(fileTypeId);
             H5Dclose(datasetId);
             frames.clear();
             return true;
         }
 
-        // Define FrameMetadata structure matching write structure
-        struct FrameMetadata
-        {
-            uint64_t index;
-            uint64_t timestampNs;
-            double deformability;
-            double area;
-            double areaRatio;
-            double ringRatio;
-            uint8_t isValid;
-            uint8_t touchesBorder;
-            uint8_t hasSingleInnerContour;
-            uint8_t inRange;
-            int32_t innerContourCount;
-            double brightness_q1;
-            double brightness_q2;
-            double brightness_q3;
-            double brightness_q4;
-            double youngsModulus;
-            uint8_t isTargetGroup;
-        };
-
         // Read metadata
-        std::vector<FrameMetadata> metadata(numFrames);
-        herr_t status = H5Dread(datasetId, compTypeId, H5S_ALL, H5S_ALL, H5P_DEFAULT, metadata.data());
-        H5Tclose(compTypeId);
-        H5Dclose(datasetId);
+        std::vector<ProcessedFrameMetadataRecord> metadata(numFrames);
+        for (auto& md : metadata)
+        {
+            md.objectId = -1;
+            md.objectCount = 0;
+        }
 
+        hid_t baseMemTypeId = createProcessedFrameMetadataType(true, false);
+        herr_t status = H5Dread(datasetId, baseMemTypeId, H5S_ALL, H5S_ALL, H5P_DEFAULT, metadata.data());
+        H5Tclose(baseMemTypeId);
         if (status < 0)
         {
+            H5Tclose(fileTypeId);
+            H5Dclose(datasetId);
             SPDLOG_ERROR("Failed to read metadata dataset {}", datasetPath);
             return false;
         }
+
+        const bool hasObjectId = H5Tget_member_index(fileTypeId, "objectId") >= 0;
+        const bool hasObjectCount = H5Tget_member_index(fileTypeId, "objectCount") >= 0;
+        if (hasObjectId || hasObjectCount)
+        {
+            hid_t objectMemTypeId = createProcessedFrameMetadataType(false, true);
+            status = H5Dread(datasetId, objectMemTypeId, H5S_ALL, H5S_ALL, H5P_DEFAULT, metadata.data());
+            H5Tclose(objectMemTypeId);
+            if (status < 0)
+            {
+                H5Tclose(fileTypeId);
+                H5Dclose(datasetId);
+                SPDLOG_ERROR("Failed to read object metadata fields from {}", datasetPath);
+                return false;
+            }
+        }
+
+        H5Tclose(fileTypeId);
+        H5Dclose(datasetId);
 
         // Convert to ProcessedFrame (images will be filled separately)
         frames.clear();
@@ -1622,6 +1609,8 @@ namespace backend::services
             ProcessedFrame frame;
             frame.index = md.index;
             frame.timestampNs = md.timestampNs;
+            frame.validation.objectId = md.objectId;
+            frame.validation.objectCount = md.objectCount;
             frame.validation.deformability = md.deformability;
             frame.validation.area = md.area;
             frame.validation.areaRatio = md.areaRatio;

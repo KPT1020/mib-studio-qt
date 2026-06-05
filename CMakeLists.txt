@@ -333,6 +333,13 @@ if(BUILD_TESTING)
     target_link_libraries(kin6_mib_app_capture_proof PRIVATE mib_backend)
     add_test(NAME backend.kin6_mib_app_capture_proof COMMAND kin6_mib_app_capture_proof)
     set_tests_properties(backend.kin6_mib_app_capture_proof PROPERTIES LABELS "backend")
+
+    add_executable(mib_processing_multi_object_test
+        src/tests/processing_multi_object_test.cpp
+    )
+    target_link_libraries(mib_processing_multi_object_test PRIVATE mib_backend)
+    add_test(NAME backend.processing_multi_object COMMAND mib_processing_multi_object_test)
+    set_tests_properties(backend.processing_multi_object PROPERTIES LABELS "backend")
 endif()
 
 if(NOT MIB_BUILD_BACKEND_ONLY)

@@ -962,7 +962,7 @@ void HdfReviewTab::exportMetricsToCsv(const QString& filePath) {
     const double areaConversionFactor = conversionFactor * conversionFactor;
     
     // CSV header
-    out << "Frame Type,Index,Timestamp,Deformability,Area,Area (um²),Area Ratio,Ring Ratio,"
+    out << "Frame Type,Index,Timestamp,Object Id,Object Count,Deformability,Area,Area (um²),Area Ratio,Ring Ratio,"
         << "Valid,Touches Border,Single Inner,In Range,Inner Count,"
         << "Bright Q1,Bright Q2,Bright Q3,Bright Q4\n";
 
@@ -974,6 +974,8 @@ void HdfReviewTab::exportMetricsToCsv(const QString& filePath) {
         out << "Valid,";
         out << frame.index << ",";
         out << frame.timestampNs << ",";
+        out << val.objectId << ",";
+        out << val.objectCount << ",";
         out << QString::number(val.deformability, 'f', 3) << ",";
         out << QString::number(val.area, 'f', 2) << ",";
         out << QString::number(areaMicrons, 'f', 2) << ",";
@@ -998,6 +1000,8 @@ void HdfReviewTab::exportMetricsToCsv(const QString& filePath) {
         out << "Invalid,";
         out << frame.index << ",";
         out << frame.timestampNs << ",";
+        out << val.objectId << ",";
+        out << val.objectCount << ",";
         out << QString::number(val.deformability, 'f', 3) << ",";
         out << QString::number(val.area, 'f', 2) << ",";
         out << QString::number(areaMicrons, 'f', 2) << ",";
@@ -2113,4 +2117,3 @@ void HdfReviewTab::loadIsoelasticCurves() {
 
 // Include moc file for ThumbnailLabel class (defined in this .cpp file with Q_OBJECT)
 #include "HdfReviewTab.moc"
-
