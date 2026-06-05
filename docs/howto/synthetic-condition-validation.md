@@ -36,8 +36,13 @@ python scripts/synthetic_condition_validation.py \
 - `overlays/`: input frames with band boundaries, mask tint, and contours.
 - `metrics.json`: detection success/failure counts by condition plus parity
   against baseline.
-- `manifest.json`: dataset split/sample range, transform definitions, and key
-  review paths.
+- `report.html`: self-contained reviewer report with command table, flow
+  diagram, visual gallery, metrics tables, limitations, and regeneration
+  command.
+- `manifest.json`: dataset split/sample range, transform definitions, key
+  review paths, and per-artifact purpose/provenance/size metadata.
+- `flow_diagram.svg`: synthetic validation data/control flow and evidence
+  capture points.
 - `sample_array_manifest.json`: deterministic reviewer sample cases covering
   the first empty baseline, first cell-positive baseline, and low-condition
   detection drops when the requested slice contains those cases.
