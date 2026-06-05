@@ -34,10 +34,138 @@ size_t defaultMaxBufferedFrames(size_t flushInterval) {
     return std::max(flushInterval, std::min(preferred, kSoftMaxBufferedFrames));
 }
 
+double rectArea(const cv::Rect2d& rect) {
+    return std::max(0.0, rect.width) * std::max(0.0, rect.height);
+}
+
+double rectIou(const cv::Rect2d& a, const cv::Rect2d& b) {
+    const double x1 = std::max(a.x, b.x);
+    const double y1 = std::max(a.y, b.y);
+    const double x2 = std::min(a.x + a.width, b.x + b.width);
+    const double y2 = std::min(a.y + a.height, b.y + b.height);
+    const double intersection = std::max(0.0, x2 - x1) * std::max(0.0, y2 - y1);
+    const double unionArea = rectArea(a) + rectArea(b) - intersection;
+    return unionArea > 0.0 ? intersection / unionArea : 0.0;
+}
+
+cv::Rect2d resultBbox(const FilterResult& result) {
+    return cv::Rect2d(result.bboxX, result.bboxY, result.bboxWidth, result.bboxHeight);
+}
+
+void populateGeometry(FilterResult& result, const std::vector<cv::Point>& contour) {
+    if (contour.empty()) {
+        return;
+    }
+
+    const cv::Rect bbox = cv::boundingRect(contour);
+    result.bboxX = static_cast<double>(bbox.x);
+    result.bboxY = static_cast<double>(bbox.y);
+    result.bboxWidth = static_cast<double>(bbox.width);
+    result.bboxHeight = static_cast<double>(bbox.height);
+
+    const cv::Moments moments = cv::moments(contour);
+    if (std::abs(moments.m00) > std::numeric_limits<double>::epsilon()) {
+        result.centroidX = moments.m10 / moments.m00;
+        result.centroidY = moments.m01 / moments.m00;
+    } else {
+        result.centroidX = result.bboxX + result.bboxWidth * 0.5;
+        result.centroidY = result.bboxY + result.bboxHeight * 0.5;
+    }
+}
+
+struct BatchTrack {
+    int id{-1};
+    uint64_t firstFrame{0};
+    uint64_t lastFrame{0};
+    int observations{0};
+    cv::Rect2d lastBbox;
+    cv::Point2d lastCentroid;
+    size_t outputIndex{0};
+};
+
+void applyTrackState(ProcessedFrame& frame, const BatchTrack& track) {
+    frame.validation.trackId = track.id;
+    frame.validation.trackFirstFrame = track.firstFrame;
+    frame.validation.trackLastFrame = track.lastFrame;
+    frame.validation.trackObservationCount = track.observations;
+}
+
+int findMatchingTrack(const std::vector<BatchTrack>& tracks,
+                      const std::vector<bool>& matchedThisFrame,
+                      const FilterResult& detection,
+                      uint64_t frameIndex,
+                      int frameWidth) {
+    constexpr uint64_t kMaxFrameGap = 5;
+    constexpr double kMinIou = 0.08;
+    constexpr double kBaseCentroidThresholdPx = 24.0;
+    constexpr double kMaxLeftwardJitterPx = 2.0;
+    constexpr double kDirectionalFrameFraction = 0.35;
+    constexpr double kMinDirectionalStepPx = 64.0;
+    constexpr double kMinVerticalTolerancePx = 20.0;
+
+    const cv::Rect2d bbox = resultBbox(detection);
+    if (rectArea(bbox) <= 0.0) {
+        return -1;
+    }
+
+    int bestTrack = -1;
+    double bestScore = std::numeric_limits<double>::max();
+    for (size_t i = 0; i < tracks.size(); ++i) {
+        const auto& track = tracks[i];
+        if (i < matchedThisFrame.size() && matchedThisFrame[i]) {
+            continue;
+        }
+        if (frameIndex <= track.lastFrame) {
+            continue;
+        }
+
+        const uint64_t frameGap = frameIndex - track.lastFrame;
+        if (frameGap > kMaxFrameGap) {
+            continue;
+        }
+
+        if (detection.centroidX + kMaxLeftwardJitterPx < track.lastCentroid.x) {
+            continue;
+        }
+
+        const double iou = rectIou(bbox, track.lastBbox);
+        const double dx = detection.centroidX - track.lastCentroid.x;
+        const double dy = std::abs(detection.centroidY - track.lastCentroid.y);
+        const double motionThreshold = std::max(
+            kBaseCentroidThresholdPx,
+            std::max(track.lastBbox.width, track.lastBbox.height) * 1.25 +
+                static_cast<double>(frameGap) * 8.0);
+        const double directionalStep = std::max(
+            motionThreshold,
+            std::max(kMinDirectionalStepPx,
+                     static_cast<double>(std::max(1, frameWidth)) * kDirectionalFrameFraction) *
+                static_cast<double>(frameGap));
+        const double verticalTolerance = std::max(
+            kMinVerticalTolerancePx,
+            std::max(track.lastBbox.height, bbox.height) * 1.5);
+        if (iou < kMinIou && (dx > directionalStep || dy > verticalTolerance)) {
+            continue;
+        }
+
+        const double score = (1.0 - std::min(1.0, iou)) +
+                             (std::max(0.0, dx) / std::max(1.0, directionalStep)) +
+                             (dy / std::max(1.0, verticalTolerance)) +
+                             static_cast<double>(frameGap) * 0.05;
+        if (score < bestScore) {
+            bestScore = score;
+            bestTrack = static_cast<int>(i);
+        }
+    }
+    return bestTrack;
+}
+
 } // namespace
 
 ProcessingService::ProcessingService() = default;
-ProcessingService::~ProcessingService() { stop(); }
+ProcessingService::~ProcessingService() {
+    stopBatchPipeline();
+    stop();
+}
 
 void ProcessingService::start(size_t workerCount) {
     if (running_.load()) return;
@@ -447,6 +575,8 @@ std::vector<ProcessedFrame> ProcessingService::processBatch(
 
     std::vector<ProcessedFrame> results;
     results.reserve(grayImages.size());
+    std::vector<BatchTrack> tracks;
+    int nextTrackId = 1;
 
     const size_t total = grayImages.size();
     if (progress) progress(BatchProgress{0, total});
@@ -477,6 +607,7 @@ std::vector<ProcessedFrame> ProcessingService::processBatch(
         if (objectResults.empty()) {
             results.emplace_back(std::move(base));
         } else {
+            std::vector<bool> matchedThisFrame(tracks.size(), false);
             for (auto& validation : objectResults) {
                 ProcessedFrame objectFrame;
                 objectFrame.index = base.index;
@@ -484,15 +615,244 @@ std::vector<ProcessedFrame> ProcessingService::processBatch(
                 objectFrame.originalImage = base.originalImage.clone();
                 objectFrame.processedImage = base.processedImage.clone();
                 objectFrame.validation = std::move(validation);
+                if (!objectFrame.validation.isValid) {
+                    results.emplace_back(std::move(objectFrame));
+                    continue;
+                }
+
+                const int trackIdx = findMatchingTrack(
+                    tracks, matchedThisFrame, objectFrame.validation, objectFrame.index, cvRoi.width);
+                if (trackIdx >= 0) {
+                    auto& track = tracks[static_cast<size_t>(trackIdx)];
+                    track.lastFrame = objectFrame.index;
+                    track.lastBbox = resultBbox(objectFrame.validation);
+                    track.lastCentroid = cv::Point2d(objectFrame.validation.centroidX,
+                                                     objectFrame.validation.centroidY);
+                    ++track.observations;
+                    if (static_cast<size_t>(trackIdx) >= matchedThisFrame.size()) {
+                        matchedThisFrame.resize(tracks.size(), false);
+                    }
+                    matchedThisFrame[static_cast<size_t>(trackIdx)] = true;
+                    applyTrackState(results[track.outputIndex], track);
+                    continue;
+                }
+
+                BatchTrack track;
+                track.id = nextTrackId++;
+                track.firstFrame = objectFrame.index;
+                track.lastFrame = objectFrame.index;
+                track.observations = 1;
+                track.lastBbox = resultBbox(objectFrame.validation);
+                track.lastCentroid = cv::Point2d(objectFrame.validation.centroidX,
+                                                 objectFrame.validation.centroidY);
+                track.outputIndex = results.size();
+                applyTrackState(objectFrame, track);
                 results.emplace_back(std::move(objectFrame));
+                tracks.push_back(std::move(track));
+                matchedThisFrame.push_back(true);
             }
         }
         if (progress) progress(BatchProgress{i + 1, total});
     }
 
-    SPDLOG_INFO("processBatch: processed {} images into {} records (roi={}x{} at {},{}, background={})",
-                total, results.size(), roi.w, roi.h, roi.x, roi.y, !background.empty());
+    SPDLOG_INFO("processBatch: processed {} images into {} records across {} tracks (roi={}x{} at {},{}, background={})",
+                total, results.size(), tracks.size(), roi.w, roi.h, roi.x, roi.y, !background.empty());
     return results;
+}
+
+bool ProcessingService::startBatchPipeline(BatchPipelineConfig config, BatchResultCallback callback) {
+    if (batchRunning_.load(std::memory_order_acquire)) {
+        SPDLOG_WARN("Batch pipeline already running");
+        return false;
+    }
+
+    if (config.batchSize == 0) {
+        config.batchSize = 1;
+    }
+    if (config.maxQueuedFrames == 0) {
+        config.maxQueuedFrames = config.batchSize;
+    }
+    if (config.workerCount == 0) {
+        config.workerCount = 1;
+    }
+
+    {
+        std::scoped_lock lk(batchMutex_);
+        std::queue<QueuedBatchFrame> empty;
+        batchQueue_.swap(empty);
+        batchConfig_ = std::move(config);
+        batchResultCallback_ = std::move(callback);
+        batchFramesAccepted_.store(0, std::memory_order_relaxed);
+        batchFramesDropped_.store(0, std::memory_order_relaxed);
+        batchFramesProcessed_.store(0, std::memory_order_relaxed);
+        batchBatchesProcessed_.store(0, std::memory_order_relaxed);
+        batchMaxQueueDepth_.store(0, std::memory_order_relaxed);
+        batchWorkerCount_.store(batchConfig_.workerCount, std::memory_order_relaxed);
+    }
+
+    batchRunning_.store(true, std::memory_order_release);
+    batchWorkers_.reserve(batchWorkerCount_.load(std::memory_order_relaxed));
+    for (size_t i = 0; i < batchWorkerCount_.load(std::memory_order_relaxed); ++i) {
+        batchWorkers_.emplace_back(&ProcessingService::batchWorkerLoop, this);
+    }
+
+    SPDLOG_INFO("Batch pipeline started: batch_size={}, max_queue={}, workers={}",
+                batchConfig_.batchSize, batchConfig_.maxQueuedFrames, batchConfig_.workerCount);
+    return true;
+}
+
+void ProcessingService::stopBatchPipeline() {
+    if (!batchRunning_.exchange(false, std::memory_order_acq_rel)) {
+        return;
+    }
+
+    batchCv_.notify_all();
+    for (auto& worker : batchWorkers_) {
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+    batchWorkers_.clear();
+
+    {
+        std::scoped_lock lk(batchMutex_);
+        std::queue<QueuedBatchFrame> empty;
+        batchQueue_.swap(empty);
+        batchResultCallback_ = {};
+        batchWorkerCount_.store(0, std::memory_order_relaxed);
+    }
+
+    SPDLOG_INFO("Batch pipeline stopped: accepted={}, processed={}, dropped={}, batches={}",
+                batchFramesAccepted_.load(std::memory_order_relaxed),
+                batchFramesProcessed_.load(std::memory_order_relaxed),
+                batchFramesDropped_.load(std::memory_order_relaxed),
+                batchBatchesProcessed_.load(std::memory_order_relaxed));
+}
+
+bool ProcessingService::enqueueBatchFrame(const cv::Mat& grayImage, uint64_t index, uint64_t timestampNs) {
+    if (!batchRunning_.load(std::memory_order_acquire) || grayImage.empty()) {
+        return false;
+    }
+
+    cv::Mat gray;
+    if (grayImage.type() == CV_8UC1) {
+        gray = grayImage.clone();
+    } else if (grayImage.channels() == 3) {
+        cv::cvtColor(grayImage, gray, cv::COLOR_BGR2GRAY);
+    } else {
+        grayImage.convertTo(gray, CV_8UC1);
+    }
+
+    bool shouldNotify = false;
+    {
+        std::scoped_lock lk(batchMutex_);
+        if (!batchRunning_.load(std::memory_order_relaxed)) {
+            return false;
+        }
+        if (batchQueue_.size() >= batchConfig_.maxQueuedFrames) {
+            batchFramesDropped_.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+
+        batchQueue_.push(QueuedBatchFrame{std::move(gray), index, timestampNs});
+        batchFramesAccepted_.fetch_add(1, std::memory_order_relaxed);
+
+        const size_t depth = batchQueue_.size();
+        size_t observed = batchMaxQueueDepth_.load(std::memory_order_relaxed);
+        while (depth > observed &&
+               !batchMaxQueueDepth_.compare_exchange_weak(observed, depth, std::memory_order_relaxed)) {
+        }
+
+        shouldNotify = depth >= batchConfig_.batchSize;
+    }
+
+    if (shouldNotify) {
+        batchCv_.notify_one();
+    }
+    return true;
+}
+
+bool ProcessingService::enqueueBatchFrame(const backend::playback::Frame& frame, uint64_t index) {
+    if (frame.width == 0 || frame.height == 0 || frame.data.empty()) {
+        return false;
+    }
+
+    cv::Mat gray = makeGrayCopy(frame.width, frame.height, frame.linePitch, frame.data.data());
+    return enqueueBatchFrame(gray, index, frame.timestamp);
+}
+
+ProcessingService::BatchPipelineStats ProcessingService::getBatchPipelineStats() const {
+    BatchPipelineStats stats;
+    stats.framesAccepted = batchFramesAccepted_.load(std::memory_order_relaxed);
+    stats.framesDropped = batchFramesDropped_.load(std::memory_order_relaxed);
+    stats.framesProcessed = batchFramesProcessed_.load(std::memory_order_relaxed);
+    stats.batchesProcessed = batchBatchesProcessed_.load(std::memory_order_relaxed);
+    stats.maxQueueDepth = batchMaxQueueDepth_.load(std::memory_order_relaxed);
+    stats.workerCount = batchWorkerCount_.load(std::memory_order_relaxed);
+    stats.running = batchRunning_.load(std::memory_order_acquire);
+
+    std::scoped_lock lk(batchMutex_);
+    stats.currentQueueDepth = batchQueue_.size();
+    stats.batchSize = batchConfig_.batchSize;
+    if (stats.workerCount == 0 && stats.running) {
+        stats.workerCount = batchConfig_.workerCount;
+    }
+    return stats;
+}
+
+void ProcessingService::batchWorkerLoop() {
+    while (true) {
+        std::vector<QueuedBatchFrame> inputs;
+        BatchPipelineConfig config;
+        BatchResultCallback callback;
+
+        {
+            std::unique_lock lk(batchMutex_);
+            batchCv_.wait(lk, [&] {
+                const size_t batchSize = std::max<size_t>(1, batchConfig_.batchSize);
+                return !batchRunning_.load(std::memory_order_acquire) || batchQueue_.size() >= batchSize;
+            });
+
+            if (batchQueue_.empty() && !batchRunning_.load(std::memory_order_acquire)) {
+                break;
+            }
+
+            const size_t batchSize = std::max<size_t>(1, batchConfig_.batchSize);
+            const size_t desired = batchRunning_.load(std::memory_order_relaxed)
+                                       ? batchSize
+                                       : std::min(batchQueue_.size(), batchSize);
+            if (batchQueue_.size() < desired) {
+                continue;
+            }
+
+            inputs.reserve(desired);
+            for (size_t i = 0; i < desired && !batchQueue_.empty(); ++i) {
+                inputs.emplace_back(std::move(batchQueue_.front()));
+                batchQueue_.pop();
+            }
+            config = batchConfig_;
+            callback = batchResultCallback_;
+        }
+
+        std::vector<ProcessedFrame> results;
+        results.reserve(inputs.size());
+        for (const auto& item : inputs) {
+            results.emplace_back(computeProcessedFrame(item.gray,
+                                                       config.background,
+                                                       config.processing,
+                                                       config.roi,
+                                                       item.index,
+                                                       item.timestampNs));
+        }
+
+        if (!results.empty()) {
+            batchFramesProcessed_.fetch_add(static_cast<uint64_t>(results.size()), std::memory_order_relaxed);
+            batchBatchesProcessed_.fetch_add(1, std::memory_order_relaxed);
+            if (callback) {
+                callback(std::move(results));
+            }
+        }
+    }
 }
 
 void ProcessingService::setRingRatioCallback(RingRatioCallback callback) {
@@ -840,6 +1200,11 @@ FilterResult ProcessingService::evaluateInnerContourObject(const ContourAnalysis
 
     const cv::Mat objectMask = makeObjectMask(processedImage.size(), analysis.filteredContours,
                                               innerFilteredIdx, parentIdx, true);
+    const auto& geometryContour =
+        (parentIdx >= 0 && parentIdx < static_cast<int>(analysis.filteredContours.size()))
+            ? analysis.filteredContours[static_cast<size_t>(parentIdx)]
+            : innerContour;
+    populateGeometry(result, geometryContour);
     if (!originalImage.empty()) {
         result.brightness = calculateBrightnessQuantiles(originalImage, objectMask);
     }
@@ -926,6 +1291,7 @@ FilterResult ProcessingService::evaluateOuterContourObject(const ContourAnalysis
     const auto& contour = analysis.filteredContours[contourIdx];
     const cv::Mat objectMask = makeObjectMask(processedImage.size(), analysis.filteredContours,
                                               static_cast<int>(contourIdx), -1, false);
+    populateGeometry(result, contour);
     if (!originalImage.empty()) {
         result.brightness = calculateBrightnessQuantiles(originalImage, objectMask);
     }

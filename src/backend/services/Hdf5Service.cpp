@@ -74,6 +74,16 @@ namespace backend::services
             uint64_t timestampNs;
             int32_t objectId;
             int32_t objectCount;
+            int32_t trackId;
+            uint64_t trackFirstFrame;
+            uint64_t trackLastFrame;
+            int32_t trackObservationCount;
+            double bboxX;
+            double bboxY;
+            double bboxWidth;
+            double bboxHeight;
+            double centroidX;
+            double centroidY;
             double deformability;
             double area;
             double areaRatio;
@@ -92,7 +102,8 @@ namespace backend::services
         };
 
         hid_t createProcessedFrameMetadataType(bool includeBaseFields = true,
-                                               bool includeObjectFields = true)
+                                               bool includeObjectFields = true,
+                                               bool includeTrackingFields = true)
         {
             hid_t compTypeId = H5Tcreate(H5T_COMPOUND, sizeof(ProcessedFrameMetadataRecord));
             if (includeBaseFields)
@@ -120,6 +131,19 @@ namespace backend::services
                 H5Tinsert(compTypeId, "objectId", HOFFSET(ProcessedFrameMetadataRecord, objectId), H5T_NATIVE_INT32);
                 H5Tinsert(compTypeId, "objectCount", HOFFSET(ProcessedFrameMetadataRecord, objectCount), H5T_NATIVE_INT32);
             }
+            if (includeTrackingFields)
+            {
+                H5Tinsert(compTypeId, "trackId", HOFFSET(ProcessedFrameMetadataRecord, trackId), H5T_NATIVE_INT32);
+                H5Tinsert(compTypeId, "trackFirstFrame", HOFFSET(ProcessedFrameMetadataRecord, trackFirstFrame), H5T_NATIVE_UINT64);
+                H5Tinsert(compTypeId, "trackLastFrame", HOFFSET(ProcessedFrameMetadataRecord, trackLastFrame), H5T_NATIVE_UINT64);
+                H5Tinsert(compTypeId, "trackObservationCount", HOFFSET(ProcessedFrameMetadataRecord, trackObservationCount), H5T_NATIVE_INT32);
+                H5Tinsert(compTypeId, "bboxX", HOFFSET(ProcessedFrameMetadataRecord, bboxX), H5T_NATIVE_DOUBLE);
+                H5Tinsert(compTypeId, "bboxY", HOFFSET(ProcessedFrameMetadataRecord, bboxY), H5T_NATIVE_DOUBLE);
+                H5Tinsert(compTypeId, "bboxWidth", HOFFSET(ProcessedFrameMetadataRecord, bboxWidth), H5T_NATIVE_DOUBLE);
+                H5Tinsert(compTypeId, "bboxHeight", HOFFSET(ProcessedFrameMetadataRecord, bboxHeight), H5T_NATIVE_DOUBLE);
+                H5Tinsert(compTypeId, "centroidX", HOFFSET(ProcessedFrameMetadataRecord, centroidX), H5T_NATIVE_DOUBLE);
+                H5Tinsert(compTypeId, "centroidY", HOFFSET(ProcessedFrameMetadataRecord, centroidY), H5T_NATIVE_DOUBLE);
+            }
             return compTypeId;
         }
 
@@ -130,6 +154,16 @@ namespace backend::services
             md.timestampNs = frame.timestampNs;
             md.objectId = frame.validation.objectId;
             md.objectCount = frame.validation.objectCount;
+            md.trackId = frame.validation.trackId;
+            md.trackFirstFrame = frame.validation.trackFirstFrame;
+            md.trackLastFrame = frame.validation.trackLastFrame;
+            md.trackObservationCount = frame.validation.trackObservationCount;
+            md.bboxX = frame.validation.bboxX;
+            md.bboxY = frame.validation.bboxY;
+            md.bboxWidth = frame.validation.bboxWidth;
+            md.bboxHeight = frame.validation.bboxHeight;
+            md.centroidX = frame.validation.centroidX;
+            md.centroidY = frame.validation.centroidY;
             md.deformability = frame.validation.deformability;
             md.area = frame.validation.area;
             md.areaRatio = frame.validation.areaRatio;
@@ -1569,9 +1603,19 @@ namespace backend::services
         {
             md.objectId = -1;
             md.objectCount = 0;
+            md.trackId = -1;
+            md.trackFirstFrame = 0;
+            md.trackLastFrame = 0;
+            md.trackObservationCount = 0;
+            md.bboxX = 0.0;
+            md.bboxY = 0.0;
+            md.bboxWidth = 0.0;
+            md.bboxHeight = 0.0;
+            md.centroidX = 0.0;
+            md.centroidY = 0.0;
         }
 
-        hid_t baseMemTypeId = createProcessedFrameMetadataType(true, false);
+        hid_t baseMemTypeId = createProcessedFrameMetadataType(true, false, false);
         herr_t status = H5Dread(datasetId, baseMemTypeId, H5S_ALL, H5S_ALL, H5P_DEFAULT, metadata.data());
         H5Tclose(baseMemTypeId);
         if (status < 0)
@@ -1586,7 +1630,7 @@ namespace backend::services
         const bool hasObjectCount = H5Tget_member_index(fileTypeId, "objectCount") >= 0;
         if (hasObjectId || hasObjectCount)
         {
-            hid_t objectMemTypeId = createProcessedFrameMetadataType(false, true);
+            hid_t objectMemTypeId = createProcessedFrameMetadataType(false, true, false);
             status = H5Dread(datasetId, objectMemTypeId, H5S_ALL, H5S_ALL, H5P_DEFAULT, metadata.data());
             H5Tclose(objectMemTypeId);
             if (status < 0)
@@ -1594,6 +1638,24 @@ namespace backend::services
                 H5Tclose(fileTypeId);
                 H5Dclose(datasetId);
                 SPDLOG_ERROR("Failed to read object metadata fields from {}", datasetPath);
+                return false;
+            }
+        }
+
+        const bool hasTrackId = H5Tget_member_index(fileTypeId, "trackId") >= 0;
+        const bool hasTrackFirstFrame = H5Tget_member_index(fileTypeId, "trackFirstFrame") >= 0;
+        const bool hasTrackLastFrame = H5Tget_member_index(fileTypeId, "trackLastFrame") >= 0;
+        const bool hasTrackObservationCount = H5Tget_member_index(fileTypeId, "trackObservationCount") >= 0;
+        if (hasTrackId || hasTrackFirstFrame || hasTrackLastFrame || hasTrackObservationCount)
+        {
+            hid_t trackingMemTypeId = createProcessedFrameMetadataType(false, false, true);
+            status = H5Dread(datasetId, trackingMemTypeId, H5S_ALL, H5S_ALL, H5P_DEFAULT, metadata.data());
+            H5Tclose(trackingMemTypeId);
+            if (status < 0)
+            {
+                H5Tclose(fileTypeId);
+                H5Dclose(datasetId);
+                SPDLOG_ERROR("Failed to read tracking metadata fields from {}", datasetPath);
                 return false;
             }
         }
@@ -1611,6 +1673,16 @@ namespace backend::services
             frame.timestampNs = md.timestampNs;
             frame.validation.objectId = md.objectId;
             frame.validation.objectCount = md.objectCount;
+            frame.validation.trackId = md.trackId;
+            frame.validation.trackFirstFrame = md.trackFirstFrame;
+            frame.validation.trackLastFrame = md.trackLastFrame;
+            frame.validation.trackObservationCount = md.trackObservationCount;
+            frame.validation.bboxX = md.bboxX;
+            frame.validation.bboxY = md.bboxY;
+            frame.validation.bboxWidth = md.bboxWidth;
+            frame.validation.bboxHeight = md.bboxHeight;
+            frame.validation.centroidX = md.centroidX;
+            frame.validation.centroidY = md.centroidY;
             frame.validation.deformability = md.deformability;
             frame.validation.area = md.area;
             frame.validation.areaRatio = md.areaRatio;

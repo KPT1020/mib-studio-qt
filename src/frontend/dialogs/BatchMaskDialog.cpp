@@ -892,15 +892,31 @@ bool BatchMaskDialog::readHdf5Metadata(
 }
 
 void BatchMaskDialog::applySourceMetadata() {
-    if (results_.size() != sourceMetadata_.size()) return;
+    if (sourceMetadata_.empty()) return;
 
-    const uint64_t firstTimestamp = sourceMetadata_.empty() ? 0 : sourceMetadata_.front().timestampNs;
-    for (size_t i = 0; i < results_.size(); ++i) {
-        const auto& md = sourceMetadata_[i];
-        results_[i].index = md.index;
-        results_[i].timestampNs = (md.timestampNs >= firstTimestamp)
+    const uint64_t firstTimestamp = sourceMetadata_.front().timestampNs;
+    auto mapSourceIndex = [this](uint64_t batchIndex) {
+        const size_t idx = static_cast<size_t>(batchIndex);
+        if (idx < sourceMetadata_.size()) {
+            return sourceMetadata_[idx].index;
+        }
+        return batchIndex;
+    };
+
+    for (auto& result : results_) {
+        const size_t batchIndex = static_cast<size_t>(result.index);
+        if (batchIndex >= sourceMetadata_.size()) continue;
+
+        const auto& md = sourceMetadata_[batchIndex];
+        result.index = md.index;
+        result.timestampNs = (md.timestampNs >= firstTimestamp)
             ? (md.timestampNs - firstTimestamp)
             : 0;
+
+        if (result.validation.trackId >= 0) {
+            result.validation.trackFirstFrame = mapSourceIndex(result.validation.trackFirstFrame);
+            result.validation.trackLastFrame = mapSourceIndex(result.validation.trackLastFrame);
+        }
     }
 }
 
