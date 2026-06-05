@@ -52,12 +52,6 @@ cv::Rect2d resultBbox(const FilterResult& result) {
     return cv::Rect2d(result.bboxX, result.bboxY, result.bboxWidth, result.bboxHeight);
 }
 
-double centroidDistance(const FilterResult& result, const cv::Point2d& centroid) {
-    const double dx = result.centroidX - centroid.x;
-    const double dy = result.centroidY - centroid.y;
-    return std::sqrt(dx * dx + dy * dy);
-}
-
 void populateGeometry(FilterResult& result, const std::vector<cv::Point>& contour) {
     if (contour.empty()) {
         return;
@@ -99,11 +93,15 @@ void applyTrackState(ProcessedFrame& frame, const BatchTrack& track) {
 int findMatchingTrack(const std::vector<BatchTrack>& tracks,
                       const std::vector<bool>& matchedThisFrame,
                       const FilterResult& detection,
-                      uint64_t frameIndex) {
+                      uint64_t frameIndex,
+                      int frameWidth) {
     constexpr uint64_t kMaxFrameGap = 5;
     constexpr double kMinIou = 0.08;
     constexpr double kBaseCentroidThresholdPx = 24.0;
     constexpr double kMaxLeftwardJitterPx = 2.0;
+    constexpr double kDirectionalFrameFraction = 0.35;
+    constexpr double kMinDirectionalStepPx = 64.0;
+    constexpr double kMinVerticalTolerancePx = 20.0;
 
     const cv::Rect2d bbox = resultBbox(detection);
     if (rectArea(bbox) <= 0.0) {
@@ -131,17 +129,27 @@ int findMatchingTrack(const std::vector<BatchTrack>& tracks,
         }
 
         const double iou = rectIou(bbox, track.lastBbox);
-        const double distance = centroidDistance(detection, track.lastCentroid);
+        const double dx = detection.centroidX - track.lastCentroid.x;
+        const double dy = std::abs(detection.centroidY - track.lastCentroid.y);
         const double motionThreshold = std::max(
             kBaseCentroidThresholdPx,
             std::max(track.lastBbox.width, track.lastBbox.height) * 1.25 +
                 static_cast<double>(frameGap) * 8.0);
-        if (iou < kMinIou && distance > motionThreshold) {
+        const double directionalStep = std::max(
+            motionThreshold,
+            std::max(kMinDirectionalStepPx,
+                     static_cast<double>(std::max(1, frameWidth)) * kDirectionalFrameFraction) *
+                static_cast<double>(frameGap));
+        const double verticalTolerance = std::max(
+            kMinVerticalTolerancePx,
+            std::max(track.lastBbox.height, bbox.height) * 1.5);
+        if (iou < kMinIou && (dx > directionalStep || dy > verticalTolerance)) {
             continue;
         }
 
         const double score = (1.0 - std::min(1.0, iou)) +
-                             (distance / std::max(1.0, motionThreshold)) +
+                             (std::max(0.0, dx) / std::max(1.0, directionalStep)) +
+                             (dy / std::max(1.0, verticalTolerance)) +
                              static_cast<double>(frameGap) * 0.05;
         if (score < bestScore) {
             bestScore = score;
@@ -610,7 +618,7 @@ std::vector<ProcessedFrame> ProcessingService::processBatch(
                 }
 
                 const int trackIdx = findMatchingTrack(
-                    tracks, matchedThisFrame, objectFrame.validation, objectFrame.index);
+                    tracks, matchedThisFrame, objectFrame.validation, objectFrame.index, cvRoi.width);
                 if (trackIdx >= 0) {
                     auto& track = tracks[static_cast<size_t>(trackIdx)];
                     track.lastFrame = objectFrame.index;

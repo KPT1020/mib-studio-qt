@@ -43,6 +43,22 @@ backend::services::ProcessingConfig permissiveTrackingConfig()
     return config;
 }
 
+backend::services::ProcessingConfig hfStreamTrackingConfig()
+{
+    backend::services::ProcessingConfig config;
+    config.gaussian_blur_size = 3;
+    config.bg_subtract_threshold = 6;
+    config.morph_kernel_size = 3;
+    config.morph_iterations = 1;
+    config.enable_area_range_check = false;
+    config.enable_ring_ratio_check = false;
+    config.enable_deformability_range_check = false;
+    config.enable_area_ratio_check = false;
+    config.enable_border_check = false;
+    config.require_single_inner_contour = false;
+    return config;
+}
+
 std::string makeTempPath()
 {
     std::random_device rd;
@@ -89,6 +105,16 @@ struct ReviewSample
     cv::Mat input;
     cv::Mat processedMask;
     int validDetections{0};
+};
+
+struct HfStreamEvidence
+{
+    bool available{false};
+    int rawValidObservations{0};
+    std::vector<int> apiRows;
+    std::vector<int> viewerCells;
+    std::vector<cv::Mat> inputFrames;
+    std::vector<backend::services::ProcessedFrame> tracks;
 };
 
 std::string jsonEscape(const std::string& value)
@@ -207,11 +233,123 @@ void writeTrackingOverlay(const std::filesystem::path& path,
     cv::imwrite(path.string(), canvas);
 }
 
+bool readHfRowImage(const std::filesystem::path& dir,
+                    int row,
+                    cv::Mat& out,
+                    std::ostream& err)
+{
+    const auto path = dir / ("row-" + std::to_string(row) + ".jpg");
+    out = cv::imread(path.string(), cv::IMREAD_GRAYSCALE);
+    if (out.empty())
+    {
+        err << "failed to read HF sample image " << path << "\n";
+        return false;
+    }
+    return true;
+}
+
+bool readHfRowImages(const std::filesystem::path& dir,
+                     const std::vector<int>& rows,
+                     std::vector<cv::Mat>& out,
+                     std::ostream& err)
+{
+    out.clear();
+    out.reserve(rows.size());
+    for (const int row : rows)
+    {
+        cv::Mat image;
+        if (!readHfRowImage(dir, row, image, err))
+        {
+            return false;
+        }
+        out.push_back(std::move(image));
+    }
+    return true;
+}
+
+int countRawValidObservations(backend::services::ProcessingService& service,
+                              const std::vector<cv::Mat>& frames,
+                              const backend::services::ProcessingConfig& config,
+                              const cv::Mat& background,
+                              const backend::services::ProcessingService::Roi& roi)
+{
+    int count = 0;
+    for (const auto& frame : frames)
+    {
+        count += static_cast<int>(validFrames(service.processBatch({frame}, config, background, roi)).size());
+    }
+    return count;
+}
+
+bool loadAndValidateHfStreamEvidence(backend::services::ProcessingService& service,
+                                     HfStreamEvidence& evidence,
+                                     std::ostream& err)
+{
+    const char* sampleDir = std::getenv("KIN9_HF_SAMPLE_DIR");
+    if (sampleDir == nullptr || std::string(sampleDir).empty())
+    {
+        std::cout << "KIN9_HF_SAMPLE_DIR not set; skipping HF 512x96stream sample assertion\n";
+        return true;
+    }
+
+    const std::filesystem::path dir(sampleDir);
+    evidence.available = true;
+    evidence.apiRows = {20, 21, 22};
+    evidence.viewerCells = {21, 22, 23};
+    if (!readHfRowImages(dir, evidence.apiRows, evidence.inputFrames, err))
+    {
+        return false;
+    }
+
+    cv::Mat background;
+    if (!readHfRowImage(dir, 24, background, err))
+    {
+        return false;
+    }
+
+    const auto config = hfStreamTrackingConfig();
+    const backend::services::ProcessingService::Roi roi{0, 8, 512, 70};
+    evidence.rawValidObservations = countRawValidObservations(service, evidence.inputFrames, config, background, roi);
+    const auto hfResults = service.processBatch(evidence.inputFrames, config, background, roi);
+    evidence.tracks = validFrames(hfResults);
+
+    if (evidence.rawValidObservations != 3)
+    {
+        err << "expected HF viewer cells 21-23 to produce 3 raw valid observations, got "
+            << evidence.rawValidObservations << "\n";
+        return false;
+    }
+    if (evidence.tracks.size() != 1)
+    {
+        err << "expected HF viewer cells 21-23 to dedupe to 1 track, got "
+            << evidence.tracks.size() << " tracks from " << hfResults.size()
+            << " total records\n";
+        return false;
+    }
+
+    const auto& val = evidence.tracks.front().validation;
+    if (val.trackId != 1 || val.trackFirstFrame != 0 || val.trackLastFrame != 2 ||
+        val.trackObservationCount != 3)
+    {
+        err << "bad HF stream track metadata: trackId=" << val.trackId
+            << " first=" << val.trackFirstFrame
+            << " last=" << val.trackLastFrame
+            << " observations=" << val.trackObservationCount << "\n";
+        return false;
+    }
+
+    std::cout << "HF 512x96stream viewer cells 21-23 deduped "
+              << evidence.rawValidObservations << " raw observations to "
+              << evidence.tracks.size() << " track\n";
+    return true;
+}
+
 void writeReviewArtifacts(const std::filesystem::path& dir,
                           const std::vector<cv::Mat>& inputFrames,
                           const std::vector<backend::services::ProcessedFrame>& tracks,
                           const std::vector<cv::Mat>& reverseInputFrames,
                           const std::vector<backend::services::ProcessedFrame>& reverseTracks,
+                          const HfStreamEvidence& hfEvidence,
                           const std::vector<ReviewSample>& samples)
 {
     std::filesystem::create_directories(dir);
@@ -235,6 +373,15 @@ void writeReviewArtifacts(const std::filesystem::path& dir,
         cv::imwrite((dir / name.str()).string(), reverseInputFrames[i]);
     }
 
+    for (size_t i = 0; i < hfEvidence.inputFrames.size(); ++i)
+    {
+        std::ostringstream name;
+        name << "hf_512x96stream_cell_" << std::setw(3) << std::setfill('0')
+             << (i < hfEvidence.viewerCells.size() ? hfEvidence.viewerCells[i] : static_cast<int>(i + 1))
+             << "_input.png";
+        cv::imwrite((dir / name.str()).string(), hfEvidence.inputFrames[i]);
+    }
+
     if (!tracks.empty())
     {
         cv::imwrite((dir / "processed_mask_track_001.png").string(), tracks.front().processedImage);
@@ -242,6 +389,12 @@ void writeReviewArtifacts(const std::filesystem::path& dir,
 
     writeTrackingOverlay(dir / "tracking_overlay.png", inputFrames.front(), tracks);
     writeTrackingOverlay(dir / "reverse_motion_overlay.png", reverseInputFrames.front(), reverseTracks);
+    if (hfEvidence.available && !hfEvidence.inputFrames.empty())
+    {
+        writeTrackingOverlay(dir / "hf_512x96stream_overlay.png",
+                             hfEvidence.inputFrames.front(),
+                             hfEvidence.tracks);
+    }
 
     std::ofstream metrics(dir / "metrics.json");
     metrics << "{\n"
@@ -253,6 +406,52 @@ void writeReviewArtifacts(const std::filesystem::path& dir,
             << "  \"reverse_motion_raw_observations\": 2,\n"
             << "  \"reverse_motion_tracks\": " << reverseTracks.size() << ",\n"
             << "  \"reverse_motion_duplicate_detections_suppressed\": " << (2 - reverseTracks.size()) << ",\n"
+            << "  \"hf_stream\": {\n"
+            << "    \"dataset\": \"gavinlouuu/512x96stream\",\n"
+            << "    \"config\": \"default\",\n"
+            << "    \"split\": \"train\",\n"
+            << "    \"sample_note\": \"viewer cells are one-indexed; API row_idx values are zero-indexed\",\n"
+            << "    \"available\": " << (hfEvidence.available ? "true" : "false") << ",\n"
+            << "    \"viewer_cells\": [";
+    for (size_t i = 0; i < hfEvidence.viewerCells.size(); ++i)
+    {
+        metrics << hfEvidence.viewerCells[i];
+        if (i + 1 != hfEvidence.viewerCells.size())
+        {
+            metrics << ", ";
+        }
+    }
+    metrics << "],\n"
+            << "    \"api_rows\": [";
+    for (size_t i = 0; i < hfEvidence.apiRows.size(); ++i)
+    {
+        metrics << hfEvidence.apiRows[i];
+        if (i + 1 != hfEvidence.apiRows.size())
+        {
+            metrics << ", ";
+        }
+    }
+    metrics << "],\n"
+            << "    \"raw_valid_observations\": " << hfEvidence.rawValidObservations << ",\n"
+            << "    \"deduped_valid_tracks\": " << hfEvidence.tracks.size() << ",\n"
+            << "    \"duplicate_detections_suppressed\": "
+            << (hfEvidence.rawValidObservations - static_cast<int>(hfEvidence.tracks.size())) << ",\n"
+            << "    \"tracks\": [\n";
+    for (size_t i = 0; i < hfEvidence.tracks.size(); ++i)
+    {
+        const auto& val = hfEvidence.tracks[i].validation;
+        metrics << "      {\"track_id\": " << val.trackId
+                << ", \"first_frame\": " << val.trackFirstFrame
+                << ", \"last_frame\": " << val.trackLastFrame
+                << ", \"observations\": " << val.trackObservationCount << "}";
+        if (i + 1 != hfEvidence.tracks.size())
+        {
+            metrics << ",";
+        }
+        metrics << "\n";
+    }
+    metrics << "    ]\n"
+            << "  },\n"
             << "  \"sample_cases\": [\n";
     for (size_t i = 0; i < samples.size(); ++i)
     {
@@ -308,11 +507,13 @@ void writeReviewArtifacts(const std::filesystem::path& dir,
              << "- `sample-*_input.png`, `sample-*_mask.png`, `sample-*_overlay.png`: representative per-sample input, processed mask, and contour overlay triples.\n"
              << "- `input_frame_*.png`: synthetic HF-stream-style frame sequence with two moving ring objects and one empty gap frame.\n"
              << "- `reverse_motion_frame_*.png`: chronological right-to-left overlap sequence that must not deduplicate into one track.\n"
+             << "- `hf_512x96stream_cell_*_input.png`: downloaded Hugging Face sample frames for viewer cells 21-23 from `gavinlouuu/512x96stream`.\n"
              << "- `processed_mask_track_001.png`: processed mask generated by `ProcessingService` for the first retained track record.\n"
              << "- `tracking_overlay.png`: retained track records with stable IDs and first/last frame spans overlaid on the first input frame.\n"
              << "- `reverse_motion_overlay.png`: reverse-motion records with separate one-observation tracks.\n"
+             << "- `hf_512x96stream_overlay.png`: retained HF stream track with stable ID and first/last frame span.\n"
              << "- `metrics.json`: raw observation count, deduplicated track count, suppressed duplicate count, reverse-motion track count, and per-track spans.\n\n"
-             << "Regenerate visuals with `KIN9_REVIEW_BUNDLE=review_artifacts/KIN-9 ./build/linux-backend/mib_processing_object_tracking_test`.\n"
+             << "Regenerate visuals with `KIN9_HF_SAMPLE_DIR=review_artifacts/KIN-9/hf-512x96stream KIN9_REVIEW_BUNDLE=review_artifacts/KIN-9 ./build/linux-backend/mib_processing_object_tracking_test`.\n"
              << "Run the full local bundle flow with `./review_artifacts/KIN-9/regenerate.sh`.\n";
 }
 } // namespace
@@ -400,11 +601,20 @@ int main()
         }
     }
 
-    auto makeReviewSample = [&](std::string id,
-                                std::string caseType,
-                                std::string expected,
-                                const cv::Mat& input) {
-        const auto sampleResults = service.processBatch({input}, config);
+    HfStreamEvidence hfEvidence;
+    if (!loadAndValidateHfStreamEvidence(service, hfEvidence, std::cerr))
+    {
+        return 13;
+    }
+
+    auto makeReviewSampleWithConfig = [&](std::string id,
+                                          std::string caseType,
+                                          std::string expected,
+                                          const cv::Mat& input,
+                                          const backend::services::ProcessingConfig& sampleConfig,
+                                          const cv::Mat& background,
+                                          const backend::services::ProcessingService::Roi& roi) {
+        const auto sampleResults = service.processBatch({input}, sampleConfig, background, roi);
         const auto sampleValid = validFrames(sampleResults);
         ReviewSample sample;
         sample.id = std::move(id);
@@ -419,7 +629,16 @@ int main()
         return sample;
     };
 
-    const std::vector<ReviewSample> reviewSamples{
+    auto makeReviewSample = [&](std::string id,
+                                std::string caseType,
+                                std::string expected,
+                                const cv::Mat& input) {
+        return makeReviewSampleWithConfig(std::move(id), std::move(caseType), std::move(expected),
+                                          input, config, cv::Mat{},
+                                          backend::services::ProcessingService::Roi{});
+    };
+
+    std::vector<ReviewSample> reviewSamples{
         makeReviewSample("sample-001-ltr-start", "normal multi-object",
                          "two left-to-right objects start stable tracks 1 and 2",
                          frames[0]),
@@ -436,6 +655,32 @@ int main()
                          "later leftward observation creates a separate track instead of deduplicating",
                          reverseFrames[1]),
     };
+    if (hfEvidence.available)
+    {
+        cv::Mat background;
+        if (!readHfRowImage(std::filesystem::path(std::getenv("KIN9_HF_SAMPLE_DIR")), 24, background, std::cerr))
+        {
+            return 14;
+        }
+        const auto hfConfig = hfStreamTrackingConfig();
+        const backend::services::ProcessingService::Roi hfRoi{0, 8, 512, 70};
+        for (size_t i = 0; i < hfEvidence.inputFrames.size(); ++i)
+        {
+            const int viewerCell = i < hfEvidence.viewerCells.size()
+                                       ? hfEvidence.viewerCells[i]
+                                       : static_cast<int>(i + 1);
+            std::ostringstream id;
+            id << "sample-" << std::setw(3) << std::setfill('0') << (6 + i)
+               << "-hf-cell-" << std::setw(3) << std::setfill('0') << viewerCell;
+            std::ostringstream expected;
+            expected << "HF viewer cell " << viewerCell
+                     << " is one observation of the same rightward-moving object; aggregate track 1 spans cells 21-23";
+            reviewSamples.push_back(
+                makeReviewSampleWithConfig(id.str(), "HF 512x96stream same object",
+                                           expected.str(), hfEvidence.inputFrames[i],
+                                           hfConfig, background, hfRoi));
+        }
+    }
 
     backend::services::Hdf5Service hdf5;
     const std::string path = makeTempPath();
@@ -490,7 +735,7 @@ int main()
 
     if (const char* bundle = std::getenv("KIN9_REVIEW_BUNDLE"))
     {
-        writeReviewArtifacts(bundle, frames, valid, reverseFrames, reverseValid, reviewSamples);
+        writeReviewArtifacts(bundle, frames, valid, reverseFrames, reverseValid, hfEvidence, reviewSamples);
     }
 
     return 0;
