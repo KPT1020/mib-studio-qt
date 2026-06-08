@@ -26,6 +26,17 @@ cv::Mat makeRingFrame(int width = 96, int height = 96)
     return image;
 }
 
+cv::Mat makeTwoRingObjects()
+{
+    cv::Mat image(96, 160, CV_8UC1, cv::Scalar(0));
+    const std::vector<cv::Point> centers{{48, 48}, {112, 48}};
+    for (const auto& center : centers) {
+        cv::circle(image, center, 22, cv::Scalar(255), cv::FILLED);
+        cv::circle(image, center, 11, cv::Scalar(0), cv::FILLED);
+    }
+    return image;
+}
+
 ProcessingConfig makeTestConfig()
 {
     ProcessingConfig config;
@@ -269,6 +280,60 @@ bool testMetricsAreEmittedFromBatchPath()
     return ok;
 }
 
+bool testBatchPipelineEmitsMultiObjectRecords()
+{
+    ProcessingService service;
+    ProcessingService::BatchPipelineConfig config;
+    config.batchSize = 1;
+    config.maxQueuedFrames = 4;
+    config.workerCount = 1;
+    config.processing = makeTestConfig();
+
+    std::mutex mutex;
+    std::condition_variable condition;
+    std::vector<ProcessedFrame> results;
+
+    const bool started = service.startBatchPipeline(config, [&](std::vector<ProcessedFrame> batch) {
+        std::scoped_lock lock(mutex);
+        for (auto& frame : batch) {
+            results.emplace_back(std::move(frame));
+        }
+        condition.notify_all();
+    });
+    if (!require(started, "batch pipeline should start for multi-object test")) {
+        return false;
+    }
+
+    const cv::Mat frame = makeTwoRingObjects();
+    if (!require(service.enqueueBatchFrame(frame, 7, 7000), "multi-object frame should enqueue")) {
+        service.stopBatchPipeline();
+        return false;
+    }
+
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+        if (!condition.wait_for(lock, std::chrono::seconds(5), [&] { return results.size() == 2; })) {
+            std::cerr << "multi-object batch test timed out waiting for 2 records, got " << results.size() << "\n";
+            service.stopBatchPipeline();
+            return false;
+        }
+    }
+
+    service.stopBatchPipeline();
+
+    bool ok = true;
+    ok &= require(results.size() == 2, "one two-object frame should emit two records");
+    for (size_t i = 0; i < results.size(); ++i) {
+        const auto& validation = results[i].validation;
+        ok &= require(results[i].index == 7, "multi-object record should preserve source frame index");
+        ok &= require(results[i].timestampNs == 7000, "multi-object record should preserve source timestamp");
+        ok &= require(validation.objectId == static_cast<int>(i + 1), "multi-object records should have one-based object IDs");
+        ok &= require(validation.objectCount == 2, "multi-object records should report total object count");
+        ok &= require(validation.isValid, "multi-object records should be valid for permissive test config");
+    }
+    return ok;
+}
+
 } // namespace
 
 int main()
@@ -284,6 +349,9 @@ int main()
     }
     if (!testMetricsAreEmittedFromBatchPath()) {
         return 4;
+    }
+    if (!testBatchPipelineEmitsMultiObjectRecords()) {
+        return 5;
     }
     return 0;
 }

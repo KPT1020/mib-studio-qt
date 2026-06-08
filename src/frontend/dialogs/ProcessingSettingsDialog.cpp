@@ -1,6 +1,7 @@
 #include "frontend/dialogs/ProcessingSettingsDialog.h"
 #include "ui_ProcessingSettingsDialog.h"
 
+#include <QComboBox>
 #include <QPushButton>
 
 #include <spdlog/spdlog.h>
@@ -19,9 +20,21 @@ ProcessingSettingsDialog::ProcessingSettingsDialog(backend::AppBackend& backend,
     ui->invalidSamplingSpin->setValue(static_cast<int>(backend_.processing().getInvalidFrameSamplingRate()));
     ui->flushIntervalSpin->setValue(static_cast<int>(backend_.processing().getFlushInterval()));
     ui->dropFramesCheck->setChecked(backend_.processing().getRealtimeDropFrames());
+    const auto realtimeMode = backend_.processing().getRealtimeProcessingMode();
+    ui->realtimeModeCombo->setCurrentIndex(
+        realtimeMode == backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch ? 1 : 0);
+    const auto batchSettings = backend_.processing().getRealtimeBatchSettings();
+    ui->batchSizeSpin->setValue(static_cast<int>(batchSettings.batchSize));
+    ui->batchQueueSpin->setValue(static_cast<int>(batchSettings.maxQueuedFrames));
+    ui->batchWorkersSpin->setValue(static_cast<int>(batchSettings.workerCount));
+    ui->batchDelaySpin->setValue(batchSettings.maxBatchDelayMs);
+    updateBatchControlsEnabled();
 
     // Update ROI limits and load current values
     updateRoiLimits();
+
+    connect(ui->realtimeModeCombo, qOverload<int>(&QComboBox::currentIndexChanged),
+            this, [this](int) { updateBatchControlsEnabled(); });
 
     connect(ui->buttons, &QDialogButtonBox::accepted, this, [this]() {
         applySettings();
@@ -37,6 +50,18 @@ ProcessingSettingsDialog::~ProcessingSettingsDialog() {
 
 void ProcessingSettingsDialog::onApply() {
     applySettings();
+}
+
+void ProcessingSettingsDialog::updateBatchControlsEnabled() {
+    const bool batchMode = ui->realtimeModeCombo->currentIndex() == 1;
+    ui->batchSizeLabel->setEnabled(batchMode);
+    ui->batchSizeSpin->setEnabled(batchMode);
+    ui->batchQueueLabel->setEnabled(batchMode);
+    ui->batchQueueSpin->setEnabled(batchMode);
+    ui->batchWorkersLabel->setEnabled(batchMode);
+    ui->batchWorkersSpin->setEnabled(batchMode);
+    ui->batchDelayLabel->setEnabled(batchMode);
+    ui->batchDelaySpin->setEnabled(batchMode);
 }
 
 void ProcessingSettingsDialog::updateRoiLimits() {
@@ -101,7 +126,24 @@ void ProcessingSettingsDialog::applySettings() {
     proc.setInvalidFrameSamplingRate(static_cast<size_t>(invalidNth));
     proc.setFlushInterval(static_cast<size_t>(flushEvery));
     proc.setRealtimeDropFrames(ui->dropFramesCheck->isChecked());
-    SPDLOG_INFO("Processing settings applied: invalidNth={}, flushEvery={}", invalidNth, flushEvery);
+
+    backend::services::ProcessingService::RealtimeBatchSettings batchSettings;
+    batchSettings.batchSize = static_cast<size_t>(ui->batchSizeSpin->value());
+    batchSettings.maxQueuedFrames = static_cast<size_t>(ui->batchQueueSpin->value());
+    batchSettings.workerCount = static_cast<size_t>(ui->batchWorkersSpin->value());
+    batchSettings.maxBatchDelayMs = ui->batchDelaySpin->value();
+    proc.setRealtimeBatchSettings(batchSettings);
+
+    const auto realtimeMode = ui->realtimeModeCombo->currentIndex() == 1
+                                  ? backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch
+                                  : backend::services::ProcessingService::RealtimeProcessingMode::Inline;
+    proc.setRealtimeProcessingMode(realtimeMode);
+
+    SPDLOG_INFO("Processing settings applied: invalidNth={}, flushEvery={}, realtimeMode={}, batchSize={}, batchQueue={}, batchWorkers={}, batchDelayMs={}",
+                invalidNth, flushEvery,
+                realtimeMode == backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch ? "async_batch" : "inline",
+                batchSettings.batchSize, batchSettings.maxQueuedFrames,
+                batchSettings.workerCount, batchSettings.maxBatchDelayMs);
 
     // Apply ROI settings
     const int roiX = ui->roiXSpin->value();

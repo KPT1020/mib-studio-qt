@@ -1,5 +1,12 @@
 {
     "buffer_threshold": 1000,
+    "realtime_processing": {
+        "mode": "inline",
+        "batch_size": 16,
+        "max_queued_frames": 4096,
+        "worker_count": 1,
+        "max_batch_delay_ms": 10
+    },
     "image_processing": {
         "area_threshold_max": 290,
         "area_threshold_min": 60,

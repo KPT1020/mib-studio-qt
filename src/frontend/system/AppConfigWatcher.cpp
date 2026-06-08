@@ -11,6 +11,8 @@
 #include <QTextStream>
 #include <QTimer>
 
+#include <algorithm>
+
 #include <spdlog/spdlog.h>
 #ifdef _WIN32
 #define NOMINMAX // Prevent Windows.h from defining min/max macros
@@ -302,6 +304,37 @@ namespace frontend
 		{
 			const int flushEvery = std::max(1, root.value("buffer_threshold").toInt(1000));
 			backend_.processing().setFlushInterval(static_cast<size_t>(flushEvery));
+		}
+
+		// 2.25) Realtime processing mode
+		if (root.contains("realtime_processing") && root.value("realtime_processing").isObject())
+		{
+			const QJsonObject rp = root.value("realtime_processing").toObject();
+			auto batchSettings = backend_.processing().getRealtimeBatchSettings();
+			if (rp.contains("batch_size"))
+				batchSettings.batchSize = static_cast<size_t>(std::max(1, rp.value("batch_size").toInt(static_cast<int>(batchSettings.batchSize))));
+			if (rp.contains("max_queued_frames"))
+				batchSettings.maxQueuedFrames = static_cast<size_t>(std::max(1, rp.value("max_queued_frames").toInt(static_cast<int>(batchSettings.maxQueuedFrames))));
+			if (rp.contains("worker_count"))
+				batchSettings.workerCount = static_cast<size_t>(std::max(1, rp.value("worker_count").toInt(static_cast<int>(batchSettings.workerCount))));
+			if (rp.contains("max_batch_delay_ms"))
+				batchSettings.maxBatchDelayMs = std::max(1, rp.value("max_batch_delay_ms").toInt(batchSettings.maxBatchDelayMs));
+			backend_.processing().setRealtimeBatchSettings(batchSettings);
+
+			auto mode = backend_.processing().getRealtimeProcessingMode();
+			if (rp.contains("mode"))
+			{
+				const QString modeText = rp.value("mode").toString("inline").trimmed().toLower();
+				mode = (modeText == "async_batch" || modeText == "batch" || modeText == "kin6")
+						   ? backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch
+						   : backend::services::ProcessingService::RealtimeProcessingMode::Inline;
+				backend_.processing().setRealtimeProcessingMode(mode);
+			}
+
+			SPDLOG_INFO("AppConfigWatcher: realtime_processing mode={}, batch_size={}, max_queue={}, workers={}, max_delay_ms={}",
+						mode == backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch ? "async_batch" : "inline",
+						batchSettings.batchSize, batchSettings.maxQueuedFrames,
+						batchSettings.workerCount, batchSettings.maxBatchDelayMs);
 		}
 
 		// 2.5) Pixel to micron conversion factor

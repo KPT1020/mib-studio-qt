@@ -22,6 +22,7 @@ private slots:
 private:
     void applySettings();
     void updateRoiLimits();
+    void updateBatchControlsEnabled();
 
     Ui::ProcessingSettingsDialog* ui;
     backend::AppBackend& backend_;

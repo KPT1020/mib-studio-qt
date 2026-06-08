@@ -269,9 +269,69 @@ void ProcessingService::setRealtimeDropFrames(bool on) {
     rtDropFrames_.store(on, std::memory_order_relaxed);
 }
 
+void ProcessingService::setRealtimeProcessingMode(RealtimeProcessingMode mode) {
+    const int normalized = static_cast<int>(mode);
+    const int previous = rtProcessingMode_.exchange(normalized, std::memory_order_acq_rel);
+    if (previous == normalized) {
+        return;
+    }
+
+    SPDLOG_INFO("ProcessingService: realtime processing mode set to {}",
+                mode == RealtimeProcessingMode::AsyncBatch ? "async_batch" : "inline");
+
+    if (rtRunning_.load(std::memory_order_acquire)) {
+        auto store = rtStore_;
+        stopRealtime();
+        startRealtime(store);
+    }
+}
+
+ProcessingService::RealtimeProcessingMode ProcessingService::getRealtimeProcessingMode() const {
+    const int mode = rtProcessingMode_.load(std::memory_order_acquire);
+    return mode == static_cast<int>(RealtimeProcessingMode::AsyncBatch)
+               ? RealtimeProcessingMode::AsyncBatch
+               : RealtimeProcessingMode::Inline;
+}
+
+void ProcessingService::setRealtimeBatchSettings(const RealtimeBatchSettings& settings) {
+    RealtimeBatchSettings normalized = settings;
+    normalized.batchSize = std::max<size_t>(1, normalized.batchSize);
+    normalized.maxQueuedFrames = std::max(normalized.batchSize, normalized.maxQueuedFrames);
+    normalized.workerCount = std::max<size_t>(1, normalized.workerCount);
+    normalized.maxBatchDelayMs = std::max(1, normalized.maxBatchDelayMs);
+
+    bool restart = false;
+    {
+        std::scoped_lock lk(rtBatchSettingsMutex_);
+        restart = rtRunning_.load(std::memory_order_acquire) &&
+                  getRealtimeProcessingMode() == RealtimeProcessingMode::AsyncBatch &&
+                  rtBatchSettings_.workerCount != normalized.workerCount;
+        rtBatchSettings_ = normalized;
+    }
+
+    SPDLOG_INFO("ProcessingService: realtime batch settings batch_size={}, max_queue={}, workers={}, max_delay_ms={}",
+                normalized.batchSize, normalized.maxQueuedFrames, normalized.workerCount, normalized.maxBatchDelayMs);
+
+    if (restart) {
+        auto store = rtStore_;
+        stopRealtime();
+        startRealtime(store);
+    } else {
+        refreshRealtimeBatchPipelineConfig();
+    }
+}
+
+ProcessingService::RealtimeBatchSettings ProcessingService::getRealtimeBatchSettings() const {
+    std::scoped_lock lk(rtBatchSettingsMutex_);
+    return rtBatchSettings_;
+}
+
 void ProcessingService::setRealtimeRoi(const Roi& roi) {
-    std::scoped_lock lk(rtMutex_);
-    rtRoi_ = roi;
+    {
+        std::scoped_lock lk(rtMutex_);
+        rtRoi_ = roi;
+    }
+    refreshRealtimeBatchPipelineConfig();
 }
 
 ProcessingService::Roi ProcessingService::getRealtimeRoi() const {
@@ -280,16 +340,19 @@ ProcessingService::Roi ProcessingService::getRealtimeRoi() const {
 }
 
 void ProcessingService::setRealtimeBackgroundGray(const cv::Mat& bg) {
-    std::scoped_lock lk(rtMutex_);
-    if (!bg.empty() && bg.type() == CV_8UC1) {
-        rtBgGray_ = std::make_shared<cv::Mat>(bg.clone());
-    } else if (!bg.empty()) {
-        cv::Mat tmp;
-        bg.convertTo(tmp, CV_8UC1);
-        rtBgGray_ = std::make_shared<cv::Mat>(std::move(tmp));
-    } else {
-        rtBgGray_.reset();
+    {
+        std::scoped_lock lk(rtMutex_);
+        if (!bg.empty() && bg.type() == CV_8UC1) {
+            rtBgGray_ = std::make_shared<cv::Mat>(bg.clone());
+        } else if (!bg.empty()) {
+            cv::Mat tmp;
+            bg.convertTo(tmp, CV_8UC1);
+            rtBgGray_ = std::make_shared<cv::Mat>(std::move(tmp));
+        } else {
+            rtBgGray_.reset();
+        }
     }
+    refreshRealtimeBatchPipelineConfig();
 }
 
 cv::Mat ProcessingService::getRealtimeBackgroundGray() const {
@@ -389,8 +452,11 @@ void ProcessingService::clearMonitoringFrames() {
 }
 
 void ProcessingService::setProcessingConfig(const ProcessingConfig& config) {
-    std::scoped_lock lk(configMutex_);
-    processingConfig_ = config;
+    {
+        std::scoped_lock lk(configMutex_);
+        processingConfig_ = config;
+    }
+    refreshRealtimeBatchPipelineConfig();
 }
 
 ProcessingConfig ProcessingService::getProcessingConfig() const {
@@ -675,6 +741,9 @@ bool ProcessingService::startBatchPipeline(BatchPipelineConfig config, BatchResu
     if (config.workerCount == 0) {
         config.workerCount = 1;
     }
+    if (config.maxBatchDelayMs <= 0) {
+        config.maxBatchDelayMs = 1;
+    }
 
     {
         std::scoped_lock lk(batchMutex_);
@@ -686,6 +755,7 @@ bool ProcessingService::startBatchPipeline(BatchPipelineConfig config, BatchResu
         batchFramesDropped_.store(0, std::memory_order_relaxed);
         batchFramesProcessed_.store(0, std::memory_order_relaxed);
         batchBatchesProcessed_.store(0, std::memory_order_relaxed);
+        batchAlgoMicrosTotal_.store(0, std::memory_order_relaxed);
         batchMaxQueueDepth_.store(0, std::memory_order_relaxed);
         batchWorkerCount_.store(batchConfig_.workerCount, std::memory_order_relaxed);
     }
@@ -696,8 +766,9 @@ bool ProcessingService::startBatchPipeline(BatchPipelineConfig config, BatchResu
         batchWorkers_.emplace_back(&ProcessingService::batchWorkerLoop, this);
     }
 
-    SPDLOG_INFO("Batch pipeline started: batch_size={}, max_queue={}, workers={}",
-                batchConfig_.batchSize, batchConfig_.maxQueuedFrames, batchConfig_.workerCount);
+    SPDLOG_INFO("Batch pipeline started: batch_size={}, max_queue={}, workers={}, max_delay_ms={}",
+                batchConfig_.batchSize, batchConfig_.maxQueuedFrames, batchConfig_.workerCount,
+                batchConfig_.maxBatchDelayMs);
     return true;
 }
 
@@ -808,22 +879,23 @@ void ProcessingService::batchWorkerLoop() {
 
         {
             std::unique_lock lk(batchMutex_);
-            batchCv_.wait(lk, [&] {
-                const size_t batchSize = std::max<size_t>(1, batchConfig_.batchSize);
-                return !batchRunning_.load(std::memory_order_acquire) || batchQueue_.size() >= batchSize;
-            });
+            batchCv_.wait_for(lk,
+                              std::chrono::milliseconds(std::max(1, batchConfig_.maxBatchDelayMs)),
+                              [&] {
+                                  const size_t batchSize = std::max<size_t>(1, batchConfig_.batchSize);
+                                  return !batchRunning_.load(std::memory_order_acquire) ||
+                                         batchQueue_.size() >= batchSize;
+                              });
 
             if (batchQueue_.empty() && !batchRunning_.load(std::memory_order_acquire)) {
                 break;
             }
-
-            const size_t batchSize = std::max<size_t>(1, batchConfig_.batchSize);
-            const size_t desired = batchRunning_.load(std::memory_order_relaxed)
-                                       ? batchSize
-                                       : std::min(batchQueue_.size(), batchSize);
-            if (batchQueue_.size() < desired) {
+            if (batchQueue_.empty()) {
                 continue;
             }
+
+            const size_t batchSize = std::max<size_t>(1, batchConfig_.batchSize);
+            const size_t desired = std::min(batchQueue_.size(), batchSize);
 
             inputs.reserve(desired);
             for (size_t i = 0; i < desired && !batchQueue_.empty(); ++i) {
@@ -834,19 +906,58 @@ void ProcessingService::batchWorkerLoop() {
             callback = batchResultCallback_;
         }
 
+        const auto algoStart = std::chrono::steady_clock::now();
         std::vector<ProcessedFrame> results;
         results.reserve(inputs.size());
         for (const auto& item : inputs) {
-            results.emplace_back(computeProcessedFrame(item.gray,
-                                                       config.background,
-                                                       config.processing,
-                                                       config.roi,
-                                                       item.index,
-                                                       item.timestampNs));
+            ProcessedFrame base = computeProcessedFrame(item.gray,
+                                                        config.background,
+                                                        config.processing,
+                                                        config.roi,
+                                                        item.index,
+                                                        item.timestampNs);
+            if (base.originalImage.empty() || base.processedImage.empty()) {
+                results.emplace_back(std::move(base));
+                continue;
+            }
+
+            Roi normalizedRoi = config.roi;
+            if (normalizedRoi.w <= 0 || normalizedRoi.h <= 0) {
+                normalizedRoi.x = 0;
+                normalizedRoi.y = 0;
+                normalizedRoi.w = base.originalImage.cols;
+                normalizedRoi.h = base.originalImage.rows;
+            }
+            normalizedRoi.x = std::max(0, std::min(normalizedRoi.x, base.originalImage.cols - 1));
+            normalizedRoi.y = std::max(0, std::min(normalizedRoi.y, base.originalImage.rows - 1));
+            normalizedRoi.w = std::max(1, std::min(normalizedRoi.w, base.originalImage.cols - normalizedRoi.x));
+            normalizedRoi.h = std::max(1, std::min(normalizedRoi.h, base.originalImage.rows - normalizedRoi.y));
+            const cv::Rect cvRoi(normalizedRoi.x, normalizedRoi.y, normalizedRoi.w, normalizedRoi.h);
+
+            auto objectResults = filterProcessedObjects(base.processedImage, cvRoi, config.processing, base.originalImage);
+            if (objectResults.empty()) {
+                results.emplace_back(std::move(base));
+                continue;
+            }
+
+            for (auto& validation : objectResults) {
+                ProcessedFrame objectFrame;
+                objectFrame.index = base.index;
+                objectFrame.timestampNs = base.timestampNs;
+                objectFrame.originalImage = base.originalImage.clone();
+                objectFrame.processedImage = base.processedImage.clone();
+                objectFrame.validation = std::move(validation);
+                results.emplace_back(std::move(objectFrame));
+            }
+        }
+        const auto algoEnd = std::chrono::steady_clock::now();
+        const auto algoMicros = std::chrono::duration_cast<std::chrono::microseconds>(algoEnd - algoStart).count();
+        if (algoMicros > 0) {
+            batchAlgoMicrosTotal_.fetch_add(static_cast<uint64_t>(algoMicros), std::memory_order_relaxed);
         }
 
         if (!results.empty()) {
-            batchFramesProcessed_.fetch_add(static_cast<uint64_t>(results.size()), std::memory_order_relaxed);
+            batchFramesProcessed_.fetch_add(static_cast<uint64_t>(inputs.size()), std::memory_order_relaxed);
             batchBatchesProcessed_.fetch_add(1, std::memory_order_relaxed);
             if (callback) {
                 callback(std::move(results));
@@ -1431,7 +1542,312 @@ FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedIma
     return std::move(results.front());
 }
 
+ProcessingService::BatchPipelineConfig ProcessingService::makeRealtimeBatchPipelineConfig() const {
+    BatchPipelineConfig config;
+    {
+        std::scoped_lock settingsLk(rtBatchSettingsMutex_);
+        config.batchSize = std::max<size_t>(1, rtBatchSettings_.batchSize);
+        config.maxQueuedFrames = std::max(config.batchSize, rtBatchSettings_.maxQueuedFrames);
+        config.workerCount = std::max<size_t>(1, rtBatchSettings_.workerCount);
+        config.maxBatchDelayMs = std::max(1, rtBatchSettings_.maxBatchDelayMs);
+    }
+    {
+        std::scoped_lock cfgLk(configMutex_);
+        config.processing = processingConfig_;
+    }
+    {
+        std::scoped_lock rtLk(rtMutex_);
+        config.roi = rtRoi_;
+        if (rtBgGray_ && !rtBgGray_->empty()) {
+            config.background = rtBgGray_->clone();
+        }
+    }
+    return config;
+}
+
+void ProcessingService::refreshRealtimeBatchPipelineConfig() {
+    if (!rtBatchPipelineActive_.load(std::memory_order_acquire)) {
+        return;
+    }
+
+    BatchPipelineConfig fresh = makeRealtimeBatchPipelineConfig();
+    std::scoped_lock lk(batchMutex_);
+    if (!rtBatchPipelineActive_.load(std::memory_order_relaxed)) {
+        return;
+    }
+    batchConfig_.batchSize = fresh.batchSize;
+    batchConfig_.maxQueuedFrames = fresh.maxQueuedFrames;
+    batchConfig_.maxBatchDelayMs = fresh.maxBatchDelayMs;
+    batchConfig_.processing = fresh.processing;
+    batchConfig_.background = std::move(fresh.background);
+    batchConfig_.roi = fresh.roi;
+}
+
+void ProcessingService::publishRealtimeValidationCallbacks(const FilterResult& validation, uint64_t timestampNs) {
+    if (validation.isValid) {
+        TargetGroupCallback tgCb;
+        {
+            std::scoped_lock cbLk(targetGroupCallbackMutex_);
+            tgCb = targetGroupCallback_;
+        }
+        if (tgCb) tgCb(validation.isTargetGroup);
+
+        if (validation.ringRatio > 0.0) {
+            RingRatioCallback rrCb;
+            {
+                std::scoped_lock cbLk(ringRatioCallbackMutex_);
+                rrCb = ringRatioCallback_;
+            }
+            if (rrCb) rrCb(validation.ringRatio, static_cast<int64_t>(timestampNs));
+        }
+    }
+}
+
+void ProcessingService::appendRealtimeMonitoringFrame(uint64_t index,
+                                                      uint64_t timestampNs,
+                                                      const FilterResult& validation,
+                                                      const cv::Mat& originalImage,
+                                                      const cv::Mat& processedImage) {
+    if (originalImage.empty() || processedImage.empty()) {
+        return;
+    }
+
+    ProcessedFrame monitoringFrame;
+    monitoringFrame.index = index;
+    monitoringFrame.timestampNs = timestampNs;
+    monitoringFrame.validation = validation;
+    monitoringFrame.originalImage = originalImage.clone();
+    monitoringFrame.processedImage = processedImage.clone();
+
+    std::scoped_lock monitoringLk(monitoringFramesMutex_);
+    if (validation.isValid) {
+        monitoringValidFrames_.push_back(std::move(monitoringFrame));
+    } else {
+        monitoringInvalidFrames_.push_back(std::move(monitoringFrame));
+    }
+}
+
+void ProcessingService::publishRealtimeBatchFrame(ProcessedFrame&& frame) {
+    if (frame.originalImage.empty() || frame.processedImage.empty()) {
+        return;
+    }
+
+    const uint64_t frameIndex = frame.index;
+    const FilterResult validation = frame.validation;
+
+    publishRealtimeValidationCallbacks(validation, frame.timestampNs);
+
+    {
+        std::scoped_lock snapshotLk(snapshotMutex_);
+        latestSnapshot_.index = frameIndex;
+        latestSnapshot_.mask = frame.processedImage.clone();
+        latestSnapshot_.contours = validation.allContours;
+        latestSnapshot_.validation = validation;
+    }
+
+    ProcessedFrame monitoringFrame;
+    monitoringFrame.index = frameIndex;
+    monitoringFrame.timestampNs = frame.timestampNs;
+    monitoringFrame.validation = validation;
+
+    Roi roi = getRealtimeRoi();
+    if (roi.w <= 0 || roi.h <= 0) {
+        roi.x = 0;
+        roi.y = 0;
+        roi.w = frame.originalImage.cols;
+        roi.h = frame.originalImage.rows;
+    }
+    roi.x = std::max(0, std::min(roi.x, frame.originalImage.cols - 1));
+    roi.y = std::max(0, std::min(roi.y, frame.originalImage.rows - 1));
+    roi.w = std::max(1, std::min(roi.w, frame.originalImage.cols - roi.x));
+    roi.h = std::max(1, std::min(roi.h, frame.originalImage.rows - roi.y));
+    const cv::Rect cvRoi(roi.x, roi.y, roi.w, roi.h);
+    monitoringFrame.originalImage = frame.originalImage(cvRoi).clone();
+    monitoringFrame.processedImage = frame.processedImage(cvRoi).clone();
+
+    {
+        std::scoped_lock monitoringLk(monitoringFramesMutex_);
+        if (validation.isValid) {
+            monitoringValidFrames_.push_back(std::move(monitoringFrame));
+        } else {
+            monitoringInvalidFrames_.push_back(std::move(monitoringFrame));
+        }
+    }
+
+    uint64_t observed = rtLastProcessed_.load(std::memory_order_relaxed);
+    while (frameIndex > observed &&
+           !rtLastProcessed_.compare_exchange_weak(observed, frameIndex, std::memory_order_relaxed)) {
+    }
+
+    if (experimentActive_.load(std::memory_order_relaxed)) {
+        bool shouldSave = validation.isValid;
+        if (!validation.isValid) {
+            const size_t counter = invalidFrameCounter_.fetch_add(1, std::memory_order_relaxed);
+            const size_t rate = invalidFrameSamplingRate_.load(std::memory_order_relaxed);
+            shouldSave = rate > 0 && (counter % rate) == 0;
+        }
+        if (shouldSave) {
+            appendExperimentFrame(std::move(frame), validation.isValid);
+        }
+    }
+}
+
+void ProcessingService::realtimeBatchLoop() {
+    rtLastProcessed_.store(0);
+
+    std::atomic<uint64_t> callbackValid{0};
+    std::atomic<uint64_t> callbackInvalid{0};
+
+    const BatchPipelineConfig initialConfig = makeRealtimeBatchPipelineConfig();
+    rtBatchPipelineActive_.store(true, std::memory_order_release);
+    const bool started = startBatchPipeline(initialConfig,
+                                            [this, &callbackValid, &callbackInvalid](std::vector<ProcessedFrame> batch) {
+                                                for (auto& frame : batch) {
+                                                    if (frame.validation.isValid) {
+                                                        callbackValid.fetch_add(1, std::memory_order_relaxed);
+                                                    } else {
+                                                        callbackInvalid.fetch_add(1, std::memory_order_relaxed);
+                                                    }
+                                                    publishRealtimeBatchFrame(std::move(frame));
+                                                }
+                                            });
+    if (!started) {
+        rtBatchPipelineActive_.store(false, std::memory_order_release);
+        rtRunning_.store(false, std::memory_order_release);
+        backend::diagnostics::CrashStateMirror::instance().processing.realtimeRunning.store(false);
+        SPDLOG_ERROR("ProcessingService: async realtime batch mode could not start");
+        return;
+    }
+
+    using clock = std::chrono::steady_clock;
+    auto lastSummaryTs = clock::now();
+    uint64_t queuedSinceSummary = 0;
+    uint64_t skippedSinceSummary = 0;
+    double enqueueMsSinceSummary = 0.0;
+    uint64_t lastProcessedTotal = 0;
+    uint64_t lastAlgoMicrosTotal = 0;
+
+    SPDLOG_INFO("ProcessingService: realtime async batch loop started");
+    if (initialConfig.processing.auto_background_enabled) {
+        SPDLOG_WARN("ProcessingService: async batch realtime mode does not run inline auto-background capture; use frame-by-frame mode when auto-background capture is required");
+    }
+    if (initialConfig.processing.multi_image_enabled && initialConfig.processing.multi_image_count > 1) {
+        SPDLOG_WARN("ProcessingService: async batch realtime mode records trigger frames only; use frame-by-frame mode for multi-image series capture");
+    }
+
+    while (rtRunning_.load(std::memory_order_acquire) &&
+           getRealtimeProcessingMode() == RealtimeProcessingMode::AsyncBatch) {
+        if (!rtStore_) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+
+        const uint64_t total = rtStore_->totalWritten();
+        if (total == 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            continue;
+        }
+
+        const uint64_t earliest = rtStore_->earliestAvailableIndex();
+        const uint64_t latest = rtStore_->latestAvailableIndex();
+        uint64_t last = rtLastProcessed_.load(std::memory_order_relaxed);
+        if (last + 1 < earliest) {
+            const uint64_t skipped = earliest - (last + 1);
+            skippedSinceSummary += skipped;
+            last = earliest - 1;
+            rtLastProcessed_.store(last, std::memory_order_relaxed);
+            SPDLOG_DEBUG("Async batch realtime fell behind, skipping {} frames (last={}, earliest={})",
+                         skipped, last, earliest);
+        }
+
+        if (last >= latest) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        } else {
+            const bool dropFrames = rtDropFrames_.load(std::memory_order_relaxed) &&
+                                    !experimentActive_.load(std::memory_order_relaxed);
+            const uint64_t firstIdx = dropFrames ? latest : last + 1;
+            if (dropFrames && last + 1 < firstIdx) {
+                skippedSinceSummary += firstIdx - (last + 1);
+            }
+
+            for (uint64_t idx = firstIdx; idx <= latest && rtRunning_.load(std::memory_order_acquire); ++idx) {
+                const auto enqueueStart = clock::now();
+                if (!rtEnabled_.load(std::memory_order_relaxed)) {
+                    rtLastProcessed_.store(idx, std::memory_order_relaxed);
+                    continue;
+                }
+
+                backend::playback::Frame frame;
+                if (!rtStore_->getByWriteIndex(idx, frame)) {
+                    continue;
+                }
+                const bool accepted = enqueueBatchFrame(frame, idx);
+                if (accepted) {
+                    ++queuedSinceSummary;
+                } else {
+                    ++skippedSinceSummary;
+                }
+                rtLastProcessed_.store(idx, std::memory_order_relaxed);
+
+                const auto enqueueEnd = clock::now();
+                enqueueMsSinceSummary += std::chrono::duration<double, std::milli>(enqueueEnd - enqueueStart).count();
+            }
+        }
+
+        const auto now = clock::now();
+        const double windowMs = std::chrono::duration<double, std::milli>(now - lastSummaryTs).count();
+        if (windowMs >= 1000.0) {
+            const uint64_t processedTotal = batchFramesProcessed_.load(std::memory_order_relaxed);
+            const uint64_t processedSinceSummary = processedTotal - lastProcessedTotal;
+            lastProcessedTotal = processedTotal;
+
+            const uint64_t algoMicrosTotal = batchAlgoMicrosTotal_.load(std::memory_order_relaxed);
+            const uint64_t algoMicrosSinceSummary = algoMicrosTotal - lastAlgoMicrosTotal;
+            lastAlgoMicrosTotal = algoMicrosTotal;
+
+            const uint64_t validSinceSummary = callbackValid.exchange(0, std::memory_order_relaxed);
+            const uint64_t invalidSinceSummary = callbackInvalid.exchange(0, std::memory_order_relaxed);
+            const double fps = windowMs > 0.0 ? (static_cast<double>(processedSinceSummary) * 1000.0 / windowMs) : 0.0;
+            const double vfps = windowMs > 0.0 ? (static_cast<double>(validSinceSummary) * 1000.0 / windowMs) : 0.0;
+            const double ifps = windowMs > 0.0 ? (static_cast<double>(invalidSinceSummary) * 1000.0 / windowMs) : 0.0;
+            const double algoAvgUs = processedSinceSummary > 0
+                                         ? static_cast<double>(algoMicrosSinceSummary) / static_cast<double>(processedSinceSummary)
+                                         : 0.0;
+            algoFps1s_.store(fps, std::memory_order_relaxed);
+            validFps1s_.store(vfps, std::memory_order_relaxed);
+            invalidFps1s_.store(ifps, std::memory_order_relaxed);
+            algoAvgUs1s_.store(algoAvgUs, std::memory_order_relaxed);
+            algoAvgUs1sUpdatedUs_.store(backend::Tools::getTimestamp(), std::memory_order_relaxed);
+
+            const auto stats = getBatchPipelineStats();
+            SPDLOG_DEBUG("Realtime async batch summary: queued={} processed={} skipped={} dropped={} queue={} max_queue={} "
+                         "window_ms={:.0f} enqueue_avg_ms={:.3f} algo_avg_us={:.1f} fps={:.1f}",
+                         queuedSinceSummary, processedSinceSummary, skippedSinceSummary, stats.framesDropped,
+                         stats.currentQueueDepth, stats.maxQueueDepth, windowMs,
+                         queuedSinceSummary > 0 ? enqueueMsSinceSummary / static_cast<double>(queuedSinceSummary) : 0.0,
+                         algoAvgUs, fps);
+
+            lastSummaryTs = now;
+            queuedSinceSummary = 0;
+            skippedSinceSummary = 0;
+            enqueueMsSinceSummary = 0.0;
+        }
+    }
+
+    rtBatchPipelineActive_.store(false, std::memory_order_release);
+    stopBatchPipeline();
+    SPDLOG_INFO("ProcessingService: realtime async batch loop stopped");
+}
+
 void ProcessingService::realtimeLoop() {
+    if (getRealtimeProcessingMode() == RealtimeProcessingMode::AsyncBatch) {
+        realtimeBatchLoop();
+    } else {
+        realtimeInlineLoop();
+    }
+}
+
+void ProcessingService::realtimeInlineLoop() {
     rtLastProcessed_.store(0);
     using clock = std::chrono::steady_clock;
     auto lastSummaryTs = clock::now();
@@ -1639,7 +2055,11 @@ void ProcessingService::realtimeLoop() {
                 // Always run validation for monitoring (even without experiment)
                 // mask is ROI-sized so contour coords are 0-based; use local roi for border check
                 cv::Rect localRoi(0, 0, roi.w, roi.h);
-                FilterResult validation = filterProcessedImage(mask, localRoi, config, grayROI);
+                auto validations = filterProcessedObjects(mask, localRoi, config, grayROI);
+                if (validations.empty()) {
+                    validations.push_back(FilterResult{});
+                }
+                const FilterResult& validation = validations.front();
 
                 // Extract contours from validation result and adjust coordinates for full-frame snapshot
                 // Contours from filterProcessedImage are in ROI coordinates, need to adjust for full frame
@@ -1653,50 +2073,21 @@ void ProcessingService::realtimeLoop() {
                 const auto algoEnd = clock::now();
                 const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
                 algoMsSinceSummary += algoMs;
-                if (validation.isValid) {
-                    ++validSinceSummary;
-                } else {
-                    ++invalidSinceSummary;
+                for (const auto& objectValidation : validations) {
+                    if (objectValidation.isValid) {
+                        ++validSinceSummary;
+                    } else {
+                        ++invalidSinceSummary;
+                    }
                 }
                 
-                // Fire trigger + autofocus callbacks BEFORE taking monitoringFramesMutex_
-                // so the UI thread's ring-buffer snapshot cannot stall the trigger path.
-                // Target-group fires FIRST; RingRatio callback is O(1) on the realtime
-                // thread as of 2026-04-16 (push into AutofocusService::pendingSamples_
-                // + notify_one; the O(n log n) sort runs on AutofocusService::statsThread_).
-                if (validation.isValid) {
-                    TargetGroupCallback tgCb;
-                    {
-                        std::scoped_lock cbLk(targetGroupCallbackMutex_);
-                        tgCb = targetGroupCallback_;
-                    }
-                    if (tgCb) tgCb(validation.isTargetGroup);
-
-                    if (validation.ringRatio > 0.0) {
-                        RingRatioCallback rrCb;
-                        {
-                            std::scoped_lock cbLk(ringRatioCallbackMutex_);
-                            rrCb = ringRatioCallback_;
-                        }
-                        if (rrCb) rrCb(validation.ringRatio, f.timestamp);
-                    }
+                for (const auto& objectValidation : validations) {
+                    publishRealtimeValidationCallbacks(objectValidation, f.timestamp);
                 }
 
                 // Always accumulate frames for monitoring (with size limit)
-                {
-                    ProcessedFrame monitoringFrame;
-                    monitoringFrame.index = idx;
-                    monitoringFrame.timestampNs = f.timestamp;
-                    monitoringFrame.validation = validation;
-                    // Store ROI-only images (already ROI-sized, just clone)
-                    monitoringFrame.originalImage = grayROI.clone();
-                    monitoringFrame.processedImage = mask.clone();
-
-                std::scoped_lock monitoringLk(monitoringFramesMutex_);
-                if (validation.isValid) {
-                    monitoringValidFrames_.push_back(std::move(monitoringFrame));
-                } else {
-                    monitoringInvalidFrames_.push_back(std::move(monitoringFrame));
+                for (const auto& objectValidation : validations) {
+                    appendRealtimeMonitoringFrame(idx, f.timestamp, objectValidation, grayROI, mask);
                 }
 
                 // Throttled DEBUG: accumulation sizes and process memory
@@ -1711,7 +2102,6 @@ void ProcessingService::realtimeLoop() {
                     SPDLOG_TRACE("Accumulated frames (idx={}): valid={}, invalid={}, flush_interval={}, since_last_flush={}, mem_mb={:.1f}",
                                  idx, vSz, iSz, flushInterval_.load(), framesSinceLastFlush_.load(), backend::Tools::getProcessMemoryMB());
                 }
-            }
 
             // Throttled DEBUG: monitoring buffer sizes and process memory
             if ((idx % 5000ULL) == 0ULL) {
@@ -1986,60 +2376,35 @@ void ProcessingService::realtimeLoop() {
                 cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
                 cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
-                FilterResult validation = filterProcessedImage(mask, cvRoi, config, gray);
+                auto validations = filterProcessedObjects(mask, cvRoi, config, gray);
+                if (validations.empty()) {
+                    validations.push_back(FilterResult{});
+                }
+                const FilterResult& validation = validations.front();
                 
                 // Extract contours from validation result for snapshot
                 std::vector<std::vector<cv::Point>> contours = validation.allContours;
                 const auto algoEnd = clock::now();
                 const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
                 algoMsSinceSummary += algoMs;
-                if (validation.isValid) {
-                    ++validSinceSummary;
-                } else {
-                    ++invalidSinceSummary;
+                for (const auto& objectValidation : validations) {
+                    if (objectValidation.isValid) {
+                        ++validSinceSummary;
+                    } else {
+                        ++invalidSinceSummary;
+                    }
                 }
                 
-                // Fire trigger + autofocus callbacks BEFORE taking monitoringFramesMutex_
-                // so the UI thread's ring-buffer snapshot cannot stall the trigger path.
-                // Target-group fires FIRST; RingRatio callback is O(1) on the realtime
-                // thread as of 2026-04-16 (push into AutofocusService::pendingSamples_
-                // + notify_one; the O(n log n) sort runs on AutofocusService::statsThread_).
-                if (validation.isValid) {
-                    TargetGroupCallback tgCb;
-                    {
-                        std::scoped_lock cbLk(targetGroupCallbackMutex_);
-                        tgCb = targetGroupCallback_;
-                    }
-                    if (tgCb) tgCb(validation.isTargetGroup);
-
-                    if (validation.ringRatio > 0.0) {
-                        RingRatioCallback rrCb;
-                        {
-                            std::scoped_lock cbLk(ringRatioCallbackMutex_);
-                            rrCb = ringRatioCallback_;
-                        }
-                        if (rrCb) rrCb(validation.ringRatio, f.timestamp);
-                    }
+                for (const auto& objectValidation : validations) {
+                    publishRealtimeValidationCallbacks(objectValidation, f.timestamp);
                 }
 
                 // Always accumulate frames for monitoring (with size limit)
-                {
-                    ProcessedFrame monitoringFrame;
-                    monitoringFrame.index = idx;
-                    monitoringFrame.timestampNs = f.timestamp;
-                    monitoringFrame.validation = validation;
-                    // Store ROI-only images to reduce memory usage
-                    cv::Mat roiOriginal = gray(cvRoi).clone();
-                    cv::Mat roiMask = mask(cvRoi).clone();
-                    monitoringFrame.originalImage = std::move(roiOriginal);
-                    monitoringFrame.processedImage = std::move(roiMask);
-
-                    std::scoped_lock monitoringLk(monitoringFramesMutex_);
-                    if (validation.isValid) {
-                        monitoringValidFrames_.push_back(std::move(monitoringFrame));
-                    } else {
-                        monitoringInvalidFrames_.push_back(std::move(monitoringFrame));
-                    }
+                cv::Mat roiOriginal = gray(cvRoi);
+                cv::Mat roiMask = mask(cvRoi);
+                for (const auto& objectValidation : validations) {
+                    appendRealtimeMonitoringFrame(idx, f.timestamp, objectValidation, roiOriginal, roiMask);
+                }
 
                     // Throttled DEBUG: accumulation sizes and process memory
                     if ((idx % 500ULL) == 0ULL) {
@@ -2053,7 +2418,6 @@ void ProcessingService::realtimeLoop() {
                         SPDLOG_DEBUG("Accumulated frames (idx={}): valid={}, invalid={}, flush_interval={}, since_last_flush={}, mem_mb={:.1f}",
                                      idx, vSz, iSz, flushInterval_.load(), framesSinceLastFlush_.load(), backend::Tools::getProcessMemoryMB());
                     }
-                }
 
                 // Throttled DEBUG: monitoring buffer sizes and process memory
                 if ((idx % 500ULL) == 0ULL) {
@@ -2342,7 +2706,11 @@ void ProcessingService::realtimeLoop() {
                 // mask is ROI-sized so contour coords are 0-based; use local roi for border check
                 cv::Mat roiMaskForValidation = mask(cvRoi).clone();
                 cv::Rect localRoi(0, 0, cvRoi.width, cvRoi.height);
-                FilterResult validation = filterProcessedImage(roiMaskForValidation, localRoi, config, roiCurr);
+                auto validations = filterProcessedObjects(roiMaskForValidation, localRoi, config, roiCurr);
+                if (validations.empty()) {
+                    validations.push_back(FilterResult{});
+                }
+                const FilterResult& validation = validations.front();
 
                 // Extract contours from validation result for snapshot
                 // Contours are in ROI-relative coordinates — adjust to full-frame for snapshot/storage
@@ -2356,66 +2724,36 @@ void ProcessingService::realtimeLoop() {
                 const auto algoEnd = clock::now();
                 const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
                 algoMsSinceSummary += algoMs;
-                if (validation.isValid) {
-                    ++validSinceSummary;
-                } else {
-                    ++invalidSinceSummary;
+                for (const auto& objectValidation : validations) {
+                    if (objectValidation.isValid) {
+                        ++validSinceSummary;
+                    } else {
+                        ++invalidSinceSummary;
+                    }
                 }
 
-                // Fire trigger + autofocus callbacks BEFORE taking monitoringFramesMutex_
-                // so the UI thread's ring-buffer snapshot cannot stall the trigger path.
-                // Target-group fires FIRST; RingRatio callback is O(1) on the realtime
-                // thread as of 2026-04-16 (push into AutofocusService::pendingSamples_
-                // + notify_one; the O(n log n) sort runs on AutofocusService::statsThread_).
-                if (validation.isValid) {
-                    TargetGroupCallback tgCb;
-                    {
-                        std::scoped_lock cbLk(targetGroupCallbackMutex_);
-                        tgCb = targetGroupCallback_;
-                    }
-                    if (tgCb) tgCb(validation.isTargetGroup);
-
-                    if (validation.ringRatio > 0.0) {
-                        RingRatioCallback rrCb;
-                        {
-                            std::scoped_lock cbLk(ringRatioCallbackMutex_);
-                            rrCb = ringRatioCallback_;
-                        }
-                        if (rrCb) rrCb(validation.ringRatio, f.timestamp);
-                    }
+                for (const auto& objectValidation : validations) {
+                    publishRealtimeValidationCallbacks(objectValidation, f.timestamp);
                 }
 
                 // Always accumulate frames for monitoring (with size limit)
-                {
-                    ProcessedFrame monitoringFrame;
-                    monitoringFrame.index = idx;
-                    monitoringFrame.timestampNs = f.timestamp;
-                    monitoringFrame.validation = validation;
-                    // Store ROI-only images to reduce memory usage
-                    cv::Mat roiOriginal = gray(cvRoi).clone();
-                    cv::Mat roiMask = mask(cvRoi).clone();
-                    monitoringFrame.originalImage = std::move(roiOriginal);
-                    monitoringFrame.processedImage = std::move(roiMask);
+                cv::Mat roiOriginal = gray(cvRoi);
+                cv::Mat roiMask = mask(cvRoi);
+                for (const auto& objectValidation : validations) {
+                    appendRealtimeMonitoringFrame(idx, f.timestamp, objectValidation, roiOriginal, roiMask);
+                }
 
-                    std::scoped_lock monitoringLk(monitoringFramesMutex_);
-                    if (validation.isValid) {
-                        monitoringValidFrames_.push_back(std::move(monitoringFrame));
-                    } else {
-                        monitoringInvalidFrames_.push_back(std::move(monitoringFrame));
+                // Throttled TRACE: accumulation sizes and process memory
+                if ((idx % 5000ULL) == 0ULL) {
+                    size_t vSz = 0;
+                    size_t iSz = 0;
+                    {
+                        std::scoped_lock fLk(framesMutex_);
+                        vSz = validFrames_.size();
+                        iSz = invalidFrames_.size();
                     }
-
-                    // Throttled TRACE: accumulation sizes and process memory
-                    if ((idx % 5000ULL) == 0ULL) {
-                        size_t vSz = 0;
-                        size_t iSz = 0;
-                        {
-                            std::scoped_lock fLk(framesMutex_);
-                            vSz = validFrames_.size();
-                            iSz = invalidFrames_.size();
-                        }
-                        SPDLOG_TRACE("Accumulated frames (idx={}): valid={}, invalid={}, flush_interval={}, since_last_flush={}, mem_mb={:.1f}",
-                                     idx, vSz, iSz, flushInterval_.load(), framesSinceLastFlush_.load(), backend::Tools::getProcessMemoryMB());
-                    }
+                    SPDLOG_TRACE("Accumulated frames (idx={}): valid={}, invalid={}, flush_interval={}, since_last_flush={}, mem_mb={:.1f}",
+                                 idx, vSz, iSz, flushInterval_.load(), framesSinceLastFlush_.load(), backend::Tools::getProcessMemoryMB());
                 }
 
                 // Throttled TRACE: monitoring buffer sizes and process memory
@@ -2452,43 +2790,51 @@ void ProcessingService::realtimeLoop() {
                         // Skip normal valid/invalid save for this frame — it's part of the series
                     } else {
                         // Normal experiment accumulation (or start of new multi-image series)
-                        bool shouldSave = false;
-                        if (validation.isValid) {
-                            if (multiImageMode) {
-                                // Start a new multi-image series
+                        if (multiImageMode) {
+                            const auto firstValid = std::find_if(validations.begin(), validations.end(),
+                                                                 [](const FilterResult& result) { return result.isValid; });
+                            if (firstValid != validations.end()) {
+                                const size_t validObjectCount = static_cast<size_t>(
+                                    std::count_if(validations.begin(), validations.end(),
+                                                  [](const FilterResult& result) { return result.isValid; }));
+                                if (validObjectCount > 1) {
+                                    SPDLOG_WARN("Multi-image realtime mode detected {} valid objects in frame {}; recording one trigger series",
+                                                validObjectCount, idx);
+                                }
+
                                 pendingMultiImageFrame = ProcessedFrame{};
                                 pendingMultiImageFrame.index = idx;
                                 pendingMultiImageFrame.timestampNs = f.timestamp;
-                                pendingMultiImageFrame.validation = validation;
+                                pendingMultiImageFrame.validation = *firstValid;
                                 pendingMultiImageFrame.originalImage = gray.clone();
                                 pendingMultiImageFrame.processedImage = mask.clone();
                                 pendingMultiImageFrame.seriesImages.push_back(gray.clone());
                                 multiImageRemaining = static_cast<size_t>(config.multi_image_count - 1);
                                 multiImagePending = true;
                                 SPDLOG_DEBUG("Multi-image series started: trigger_idx={}, count={}", idx, config.multi_image_count);
-                                // Don't save yet — wait for series to complete
-                            } else {
-                                shouldSave = true; // Normal single-image mode
                             }
                         } else {
-                            // Sample invalid frames: save every Nth invalid frame
-                            size_t counter = invalidFrameCounter_.fetch_add(1, std::memory_order_relaxed);
-                            size_t rate = invalidFrameSamplingRate_.load(std::memory_order_relaxed);
-                            if (rate > 0 && (counter % rate) == 0) {
-                                shouldSave = true;
+                            for (const auto& objectValidation : validations) {
+                                bool shouldSaveObject = objectValidation.isValid;
+                                if (!objectValidation.isValid) {
+                                    size_t counter = invalidFrameCounter_.fetch_add(1, std::memory_order_relaxed);
+                                    size_t rate = invalidFrameSamplingRate_.load(std::memory_order_relaxed);
+                                    shouldSaveObject = rate > 0 && (counter % rate) == 0;
+                                }
+
+                                if (shouldSaveObject) {
+                                    ProcessedFrame frame;
+                                    frame.index = idx;
+                                    frame.timestampNs = f.timestamp;
+                                    frame.validation = objectValidation;
+                                    frame.originalImage = gray.clone();
+                                    frame.processedImage = mask.clone();
+
+                                    appendExperimentFrame(std::move(frame), objectValidation.isValid);
+                                }
                             }
                         }
 
-                        if (shouldSave) {
-                            ProcessedFrame frame;
-                            frame.index = idx;
-                            frame.timestampNs = f.timestamp;
-                            frame.validation = validation;
-                            frame.originalImage = gray.clone();
-                            frame.processedImage = mask.clone();
-
-                            appendExperimentFrame(std::move(frame), validation.isValid);
-                        }
                     }
                 } else if (multiImagePending) {
                     // Experiment ended while collecting a multi-image series — save partial series

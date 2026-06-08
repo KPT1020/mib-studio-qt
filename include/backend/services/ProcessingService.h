@@ -133,6 +133,18 @@ public:
         FilterResult validation;
     };
 
+    enum class RealtimeProcessingMode {
+        Inline = 0,
+        AsyncBatch = 1,
+    };
+
+    struct RealtimeBatchSettings {
+        size_t batchSize{16};
+        size_t maxQueuedFrames{4096};
+        size_t workerCount{1};
+        int maxBatchDelayMs{10};
+    };
+
     ProcessingService();
     ~ProcessingService();
 
@@ -151,6 +163,10 @@ public:
     // Note: experiments still process every frame (this mode is ignored while experimentActive_ is true).
     void setRealtimeDropFrames(bool on);
     bool getRealtimeDropFrames() const { return rtDropFrames_.load(std::memory_order_relaxed); }
+    void setRealtimeProcessingMode(RealtimeProcessingMode mode);
+    RealtimeProcessingMode getRealtimeProcessingMode() const;
+    void setRealtimeBatchSettings(const RealtimeBatchSettings& settings);
+    RealtimeBatchSettings getRealtimeBatchSettings() const;
     void setRealtimeRoi(const Roi& roi);
     Roi getRealtimeRoi() const;
     void setRealtimeBackgroundGray(const cv::Mat& bg);
@@ -266,6 +282,7 @@ public:
         size_t batchSize{64};
         size_t maxQueuedFrames{4096};
         size_t workerCount{1};
+        int maxBatchDelayMs{10};
         ProcessingConfig processing;
         cv::Mat background;
         Roi roi{0, 0, 0, 0};
@@ -335,6 +352,17 @@ private:
     void workerLoop();
     void batchWorkerLoop();
     void realtimeLoop();
+    void realtimeInlineLoop();
+    void realtimeBatchLoop();
+    BatchPipelineConfig makeRealtimeBatchPipelineConfig() const;
+    void refreshRealtimeBatchPipelineConfig();
+    void publishRealtimeBatchFrame(ProcessedFrame&& frame);
+    void publishRealtimeValidationCallbacks(const FilterResult& validation, uint64_t timestampNs);
+    void appendRealtimeMonitoringFrame(uint64_t index,
+                                       uint64_t timestampNs,
+                                       const FilterResult& validation,
+                                       const cv::Mat& originalImage,
+                                       const cv::Mat& processedImage);
     bool appendExperimentFrame(ProcessedFrame&& frame, bool isValid);
     DroppedFrameCounts trimExperimentBuffersLocked(size_t maxBufferedFrames);
     void logDroppedExperimentFrames(const DroppedFrameCounts& dropped, size_t bufferedTotal, size_t maxBufferedFrames);
@@ -388,6 +416,7 @@ private:
     std::atomic<uint64_t> batchFramesDropped_{0};
     std::atomic<uint64_t> batchFramesProcessed_{0};
     std::atomic<uint64_t> batchBatchesProcessed_{0};
+    std::atomic<uint64_t> batchAlgoMicrosTotal_{0};
     std::atomic<size_t> batchMaxQueueDepth_{0};
     std::atomic<size_t> batchWorkerCount_{0};
 
@@ -396,6 +425,10 @@ private:
     std::atomic<bool> rtRunning_{false};
     std::atomic<bool> rtEnabled_{true};
     std::atomic<bool> rtDropFrames_{false};
+    std::atomic<int> rtProcessingMode_{static_cast<int>(RealtimeProcessingMode::Inline)};
+    mutable std::mutex rtBatchSettingsMutex_;
+    RealtimeBatchSettings rtBatchSettings_{};
+    std::atomic<bool> rtBatchPipelineActive_{false};
     std::shared_ptr<backend::playback::FrameStore> rtStore_;
     mutable std::mutex rtMutex_;
     Roi rtRoi_{};
