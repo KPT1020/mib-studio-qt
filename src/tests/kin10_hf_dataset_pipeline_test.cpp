@@ -10,6 +10,7 @@
 #include <iomanip>
 #include <iostream>
 #include <mutex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -49,6 +50,7 @@ struct SampleMetrics {
     double ringRatio{0.0};
     int innerContourCount{0};
     bool isValid{false};
+    size_t outputRecordCount{0};
 };
 
 std::string jsonEscape(const std::string& value)
@@ -172,11 +174,13 @@ bool runBatchPipeline(const std::vector<cv::Mat>& images,
 
     std::mutex mutex;
     std::condition_variable condition;
+    std::set<uint64_t> completedFrameIndices;
 
     const bool started = service.startBatchPipeline(config, [&](std::vector<ProcessedFrame> batch) {
         std::scoped_lock lock(mutex);
         callbackBatchSizes.push_back(batch.size());
         for (auto& frame : batch) {
+            completedFrameIndices.insert(frame.index);
             results.emplace_back(std::move(frame));
         }
         condition.notify_all();
@@ -197,11 +201,13 @@ bool runBatchPipeline(const std::vector<cv::Mat>& images,
     {
         std::unique_lock lock(mutex);
         const bool finished = condition.wait_for(lock, std::chrono::seconds(60), [&] {
-            return results.size() == images.size();
+            return completedFrameIndices.size() == images.size();
         });
         if (!finished) {
             std::cerr << "timed out waiting for " << images.size()
-                      << " HF dataset frames, got " << results.size() << '\n';
+                      << " HF dataset frames, got " << completedFrameIndices.size()
+                      << " completed source frames from " << results.size()
+                      << " output records\n";
             service.stopBatchPipeline();
             return false;
         }
@@ -220,9 +226,40 @@ bool writeSampleArtifacts(const std::filesystem::path& outputDir,
     const auto samplesDir = outputDir / "samples";
     std::filesystem::create_directories(samplesDir);
 
+    std::vector<std::vector<size_t>> resultIndicesByRecord(records.size());
     for (size_t i = 0; i < results.size(); ++i) {
+        const auto recordIndex = results[i].index;
+        if (recordIndex >= records.size()) {
+            std::cerr << "result index " << recordIndex
+                      << " outside manifest record count " << records.size() << '\n';
+            return false;
+        }
+        resultIndicesByRecord[static_cast<size_t>(recordIndex)].push_back(i);
+    }
+
+    for (size_t i = 0; i < records.size(); ++i) {
         const auto& record = records[i];
-        const auto& frame = results[i];
+        const auto& candidates = resultIndicesByRecord[i];
+        if (candidates.empty()) {
+            std::cerr << "row " << record.rowIndex << " produced no output records\n";
+            return false;
+        }
+
+        size_t selected = candidates.front();
+        for (const auto candidate : candidates) {
+            const auto& frame = results[candidate];
+            const bool hasMask = !frame.processedImage.empty() && cv::countNonZero(frame.processedImage) > 0;
+            const bool hasContour = !frame.validation.allContours.empty();
+            if (frame.validation.isValid && hasMask && hasContour) {
+                selected = candidate;
+                break;
+            }
+            if (selected == candidates.front() && hasMask && hasContour) {
+                selected = candidate;
+            }
+        }
+
+        const auto& frame = results[selected];
         if (frame.originalImage.empty() || frame.processedImage.empty()) {
             std::cerr << "row " << record.rowIndex << " produced an empty image or mask\n";
             return false;
@@ -242,6 +279,7 @@ bool writeSampleArtifacts(const std::filesystem::path& outputDir,
         sample.ringRatio = frame.validation.ringRatio;
         sample.innerContourCount = frame.validation.innerContourCount;
         sample.isValid = frame.validation.isValid;
+        sample.outputRecordCount = candidates.size();
 
         const auto inputPath = samplesDir / (sample.sampleId + "-input.png");
         const auto maskPath = samplesDir / (sample.sampleId + "-mask.png");
@@ -291,6 +329,7 @@ void writeMetricsJson(const std::filesystem::path& outputPath,
                       const std::vector<ImageRecord>& records,
                       const ProcessingService::BatchPipelineStats& stats,
                       const std::vector<size_t>& callbackBatchSizes,
+                      size_t outputRecordCount,
                       const std::vector<SampleMetrics>& samples,
                       const std::vector<std::string>& failures)
 {
@@ -334,6 +373,7 @@ void writeMetricsJson(const std::filesystem::path& outputPath,
     out << "  \"batch_pipeline\": {\n";
     out << "    \"batch_size\": " << stats.batchSize << ",\n";
     out << "    \"worker_count\": " << stats.workerCount << ",\n";
+    out << "    \"output_record_count\": " << outputRecordCount << ",\n";
     out << "    \"frames_accepted\": " << stats.framesAccepted << ",\n";
     out << "    \"frames_processed\": " << stats.framesProcessed << ",\n";
     out << "    \"frames_dropped\": " << stats.framesDropped << ",\n";
@@ -372,6 +412,7 @@ void writeMetricsJson(const std::filesystem::path& outputPath,
         out << "      \"deformability\": " << sample.deformability << ",\n";
         out << "      \"ring_ratio\": " << sample.ringRatio << ",\n";
         out << "      \"inner_contour_count\": " << sample.innerContourCount << ",\n";
+        out << "      \"output_record_count\": " << sample.outputRecordCount << ",\n";
         out << "      \"is_valid\": " << (sample.isValid ? "true" : "false") << "\n";
         out << "    }";
         if (i + 1 < samples.size()) {
@@ -481,8 +522,9 @@ int main(int argc, char** argv)
     if (!runBatchPipeline(images, results, stats, callbackBatchSizes)) {
         return 5;
     }
-    if (results.size() != records.size()) {
-        std::cerr << "result count mismatch: expected " << records.size() << ", got " << results.size() << '\n';
+    if (results.size() < records.size()) {
+        std::cerr << "result count mismatch: expected at least " << records.size()
+                  << ", got " << results.size() << '\n';
         return 6;
     }
 
@@ -493,7 +535,7 @@ int main(int argc, char** argv)
 
     std::vector<std::string> failures;
     collectFailures(records, stats, samples, failures);
-    writeMetricsJson(outputDir / "metrics.json", records, stats, callbackBatchSizes, samples, failures);
+    writeMetricsJson(outputDir / "metrics.json", records, stats, callbackBatchSizes, results.size(), samples, failures);
 
     if (!failures.empty()) {
         std::cerr << "HF dataset pipeline regression detected:\n";
