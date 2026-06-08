@@ -28,7 +28,7 @@ The release pipeline builds entirely on your local machine (where all dependenci
 
 ### What `release.ps1 --push` Does
 
-1. Bumps version in `CMakeLists.txt`
+1. Bumps version in `cmake/MIBVersion.cmake`
 2. Commits the version bump
 3. Creates git tag (`v0.2.2` or `v0.2.2-beta.1`)
 4. Builds Release locally (`cmake --build`)
@@ -79,7 +79,7 @@ Before starting a release, ensure you have:
 
 ### Step 1: Bump Version
 
-Use the `bump-version.ps1` script to increment the version number in `CMakeLists.txt`. The script supports semantic versioning (X.Y.Z).
+Use the `bump-version.ps1` script to increment the version number in `cmake/MIBVersion.cmake`. The script supports semantic versioning (X.Y.Z).
 
 **Usage:**
 
@@ -99,9 +99,9 @@ Use the `bump-version.ps1` script to increment the version number in `CMakeLists
 
 **What it does:**
 
-- Reads current version from `CMakeLists.txt` (`DEFAULT_VERSION`)
+- Reads current version from `cmake/MIBVersion.cmake` (`DEFAULT_VERSION`)
 - Calculates new version based on bump type
-- Updates `CMakeLists.txt` with new version
+- Updates `cmake/MIBVersion.cmake` with new version
 - Optionally creates an annotated git tag (e.g., `v0.1.1`) if `--tag` is specified
 
 **Example output:**
@@ -111,8 +111,8 @@ Use the `bump-version.ps1` script to increment the version number in `CMakeLists
 Current version: 0.1.0
 New version: 0.1.1 (patch bump)
 
-Updating CMakeLists.txt...
-CMakeLists.txt updated successfully
+Updating cmake\MIBVersion.cmake...
+cmake\MIBVersion.cmake updated successfully
 
 Creating git tag...
 Git tag created: v0.1.1
@@ -124,10 +124,10 @@ Version updated: 0.1.0 to 0.1.1
 
 **Important Notes:**
 
-- The version in `CMakeLists.txt` is used by CMake to set `PROJECT_VERSION`
+- The version in `cmake/MIBVersion.cmake` is used by CMake to set `PROJECT_VERSION`
 - Installer filenames are automatically generated using this version: `MIB_Studio_Qt_Setup_v<version>.exe`
 - If you create a git tag, remember to push it: `git push origin v<version>`
-- CMake can also detect version from git tags (see `CMakeLists.txt` for details)
+- CMake can also detect version from git tags (see `cmake/MIBVersion.cmake` for details)
 
 ### Step 2: Build Release Configuration
 
@@ -205,7 +205,7 @@ The version is automatically passed to InnoSetup via:
 ISCC.exe /DAppVersion=<PROJECT_VERSION> mib-studio-qt.iss
 ```
 
-The `PROJECT_VERSION` comes from `CMakeLists.txt` (either `DEFAULT_VERSION` or git tag detection).
+The `PROJECT_VERSION` comes from `cmake/MIBVersion.cmake` (either `DEFAULT_VERSION` or git tag detection).
 
 **See Also:**
 
@@ -403,8 +403,8 @@ After publishing, verify the release:
 
 ### Version Bump Issues
 
-**Error: "Could not find DEFAULT_VERSION in CMakeLists.txt"**
-- Ensure `CMakeLists.txt` contains: `set(DEFAULT_VERSION "X.Y.Z")`
+**Error: "Could not find DEFAULT_VERSION in cmake\\MIBVersion.cmake"**
+- Ensure `cmake/MIBVersion.cmake` contains: `set(DEFAULT_VERSION "X.Y.Z")`
 - Check file encoding (should be UTF-8)
 
 **Error: "Git tag already exists"**

@@ -106,14 +106,14 @@ Use the `bump-version.ps1` script to increment the version:
 .\bump-version.ps1 --patch --tag
 ```
 
-The script updates `CMakeLists.txt` and optionally creates a git tag (e.g., `v0.1.1`). If you create a tag, remember to push it:
+The script updates `cmake/MIBVersion.cmake` and optionally creates a git tag (e.g., `v0.1.1`). If you create a tag, remember to push it:
 ```bash
 git push origin v0.1.1
 ```
 
 ### Automatic Version from Git Tags
 
-CMake automatically detects version from git tags during configuration. If a git tag matching the pattern `vX.Y.Z` or `X.Y.Z` exists and is newer than the hardcoded version in `CMakeLists.txt`, it will be used. This allows versioning based on git tags while maintaining a fallback default version.
+CMake automatically detects version from git tags during configuration. If a git tag matching the pattern `vX.Y.Z` or `X.Y.Z` exists and is newer than the hardcoded version in `cmake/MIBVersion.cmake`, it will be used. This allows versioning based on git tags while maintaining a fallback default version.
 
 The version is used throughout the build:
 - Application version (shown in About dialog and used by auto-updater)

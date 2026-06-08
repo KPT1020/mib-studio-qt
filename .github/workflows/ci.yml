@@ -25,11 +25,12 @@ jobs:
         shell: pwsh
         run: |
           # Check version is set
-          $content = Get-Content CMakeLists.txt -Raw
+          $versionFile = "cmake/MIBVersion.cmake"
+          $content = Get-Content $versionFile -Raw
           if ($content -match 'set\(DEFAULT_VERSION\s+"(\d+\.\d+\.\d+)"\)') {
             Write-Host "Version: $($matches[1])" -ForegroundColor Green
           } else {
-            Write-Host "ERROR: DEFAULT_VERSION not found in CMakeLists.txt" -ForegroundColor Red
+            Write-Host "ERROR: DEFAULT_VERSION not found in $versionFile" -ForegroundColor Red
             exit 1
           }
 

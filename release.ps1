@@ -91,11 +91,12 @@ if ($DryRun) {
 }
 
 # Read new version
-$cmakeContent = Get-Content "$PSScriptRoot\CMakeLists.txt" -Raw
+$versionFile = "$PSScriptRoot\cmake\MIBVersion.cmake"
+$cmakeContent = Get-Content $versionFile -Raw
 if ($cmakeContent -match 'set\(DEFAULT_VERSION\s+"(\d+\.\d+\.\d+)"\)') {
     $newVersion = $matches[1]
 } else {
-    Write-Host "ERROR: Could not read version from CMakeLists.txt" -ForegroundColor Red
+    Write-Host "ERROR: Could not read version from cmake\MIBVersion.cmake" -ForegroundColor Red
     exit 1
 }
 
@@ -125,9 +126,9 @@ Write-Host "Version: $tagName (channel: $channel)" -ForegroundColor Green
 Write-Host "`n--- Step 2: Commit Version Bump ---" -ForegroundColor Cyan
 
 if ($DryRun) {
-    Write-Host "[DRY RUN] Would commit CMakeLists.txt with version bump" -ForegroundColor Gray
+    Write-Host "[DRY RUN] Would commit cmake\MIBVersion.cmake with version bump" -ForegroundColor Gray
 } else {
-    git add CMakeLists.txt
+    git add cmake/MIBVersion.cmake
     git commit -m "chore: bump version to $newVersion"
     if ($LASTEXITCODE -ne 0) {
         Write-Host "WARNING: Commit may have failed (perhaps no changes?)" -ForegroundColor Yellow
