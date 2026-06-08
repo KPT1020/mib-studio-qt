@@ -3,8 +3,8 @@
 > Folder-backed [[ICamera]] for development and tests. Reads PNG/TIFF/JPEG
 > images from a directory and replays them at a configured interval.
 
-**Source:** `src/camera/mock/MockCamera.cpp`,
-`include/camera/mock/MockCamera.h`
+**Source:** `src/backend/camera/mock/MockCamera.cpp`,
+`include/backend/camera/mock/MockCamera.h`
 **Related:** [[ICamera]], [[../build-and-run/Run-Modes]]
 (mock env vars), [[../frontend/ConnectTab]]
 

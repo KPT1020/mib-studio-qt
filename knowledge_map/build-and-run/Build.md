@@ -26,7 +26,7 @@ From `CMakePresets.json`:
 | `mib_backend_smoke_test` | executable test | Backend-only HDF5/open/flush smoke test (`ctest -L backend`) |
 
 `mib_backend` is linked by both executables. Source is in
-`src/backend/`, `src/camera/`, and `src/backend/playback/`.
+`src/backend/`, `src/backend/camera/`, and `src/backend/playback/`.
 
 Backend-only builds set `MIB_BUILD_BACKEND_ONLY=ON` and skip frontend target
 generation entirely.

@@ -42,7 +42,7 @@ See `src/backend/AppBackend.cpp` around lines 79–200.
    - `CaptureService::CameraReadyCallback` → starts/stops `TriggerService`
      and hands it the live `ICamera*`
    - `ProcessingService::BackgroundCaptureCallback` → emits Qt signal via
-     [[../frontend/System-Utilities]] `BackgroundCaptureNotifier`
+     [[../frontend/System-Utilities]] `AppBackend::setBackgroundCaptureCallback`
 8. Seeds the [[../diagnostics/CrashStateMirror]] with initial app context
    (camera label, data dir, mock vs hardware, FrameStore capacity) and sets
    the Sentry tags (`camera_mode`, `data_dir`) on [[../services/CrashReporter]].

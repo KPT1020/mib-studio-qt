@@ -2,8 +2,8 @@
 
 > Production [[ICamera]] implementation backed by the Euresys EGrabber SDK.
 
-**Source:** `src/camera/common/EGrabberCamera.cpp`,
-`include/camera/common/EGrabberCamera.h`
+**Source:** `src/backend/camera/common/EGrabberCamera.cpp`,
+`include/backend/camera/common/EGrabberCamera.h`
 **Related:** [[ICamera]], [[../services/CaptureService]],
 [[../services/CameraControlService]]
 

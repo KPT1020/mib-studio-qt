@@ -9,16 +9,13 @@
 #include "backend/services/ProcessingService.h"
 #include "backend/services/PlaybackService.h"
 #include "backend/playback/FrameStore.h"
-#include "camera/common/EGrabberCamera.h"
-#include "camera/mock/MockCamera.h"
+#include "backend/camera/common/EGrabberCamera.h"
+#include "backend/camera/mock/MockCamera.h"
 #include "backend/services/CameraControlService.h"
 #include "backend/services/AutofocusService.h"
 #include "backend/services/TriggerService.h"
 #include "backend/services/YoloService.h"
 #include "backend/services/SyringePumpService.h"
-#include "backend/BackgroundCaptureNotifier.h"
-#include <QImage>
-#include <QTimer>
 
 #include <algorithm>
 #include <chrono>
@@ -26,6 +23,7 @@
 #include <filesystem>
 #include <cctype>
 #include <string>
+#include <utility>
 #include <spdlog/spdlog.h>
 #ifdef _WIN32
 #include <windows.h>
@@ -75,9 +73,7 @@ namespace backend
         }
     }
 
-    AppBackend::AppBackend() {
-        backgroundCaptureNotifier_ = std::make_unique<BackgroundCaptureNotifier>();
-    }
+    AppBackend::AppBackend() = default;
     AppBackend::~AppBackend() {
         stopFrameRecording();
     }
@@ -306,18 +302,17 @@ namespace backend
             }
         }
 
-        // Wire background capture callback to emit Qt signal
+        // Forward backend-owned background images to the active frontend adapter.
         if (bootProcessing)
         {
             processingService_->setBackgroundCaptureCallback([this](const cv::Mat& bg, uint64_t frameIndex) {
-                if (backgroundCaptureNotifier_) {
-                    // Convert cv::Mat to QImage
-                    QImage qimg(bg.data, bg.cols, bg.rows, static_cast<int>(bg.step), QImage::Format_Grayscale8);
-                    QImage qimgCopy = qimg.copy(); // Ensure we own the data
-                    // Use QTimer::singleShot to ensure we're in the Qt event loop thread
-                    QTimer::singleShot(0, backgroundCaptureNotifier_.get(), [this, qimgCopy, frameIndex]() {
-                        emit backgroundCaptureNotifier_->backgroundAutoCaptured(qimgCopy, frameIndex);
-                    });
+                BackgroundCaptureCallback callback;
+                {
+                    std::lock_guard<std::mutex> lock(backgroundCaptureCallbackMutex_);
+                    callback = backgroundCaptureCallback_;
+                }
+                if (callback) {
+                    callback(bg, frameIndex);
                 }
                 SPDLOG_INFO("Background auto-captured at frame {}", frameIndex);
             });
@@ -750,8 +745,9 @@ namespace backend
         return frameRecordingFiltered_.load();
     }
 
-    BackgroundCaptureNotifier* AppBackend::backgroundCaptureNotifier() const {
-        return backgroundCaptureNotifier_.get();
+    void AppBackend::setBackgroundCaptureCallback(BackgroundCaptureCallback callback) {
+        std::lock_guard<std::mutex> lk(backgroundCaptureCallbackMutex_);
+        backgroundCaptureCallback_ = std::move(callback);
     }
 
     void AppBackend::setLastConfigJson(const std::string& json) {

@@ -10,7 +10,9 @@
 #include <QSplitter>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QImage>
 #include <QMessageBox>
+#include <QMetaObject>
 #include <QSizePolicy>
 #include <QWidget>
 #include <QVBoxLayout>
@@ -27,7 +29,6 @@
 #include <vector>
 
 #include "backend/AppBackend.h"
-#include "backend/BackgroundCaptureNotifier.h"
 #include "backend/services/CaptureService.h"
 #include "backend/services/CrashReporter.h"
 #include "backend/services/ProcessingService.h"
@@ -318,9 +319,25 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
                 sidebarWidget_->updateBackgroundPreview(currentBg);
             }
             
-            // Connect auto-capture signal
-            connect(backend_.backgroundCaptureNotifier(), &backend::BackgroundCaptureNotifier::backgroundAutoCaptured,
-                    playbackPanel, &PlaybackPanel::onBackgroundAutoCaptured);
+            backend_.setBackgroundCaptureCallback([playbackPanel](const cv::Mat& background, uint64_t frameIndex) {
+                if (!playbackPanel || background.empty()) {
+                    return;
+                }
+
+                cv::Mat gray;
+                if (background.type() == CV_8UC1) {
+                    gray = background;
+                } else {
+                    background.convertTo(gray, CV_8UC1);
+                }
+
+                QImage image(gray.data, gray.cols, gray.rows,
+                             static_cast<int>(gray.step), QImage::Format_Grayscale8);
+                const QImage ownedImage = image.copy();
+                QMetaObject::invokeMethod(playbackPanel, [playbackPanel, ownedImage, frameIndex]() {
+                    playbackPanel->onBackgroundAutoCaptured(ownedImage, frameIndex);
+                }, Qt::QueuedConnection);
+            });
         }
     }
     
@@ -396,6 +413,7 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
 }
 
 MainWindow::~MainWindow() {
+    backend_.setBackgroundCaptureCallback({});
     delete ui;
 }
 

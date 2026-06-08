@@ -197,11 +197,13 @@ bool runBatchPipeline(const std::vector<cv::Mat>& images,
     {
         std::unique_lock lock(mutex);
         const bool finished = condition.wait_for(lock, std::chrono::seconds(60), [&] {
-            return results.size() == images.size();
+            return service.getBatchPipelineStats().framesProcessed >= images.size();
         });
         if (!finished) {
             std::cerr << "timed out waiting for " << images.size()
-                      << " HF dataset frames, got " << results.size() << '\n';
+                      << " HF dataset frames, processed "
+                      << service.getBatchPipelineStats().framesProcessed
+                      << " and produced " << results.size() << " objects\n";
             service.stopBatchPipeline();
             return false;
         }
@@ -220,9 +222,21 @@ bool writeSampleArtifacts(const std::filesystem::path& outputDir,
     const auto samplesDir = outputDir / "samples";
     std::filesystem::create_directories(samplesDir);
 
-    for (size_t i = 0; i < results.size(); ++i) {
+    std::vector<const ProcessedFrame*> representatives(records.size(), nullptr);
+    for (const auto& frame : results) {
+        if (frame.index < representatives.size() && representatives[frame.index] == nullptr) {
+            representatives[frame.index] = &frame;
+        }
+    }
+
+    for (size_t i = 0; i < records.size(); ++i) {
         const auto& record = records[i];
-        const auto& frame = results[i];
+        const auto* framePtr = representatives[i];
+        if (framePtr == nullptr) {
+            std::cerr << "row " << record.rowIndex << " produced no representative result\n";
+            return false;
+        }
+        const auto& frame = *framePtr;
         if (frame.originalImage.empty() || frame.processedImage.empty()) {
             std::cerr << "row " << record.rowIndex << " produced an empty image or mask\n";
             return false;
@@ -481,8 +495,9 @@ int main(int argc, char** argv)
     if (!runBatchPipeline(images, results, stats, callbackBatchSizes)) {
         return 5;
     }
-    if (results.size() != records.size()) {
-        std::cerr << "result count mismatch: expected " << records.size() << ", got " << results.size() << '\n';
+    if (results.size() < records.size()) {
+        std::cerr << "result count mismatch: expected at least " << records.size()
+                  << ", got " << results.size() << '\n';
         return 6;
     }
 

@@ -1,7 +1,7 @@
 #include "backend/AppBackend.h"
 #include "backend/services/CaptureService.h"
 #include "backend/services/ProcessingService.h"
-#include "camera/mock/MockCamera.h"
+#include "backend/camera/mock/MockCamera.h"
 
 #include <QCoreApplication>
 

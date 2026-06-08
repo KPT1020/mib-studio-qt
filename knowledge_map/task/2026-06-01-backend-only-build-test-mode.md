@@ -11,7 +11,7 @@ backend tests without building frontend executables.
   - `MIB_BUILD_BACKEND_ONLY` (default `OFF`)
   - When `ON`, frontend executable target generation is skipped.
 - Added backend smoke test target:
-  - `mib_backend_smoke_test` (`src/tests/backend_smoke_test.cpp`)
+  - `mib_backend_smoke_test` (`tests/recording/hdf5_smoke_test.cpp`)
   - Registered with CTest as `backend.smoke` and label `backend`.
 - Added Linux presets:
   - configure: `linux-backend-only`

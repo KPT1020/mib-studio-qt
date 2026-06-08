@@ -1,0 +1,31 @@
+set(MIB_QT_COMPONENTS Core Gui SerialPort)
+if(NOT MIB_BUILD_BACKEND_ONLY)
+    list(APPEND MIB_QT_COMPONENTS Widgets Charts Network Concurrent)
+endif()
+
+find_package(Qt6 COMPONENTS ${MIB_QT_COMPONENTS} REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG QUIET)
+find_package(OpenCV CONFIG REQUIRED)
+find_package(onnxruntime CONFIG QUIET)
+
+set(MIB_HAS_EGRABBER OFF)
+if(WIN32 AND MIB_ENABLE_HARDWARE_SDKS)
+    set(MIB_HAS_EGRABBER ON)
+endif()
+message(STATUS "Hardware SDK integrations: ${MIB_HAS_EGRABBER}")
+
+set(MIB_HAS_ONNXRUNTIME OFF)
+if(TARGET onnxruntime::onnxruntime)
+    set(MIB_HAS_ONNXRUNTIME ON)
+endif()
+
+find_package(SQLite3 QUIET)
+if(NOT SQLite3_FOUND)
+    find_package(unofficial-sqlite3 CONFIG QUIET)
+endif()
+
+find_package(HDF5 CONFIG QUIET)
+if(NOT HDF5_FOUND)
+    find_package(HDF5 MODULE QUIET)
+endif()

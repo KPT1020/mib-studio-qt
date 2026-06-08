@@ -4,7 +4,7 @@
 > hardware vs mock differences so [[../services/CaptureService]] doesn't
 > care.
 
-**Source:** `include/camera/common/ICamera.h`, `include/camera/common/Frame.h`
+**Source:** `include/backend/camera/common/ICamera.h`, `include/backend/camera/common/Frame.h`
 
 ## Types
 

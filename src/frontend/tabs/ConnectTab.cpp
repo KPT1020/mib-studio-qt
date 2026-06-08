@@ -11,7 +11,7 @@
 #include "backend/services/CaptureService.h"
 #include "frontend/dialogs/MockConfigDialog.h"
 #include "frontend/system/DeviceInitManager.h"
-#include "camera/mock/MockCamera.h"
+#include "backend/camera/mock/MockCamera.h"
 
 #include <filesystem>
 #include <algorithm>

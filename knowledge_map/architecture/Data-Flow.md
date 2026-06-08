@@ -56,7 +56,7 @@ reads these on a timer to refresh live histograms and scatter plots.
 ## Key frame data types
 
 - `camera::common::Frame` — camera-side; PFNC pixel format, linePitch,
-  raw bytes. Defined in `include/camera/common/Frame.h`.
+  raw bytes. Defined in `include/backend/camera/common/Frame.h`.
 - `backend::playback::Frame` — ring-buffer-side; same shape, lives in
   [[../data-model/FrameStore]].
 - `backend::services::ProcessedFrame` — processing-side; `cv::Mat

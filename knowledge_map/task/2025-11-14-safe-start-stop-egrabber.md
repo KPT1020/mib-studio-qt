@@ -8,7 +8,7 @@ Intermittent GenTL error `-1012` (“An operation has been aborted before it cou
 
 ## Changes
 
-- Implemented SDK-recommended shutdown sequence in `src/camera/common/EGrabberCamera.cpp`:
+- Implemented SDK-recommended shutdown sequence in `src/backend/camera/common/EGrabberCamera.cpp`:
   - `grabber_->stop()` with `gentl_error` handling that ignores `gc::GC_ERR_ABORT` (debug log).
   - `grabber_->cancelPop()` to wake any thread blocked in `pop()`.
   - `grabber_->reallocBuffers(0)` then reset handles.
@@ -25,7 +25,7 @@ Intermittent GenTL error `-1012` (“An operation has been aborted before it cou
 
 ## Files touched
 
-- Updated: `src/camera/common/EGrabberCamera.cpp`
+- Updated: `src/backend/camera/common/EGrabberCamera.cpp`
 - Added doc: `docs/howto/safe-start-stop-egrabber.md`
 
 ## Expected impact

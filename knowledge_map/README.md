@@ -32,7 +32,7 @@ following `[[WikiLinks]]`. If you are a new agent, start here:
   [[frontend/SyringePumpTab]]
 - Support: [[frontend/Dialogs]], [[frontend/System-Utilities]]
 
-### Camera (`src/camera/`)
+### Camera (`src/backend/camera/`)
 - [[camera/_MOC|Camera MOC]]
 - [[camera/ICamera]], [[camera/EGrabberCamera]], [[camera/MockCamera]]
 

@@ -64,9 +64,9 @@ compile in Linux CI/cloud environments.
 
 - `CMakeLists.txt`
 - `include/backend/services/CameraControlService.h`
-- `include/camera/common/EGrabberCamera.h`
+- `include/backend/camera/common/EGrabberCamera.h`
 - `src/backend/AppBackend.cpp`
 - `src/backend/services/CameraControlService.cpp`
 - `src/backend/services/CaptureService.cpp`
 - `src/backend/services/AutofocusService.stub.cpp` (new)
-- `src/camera/common/EGrabberCamera.cpp`
+- `src/backend/camera/common/EGrabberCamera.cpp`

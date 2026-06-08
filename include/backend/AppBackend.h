@@ -1,12 +1,14 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
 
-namespace backend { class BackgroundCaptureNotifier; }
+namespace cv { class Mat; }
 
 namespace backend::services
 {
@@ -40,6 +42,8 @@ namespace backend
     class AppBackend
     {
     public:
+        using BackgroundCaptureCallback = std::function<void(const cv::Mat& background, uint64_t frameIndex)>;
+
         AppBackend();
         ~AppBackend();
 
@@ -87,8 +91,7 @@ namespace backend
         void setLastConfigJson(const std::string& json);
         std::string getLastConfigJson() const;
 
-        // Get background capture notifier for Qt signal connections
-        BackgroundCaptureNotifier* backgroundCaptureNotifier() const;
+        void setBackgroundCaptureCallback(BackgroundCaptureCallback callback);
 
     private:
         std::unique_ptr<services::SqliteService> sqliteService_;
@@ -116,8 +119,8 @@ namespace backend
         std::atomic<uint64_t> frameRecordingFiltered_{0};
         std::string frameRecordingPath_;
 
-        // Background capture notifier for Qt signals
-        std::unique_ptr<BackgroundCaptureNotifier> backgroundCaptureNotifier_;
+        mutable std::mutex backgroundCaptureCallbackMutex_;
+        BackgroundCaptureCallback backgroundCaptureCallback_;
 
         // Raw config JSON for HDF5 metadata persistence
         mutable std::mutex configJsonMutex_;

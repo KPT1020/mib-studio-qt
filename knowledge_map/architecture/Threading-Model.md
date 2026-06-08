@@ -28,7 +28,7 @@
 - `ProcessingService` uses `std::condition_variable_any` for the worker
   queue; realtime loop polls FrameStore by absolute write-index.
 - Qt signals from non-GUI threads go through
-  [[../frontend/System-Utilities]] `BackgroundCaptureNotifier` (signal bridge).
+  [[../frontend/System-Utilities]] `AppBackend::setBackgroundCaptureCallback` (signal bridge).
 
 ## Experiment vs Monitoring vs Realtime
 

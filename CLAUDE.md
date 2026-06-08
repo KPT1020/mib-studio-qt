@@ -35,7 +35,7 @@ code must update the vault in the same commit/PR as the code change.**
 | Threading, data flow, or layering | `knowledge_map/architecture/{Threading-Model,Data-Flow,Overview}.md` |
 | `src/backend/playback/FrameStore.*` | `knowledge_map/data-model/FrameStore.md` |
 | HDF5 schema / dataset paths (`Hdf5Service.cpp`) | `knowledge_map/data-model/HDF5-Storage.md` + `services/Hdf5Service.md` |
-| `src/camera/` (ICamera, EGrabber, Mock) | `knowledge_map/camera/*.md` |
+| `src/backend/camera/` (ICamera, EGrabber, Mock) | `knowledge_map/camera/*.md` |
 | `CMakeLists.txt`, `conanfile.txt`, `CMakePresets.json` | `knowledge_map/build-and-run/{Build,Dependencies,Run-Modes}.md` |
 | Conventions / logging patterns | `knowledge_map/conventions/*.md` |
 | Domain vocabulary (new metric, new concept) | `knowledge_map/domain/{Glossary,Microscopy-Pipeline}.md` |
@@ -114,7 +114,7 @@ C++17 / Qt6 (Widgets + Charts) application for real-time microscopy image captur
 - `RecorderService` — Raw frame container writer (recording mode)
 - `SqliteService` — Metadata persistence
 
-**Camera abstraction** (`src/camera/`) — `ICamera` interface with `EGrabberCamera` (hardware) and `MockCamera` (folder-backed) implementations.
+**Camera abstraction** (`src/backend/camera/`) — `ICamera` interface with `EGrabberCamera` (hardware) and `MockCamera` (folder-backed) implementations.
 
 **FrameStore** (`src/backend/playback/FrameStore.cpp`) — Ring buffer for in-memory frame history. Default constructor capacity is 512, but `AppBackend::initialize` overrides it to **5000**.
 

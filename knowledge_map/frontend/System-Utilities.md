@@ -41,7 +41,7 @@
 
 ## Cross-thread Qt signals
 
-- **`BackgroundCaptureNotifier`** (`src/backend/BackgroundCaptureNotifier.cpp`)
+- **`AppBackend::setBackgroundCaptureCallback`** (`backend::AppBackend background capture callback`)
   — tiny `QObject` that bridges non-Qt thread callbacks (e.g.
   background auto-capture from [[../services/ProcessingService]]) to Qt
   signals on the main thread. Owned by [[../architecture/AppBackend]].

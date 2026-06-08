@@ -1,4 +1,4 @@
-#include "camera/common/EGrabberCamera.h"
+#include "backend/camera/common/EGrabberCamera.h"
 
 #include <spdlog/spdlog.h>
 

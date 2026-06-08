@@ -1,0 +1,55 @@
+name: Backend CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            g++ \
+            libhdf5-dev \
+            libopencv-dev \
+            libqt6serialport6-dev \
+            libqt6svg6-dev \
+            libsqlite3-dev \
+            ninja-build \
+            qt6-base-dev \
+            qt6-base-dev-tools \
+            qt6-image-formats-plugins
+
+      - name: Configure backend
+        run: cmake --preset linux-backend-only
+
+      - name: Build backend
+        run: cmake --build --preset linux-backend-only-build
+
+      - name: Test backend
+        run: ctest --preset linux-backend-only-test --output-on-failure
+
+      - name: Upload CTest logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-ci-logs
+          path: |
+            build/linux-backend/Testing/**/*.log
+            build/linux-backend/CMakeFiles/CMake*.log

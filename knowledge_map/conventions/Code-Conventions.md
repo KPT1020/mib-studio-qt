@@ -49,7 +49,7 @@
 
 - Never touch a service's private state outside its public API.
 - UI ↔ non-Qt-thread communication goes through
-  `backend::BackgroundCaptureNotifier` or Qt queued connections. See
+  `backend::AppBackend background capture callback` or Qt queued connections. See
   [[../frontend/System-Utilities]].
 
 ## C++ standard

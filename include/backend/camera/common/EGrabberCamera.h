@@ -1,6 +1,6 @@
 #pragma once
 
-#include "camera/common/ICamera.h"
+#include "backend/camera/common/ICamera.h"
 
 #ifndef MIB_HAS_EGRABBER
 #define MIB_HAS_EGRABBER 0

@@ -24,7 +24,7 @@
 └────────────────────────────┬────────────────────────────────────────┘
                              │ grabFrame / config
 ┌────────────────────────────▼────────────────────────────────────────┐
-│         Camera abstraction (src/camera/) — ICamera interface        │
+│         Camera abstraction (src/backend/camera/) — ICamera interface        │
 │            EGrabberCamera (hardware) · MockCamera (dev)             │
 └─────────────────────────────────────────────────────────────────────┘
 ```
