@@ -9,6 +9,23 @@ login for the public dataset.
 
 ## Run Locally
 
+Windows Debug:
+
+```powershell
+cmake --preset windows-default
+cmake --build --preset windows-default-build --target kin10_hf_dataset_pipeline_test
+ctest --preset windows-debug-integration-test -R backend.kin10_hf_dataset_pipeline --output-on-failure
+```
+
+The Windows CTest runner writes downloaded frames, sample overlays, and
+`metrics.json` under:
+
+```text
+build/test-output/kin10_hf_dataset_pipeline/
+```
+
+Linux:
+
 ```bash
 cmake --preset linux-backend-only
 cmake --build --preset linux-backend-only-build --target kin10_hf_dataset_pipeline_test
@@ -29,6 +46,14 @@ tools/kin10_run_hf_dataset_test.sh \
   build/linux-backend/kin10_hf_dataset_pipeline_test
 ```
 
+Cross-platform equivalent:
+
+```powershell
+python tools/kin10_run_hf_dataset_test.py `
+  --out-dir review_artifacts/KIN-10/hf_dataset_pipeline `
+  --binary build/Debug/kin10_hf_dataset_pipeline_test.exe
+```
+
 ## Sample Selection And Cache
 
 By default the runner uses rows `0,1,2,2500,4999` from config `default`, split
@@ -45,6 +70,14 @@ Set `KIN10_HF_ROW_INDICES` to exercise a different public sample set:
 ```bash
 KIN10_HF_ROW_INDICES=0,10,20,100,4999 \
   ctest --preset linux-backend-only-test -R backend.kin10_hf_dataset_pipeline --output-on-failure
+```
+
+On PowerShell:
+
+```powershell
+$env:KIN10_HF_ROW_INDICES = "0,10,20,100,4999"
+ctest --preset windows-debug-integration-test -R backend.kin10_hf_dataset_pipeline --output-on-failure
+Remove-Item Env:\KIN10_HF_ROW_INDICES
 ```
 
 ## Regression Signal

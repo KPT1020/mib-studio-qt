@@ -149,10 +149,49 @@
       }
     },
     {
+      "name": "windows-debug-test",
+      "displayName": "Test Windows Debug (fast)",
+      "configurePreset": "windows-default",
+      "configuration": "Debug",
+      "filter": {
+        "exclude": {
+          "label": "integration"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 30
+      }
+    },
+    {
+      "name": "windows-debug-integration-test",
+      "displayName": "Test Windows Debug integration",
+      "configurePreset": "windows-default",
+      "configuration": "Debug",
+      "filter": {
+        "include": {
+          "label": "integration"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 180
+      }
+    },
+    {
       "name": "windows-test",
-      "displayName": "Test (Release)",
+      "displayName": "Test Windows Release (fast)",
       "configurePreset": "windows-default",
       "configuration": "Release",
+      "filter": {
+        "exclude": {
+          "label": "integration"
+        }
+      },
       "output": {
         "outputOnFailure": true
       },

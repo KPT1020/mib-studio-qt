@@ -308,18 +308,20 @@ endif()
 
 # Backend smoke test (no frontend dependencies).
 if(BUILD_TESTING)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+
     add_executable(mib_backend_smoke_test
         src/tests/backend_smoke_test.cpp
     )
     target_link_libraries(mib_backend_smoke_test PRIVATE mib_backend)
-    add_test(NAME backend.smoke COMMAND mib_backend_smoke_test)
+    add_test(NAME backend.smoke COMMAND $<TARGET_FILE:mib_backend_smoke_test>)
     set_tests_properties(backend.smoke PROPERTIES LABELS "backend")
 
     add_executable(processing_batch_pipeline_test
         src/tests/processing_batch_pipeline_test.cpp
     )
     target_link_libraries(processing_batch_pipeline_test PRIVATE mib_backend)
-    add_test(NAME backend.processing_batch_pipeline COMMAND processing_batch_pipeline_test)
+    add_test(NAME backend.processing_batch_pipeline COMMAND $<TARGET_FILE:processing_batch_pipeline_test>)
     set_tests_properties(backend.processing_batch_pipeline PROPERTIES LABELS "backend")
 
     add_executable(kin6_batch_pipeline_evidence
@@ -331,7 +333,20 @@ if(BUILD_TESTING)
         src/tests/kin10_hf_dataset_pipeline_test.cpp
     )
     target_link_libraries(kin10_hf_dataset_pipeline_test PRIVATE mib_backend)
-    if(UNIX)
+    if(Python3_Interpreter_FOUND)
+        add_test(
+            NAME backend.kin10_hf_dataset_pipeline
+            COMMAND
+                ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tools/kin10_run_hf_dataset_test.py
+                --out-dir ${CMAKE_CURRENT_BINARY_DIR}/test-output/kin10_hf_dataset_pipeline
+                --binary $<TARGET_FILE:kin10_hf_dataset_pipeline_test>
+        )
+        set_tests_properties(backend.kin10_hf_dataset_pipeline PROPERTIES
+            LABELS "backend;integration"
+            TIMEOUT 180
+        )
+    elseif(UNIX)
         add_test(
             NAME backend.kin10_hf_dataset_pipeline
             COMMAND
@@ -343,27 +358,29 @@ if(BUILD_TESTING)
             LABELS "backend;integration"
             TIMEOUT 180
         )
+    else()
+        message(WARNING "Python3 interpreter not found; backend.kin10_hf_dataset_pipeline will not be registered")
     endif()
 
     add_executable(kin6_mib_app_capture_proof
         src/tests/kin6_mib_app_capture_proof.cpp
     )
     target_link_libraries(kin6_mib_app_capture_proof PRIVATE mib_backend)
-    add_test(NAME backend.kin6_mib_app_capture_proof COMMAND kin6_mib_app_capture_proof)
+    add_test(NAME backend.kin6_mib_app_capture_proof COMMAND $<TARGET_FILE:kin6_mib_app_capture_proof>)
     set_tests_properties(backend.kin6_mib_app_capture_proof PROPERTIES LABELS "backend")
 
     add_executable(mib_processing_multi_object_test
         src/tests/processing_multi_object_test.cpp
     )
     target_link_libraries(mib_processing_multi_object_test PRIVATE mib_backend)
-    add_test(NAME backend.processing_multi_object COMMAND mib_processing_multi_object_test)
+    add_test(NAME backend.processing_multi_object COMMAND $<TARGET_FILE:mib_processing_multi_object_test>)
     set_tests_properties(backend.processing_multi_object PROPERTIES LABELS "backend")
 
     add_executable(mib_processing_object_tracking_test
         src/tests/processing_object_tracking_test.cpp
     )
     target_link_libraries(mib_processing_object_tracking_test PRIVATE mib_backend)
-    add_test(NAME backend.processing_object_tracking COMMAND mib_processing_object_tracking_test)
+    add_test(NAME backend.processing_object_tracking COMMAND $<TARGET_FILE:mib_processing_object_tracking_test>)
     set_tests_properties(backend.processing_object_tracking PROPERTIES LABELS "backend")
 endif()
 
