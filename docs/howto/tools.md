@@ -14,12 +14,12 @@ Standalone end-user tools for working with MIB Studio HDF5 files after recording
 - **Windows:** Versioned zip per release, e.g. `MIB_Studio_Tools_vX.Y.Z_windows.zip`, containing `hdf5_export_app.exe`, `mib_reanalyse_hdf5.exe`, and `README.txt`.
 - **macOS:** Build from source (see [tools/README.md](../../tools/README.md)); optional .app and .dmg via `tools/build_mac.sh`.
 
-Published builds are uploaded to the same RustFS bucket as the main app, under the `stable/tools/` prefix. A manifest `tools-latest.json` is updated so the latest tools zip URL can be fetched programmatically.
+Published builds are uploaded to the same Cloudflare R2 update bucket as the main app, under the `stable/tools/` prefix. A manifest `tools-latest.json` is updated so the latest tools zip URL can be fetched programmatically.
 
-Example (replace bucket/endpoint with your deployment):
+Production URLs:
 
-- Manifest: `https://<endpoint>/<bucket>/stable/tools/tools-latest.json`
-- Zip: `https://<endpoint>/<bucket>/stable/tools/MIB_Studio_Tools_vX.Y.Z_windows.zip`
+- Manifest: `https://updates.yofo.bio/stable/tools/tools-latest.json`
+- Zip: `https://updates.yofo.bio/stable/tools/MIB_Studio_Tools_vX.Y.Z_windows.zip`
 
 ## Quick start (Windows, from the zip)
 

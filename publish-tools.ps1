@@ -1,5 +1,6 @@
-# Publish MIB Studio Tools zip to RustFS (S3-compatible) under stable/tools/
-# Usage: .\publish-tools.ps1 -Zip "tools\dist\MIB_Studio_Tools_v0.1.7_windows.zip" [-Profile rustfs]
+# Publish MIB Studio Tools zip to Cloudflare R2 (S3-compatible) under stable/tools/
+# Usage: $env:MIB_STUDIO_R2_ENDPOINT = "https://<account-id>.r2.cloudflarestorage.com"
+#        .\publish-tools.ps1 -Zip "tools\dist\MIB_Studio_Tools_v0.1.7_windows.zip" [-Profile mib-studio-r2]
 # Version is auto-detected from zip filename if not provided.
 
 param(
@@ -9,25 +10,59 @@ param(
     [Parameter(Mandatory=$false)]
     [string]$Zip,
 
-    [string]$Endpoint = "https://s3.yofo.bio",
+    [string]$Endpoint = $env:MIB_STUDIO_R2_ENDPOINT,
     [string]$Bucket = "mib-studio-qt-updates",
+    [string]$PublicBaseUrl = "https://updates.yofo.bio",
     [string]$Channel = "stable",
-    [string]$Profile = ""
+    [string]$Profile = $env:MIB_STUDIO_R2_PROFILE,
+    [string]$Acl = ""
 )
 
 $ErrorActionPreference = "Stop"
 
-function Restore-ChecksumEnvVar {
+function Join-PublicObjectUrl {
     param(
-        [string]$Name,
-        [string]$PreviousValue
+        [string]$BaseUrl,
+        [string]$Key
     )
 
-    if ($null -eq $PreviousValue) {
-        Remove-Item "Env:$Name" -ErrorAction SilentlyContinue
-    } else {
-        Set-Item "Env:$Name" $PreviousValue
-    }
+    return "$($BaseUrl.TrimEnd('/'))/$($Key.TrimStart('/'))"
+}
+
+function Invoke-S3Upload {
+    param(
+        [string]$File,
+        [string]$Key,
+        [string]$ContentType
+    )
+
+    $uploadArgs = @(
+        $s3UploadScript,
+        "--endpoint", $Endpoint,
+        "--bucket", $Bucket,
+        "--key", $Key,
+        "--file", $File,
+        "--content-type", $ContentType
+    )
+    if ($Profile) { $uploadArgs += @("--profile", $Profile) }
+    if ($Acl) { $uploadArgs += @("--acl", $Acl) }
+    if ($env:S3_UPLOAD_DEBUG) { $uploadArgs += @("--debug") }
+
+    Write-Host "   Command: python $($uploadArgs -join ' ')" -ForegroundColor Gray
+    & python $uploadArgs | Write-Host
+    return $LASTEXITCODE
+}
+
+if (-not $Endpoint) {
+    Write-Host "ERROR: R2 S3 API endpoint is required. Set MIB_STUDIO_R2_ENDPOINT or pass -Endpoint." -ForegroundColor Red
+    Write-Host "       Example: https://<account-id>.r2.cloudflarestorage.com" -ForegroundColor Red
+    exit 1
+}
+
+$s3UploadScript = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "scripts\s3_upload.py"
+if (-not (Test-Path $s3UploadScript)) {
+    Write-Host "ERROR: Cannot find $s3UploadScript" -ForegroundColor Red
+    exit 1
 }
 
 # Default zip path: tools/dist/MIB_Studio_Tools_vX.Y.Z_windows.zip (use latest if single zip)
@@ -77,8 +112,8 @@ $toolsPrefix = "${Channel}/tools"
 $zipKey = "$toolsPrefix/$zipFileName"
 $manifestKey = "$toolsPrefix/tools-latest.json"
 
-$endpointNoSlash = $Endpoint.TrimEnd('/')
-$zipUrl = "$endpointNoSlash/$Bucket/$zipKey"
+$publicBaseNoSlash = $PublicBaseUrl.TrimEnd('/')
+$zipUrl = Join-PublicObjectUrl -BaseUrl $PublicBaseUrl -Key $zipKey
 
 Write-Host "`n2. Generating manifest..." -ForegroundColor Yellow
 $manifest = @{
@@ -92,51 +127,24 @@ $manifestJson = $manifest | ConvertTo-Json -Depth 10
 $manifestPath = Join-Path $env:TEMP "mib_tools_latest_$(New-Guid).json"
 $manifestJson | Out-File -FilePath $manifestPath -Encoding UTF8 -NoNewline
 
-$awsArgs = @("--endpoint-url", $Endpoint)
-if ($Profile) { $awsArgs += @("--profile", $Profile) }
-
-# Force AWS CLI checksum behavior that is compatible with S3-compatible endpoints.
-$previousRequestChecksumCalculation = $env:AWS_REQUEST_CHECKSUM_CALCULATION
-$previousResponseChecksumValidation = $env:AWS_RESPONSE_CHECKSUM_VALIDATION
-$env:AWS_REQUEST_CHECKSUM_CALCULATION = "when_required"
-$env:AWS_RESPONSE_CHECKSUM_VALIDATION = "when_required"
-
 Write-Host "`n3. Uploading zip..." -ForegroundColor Yellow
-$uploadArgs = $awsArgs + @(
-    "s3api", "put-object",
-    "--bucket", $Bucket,
-    "--key", $zipKey,
-    "--body", $Zip,
-    "--content-type", "application/zip",
-    "--acl", "public-read"
-)
-$result = & aws $uploadArgs 2>&1
-if ($LASTEXITCODE -ne 0) {
+$uploadExit = Invoke-S3Upload -File $Zip -Key $zipKey -ContentType "application/zip"
+if ($uploadExit -ne 0) {
     Write-Host "ERROR: Zip upload failed!" -ForegroundColor Red
-    Write-Host $result -ForegroundColor Red
     Remove-Item $manifestPath -ErrorAction SilentlyContinue
-    Restore-ChecksumEnvVar -Name "AWS_REQUEST_CHECKSUM_CALCULATION" -PreviousValue $previousRequestChecksumCalculation
-    Restore-ChecksumEnvVar -Name "AWS_RESPONSE_CHECKSUM_VALIDATION" -PreviousValue $previousResponseChecksumValidation
     exit 1
 }
 Write-Host "   Zip uploaded successfully" -ForegroundColor Green
 
 Write-Host "`n4. Uploading tools-latest.json..." -ForegroundColor Yellow
-$manifestUploadArgs = $awsArgs + @("s3", "cp", $manifestPath, "s3://$Bucket/$manifestKey", "--content-type", "application/json", "--acl", "public-read")
-$result = & aws $manifestUploadArgs 2>&1
+$uploadExit = Invoke-S3Upload -File $manifestPath -Key $manifestKey -ContentType "application/json"
 Remove-Item $manifestPath -ErrorAction SilentlyContinue
-if ($LASTEXITCODE -ne 0) {
+if ($uploadExit -ne 0) {
     Write-Host "ERROR: Manifest upload failed!" -ForegroundColor Red
-    Write-Host $result -ForegroundColor Red
-    Restore-ChecksumEnvVar -Name "AWS_REQUEST_CHECKSUM_CALCULATION" -PreviousValue $previousRequestChecksumCalculation
-    Restore-ChecksumEnvVar -Name "AWS_RESPONSE_CHECKSUM_VALIDATION" -PreviousValue $previousResponseChecksumValidation
     exit 1
 }
 Write-Host "   Manifest uploaded successfully" -ForegroundColor Green
 
-Restore-ChecksumEnvVar -Name "AWS_REQUEST_CHECKSUM_CALCULATION" -PreviousValue $previousRequestChecksumCalculation
-Restore-ChecksumEnvVar -Name "AWS_RESPONSE_CHECKSUM_VALIDATION" -PreviousValue $previousResponseChecksumValidation
-
 Write-Host "`n=== Publish Complete ===" -ForegroundColor Cyan
-Write-Host "Manifest URL: $endpointNoSlash/$Bucket/$manifestKey" -ForegroundColor Green
+Write-Host "Manifest URL: $(Join-PublicObjectUrl -BaseUrl $publicBaseNoSlash -Key $manifestKey)" -ForegroundColor Green
 Write-Host "Zip URL: $zipUrl" -ForegroundColor Green

@@ -1,6 +1,7 @@
-# PowerShell script to publish MIB Studio Qt updates to RustFS (S3-compatible)
-# Usage: .\publish-update.ps1 -Installer "build\dist\MIB_Studio_Qt_Update_v0.2.0.exe" -Profile rustfs
-#        .\publish-update.ps1 -Installer "build\dist\MIB_Studio_Qt_Setup_v0.2.0.exe" -Profile rustfs
+# PowerShell script to publish MIB Studio Qt updates to Cloudflare R2 (S3-compatible)
+# Usage: $env:MIB_STUDIO_R2_ENDPOINT = "https://<account-id>.r2.cloudflarestorage.com"
+#        .\publish-update.ps1 -Installer "build\dist\MIB_Studio_Qt_Update_v0.2.0.exe" -Profile mib-studio-r2
+#        .\publish-update.ps1 -Installer "build\dist\MIB_Studio_Qt_Setup_v0.2.0.exe" -Profile mib-studio-r2
 # Version is auto-detected from installer filename if not provided
 
 param(
@@ -10,16 +11,33 @@ param(
     [Parameter(Mandatory=$true)]
     [string]$Installer,
     
-    [string]$Endpoint = "https://s3.yofo.bio",
+    [string]$Endpoint = $env:MIB_STUDIO_R2_ENDPOINT,
     [string]$Bucket = "mib-studio-qt-updates",
+    [string]$PublicBaseUrl = "https://updates.yofo.bio",
     [string]$Channel = "stable",
-    [string]$Profile = "",
+    [string]$Profile = $env:MIB_STUDIO_R2_PROFILE,
+    [string]$Acl = "",
     [string]$ReleaseNotesUrl = ""
 )
 
 $ErrorActionPreference = "Stop"
 
 Write-Host "=== Publishing MIB Studio Qt Update ===" -ForegroundColor Cyan
+
+if (-not $Endpoint) {
+    Write-Host "ERROR: R2 S3 API endpoint is required. Set MIB_STUDIO_R2_ENDPOINT or pass -Endpoint." -ForegroundColor Red
+    Write-Host "       Example: https://<account-id>.r2.cloudflarestorage.com" -ForegroundColor Red
+    exit 1
+}
+
+function Join-PublicObjectUrl {
+    param(
+        [string]$BaseUrl,
+        [string]$Key
+    )
+
+    return "$($BaseUrl.TrimEnd('/'))/$($Key.TrimStart('/'))"
+}
 
 # Locate boto3 uploader helper
 $s3UploadScript = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "scripts\s3_upload.py"
@@ -74,9 +92,10 @@ $installerFileName = Split-Path -Leaf $Installer
 $installerKey = "$Channel/$installerFileName"
 $manifestKey = "$Channel/latest.json"
 
-# Build URLs
-$endpointNoSlash = $Endpoint.TrimEnd('/')
-$installerUrl = "$endpointNoSlash/$Bucket/$installerKey"
+# Build public URLs. R2 custom domains expose objects by key, without the
+# bucket name in the URL.
+$publicBaseNoSlash = $PublicBaseUrl.TrimEnd('/')
+$installerUrl = Join-PublicObjectUrl -BaseUrl $PublicBaseUrl -Key $installerKey
 
 # Create manifest JSON
 Write-Host "`n2. Generating manifest..." -ForegroundColor Yellow
@@ -111,10 +130,10 @@ function Invoke-S3Upload {
         "--bucket", $Bucket,
         "--key", $Key,
         "--file", $File,
-        "--content-type", $ContentType,
-        "--acl", "public-read"
+        "--content-type", $ContentType
     )
     if ($Profile) { $uploadArgs += @("--profile", $Profile) }
+    if ($Acl) { $uploadArgs += @("--acl", $Acl) }
     if ($env:S3_UPLOAD_DEBUG) { $uploadArgs += @("--debug") }
 
     Write-Host "   Command: python $($uploadArgs -join ' ')" -ForegroundColor Gray
@@ -147,5 +166,5 @@ if ($uploadExit -ne 0) {
 Write-Host "   Manifest uploaded successfully" -ForegroundColor Green
 
 Write-Host "`n=== Publish Complete ===" -ForegroundColor Cyan
-Write-Host "Manifest URL: $endpointNoSlash/$Bucket/$manifestKey" -ForegroundColor Green
+Write-Host "Manifest URL: $(Join-PublicObjectUrl -BaseUrl $publicBaseNoSlash -Key $manifestKey)" -ForegroundColor Green
 Write-Host "Installer URL: $installerUrl" -ForegroundColor Green

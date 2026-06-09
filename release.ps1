@@ -1,5 +1,5 @@
 # Unified release script for MIB Studio Qt
-# Builds locally, creates GitHub Release, and publishes to RustFS — all from your machine.
+# Builds locally, creates GitHub Release, and publishes to Cloudflare R2 — all from your machine.
 #
 # Usage:
 #   .\release.ps1 --patch                    # Production: bump, build, tag (v0.2.2)
@@ -17,7 +17,7 @@ param(
     [switch]$Push,
     [switch]$SkipBuild,
     [switch]$DryRun,
-    [string]$Profile = "rustfs"
+    [string]$Profile = $env:MIB_STUDIO_R2_PROFILE
 )
 
 $ErrorActionPreference = "Stop"
@@ -38,10 +38,10 @@ if ($bumpCount -ne 1) {
     Write-Host "  --minor       Bump minor version (new features)"
     Write-Host "  --major       Bump major version (breaking changes)"
     Write-Host "  --beta        Create a test/pre-release (publishes to test channel)"
-    Write-Host "  --push        Push tag, create GitHub Release, publish to RustFS"
+    Write-Host "  --push        Push tag, create GitHub Release, publish to Cloudflare R2"
     Write-Host "  --skip-build  Skip local build (tag and push only)"
     Write-Host "  --dry-run     Show what would happen without making changes"
-    Write-Host "  --profile     AWS CLI profile for RustFS (default: rustfs)"
+    Write-Host "  --profile     AWS/R2 profile for publishing (default: MIB_STUDIO_R2_PROFILE env var)"
     exit 1
 }
 
@@ -264,8 +264,8 @@ $checksumLines``````
             }
         }
 
-        # --- Step 7: Publish to RustFS ---
-        Write-Host "`n--- Step 7: Publish to RustFS ($channel) ---" -ForegroundColor Cyan
+        # --- Step 7: Publish to Cloudflare R2 ---
+        Write-Host "`n--- Step 7: Publish to Cloudflare R2 ($channel) ---" -ForegroundColor Cyan
 
         if ($updateExe) {
             if ($DryRun) {
@@ -278,13 +278,13 @@ $checksumLines``````
                     -Profile $Profile `
                     -ReleaseNotesUrl "https://github.com/gavinlouuu-kpt/mib-studio-qt/releases/tag/$tagName"
                 if ($LASTEXITCODE -ne 0) {
-                    Write-Host "WARNING: RustFS publish failed" -ForegroundColor Yellow
+                    Write-Host "WARNING: Cloudflare R2 publish failed" -ForegroundColor Yellow
                 } else {
-                    Write-Host "Published to RustFS ($channel)" -ForegroundColor Green
+                    Write-Host "Published to Cloudflare R2 ($channel)" -ForegroundColor Green
                 }
             }
         } else {
-            Write-Host "WARNING: Update package not found, skipping RustFS publish" -ForegroundColor Yellow
+            Write-Host "WARNING: Update package not found, skipping Cloudflare R2 publish" -ForegroundColor Yellow
         }
     } else {
         Write-Host "`n--- Step 6-7: Publish (skipped - no build) ---" -ForegroundColor Cyan
@@ -310,7 +310,7 @@ if (-not $SkipBuild) {
 
 if ($Push -and -not $SkipBuild) {
     Write-Host "Channel: $channel" -ForegroundColor Green
-    Write-Host "Status: Released (GitHub Release + RustFS)" -ForegroundColor Green
+    Write-Host "Status: Released (GitHub Release + Cloudflare R2)" -ForegroundColor Green
 } elseif ($Push) {
     Write-Host "Status: Tag pushed (no installers published)" -ForegroundColor Yellow
 } else {

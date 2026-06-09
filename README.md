@@ -61,26 +61,29 @@ After building installers, see [Publishing Updates](#publishing-updates) below t
 
 ## Publishing Updates
 
-After building installers, use `publish-update.ps1` to upload them to RustFS (S3-compatible storage) for distribution.
+After building installers, use `publish-update.ps1` to upload them to the dedicated Cloudflare R2 update bucket for distribution through `https://updates.yofo.bio`.
 
 **Prerequisites:**
-- AWS CLI installed and configured
-- RustFS credentials (via profile or environment variables)
+- Python with `boto3` available for the repo's S3-compatible upload helper
+- R2 endpoint configured with `MIB_STUDIO_R2_ENDPOINT`
+- R2 credentials via `MIB_STUDIO_R2_PROFILE`, AWS environment variables, or CI secrets
 
 **Publish update package (for auto-updates):**
 ```powershell
-.\publish-update.ps1 -Installer "resources\build\dist\MIB_Studio_Qt_Update_v0.2.0.exe" -Profile rustfs
+$env:MIB_STUDIO_R2_ENDPOINT = "https://<account-id>.r2.cloudflarestorage.com"
+$env:MIB_STUDIO_R2_PROFILE = "mib-studio-r2"
+.\publish-update.ps1 -Installer "resources\build\dist\MIB_Studio_Qt_Update_v0.2.0.exe"
 ```
 
 **Publish full installer (optional, for manual downloads):**
 ```powershell
-.\publish-update.ps1 -Installer "resources\build\dist\MIB_Studio_Qt_Setup_v0.2.0.exe" -Profile rustfs
+.\publish-update.ps1 -Installer "resources\build\dist\MIB_Studio_Qt_Setup_v0.2.0.exe"
 ```
 
-The script auto-detects version from filename, computes SHA-256, generates a manifest, and uploads files with public-read ACL.
+The script auto-detects version from filename, computes SHA-256, generates a manifest, uploads files to R2, and prints the final public URLs.
 
 For complete release workflow, see [docs/howto/release-workflow.md](docs/howto/release-workflow.md).  
-For detailed publishing information, see [docs/howto/auto-update-rustfs.md](docs/howto/auto-update-rustfs.md).
+For detailed publishing information, see [docs/howto/auto-update-r2.md](docs/howto/auto-update-r2.md).
 
 ## Version Management
 

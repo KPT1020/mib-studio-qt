@@ -36,7 +36,7 @@ def main() -> int:
     parser.add_argument("--key", required=True)
     parser.add_argument("--file", required=True)
     parser.add_argument("--content-type", default="application/octet-stream")
-    parser.add_argument("--acl", default="public-read")
+    parser.add_argument("--acl", default=None)
     parser.add_argument("--profile", default=None)
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
@@ -66,14 +66,16 @@ def main() -> int:
     file_size = os.path.getsize(args.file)
     try:
         with open(args.file, "rb") as fh:
-            s3.put_object(
-                Bucket=args.bucket,
-                Key=args.key,
-                Body=fh,
-                ContentLength=file_size,
-                ContentType=args.content_type,
-                ACL=args.acl,
-            )
+            put_args = {
+                "Bucket": args.bucket,
+                "Key": args.key,
+                "Body": fh,
+                "ContentLength": file_size,
+                "ContentType": args.content_type,
+            }
+            if args.acl:
+                put_args["ACL"] = args.acl
+            s3.put_object(**put_args)
     except (BotoCoreError, ClientError) as e:
         print(f"ERROR: upload failed: {e}", file=sys.stderr)
         return 1
