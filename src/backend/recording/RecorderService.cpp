@@ -11,7 +11,7 @@ RecorderService::~RecorderService() { close(); }
 
 bool RecorderService::openForWrite(const std::string& containerDir) {
     (void)containerDir;
-    SPDLOG_WARN("Recorder support not enabled; skipping open");
+    SPDLOG_WARN("Legacy RecorderService raw writer is unavailable; AppBackend frame recording uses HDF5");
     impl_->opened = false;
     return false;
 }

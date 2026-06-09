@@ -6,6 +6,8 @@
 
 namespace backend::services {
 
+// Legacy raw-frame container writer kept for source compatibility. The main
+// frame-recording path is AppBackend::startFrameRecording, backed by Hdf5Service.
 class RecorderService {
 public:
     RecorderService();

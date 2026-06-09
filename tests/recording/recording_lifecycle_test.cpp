@@ -1,5 +1,4 @@
 #include "backend/recording/Hdf5Service.h"
-#include "backend/recording/RecorderService.h"
 
 #include <opencv2/core.hpp>
 
@@ -28,32 +27,19 @@ cv::Mat makeFrame(unsigned char value)
 
 int main()
 {
-    backend::services::RecorderService recorder;
-    if (recorder.isOpen() || recorder.openForWrite(std::filesystem::temp_directory_path().string()))
-    {
-        std::cerr << "RecorderService should remain closed when recorder support is disabled\n";
-        return 1;
-    }
-    const unsigned char pixel = 1;
-    if (recorder.writeFrame(&pixel, 1, 1, 1, 1, 0, 1, 1, 1) || recorder.isOpen())
-    {
-        std::cerr << "disabled RecorderService should reject frame writes and stay closed\n";
-        return 2;
-    }
-
     const auto path = makeTempPath();
     backend::services::Hdf5Service hdf5;
     if (!hdf5.openFile(path.string()))
     {
         std::cerr << "failed to open HDF5 recording file\n";
-        return 3;
+        return 1;
     }
     if (!hdf5.initializeRecordingDatasets())
     {
         std::cerr << "failed to initialize recording datasets\n";
         hdf5.closeFile();
         std::filesystem::remove(path);
-        return 4;
+        return 2;
     }
 
     std::vector<cv::Mat> firstBatch{makeFrame(30), makeFrame(60)};
@@ -66,7 +52,7 @@ int main()
         std::cerr << "failed to append first recording batch\n";
         hdf5.closeFile();
         std::filesystem::remove(path);
-        return 5;
+        return 3;
     }
 
     std::vector<cv::Mat> secondBatch{makeFrame(90)};
@@ -78,14 +64,14 @@ int main()
         std::cerr << "failed to append second recording batch\n";
         hdf5.closeFile();
         std::filesystem::remove(path);
-        return 6;
+        return 4;
     }
     if (!hdf5.writeRecordingInfo(1000, 4000, 3, 1))
     {
         std::cerr << "failed to write recording info\n";
         hdf5.closeFile();
         std::filesystem::remove(path);
-        return 7;
+        return 5;
     }
     hdf5.closeFile();
 
@@ -93,14 +79,14 @@ int main()
     {
         std::cerr << "failed to reload HDF5 recording file\n";
         std::filesystem::remove(path);
-        return 8;
+        return 6;
     }
     if (!hdf5.isRecordingFile())
     {
         std::cerr << "recording file marker should be present\n";
         hdf5.closeFile();
         std::filesystem::remove(path);
-        return 9;
+        return 7;
     }
 
     uint64_t start = 0;
@@ -113,7 +99,7 @@ int main()
         std::cerr << "recording info should round-trip\n";
         hdf5.closeFile();
         std::filesystem::remove(path);
-        return 10;
+        return 8;
     }
 
     std::vector<backend::services::ProcessedFrame> metadata;
@@ -122,7 +108,7 @@ int main()
         std::cerr << "recording metadata should contain three appended frames\n";
         hdf5.closeFile();
         std::filesystem::remove(path);
-        return 11;
+        return 9;
     }
     for (size_t i = 0; i < metadata.size(); ++i)
     {
@@ -132,7 +118,7 @@ int main()
                       << " timestamp=" << metadata[i].timestampNs << "\n";
             hdf5.closeFile();
             std::filesystem::remove(path);
-            return 12;
+            return 10;
         }
     }
 
@@ -146,7 +132,7 @@ int main()
         std::cerr << "recorded image dataset shape should match appended frames\n";
         hdf5.closeFile();
         std::filesystem::remove(path);
-        return 13;
+        return 11;
     }
 
     hdf5.closeFile();
