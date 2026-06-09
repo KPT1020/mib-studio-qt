@@ -37,13 +37,14 @@ jobs:
       - name: Determine version
         id: version
         run: |
-          $content = Get-Content CMakeLists.txt -Raw
+          $versionFile = "cmake/MIBVersion.cmake"
+          $content = Get-Content $versionFile -Raw
           if ($content -match 'set\(DEFAULT_VERSION\s+"(\d+)\.(\d+)\.(\d+)"\)') {
             $major = [int]$matches[1]
             $minor = [int]$matches[2]
             $patch = [int]$matches[3]
           } else {
-            Write-Host "ERROR: Could not find DEFAULT_VERSION" -ForegroundColor Red
+            Write-Host "ERROR: Could not find DEFAULT_VERSION in $versionFile" -ForegroundColor Red
             exit 1
           }
           $current = "$major.$minor.$patch"
@@ -59,12 +60,12 @@ jobs:
             $tag = "v$version"
             $channel = "stable"
 
-            # Update CMakeLists.txt, commit, tag, push
+            # Update fallback CMake version module, commit, tag, push
             $content = $content -replace "set\(DEFAULT_VERSION\s+`"$current`"\)", "set(DEFAULT_VERSION `"$version`")"
-            Set-Content -Path CMakeLists.txt -Value $content -NoNewline
+            Set-Content -Path $versionFile -Value $content -NoNewline
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add CMakeLists.txt
+            git add $versionFile
             git commit -m "chore: bump version to $version"
             git tag -a $tag -m "Version $version"
             git push origin HEAD:main --follow-tags

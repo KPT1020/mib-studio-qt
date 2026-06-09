@@ -1,5 +1,6 @@
 MIB-Studio/
 build/
+CMakeUserPresets.json
 export/
 data/logs/app.log
 data/empty_detection_results/

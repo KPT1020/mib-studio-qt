@@ -1,4 +1,4 @@
-# PowerShell script to bump version in CMakeLists.txt
+# PowerShell script to bump the fallback CMake version
 # Usage: .\bump-version.ps1 --patch|--minor|--major [--tag]
 
 param(
@@ -36,22 +36,22 @@ if ($bumpCount -gt 1) {
     exit 1
 }
 
-# Find CMakeLists.txt
-$cmakeFile = Join-Path $PSScriptRoot "CMakeLists.txt"
-if (-not (Test-Path $cmakeFile)) {
-    Write-Host "ERROR: CMakeLists.txt not found at: $cmakeFile" -ForegroundColor Red
+# Find fallback CMake version module
+$versionFile = Join-Path $PSScriptRoot "cmake\MIBVersion.cmake"
+if (-not (Test-Path $versionFile)) {
+    Write-Host "ERROR: Version file not found at: $versionFile" -ForegroundColor Red
     exit 1
 }
 
 Write-Host "=== Version Bump Tool ===" -ForegroundColor Cyan
 
 # Read and extract current version from DEFAULT_VERSION
-$content = Get-Content $cmakeFile -Raw
+$content = Get-Content $versionFile -Raw
 if ($content -match 'set\(DEFAULT_VERSION\s+"(\d+\.\d+\.\d+)"\)') {
     $currentVersion = $matches[1]
     Write-Host "Current version: $currentVersion" -ForegroundColor Green
 } else {
-    Write-Host "ERROR: Could not find DEFAULT_VERSION in CMakeLists.txt" -ForegroundColor Red
+    Write-Host "ERROR: Could not find DEFAULT_VERSION in cmake\MIBVersion.cmake" -ForegroundColor Red
     Write-Host "Expected format: set(DEFAULT_VERSION \"X.Y.Z\")" -ForegroundColor Yellow
     exit 1
 }
@@ -87,20 +87,20 @@ $newVersion = "$versionMajor.$versionMinor.$versionPatch"
 Write-Host "New version: $newVersion ($bumpType bump)" -ForegroundColor Cyan
 
 # Confirm before updating
-Write-Host "`nUpdating CMakeLists.txt..." -ForegroundColor Yellow
+Write-Host "`nUpdating cmake\MIBVersion.cmake..." -ForegroundColor Yellow
 
-# Replace DEFAULT_VERSION in CMakeLists.txt
+# Replace DEFAULT_VERSION in the fallback CMake version module
 $newContent = $content -replace "set\(DEFAULT_VERSION\s+`"$currentVersion`"\)", "set(DEFAULT_VERSION `"$newVersion`")"
 
 # Verify the replacement worked
 if ($newContent -eq $content) {
-    Write-Host "ERROR: Failed to update version in CMakeLists.txt" -ForegroundColor Red
+    Write-Host "ERROR: Failed to update version in cmake\MIBVersion.cmake" -ForegroundColor Red
     exit 1
 }
 
 # Write updated content
-Set-Content -Path $cmakeFile -Value $newContent -NoNewline
-Write-Host "CMakeLists.txt updated successfully" -ForegroundColor Green
+Set-Content -Path $versionFile -Value $newContent -NoNewline
+Write-Host "cmake\MIBVersion.cmake updated successfully" -ForegroundColor Green
 
 # Create git tag if requested
 if ($Tag) {
