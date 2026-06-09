@@ -12,6 +12,7 @@ flowchart LR
     API --> Backend["Backend implementation\nsrc/backend"]
     Backend --> Camera["Camera abstraction\ninclude/camera + src/camera"]
     Backend --> Infra["OpenCV, HDF5, SQLite, spdlog,\nONNX Runtime, Qt Core/Gui, OS APIs"]
+    Bridge["Frontend-neutral bridge\nbackend::bridge::BackendFacade"] --> API
     Camera --> Hardware["EGrabber SDK or mock frame sources"]
 ```
 
@@ -98,8 +99,17 @@ The main public backend entry point is `backend::AppBackend`:
 - camera setup APIs configure mock or hardware selection and apply/reset
   hardware camera scripts.
 - frame recording APIs start and stop direct HDF5 frame recording.
-- `backgroundCaptureNotifier()` exposes the narrow Qt signal bridge used by the
-  frontend.
+- `setBackgroundCaptureCallback()` exposes a narrow callback for background
+  capture frames without Qt widget types.
+
+For frontend adapters that should not call individual services directly, use
+`backend::bridge::BackendFacade` from
+`include/backend/app/BackendFacade.h`. It wraps an existing `AppBackend&`,
+defines `BackendCommand` variants for camera, recording, processing settings,
+recording load, and playback seek flows, and emits `BackendEvent` variants for
+frame readiness, camera status, recording status, processing results, playback
+position, and errors. See
+[`frontend-neutral-backend-bridge.md`](frontend-neutral-backend-bridge.md).
 
 Service headers under `include/backend/services/` are also public within the
 application. They should remain callable by tests and frontend controllers

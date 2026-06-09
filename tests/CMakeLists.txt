@@ -18,6 +18,10 @@ mib_add_backend_test_executable(backend_lifecycle_smoke_test backend/backend_lif
 add_test(NAME backend.lifecycle_smoke COMMAND $<TARGET_FILE:backend_lifecycle_smoke_test>)
 set_tests_properties(backend.lifecycle_smoke PROPERTIES LABELS "backend")
 
+mib_add_backend_test_executable(backend_facade_boundary_test backend/backend_facade_boundary_test.cpp)
+add_test(NAME backend.facade_boundary COMMAND $<TARGET_FILE:backend_facade_boundary_test>)
+set_tests_properties(backend.facade_boundary PROPERTIES LABELS "backend;bridge")
+
 mib_add_backend_test_executable(mock_camera_smoke_test camera/mock_camera_smoke_test.cpp)
 add_test(NAME camera.mock_smoke COMMAND $<TARGET_FILE:mock_camera_smoke_test>)
 set_tests_properties(camera.mock_smoke PROPERTIES LABELS "camera;backend")
