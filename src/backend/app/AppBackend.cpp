@@ -16,16 +16,15 @@
 #include "backend/services/TriggerService.h"
 #include "backend/services/YoloService.h"
 #include "backend/services/SyringePumpService.h"
-#include "backend/app/BackgroundCaptureNotifier.h"
-#include <QImage>
-#include <QTimer>
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
+#include <cstring>
 #include <cstdlib>
 #include <filesystem>
-#include <cctype>
 #include <string>
+#include <utility>
 #include <spdlog/spdlog.h>
 #ifdef _WIN32
 #include <windows.h>
@@ -73,11 +72,56 @@ namespace backend
             logPath = (dataPath / "logs" / "app.log").string();
             return logPath;
         }
+
+        BackgroundFramePixelFormat pixelFormatForMatType(int type)
+        {
+            switch (type)
+            {
+            case CV_8UC1:
+                return BackgroundFramePixelFormat::Gray8;
+            case CV_8UC3:
+                return BackgroundFramePixelFormat::Bgr8;
+            case CV_8UC4:
+                return BackgroundFramePixelFormat::Bgra8;
+            default:
+                return BackgroundFramePixelFormat::Unknown;
+            }
+        }
+
+        BackgroundFrame makeBackgroundFrame(const cv::Mat &image)
+        {
+            BackgroundFrame frame;
+            if (image.empty())
+            {
+                return frame;
+            }
+
+            const auto pixelFormat = pixelFormatForMatType(image.type());
+            if (pixelFormat == BackgroundFramePixelFormat::Unknown)
+            {
+                SPDLOG_WARN("AppBackend: unsupported background frame type {}", image.type());
+                return frame;
+            }
+
+            frame.width = static_cast<std::uint64_t>(image.cols);
+            frame.height = static_cast<std::uint64_t>(image.rows);
+            frame.strideBytes = static_cast<std::size_t>(image.cols) * image.elemSize();
+            frame.pixelFormat = pixelFormat;
+            frame.data.resize(frame.strideBytes * static_cast<std::size_t>(image.rows));
+
+            for (int row = 0; row < image.rows; ++row)
+            {
+                const auto *src = image.ptr<std::uint8_t>(row);
+                auto *dst = frame.data.data() + static_cast<std::size_t>(row) * frame.strideBytes;
+                std::memcpy(dst, src, frame.strideBytes);
+            }
+
+            return frame;
+        }
     }
 
-    AppBackend::AppBackend() {
-        backgroundCaptureNotifier_ = std::make_unique<BackgroundCaptureNotifier>();
-    }
+    AppBackend::AppBackend() = default;
+
     AppBackend::~AppBackend() {
         stopFrameRecording();
     }
@@ -306,18 +350,21 @@ namespace backend
             }
         }
 
-        // Wire background capture callback to emit Qt signal
+        // Wire background capture into an application callback without exposing Qt types.
         if (bootProcessing)
         {
             processingService_->setBackgroundCaptureCallback([this](const cv::Mat& bg, uint64_t frameIndex) {
-                if (backgroundCaptureNotifier_) {
-                    // Convert cv::Mat to QImage
-                    QImage qimg(bg.data, bg.cols, bg.rows, static_cast<int>(bg.step), QImage::Format_Grayscale8);
-                    QImage qimgCopy = qimg.copy(); // Ensure we own the data
-                    // Use QTimer::singleShot to ensure we're in the Qt event loop thread
-                    QTimer::singleShot(0, backgroundCaptureNotifier_.get(), [this, qimgCopy, frameIndex]() {
-                        emit backgroundCaptureNotifier_->backgroundAutoCaptured(qimgCopy, frameIndex);
-                    });
+                BackgroundCaptureCallback callback;
+                {
+                    std::scoped_lock lk(backgroundCaptureCallbackMutex_);
+                    callback = backgroundCaptureCallback_;
+                }
+
+                if (callback) {
+                    BackgroundCaptureEvent event{makeBackgroundFrame(bg), frameIndex};
+                    if (!event.frame.empty()) {
+                        callback(event);
+                    }
                 }
                 SPDLOG_INFO("Background auto-captured at frame {}", frameIndex);
             });
@@ -750,8 +797,9 @@ namespace backend
         return frameRecordingFiltered_.load();
     }
 
-    BackgroundCaptureNotifier* AppBackend::backgroundCaptureNotifier() const {
-        return backgroundCaptureNotifier_.get();
+    void AppBackend::setBackgroundCaptureCallback(BackgroundCaptureCallback callback) {
+        std::scoped_lock lk(backgroundCaptureCallbackMutex_);
+        backgroundCaptureCallback_ = std::move(callback);
     }
 
     void AppBackend::setLastConfigJson(const std::string& json) {

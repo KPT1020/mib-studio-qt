@@ -3,6 +3,8 @@ include(MIBWindowsDeployment)
 
 set(FRONTEND_COMMON_SOURCES
     # Core
+    ${PROJECT_SOURCE_DIR}/src/frontend/qt/BackgroundFrameQtAdapter.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/qt/BackgroundFrameQtAdapter.h
     ${PROJECT_SOURCE_DIR}/src/frontend/core/MainWindow.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/core/MainWindow.h
     ${PROJECT_SOURCE_DIR}/resources/ui/MainWindow.ui

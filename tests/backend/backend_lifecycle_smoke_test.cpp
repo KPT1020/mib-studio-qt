@@ -53,25 +53,37 @@ int main(int argc, char** argv)
     setEnv("MIB_MOCK_CAMERA_INTERVAL_MS", "1");
 
     backend::AppBackend backend;
+    bool callbackTouched = false;
+    backend.setBackgroundCaptureCallback([&callbackTouched](const backend::BackgroundCaptureEvent&) {
+        callbackTouched = true;
+    });
+    backend.setBackgroundCaptureCallback({});
+    if (callbackTouched)
+    {
+        std::cerr << "AppBackend background callback should not run during callback registration\n";
+        std::filesystem::remove_all(dataDir);
+        return 1;
+    }
+
     if (!backend.initialize(dataDir.string()))
     {
         std::cerr << "AppBackend initialize should succeed in hardware-free mock mode\n";
         std::filesystem::remove_all(dataDir);
-        return 1;
+        return 2;
     }
 
     if (!backend.getFrameStore())
     {
         std::cerr << "AppBackend should create a frame store during initialize\n";
         std::filesystem::remove_all(dataDir);
-        return 2;
+        return 3;
     }
 
     if (!backend.isCameraConfigured())
     {
         std::cerr << "AppBackend should configure a mock camera when hardware SDKs are disabled\n";
         std::filesystem::remove_all(dataDir);
-        return 3;
+        return 4;
     }
 
     if (backend.isFrameRecording() || backend.frameRecordingCount() != 0 ||
@@ -79,7 +91,7 @@ int main(int argc, char** argv)
     {
         std::cerr << "AppBackend recording lifecycle should start idle\n";
         std::filesystem::remove_all(dataDir);
-        return 4;
+        return 5;
     }
 
     backend.setLastConfigJson("{\"smoke\":true}");
@@ -87,7 +99,7 @@ int main(int argc, char** argv)
     {
         std::cerr << "AppBackend config JSON should round-trip\n";
         std::filesystem::remove_all(dataDir);
-        return 5;
+        return 6;
     }
 
     camera::mock::MockCameraOptions options;
@@ -97,7 +109,7 @@ int main(int argc, char** argv)
     {
         std::cerr << "configureMockCamera should leave the backend camera-configured\n";
         std::filesystem::remove_all(dataDir);
-        return 6;
+        return 7;
     }
 
     backend.stopFrameRecording();

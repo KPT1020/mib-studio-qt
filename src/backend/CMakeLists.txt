@@ -2,8 +2,7 @@ include(MIBLinkHelpers)
 
 add_library(mib_backend STATIC
     ${PROJECT_SOURCE_DIR}/src/backend/app/AppBackend.cpp
-    ${PROJECT_SOURCE_DIR}/src/backend/app/BackgroundCaptureNotifier.cpp
-    ${PROJECT_SOURCE_DIR}/include/backend/app/BackgroundCaptureNotifier.h
+    ${PROJECT_SOURCE_DIR}/include/backend/app/BackgroundFrame.h
     ${PROJECT_SOURCE_DIR}/src/backend/app/Tools.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/processing/EModulusLut.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/services/Logger.cpp

@@ -27,7 +27,6 @@
 #include <vector>
 
 #include "backend/app/AppBackend.h"
-#include "backend/app/BackgroundCaptureNotifier.h"
 #include "backend/services/CaptureService.h"
 #include "backend/services/CrashReporter.h"
 #include "backend/processing/ProcessingService.h"
@@ -63,6 +62,7 @@
 #include "frontend/dialogs/ConversionFactorDialog.h"
 #include "frontend/dialogs/SyringePumpSettingsDialog.h"
 #include "backend/app/Tools.h"
+#include "frontend/qt/BackgroundFrameQtAdapter.h"
 #include <QCloseEvent>
 #ifdef _WIN32
 #include <windows.h>
@@ -307,20 +307,25 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     experimentTabs_->addTab(monitoringTab, tr("Monitoring"));
     
     // Connect PlaybackPanel background signal to SidebarWidget
-    if (sidebarWidget_ && previewPage) {
+    if (previewPage) {
         PlaybackPanel* playbackPanel = previewPage->getPlaybackPanel();
         if (playbackPanel) {
-            connect(playbackPanel, &PlaybackPanel::backgroundImageSet,
-                    sidebarWidget_, &frontend::SidebarWidget::updateBackgroundPreview);
+            if (sidebarWidget_) {
+                connect(playbackPanel, &PlaybackPanel::backgroundImageSet,
+                        sidebarWidget_, &frontend::SidebarWidget::updateBackgroundPreview);
+            }
             // Set initial background if one exists
             QImage currentBg = playbackPanel->getBackgroundImage();
-            if (!currentBg.isNull()) {
+            if (sidebarWidget_ && !currentBg.isNull()) {
                 sidebarWidget_->updateBackgroundPreview(currentBg);
             }
-            
-            // Connect auto-capture signal
-            connect(backend_.backgroundCaptureNotifier(), &backend::BackgroundCaptureNotifier::backgroundAutoCaptured,
-                    playbackPanel, &PlaybackPanel::onBackgroundAutoCaptured);
+
+            backend_.setBackgroundCaptureCallback([playbackPanel](const backend::BackgroundCaptureEvent& event) {
+                QTimer::singleShot(0, playbackPanel, [playbackPanel, event]() {
+                    const QImage background = frontend::qt::toQImage(event.frame);
+                    playbackPanel->onBackgroundAutoCaptured(background, event.frameIndex);
+                });
+            });
         }
     }
     
@@ -396,6 +401,7 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
 }
 
 MainWindow::~MainWindow() {
+    backend_.setBackgroundCaptureCallback({});
     delete ui;
 }
 
