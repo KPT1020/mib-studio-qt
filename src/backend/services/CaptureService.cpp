@@ -1,10 +1,10 @@
 #include "backend/services/CaptureService.h"
-#include "backend/Tools.h"
+#include "backend/app/Tools.h"
 #include "backend/diagnostics/CrashStateMirror.h"
 #include "backend/playback/FrameStore.h"
-#include "camera/common/EGrabberCamera.h"
-#include "camera/common/ICamera.h"
-#include "camera/mock/MockCamera.h"
+#include "backend/camera/egrabber/EGrabberCamera.h"
+#include "backend/camera/common/ICamera.h"
+#include "backend/camera/mock/MockCamera.h"
 
 #include <spdlog/spdlog.h>
 

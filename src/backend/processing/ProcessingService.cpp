@@ -1,8 +1,8 @@
-#include "backend/services/ProcessingService.h"
-#include "backend/services/Hdf5Service.h"
+#include "backend/processing/ProcessingService.h"
+#include "backend/recording/Hdf5Service.h"
 #include "backend/diagnostics/CrashStateMirror.h"
 #include "backend/playback/FrameStore.h"
-#include "backend/Tools.h"
+#include "backend/app/Tools.h"
 
 #include <spdlog/spdlog.h>
 

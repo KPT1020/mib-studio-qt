@@ -20,8 +20,8 @@
 #include <shlobj.h>
 #endif
 
-#include "backend/AppBackend.h"
-#include "backend/services/ProcessingService.h"
+#include "backend/app/AppBackend.h"
+#include "backend/processing/ProcessingService.h"
 #include "backend/services/AutofocusService.h"
 #include "frontend/system/PlaybackPanel.h"
 

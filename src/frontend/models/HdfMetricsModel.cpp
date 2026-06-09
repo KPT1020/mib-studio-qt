@@ -1,6 +1,6 @@
 #include "frontend/models/HdfMetricsModel.h"
 
-#include "backend/services/ProcessingService.h"
+#include "backend/processing/ProcessingService.h"
 
 namespace frontend {
 

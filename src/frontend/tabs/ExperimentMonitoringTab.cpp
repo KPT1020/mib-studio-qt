@@ -48,8 +48,8 @@
 #include <QFileDialog>
 
 #include "frontend/widgets/ZoomableChartView.h"
-#include "backend/AppBackend.h"
-#include "backend/services/ProcessingService.h"
+#include "backend/app/AppBackend.h"
+#include "backend/processing/ProcessingService.h"
 #include "backend/services/TriggerService.h"
 
 #include <spdlog/spdlog.h>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "camera/common/ICamera.h"
+#include "backend/camera/common/ICamera.h"
 
 #include <chrono>
 #include <filesystem>

@@ -1,7 +1,7 @@
-#include "backend/services/Hdf5Service.h"
+#include "backend/recording/Hdf5Service.h"
 #include "backend/diagnostics/CrashStateMirror.h"
 #include "backend/services/CrashReporter.h"
-#include "backend/services/ProcessingService.h"
+#include "backend/processing/ProcessingService.h"
 #include "backend/services/Logger.h"
 
 #include <spdlog/spdlog.h>

@@ -3,9 +3,9 @@
 #include <QString>
 #include <spdlog/spdlog.h>
 
-#include "backend/AppBackend.h"
+#include "backend/app/AppBackend.h"
 #include "backend/services/CaptureService.h"
-#include "backend/services/ProcessingService.h"
+#include "backend/processing/ProcessingService.h"
 
 namespace frontend
 {

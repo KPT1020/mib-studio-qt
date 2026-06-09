@@ -8,11 +8,11 @@
 
 #include <spdlog/spdlog.h>
 
-#include "backend/AppBackend.h"
+#include "backend/app/AppBackend.h"
 #include "backend/services/CameraControlService.h"
 #include "backend/services/CaptureService.h"
 #include "backend/services/AutofocusService.h"
-#include "backend/Tools.h"
+#include "backend/app/Tools.h"
 #include "frontend/tabs/ConnectTab.h"
 #include "frontend/tabs/NanopositionerTab.h"
 

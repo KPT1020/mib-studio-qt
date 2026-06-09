@@ -1,27 +1,27 @@
 include(MIBLinkHelpers)
 
 add_library(mib_backend STATIC
-    ${PROJECT_SOURCE_DIR}/src/backend/AppBackend.cpp
-    ${PROJECT_SOURCE_DIR}/src/backend/BackgroundCaptureNotifier.cpp
-    ${PROJECT_SOURCE_DIR}/include/backend/BackgroundCaptureNotifier.h
-    ${PROJECT_SOURCE_DIR}/src/backend/Tools.cpp
-    ${PROJECT_SOURCE_DIR}/src/backend/EModulusLut.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/app/AppBackend.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/app/BackgroundCaptureNotifier.cpp
+    ${PROJECT_SOURCE_DIR}/include/backend/app/BackgroundCaptureNotifier.h
+    ${PROJECT_SOURCE_DIR}/src/backend/app/Tools.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/processing/EModulusLut.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/services/Logger.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/services/CrashReporter.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/diagnostics/CrashStateMirror.cpp
-    ${PROJECT_SOURCE_DIR}/src/backend/services/SqliteService.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/database/SqliteService.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/services/CameraControlService.cpp
-    ${PROJECT_SOURCE_DIR}/src/backend/services/Hdf5Service.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/recording/Hdf5Service.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/services/CaptureService.cpp
-    ${PROJECT_SOURCE_DIR}/src/backend/services/RecorderService.cpp
-    ${PROJECT_SOURCE_DIR}/src/backend/services/ProcessingService.cpp
-    ${PROJECT_SOURCE_DIR}/src/backend/services/BatchMaskSources.cpp
-    ${PROJECT_SOURCE_DIR}/src/backend/services/PlaybackService.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/recording/RecorderService.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingService.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/processing/BatchMaskSources.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/playback/PlaybackService.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/services/SyringePumpService.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/services/TriggerService.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/playback/FrameStore.cpp
-    ${PROJECT_SOURCE_DIR}/src/camera/common/EGrabberCamera.cpp
-    ${PROJECT_SOURCE_DIR}/src/camera/mock/MockCamera.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/camera/egrabber/EGrabberCamera.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/camera/mock/MockCamera.cpp
 )
 
 if(MIB_HAS_EGRABBER)

@@ -40,7 +40,7 @@
 #include <shlobj.h>
 #endif
 
-#include "backend/AppBackend.h"
+#include "backend/app/AppBackend.h"
 #include "frontend/models/JsonTableModel.h"
 #include "frontend/utils/JsonFlatten.h"
 

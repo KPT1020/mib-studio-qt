@@ -12,7 +12,7 @@
 #include <opencv2/core.hpp>
 #include <deque>
 #include <cmath>
-#include "backend/EModulusLut.h"
+#include "backend/processing/EModulusLut.h"
 
 namespace backend { namespace playback { class FrameStore; struct Frame; } }
 

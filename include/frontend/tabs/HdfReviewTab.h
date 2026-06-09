@@ -20,7 +20,7 @@ namespace backend::services
     struct ProcessedFrame;
 }
 
-#include "backend/services/ProcessingService.h"
+#include "backend/processing/ProcessingService.h"
 #include "frontend/utils/OverlayRenderer.h"
 
 class QPushButton;

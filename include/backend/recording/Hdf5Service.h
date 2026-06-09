@@ -14,7 +14,7 @@ namespace backend::services {
     struct ProcessingConfig;
 }
 
-#include "backend/services/ProcessingService.h"
+#include "backend/processing/ProcessingService.h"
 
 namespace backend::services {
 

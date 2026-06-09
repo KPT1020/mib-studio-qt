@@ -5,7 +5,7 @@
 namespace cv { class Mat; }
 namespace backend::services { struct FilterResult; }
 
-#include "backend/services/ProcessingService.h"
+#include "backend/processing/ProcessingService.h"
 
 namespace frontend {
 
