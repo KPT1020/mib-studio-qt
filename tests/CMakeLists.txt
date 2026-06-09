@@ -2,7 +2,7 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 
 function(mib_add_backend_test_executable target source)
     add_executable(${target}
-        ${PROJECT_SOURCE_DIR}/src/tests/${source}
+        ${PROJECT_SOURCE_DIR}/tests/${source}
     )
     target_link_libraries(${target} PRIVATE mib_backend)
     set_target_properties(${target} PROPERTIES
@@ -10,17 +10,33 @@ function(mib_add_backend_test_executable target source)
     )
 endfunction()
 
-mib_add_backend_test_executable(mib_backend_smoke_test backend_smoke_test.cpp)
+mib_add_backend_test_executable(mib_backend_smoke_test backend/backend_smoke_test.cpp)
 add_test(NAME backend.smoke COMMAND $<TARGET_FILE:mib_backend_smoke_test>)
 set_tests_properties(backend.smoke PROPERTIES LABELS "backend")
 
-mib_add_backend_test_executable(processing_batch_pipeline_test processing_batch_pipeline_test.cpp)
+mib_add_backend_test_executable(backend_lifecycle_smoke_test backend/backend_lifecycle_smoke_test.cpp)
+add_test(NAME backend.lifecycle_smoke COMMAND $<TARGET_FILE:backend_lifecycle_smoke_test>)
+set_tests_properties(backend.lifecycle_smoke PROPERTIES LABELS "backend")
+
+mib_add_backend_test_executable(mock_camera_smoke_test camera/mock_camera_smoke_test.cpp)
+add_test(NAME camera.mock_smoke COMMAND $<TARGET_FILE:mock_camera_smoke_test>)
+set_tests_properties(camera.mock_smoke PROPERTIES LABELS "camera;backend")
+
+mib_add_backend_test_executable(processing_pipeline_smoke_test processing/processing_pipeline_smoke_test.cpp)
+add_test(NAME processing.pipeline_smoke COMMAND $<TARGET_FILE:processing_pipeline_smoke_test>)
+set_tests_properties(processing.pipeline_smoke PROPERTIES LABELS "processing;backend")
+
+mib_add_backend_test_executable(processing_batch_pipeline_test processing/processing_batch_pipeline_test.cpp)
 add_test(NAME backend.processing_batch_pipeline COMMAND $<TARGET_FILE:processing_batch_pipeline_test>)
-set_tests_properties(backend.processing_batch_pipeline PROPERTIES LABELS "backend")
+set_tests_properties(backend.processing_batch_pipeline PROPERTIES LABELS "processing;backend")
 
-mib_add_backend_test_executable(kin6_batch_pipeline_evidence kin6_batch_pipeline_evidence.cpp)
+mib_add_backend_test_executable(recording_lifecycle_test recording/recording_lifecycle_test.cpp)
+add_test(NAME recording.lifecycle COMMAND $<TARGET_FILE:recording_lifecycle_test>)
+set_tests_properties(recording.lifecycle PROPERTIES LABELS "recording;backend")
 
-mib_add_backend_test_executable(kin10_hf_dataset_pipeline_test kin10_hf_dataset_pipeline_test.cpp)
+mib_add_backend_test_executable(kin6_batch_pipeline_evidence integration/kin6_batch_pipeline_evidence.cpp)
+
+mib_add_backend_test_executable(kin10_hf_dataset_pipeline_test integration/kin10_hf_dataset_pipeline_test.cpp)
 if(Python3_Interpreter_FOUND)
     add_test(
         NAME backend.kin10_hf_dataset_pipeline
@@ -50,14 +66,14 @@ else()
     message(WARNING "Python3 interpreter not found; backend.kin10_hf_dataset_pipeline will not be registered")
 endif()
 
-mib_add_backend_test_executable(kin6_mib_app_capture_proof kin6_mib_app_capture_proof.cpp)
+mib_add_backend_test_executable(kin6_mib_app_capture_proof integration/kin6_mib_app_capture_proof.cpp)
 add_test(NAME backend.kin6_mib_app_capture_proof COMMAND $<TARGET_FILE:kin6_mib_app_capture_proof>)
-set_tests_properties(backend.kin6_mib_app_capture_proof PROPERTIES LABELS "backend")
+set_tests_properties(backend.kin6_mib_app_capture_proof PROPERTIES LABELS "backend;integration")
 
-mib_add_backend_test_executable(mib_processing_multi_object_test processing_multi_object_test.cpp)
+mib_add_backend_test_executable(mib_processing_multi_object_test processing/processing_multi_object_test.cpp)
 add_test(NAME backend.processing_multi_object COMMAND $<TARGET_FILE:mib_processing_multi_object_test>)
-set_tests_properties(backend.processing_multi_object PROPERTIES LABELS "backend")
+set_tests_properties(backend.processing_multi_object PROPERTIES LABELS "processing;backend")
 
-mib_add_backend_test_executable(mib_processing_object_tracking_test processing_object_tracking_test.cpp)
+mib_add_backend_test_executable(mib_processing_object_tracking_test processing/processing_object_tracking_test.cpp)
 add_test(NAME backend.processing_object_tracking COMMAND $<TARGET_FILE:mib_processing_object_tracking_test>)
-set_tests_properties(backend.processing_object_tracking PROPERTIES LABELS "backend")
+set_tests_properties(backend.processing_object_tracking PROPERTIES LABELS "processing;backend")
