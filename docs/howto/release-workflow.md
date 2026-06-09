@@ -61,10 +61,10 @@ Before starting a release, ensure you have:
 4. Cloudflare R2 publishing configuration:
    - Public custom domain: `https://updates.yofo.bio`
    - Dedicated bucket: `mib-studio-qt-updates`
-   - Local endpoint: `$env:MIB_STUDIO_R2_ENDPOINT = "https://<account-id>.r2.cloudflarestorage.com"`
-   - Local profile or credentials: `$env:MIB_STUDIO_R2_PROFILE = "mib-studio-r2"`
+   - Preferred for agent/Linux publishing: authenticated Wrangler session with R2 access.
+   - S3 alternative: `MIB_STUDIO_R2_ENDPOINT="https://<account-id>.r2.cloudflarestorage.com"` plus `MIB_STUDIO_R2_PROFILE="mib-studio-r2"` or AWS credential environment variables.
    - Do not commit R2 credentials or write tokens to the repo.
-5. Python with `boto3` for the repo upload helper.
+5. Python. Install `boto3` only when using the S3-compatible upload backend instead of Wrangler.
 
 For R2 bucket, DNS, cache, migration, and rollback details, see [`auto-update-r2.md`](auto-update-r2.md).
 
@@ -115,12 +115,7 @@ Use the update package for auto-updates. The full setup installer is for first-t
 
 ### Step 4: Publish Packages
 
-Set R2 publishing configuration:
-
-```bash
-export MIB_STUDIO_R2_ENDPOINT="https://<account-id>.r2.cloudflarestorage.com"
-export MIB_STUDIO_R2_PROFILE="mib-studio-r2"
-```
+Set R2 publishing configuration. By default, `publish-update.py` uses Wrangler when `MIB_STUDIO_R2_ENDPOINT` is not set. Set `MIB_STUDIO_R2_ENDPOINT` and `MIB_STUDIO_R2_PROFILE` only when publishing through S3-compatible credentials.
 
 Publish the update package:
 
@@ -154,6 +149,7 @@ Important parameters:
 - `--profile`: AWS/R2 profile; defaults to `MIB_STUDIO_R2_PROFILE`
 - `--acl`: optional ACL for legacy S3-compatible targets; leave empty for R2
 - `--release-notes-url`: optional GitHub release or changelog URL
+- `--upload-method`: `auto` by default; uses S3 when `--endpoint`/`MIB_STUDIO_R2_ENDPOINT` is set, otherwise Wrangler
 
 ## Verification Steps
 

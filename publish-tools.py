@@ -12,7 +12,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from scripts.s3_upload import upload_file_to_s3
+from scripts.s3_upload import upload_file_to_s3, upload_file_with_wrangler
 
 
 DEFAULT_BUCKET = "mib-studio-qt-updates"
@@ -81,8 +81,58 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--acl", default="")
     parser.add_argument("--manifest-out", default=None, help="Write generated manifest to this path")
     parser.add_argument("--dry-run", action="store_true", help="Generate metadata but do not upload")
+    parser.add_argument(
+        "--upload-method",
+        choices=("auto", "s3", "wrangler"),
+        default="auto",
+        help="Upload through S3 credentials or the authenticated Wrangler CLI",
+    )
+    parser.add_argument("--wrangler-bin", default=os.getenv("WRANGLER_BIN", "wrangler"))
     parser.add_argument("--debug", action="store_true")
     return parser
+
+
+def resolve_upload_method(upload_method: str, endpoint: str | None) -> str:
+    if upload_method == "auto":
+        return "s3" if endpoint else "wrangler"
+    return upload_method
+
+
+def upload_object(
+    *,
+    args: argparse.Namespace,
+    key: str,
+    file_path: Path,
+    content_type: str,
+    cache_control: str,
+) -> None:
+    method = resolve_upload_method(args.upload_method, args.endpoint)
+    if method == "s3":
+        if not args.endpoint:
+            raise RuntimeError("R2 S3 API endpoint is required for --upload-method s3")
+        upload_file_to_s3(
+            endpoint=args.endpoint,
+            bucket=args.bucket,
+            key=key,
+            file_path=str(file_path),
+            content_type=content_type,
+            cache_control=cache_control,
+            acl=args.acl or None,
+            profile=args.profile,
+            debug=args.debug,
+        )
+        return
+
+    if args.acl:
+        print("   Note: --acl is ignored for Wrangler uploads; R2 public access is configured on the bucket/domain.")
+    upload_file_with_wrangler(
+        bucket=args.bucket,
+        key=key,
+        file_path=str(file_path),
+        content_type=content_type,
+        cache_control=cache_control,
+        wrangler_bin=args.wrangler_bin,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -145,41 +195,24 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Zip URL: {zip_url}")
         return 0
 
-    if not args.endpoint:
-        if not args.manifest_out:
-            manifest_path.unlink(missing_ok=True)
-        print(
-            "ERROR: R2 S3 API endpoint is required. Set MIB_STUDIO_R2_ENDPOINT or pass --endpoint.",
-            file=sys.stderr,
-        )
-        return 1
-
     try:
         print("\n3. Uploading zip...")
-        upload_file_to_s3(
-            endpoint=args.endpoint,
-            bucket=args.bucket,
+        upload_object(
+            args=args,
             key=zip_key,
-            file_path=str(zip_path),
+            file_path=zip_path,
             content_type="application/zip",
             cache_control=ARTIFACT_CACHE_CONTROL,
-            acl=args.acl or None,
-            profile=args.profile,
-            debug=args.debug,
         )
         print("   Zip uploaded successfully")
 
         print("\n4. Uploading tools-latest.json...")
-        upload_file_to_s3(
-            endpoint=args.endpoint,
-            bucket=args.bucket,
+        upload_object(
+            args=args,
             key=manifest_key,
-            file_path=str(manifest_path),
+            file_path=manifest_path,
             content_type="application/json",
             cache_control=MANIFEST_CACHE_CONTROL,
-            acl=args.acl or None,
-            profile=args.profile,
-            debug=args.debug,
         )
         print("   Manifest uploaded successfully")
     except Exception as exc:

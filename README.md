@@ -64,14 +64,13 @@ After building installers, see [Publishing Updates](#publishing-updates) below t
 After building installers, use `publish-update.py` to upload them to the dedicated Cloudflare R2 update bucket for distribution through `https://updates.yofo.bio`.
 
 **Prerequisites:**
-- Python with `boto3` available for the repo's S3-compatible upload helper
-- R2 endpoint configured with `MIB_STUDIO_R2_ENDPOINT`
-- R2 credentials via `MIB_STUDIO_R2_PROFILE`, AWS environment variables, or CI secrets
+- Python
+- Either Wrangler logged in with R2 access, or `boto3` plus S3-compatible R2 credentials
+- For S3 uploads: configure `MIB_STUDIO_R2_ENDPOINT` and credentials via `MIB_STUDIO_R2_PROFILE`, AWS environment variables, or CI secrets
 
 **Publish update package (for auto-updates):**
 ```bash
-export MIB_STUDIO_R2_ENDPOINT="https://<account-id>.r2.cloudflarestorage.com"
-export MIB_STUDIO_R2_PROFILE="mib-studio-r2"
+# Uses Wrangler automatically when MIB_STUDIO_R2_ENDPOINT is not set.
 python publish-update.py --installer "resources/build/dist/MIB_Studio_Qt_Update_v0.2.0.exe"
 ```
 

@@ -18,6 +18,8 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import shlex
+import subprocess
 import sys
 
 # Disable automatic CRC32 checksum trailers — they force aws-chunked encoding
@@ -83,6 +85,37 @@ def upload_file_to_s3(
         if acl:
             put_args["ACL"] = acl
         s3.put_object(**put_args)
+
+
+def upload_file_with_wrangler(
+    *,
+    bucket: str,
+    key: str,
+    file_path: str,
+    content_type: str = "application/octet-stream",
+    cache_control: str | None = None,
+    wrangler_bin: str = "wrangler",
+    remote: bool = True,
+) -> None:
+    """Upload a file to R2 with Wrangler's authenticated session."""
+    cmd = [
+        wrangler_bin,
+        "r2",
+        "object",
+        "put",
+        f"{bucket}/{key}",
+        "--file",
+        file_path,
+        "--content-type",
+        content_type,
+        "--force",
+    ]
+    if cache_control:
+        cmd += ["--cache-control", cache_control]
+    cmd.append("--remote" if remote else "--local")
+
+    print(f"   Command: {shlex.join(cmd)}")
+    subprocess.run(cmd, check=True)
 
 
 def main() -> int:

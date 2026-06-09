@@ -11,7 +11,7 @@ MIB Studio checks a public update manifest, downloads the latest Windows update 
 - **Production manifest**: `https://updates.yofo.bio/stable/latest.json`
 - **Override for testing**: set `MIB_STUDIO_UPDATE_MANIFEST_URL` to any HTTPS URL returning a compatible manifest JSON
 
-Do not commit R2 credentials or account IDs that are intended to remain private. Use local environment variables, an AWS CLI profile, CI secrets, or Cloudflare-managed credentials.
+Do not commit R2 credentials or account IDs that are intended to remain private. Use a logged-in Wrangler session, local environment variables, an AWS CLI profile, CI secrets, or Cloudflare-managed credentials.
 
 ### Object Layout
 
@@ -65,12 +65,14 @@ Configure these outside the repo:
 5. Create least-privilege write credentials for release publishing. Credentials need object write access to the updater bucket only.
 6. Store credentials in a local AWS profile such as `mib-studio-r2`, environment variables, or CI secrets.
 
-Recommended local environment:
+Recommended S3-compatible local environment:
 
 ```bash
 export MIB_STUDIO_R2_ENDPOINT="https://<account-id>.r2.cloudflarestorage.com"
 export MIB_STUDIO_R2_PROFILE="mib-studio-r2"
 ```
+
+If `MIB_STUDIO_R2_ENDPOINT` is not set, the Python publish scripts use `wrangler r2 object put --remote` with the currently authenticated Wrangler session.
 
 ### Migration From RustFS
 
@@ -100,9 +102,6 @@ cmake --build build --target package_installer_update --config Release
 Publish the update package:
 
 ```bash
-export MIB_STUDIO_R2_ENDPOINT="https://<account-id>.r2.cloudflarestorage.com"
-export MIB_STUDIO_R2_PROFILE="mib-studio-r2"
-
 python publish-update.py \
   --installer "build/dist/MIB_Studio_Qt_Update_v0.2.0.exe" \
   --release-notes-url "https://github.com/gavinlouuu-kpt/mib-studio-qt/releases/tag/v0.2.0"
@@ -114,16 +113,13 @@ Publish the optional full installer:
 python publish-update.py --installer "build/dist/MIB_Studio_Qt_Setup_v0.2.0.exe"
 ```
 
-`publish-update.py` uploads to `s3://mib-studio-qt-updates/<channel>/...`, generates `<channel>/latest.json`, and prints final public URLs under `https://updates.yofo.bio`. `publish-update.ps1` is a Windows compatibility wrapper around the Python command.
+`publish-update.py` uploads to `s3://mib-studio-qt-updates/<channel>/...`, generates `<channel>/latest.json`, and prints final public URLs under `https://updates.yofo.bio`. It uses S3/boto3 when `MIB_STUDIO_R2_ENDPOINT` is set, otherwise Wrangler. `publish-update.ps1` is a Windows compatibility wrapper around the Python command.
 
 For legacy S3-compatible targets that require object ACLs, pass `--acl public-read`. R2 public access is configured at the bucket/custom-domain layer, so ACLs are not sent by default.
 
 ### Publishing Tools
 
 ```bash
-export MIB_STUDIO_R2_ENDPOINT="https://<account-id>.r2.cloudflarestorage.com"
-export MIB_STUDIO_R2_PROFILE="mib-studio-r2"
-
 python publish-tools.py --zip "tools/dist/MIB_Studio_Tools_v0.1.7_windows.zip"
 ```
 
