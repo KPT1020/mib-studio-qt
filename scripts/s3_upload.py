@@ -36,6 +36,7 @@ def main() -> int:
     parser.add_argument("--key", required=True)
     parser.add_argument("--file", required=True)
     parser.add_argument("--content-type", default="application/octet-stream")
+    parser.add_argument("--cache-control", default=None)
     parser.add_argument("--acl", default=None)
     parser.add_argument("--profile", default=None)
     parser.add_argument("--debug", action="store_true")
@@ -73,6 +74,8 @@ def main() -> int:
                 "ContentLength": file_size,
                 "ContentType": args.content_type,
             }
+            if args.cache_control:
+                put_args["CacheControl"] = args.cache_control
             if args.acl:
                 put_args["ACL"] = args.acl
             s3.put_object(**put_args)

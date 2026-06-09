@@ -33,7 +33,8 @@ function Invoke-S3Upload {
     param(
         [string]$File,
         [string]$Key,
-        [string]$ContentType
+        [string]$ContentType,
+        [string]$CacheControl
     )
 
     $uploadArgs = @(
@@ -44,6 +45,7 @@ function Invoke-S3Upload {
         "--file", $File,
         "--content-type", $ContentType
     )
+    if ($CacheControl) { $uploadArgs += @("--cache-control", $CacheControl) }
     if ($Profile) { $uploadArgs += @("--profile", $Profile) }
     if ($Acl) { $uploadArgs += @("--acl", $Acl) }
     if ($env:S3_UPLOAD_DEBUG) { $uploadArgs += @("--debug") }
@@ -128,7 +130,7 @@ $manifestPath = Join-Path $env:TEMP "mib_tools_latest_$(New-Guid).json"
 $manifestJson | Out-File -FilePath $manifestPath -Encoding UTF8 -NoNewline
 
 Write-Host "`n3. Uploading zip..." -ForegroundColor Yellow
-$uploadExit = Invoke-S3Upload -File $Zip -Key $zipKey -ContentType "application/zip"
+$uploadExit = Invoke-S3Upload -File $Zip -Key $zipKey -ContentType "application/zip" -CacheControl "public, max-age=31536000, immutable"
 if ($uploadExit -ne 0) {
     Write-Host "ERROR: Zip upload failed!" -ForegroundColor Red
     Remove-Item $manifestPath -ErrorAction SilentlyContinue
@@ -137,7 +139,7 @@ if ($uploadExit -ne 0) {
 Write-Host "   Zip uploaded successfully" -ForegroundColor Green
 
 Write-Host "`n4. Uploading tools-latest.json..." -ForegroundColor Yellow
-$uploadExit = Invoke-S3Upload -File $manifestPath -Key $manifestKey -ContentType "application/json"
+$uploadExit = Invoke-S3Upload -File $manifestPath -Key $manifestKey -ContentType "application/json" -CacheControl "public, max-age=60, must-revalidate"
 Remove-Item $manifestPath -ErrorAction SilentlyContinue
 if ($uploadExit -ne 0) {
     Write-Host "ERROR: Manifest upload failed!" -ForegroundColor Red

@@ -121,7 +121,8 @@ function Invoke-S3Upload {
     param(
         [string]$File,
         [string]$Key,
-        [string]$ContentType
+        [string]$ContentType,
+        [string]$CacheControl
     )
 
     $uploadArgs = @(
@@ -132,6 +133,7 @@ function Invoke-S3Upload {
         "--file", $File,
         "--content-type", $ContentType
     )
+    if ($CacheControl) { $uploadArgs += @("--cache-control", $CacheControl) }
     if ($Profile) { $uploadArgs += @("--profile", $Profile) }
     if ($Acl) { $uploadArgs += @("--acl", $Acl) }
     if ($env:S3_UPLOAD_DEBUG) { $uploadArgs += @("--debug") }
@@ -147,7 +149,7 @@ function Invoke-S3Upload {
 
 # Upload installer (boto3 handles multipart with correct Content-Length headers)
 Write-Host "`n3. Uploading installer..." -ForegroundColor Yellow
-$uploadExit = Invoke-S3Upload -File $Installer -Key $installerKey -ContentType "application/octet-stream"
+$uploadExit = Invoke-S3Upload -File $Installer -Key $installerKey -ContentType "application/x-msdownload" -CacheControl "public, max-age=31536000, immutable"
 if ($uploadExit -ne 0) {
     Write-Host "ERROR: Installer upload failed!" -ForegroundColor Red
     Remove-Item $manifestPath -ErrorAction SilentlyContinue
@@ -157,7 +159,7 @@ Write-Host "   Installer uploaded successfully" -ForegroundColor Green
 
 # Upload manifest
 Write-Host "`n4. Uploading manifest..." -ForegroundColor Yellow
-$uploadExit = Invoke-S3Upload -File $manifestPath -Key $manifestKey -ContentType "application/json"
+$uploadExit = Invoke-S3Upload -File $manifestPath -Key $manifestKey -ContentType "application/json" -CacheControl "public, max-age=60, must-revalidate"
 Remove-Item $manifestPath -ErrorAction SilentlyContinue
 if ($uploadExit -ne 0) {
     Write-Host "ERROR: Manifest upload failed!" -ForegroundColor Red
