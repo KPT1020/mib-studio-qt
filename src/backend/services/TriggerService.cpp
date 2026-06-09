@@ -1,5 +1,5 @@
 #include "backend/services/TriggerService.h"
-#include "camera/common/ICamera.h"
+#include "backend/camera/common/ICamera.h"
 #include <spdlog/spdlog.h>
 #include <chrono>
 

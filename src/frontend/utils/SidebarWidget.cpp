@@ -8,7 +8,7 @@
 #include <QPropertyAnimation>
 #include <QScrollArea>
 
-#include "backend/AppBackend.h"
+#include "backend/app/AppBackend.h"
 #include "frontend/utils/StatisticsPanel.h"
 #include "frontend/utils/BackgroundPreviewWidget.h"
 #include "frontend/tabs/NanopositionerTab.h"

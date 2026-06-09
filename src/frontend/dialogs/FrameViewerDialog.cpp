@@ -12,7 +12,7 @@
 #include <QPushButton>
 #include <QHBoxLayout>
 
-#include "backend/services/ProcessingService.h"
+#include "backend/processing/ProcessingService.h"
 #include "frontend/utils/OverlayRenderer.h"
 #include <spdlog/spdlog.h>
 #include <opencv2/core.hpp>

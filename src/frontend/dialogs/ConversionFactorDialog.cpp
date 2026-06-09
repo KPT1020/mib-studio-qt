@@ -17,8 +17,8 @@
 #include <shlobj.h>
 #endif
 
-#include "backend/AppBackend.h"
-#include "backend/services/ProcessingService.h"
+#include "backend/app/AppBackend.h"
+#include "backend/processing/ProcessingService.h"
 
 namespace
 {

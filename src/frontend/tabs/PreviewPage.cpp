@@ -13,7 +13,7 @@
 
 #include <spdlog/spdlog.h>
 
-#include "backend/AppBackend.h"
+#include "backend/app/AppBackend.h"
 #include "backend/services/CaptureService.h"
 #include "frontend/system/PlaybackPanel.h"
 #include "frontend/tabs/ConfigTabs.h"

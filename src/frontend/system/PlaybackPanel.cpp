@@ -29,13 +29,13 @@
 #include <algorithm>
 #include <cmath>
 
-#include "backend/AppBackend.h"
+#include "backend/app/AppBackend.h"
 #include "backend/services/CaptureService.h"
 #include "backend/services/CrashReporter.h"
-#include "backend/services/PlaybackService.h"
-#include "backend/services/ProcessingService.h"
+#include "backend/playback/PlaybackService.h"
+#include "backend/processing/ProcessingService.h"
 #include "backend/playback/FrameStore.h"
-#include "backend/Tools.h"
+#include "backend/app/Tools.h"
 #include "frontend/dialogs/BufferSaveDialog.h"
 
 #include <spdlog/spdlog.h>

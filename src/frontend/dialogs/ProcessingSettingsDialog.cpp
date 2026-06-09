@@ -6,9 +6,9 @@
 
 #include <spdlog/spdlog.h>
 
-#include "backend/AppBackend.h"
-#include "backend/services/ProcessingService.h"
-#include "backend/services/PlaybackService.h"
+#include "backend/app/AppBackend.h"
+#include "backend/processing/ProcessingService.h"
+#include "backend/playback/PlaybackService.h"
 #include "backend/playback/FrameStore.h"
 #include "frontend/system/PlaybackPanel.h"
 

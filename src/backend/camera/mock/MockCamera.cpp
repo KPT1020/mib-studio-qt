@@ -1,4 +1,4 @@
-#include "camera/mock/MockCamera.h"
+#include "backend/camera/mock/MockCamera.h"
 
 #include <QImage>
 #include <QImageReader>

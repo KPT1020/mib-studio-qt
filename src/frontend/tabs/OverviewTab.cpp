@@ -24,8 +24,8 @@
 #include <shlobj.h>
 #endif
 
-#include "backend/AppBackend.h"
-#include "backend/services/PlaybackService.h"
+#include "backend/app/AppBackend.h"
+#include "backend/playback/PlaybackService.h"
 #include "backend/playback/FrameStore.h"
 #include "frontend/utils/ConfigPathManager.h"
 #include "frontend/utils/FileIOUtils.h"

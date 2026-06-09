@@ -1,7 +1,7 @@
-#include "backend/services/BatchMaskSources.h"
+#include "backend/processing/BatchMaskSources.h"
 
-#include "backend/services/Hdf5Service.h"
-#include "backend/services/ProcessingService.h"
+#include "backend/recording/Hdf5Service.h"
+#include "backend/processing/ProcessingService.h"
 
 #include <spdlog/spdlog.h>
 

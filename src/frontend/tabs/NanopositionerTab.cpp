@@ -20,8 +20,8 @@
 #include <shlobj.h>
 #endif
 
-#include "backend/AppBackend.h"
-#include "backend/Tools.h"
+#include "backend/app/AppBackend.h"
+#include "backend/app/Tools.h"
 #include "backend/services/AutofocusService.h"
 
 using json = nlohmann::json;

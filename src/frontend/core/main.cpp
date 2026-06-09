@@ -7,7 +7,7 @@
 #include <QStringList>
 #include <QSysInfo>
 
-#include "backend/AppBackend.h"
+#include "backend/app/AppBackend.h"
 #include "backend/diagnostics/CrashStateMirror.h"
 #include "backend/services/CrashReporter.h"
 #include "frontend/core/MainWindow.h"

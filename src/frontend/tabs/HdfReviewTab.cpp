@@ -41,9 +41,9 @@
 #include <QBarCategoryAxis>
 #endif
 
-#include "backend/AppBackend.h"
-#include "backend/services/Hdf5Service.h"
-#include "backend/services/ProcessingService.h"
+#include "backend/app/AppBackend.h"
+#include "backend/recording/Hdf5Service.h"
+#include "backend/processing/ProcessingService.h"
 #include "frontend/dialogs/BatchMaskDialog.h"
 #include "frontend/dialogs/FrameViewerDialog.h"
 #include "frontend/models/HdfMetricsModel.h"

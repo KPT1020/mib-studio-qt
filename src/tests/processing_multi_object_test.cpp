@@ -1,5 +1,5 @@
-#include "backend/services/ProcessingService.h"
-#include "backend/services/Hdf5Service.h"
+#include "backend/processing/ProcessingService.h"
+#include "backend/recording/Hdf5Service.h"
 
 #include <opencv2/imgproc.hpp>
 

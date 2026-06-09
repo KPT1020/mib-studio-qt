@@ -1,5 +1,5 @@
 #include "frontend/utils/OverlayRenderer.h"
-#include "backend/services/ProcessingService.h"
+#include "backend/processing/ProcessingService.h"
 
 #include <QImage>
 #include <opencv2/core.hpp>

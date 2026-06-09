@@ -11,7 +11,7 @@
 
 #include <opencv2/videoio.hpp>
 
-#include "backend/services/ProcessingService.h"
+#include "backend/processing/ProcessingService.h"
 #include "frontend/utils/RoiDrawCanvas.h"
 
 namespace cv { class Mat; }

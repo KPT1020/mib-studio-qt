@@ -1,9 +1,9 @@
 #include "frontend/dialogs/BatchMaskDialog.h"
 
-#include "backend/AppBackend.h"
-#include "backend/services/BatchMaskSources.h"
-#include "backend/services/Hdf5Service.h"
-#include "backend/services/ProcessingService.h"
+#include "backend/app/AppBackend.h"
+#include "backend/processing/BatchMaskSources.h"
+#include "backend/recording/Hdf5Service.h"
+#include "backend/processing/ProcessingService.h"
 #include "frontend/utils/RoiDrawCanvas.h"
 
 #include <QCoreApplication>

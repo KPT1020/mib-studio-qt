@@ -26,13 +26,13 @@
 #include <algorithm>
 #include <vector>
 
-#include "backend/AppBackend.h"
-#include "backend/BackgroundCaptureNotifier.h"
+#include "backend/app/AppBackend.h"
+#include "backend/app/BackgroundCaptureNotifier.h"
 #include "backend/services/CaptureService.h"
 #include "backend/services/CrashReporter.h"
-#include "backend/services/ProcessingService.h"
-#include "backend/services/Hdf5Service.h"
-#include "backend/services/PlaybackService.h"
+#include "backend/processing/ProcessingService.h"
+#include "backend/recording/Hdf5Service.h"
+#include "backend/playback/PlaybackService.h"
 #include "backend/services/AutofocusService.h"
 #include "frontend/system/PlaybackPanel.h"
 #include "frontend/tabs/ConnectTab.h"
@@ -62,7 +62,7 @@
 #include "frontend/dialogs/ProcessingSettingsDialog.h"
 #include "frontend/dialogs/ConversionFactorDialog.h"
 #include "frontend/dialogs/SyringePumpSettingsDialog.h"
-#include "backend/Tools.h"
+#include "backend/app/Tools.h"
 #include <QCloseEvent>
 #ifdef _WIN32
 #include <windows.h>

@@ -19,7 +19,7 @@
 #include <shlobj.h>
 #endif
 
-#include "backend/AppBackend.h"
+#include "backend/app/AppBackend.h"
 #include "backend/services/SyringePumpService.h"
 
 using json = nlohmann::json;
