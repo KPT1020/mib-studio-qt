@@ -67,23 +67,23 @@ Configure these outside the repo:
 
 Recommended local environment:
 
-```powershell
-$env:MIB_STUDIO_R2_ENDPOINT = "https://<account-id>.r2.cloudflarestorage.com"
-$env:MIB_STUDIO_R2_PROFILE = "mib-studio-r2"
+```bash
+export MIB_STUDIO_R2_ENDPOINT="https://<account-id>.r2.cloudflarestorage.com"
+export MIB_STUDIO_R2_PROFILE="mib-studio-r2"
 ```
 
 ### Migration From RustFS
 
 Preserve the existing channel layout when copying objects from the old RustFS bucket:
 
-```powershell
-$env:MIB_STUDIO_R2_ENDPOINT = "https://<account-id>.r2.cloudflarestorage.com"
+```bash
+export MIB_STUDIO_R2_ENDPOINT="https://<account-id>.r2.cloudflarestorage.com"
 
 aws --endpoint-url https://s3.yofo.bio --profile rustfs s3 sync s3://mib-studio-qt-updates/stable ./tmp-updates/stable
-aws --endpoint-url $env:MIB_STUDIO_R2_ENDPOINT --profile mib-studio-r2 s3 sync ./tmp-updates/stable s3://mib-studio-qt-updates/stable
+aws --endpoint-url "$MIB_STUDIO_R2_ENDPOINT" --profile mib-studio-r2 s3 sync ./tmp-updates/stable s3://mib-studio-qt-updates/stable
 
 aws --endpoint-url https://s3.yofo.bio --profile rustfs s3 sync s3://mib-studio-qt-updates/test ./tmp-updates/test
-aws --endpoint-url $env:MIB_STUDIO_R2_ENDPOINT --profile mib-studio-r2 s3 sync ./tmp-updates/test s3://mib-studio-qt-updates/test
+aws --endpoint-url "$MIB_STUDIO_R2_ENDPOINT" --profile mib-studio-r2 s3 sync ./tmp-updates/test s3://mib-studio-qt-updates/test
 ```
 
 After copying, update migrated manifests if they still point at `https://s3.yofo.bio/mib-studio-qt-updates/...`. The app expects the manifest's `installer_url` to be publicly downloadable without credentials.
@@ -92,39 +92,39 @@ After copying, update migrated manifests if they still point at `https://s3.yofo
 
 Build both installers:
 
-```powershell
+```bash
 cmake --build build --target package_installer --config Release
 cmake --build build --target package_installer_update --config Release
 ```
 
 Publish the update package:
 
-```powershell
-$env:MIB_STUDIO_R2_ENDPOINT = "https://<account-id>.r2.cloudflarestorage.com"
-$env:MIB_STUDIO_R2_PROFILE = "mib-studio-r2"
+```bash
+export MIB_STUDIO_R2_ENDPOINT="https://<account-id>.r2.cloudflarestorage.com"
+export MIB_STUDIO_R2_PROFILE="mib-studio-r2"
 
-.\publish-update.ps1 `
-  -Installer "build\dist\MIB_Studio_Qt_Update_v0.2.0.exe" `
-  -ReleaseNotesUrl "https://github.com/gavinlouuu-kpt/mib-studio-qt/releases/tag/v0.2.0"
+python publish-update.py \
+  --installer "build/dist/MIB_Studio_Qt_Update_v0.2.0.exe" \
+  --release-notes-url "https://github.com/gavinlouuu-kpt/mib-studio-qt/releases/tag/v0.2.0"
 ```
 
 Publish the optional full installer:
 
-```powershell
-.\publish-update.ps1 -Installer "build\dist\MIB_Studio_Qt_Setup_v0.2.0.exe"
+```bash
+python publish-update.py --installer "build/dist/MIB_Studio_Qt_Setup_v0.2.0.exe"
 ```
 
-`publish-update.ps1` uploads to `s3://mib-studio-qt-updates/<channel>/...`, generates `<channel>/latest.json`, and prints final public URLs under `https://updates.yofo.bio`.
+`publish-update.py` uploads to `s3://mib-studio-qt-updates/<channel>/...`, generates `<channel>/latest.json`, and prints final public URLs under `https://updates.yofo.bio`. `publish-update.ps1` is a Windows compatibility wrapper around the Python command.
 
-For legacy S3-compatible targets that require object ACLs, pass `-Acl public-read`. R2 public access is configured at the bucket/custom-domain layer, so ACLs are not sent by default.
+For legacy S3-compatible targets that require object ACLs, pass `--acl public-read`. R2 public access is configured at the bucket/custom-domain layer, so ACLs are not sent by default.
 
 ### Publishing Tools
 
-```powershell
-$env:MIB_STUDIO_R2_ENDPOINT = "https://<account-id>.r2.cloudflarestorage.com"
-$env:MIB_STUDIO_R2_PROFILE = "mib-studio-r2"
+```bash
+export MIB_STUDIO_R2_ENDPOINT="https://<account-id>.r2.cloudflarestorage.com"
+export MIB_STUDIO_R2_PROFILE="mib-studio-r2"
 
-.\publish-tools.ps1 -Zip "tools\dist\MIB_Studio_Tools_v0.1.7_windows.zip"
+python publish-tools.py --zip "tools/dist/MIB_Studio_Tools_v0.1.7_windows.zip"
 ```
 
 The tools manifest is published to `https://updates.yofo.bio/stable/tools/tools-latest.json`.
@@ -133,14 +133,14 @@ The tools manifest is published to `https://updates.yofo.bio/stable/tools/tools-
 
 Run the public manifest verifier after publishing:
 
-```powershell
-.\verify-update-manifest.ps1
+```bash
+python verify-update-manifest.py
 ```
 
 For test channel smoke tests:
 
-```powershell
-.\verify-update-manifest.ps1 -ManifestUrl "https://updates.yofo.bio/test/latest.json"
+```bash
+python verify-update-manifest.py --manifest-url "https://updates.yofo.bio/test/latest.json"
 ```
 
 Manual checks:
@@ -173,7 +173,7 @@ Do not retire the old URL until the cutoff plan is explicitly accepted by releas
 If a bad R2 release is published:
 
 1. Generate and publish a corrected `stable/latest.json` that points to the last known-good update package.
-2. Verify with `.\verify-update-manifest.ps1`.
+2. Verify with `python verify-update-manifest.py`.
 3. If R2 public access is unhealthy, set `MIB_STUDIO_UPDATE_MANIFEST_URL` for smoke tests or publish a temporary manifest on a known-good HTTPS endpoint.
 4. For already-released clients, keep the RustFS compatibility endpoint or redirect pointing at the corrected manifest until the fixed build is widely installed.
 

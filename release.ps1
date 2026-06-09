@@ -272,11 +272,17 @@ $checksumLines``````
                 Write-Host "[DRY RUN] Would publish $($updateExe.Name) to $channel channel" -ForegroundColor Gray
             } else {
                 Write-Host "Publishing to $channel channel..." -ForegroundColor Yellow
-                & "$PSScriptRoot\publish-update.ps1" `
-                    -Installer $updateExe.FullName `
-                    -Channel $channel `
-                    -Profile $Profile `
-                    -ReleaseNotesUrl "https://github.com/gavinlouuu-kpt/mib-studio-qt/releases/tag/$tagName"
+                $python = if ($env:PYTHON) { $env:PYTHON } else { "python" }
+                $publishArgs = @(
+                    "$PSScriptRoot\publish-update.py",
+                    "--installer", $updateExe.FullName,
+                    "--channel", $channel,
+                    "--release-notes-url", "https://github.com/gavinlouuu-kpt/mib-studio-qt/releases/tag/$tagName"
+                )
+                if ($Profile) {
+                    $publishArgs += @("--profile", $Profile)
+                }
+                & $python @publishArgs
                 if ($LASTEXITCODE -ne 0) {
                     Write-Host "WARNING: Cloudflare R2 publish failed" -ForegroundColor Yellow
                 } else {

@@ -4,7 +4,7 @@ This guide documents the end-to-end process for releasing a new version of MIB S
 
 ## Overview
 
-The release pipeline builds on a local Windows machine with the required proprietary dependencies, publishes installer assets to GitHub Releases with `gh`, and publishes the auto-update package to Cloudflare R2 through `publish-update.ps1`.
+The release pipeline builds on a local Windows machine with the required proprietary dependencies, publishes installer assets to GitHub Releases with `gh`, and publishes the auto-update package to Cloudflare R2 through the Python command `publish-update.py`.
 
 ### One-Command Release (`release.ps1`)
 
@@ -35,7 +35,7 @@ The release pipeline builds on a local Windows machine with the required proprie
 5. Builds both Inno Setup installers.
 6. Pushes branch and tag to GitHub.
 7. Creates a GitHub Release with installers and SHA-256 checksums.
-8. Publishes the update package to Cloudflare R2 via `publish-update.ps1`.
+8. Publishes the update package to Cloudflare R2 via `publish-update.py`.
 
 Options:
 
@@ -117,26 +117,26 @@ Use the update package for auto-updates. The full setup installer is for first-t
 
 Set R2 publishing configuration:
 
-```powershell
-$env:MIB_STUDIO_R2_ENDPOINT = "https://<account-id>.r2.cloudflarestorage.com"
-$env:MIB_STUDIO_R2_PROFILE = "mib-studio-r2"
+```bash
+export MIB_STUDIO_R2_ENDPOINT="https://<account-id>.r2.cloudflarestorage.com"
+export MIB_STUDIO_R2_PROFILE="mib-studio-r2"
 ```
 
 Publish the update package:
 
-```powershell
-.\publish-update.ps1 `
-  -Installer "build\dist\MIB_Studio_Qt_Update_v0.2.0.exe" `
-  -ReleaseNotesUrl "https://github.com/gavinlouuu-kpt/mib-studio-qt/releases/tag/v0.2.0"
+```bash
+python publish-update.py \
+  --installer "build/dist/MIB_Studio_Qt_Update_v0.2.0.exe" \
+  --release-notes-url "https://github.com/gavinlouuu-kpt/mib-studio-qt/releases/tag/v0.2.0"
 ```
 
 Publish the optional full installer:
 
-```powershell
-.\publish-update.ps1 -Installer "build\dist\MIB_Studio_Qt_Setup_v0.2.0.exe"
+```bash
+python publish-update.py --installer "build/dist/MIB_Studio_Qt_Setup_v0.2.0.exe"
 ```
 
-`publish-update.ps1`:
+`publish-update.py`:
 
 - Validates the installer exists and has nonzero size.
 - Auto-detects the version from `MIB_Studio_Qt_(Setup|Update)_vX.Y.Z.exe`.
@@ -147,26 +147,26 @@ Publish the optional full installer:
 
 Important parameters:
 
-- `-Endpoint`: R2 S3 API endpoint; defaults to `MIB_STUDIO_R2_ENDPOINT`
-- `-Bucket`: R2 bucket; defaults to `mib-studio-qt-updates`
-- `-PublicBaseUrl`: public custom domain; defaults to `https://updates.yofo.bio`
-- `-Channel`: `stable` by default, `test` for beta releases
-- `-Profile`: AWS/R2 profile; defaults to `MIB_STUDIO_R2_PROFILE`
-- `-Acl`: optional ACL for legacy S3-compatible targets; leave empty for R2
-- `-ReleaseNotesUrl`: optional GitHub release or changelog URL
+- `--endpoint`: R2 S3 API endpoint; defaults to `MIB_STUDIO_R2_ENDPOINT`
+- `--bucket`: R2 bucket; defaults to `mib-studio-qt-updates`
+- `--public-base-url`: public custom domain; defaults to `https://updates.yofo.bio`
+- `--channel`: `stable` by default, `test` for beta releases
+- `--profile`: AWS/R2 profile; defaults to `MIB_STUDIO_R2_PROFILE`
+- `--acl`: optional ACL for legacy S3-compatible targets; leave empty for R2
+- `--release-notes-url`: optional GitHub release or changelog URL
 
 ## Verification Steps
 
 After publishing, verify public access from a network path that does not use private credentials:
 
-```powershell
-.\verify-update-manifest.ps1
+```bash
+python verify-update-manifest.py
 ```
 
 For test channel:
 
-```powershell
-.\verify-update-manifest.ps1 -ManifestUrl "https://updates.yofo.bio/test/latest.json"
+```bash
+python verify-update-manifest.py --manifest-url "https://updates.yofo.bio/test/latest.json"
 ```
 
 Manual checks:
@@ -211,8 +211,8 @@ cmake --build build --config Release --target package_installer_update
 git push origin main
 git push origin v0.2.2
 gh release create v0.2.2 build\dist\MIB_Studio_Qt_Setup_v0.2.2.exe build\dist\MIB_Studio_Qt_Update_v0.2.2.exe
-.\publish-update.ps1 -Installer "build\dist\MIB_Studio_Qt_Update_v0.2.2.exe"
-.\verify-update-manifest.ps1
+python publish-update.py --installer "build/dist/MIB_Studio_Qt_Update_v0.2.2.exe"
+python verify-update-manifest.py
 ```
 
 ## Workflow Diagram
@@ -225,8 +225,8 @@ flowchart TD
     Build --> Installers[4. Build Installers<br/>Inno Setup]
     Installers --> Push[5. Push tag to GitHub]
     Push --> GHRelease[6. Create GitHub Release<br/>gh CLI]
-    GHRelease --> R2[7. Publish to Cloudflare R2<br/>publish-update.ps1]
-    R2 --> Verify[8. Verify public manifest<br/>verify-update-manifest.ps1]
+    GHRelease --> R2[7. Publish to Cloudflare R2<br/>publish-update.py]
+    R2 --> Verify[8. Verify public manifest<br/>verify-update-manifest.py]
     Verify --> Done([Release Complete])
 
     Commit -->|--beta| BetaTag[Tag: v0.2.2-beta.1]
@@ -249,7 +249,7 @@ Do not retire the old URL until release owners explicitly accept the cutoff plan
 If a bad R2 release is published:
 
 1. Publish a corrected `stable/latest.json` that points at the last known-good update package.
-2. Run `.\verify-update-manifest.ps1`.
+2. Run `python verify-update-manifest.py`.
 3. Purge Cloudflare cache for mutable manifest paths if stale content is observed.
 4. Keep the old-host compatibility endpoint or redirect pointing at the corrected manifest until the fixed build is widely installed.
 
@@ -269,6 +269,6 @@ If a bad R2 release is published:
 
 **Auto-update check fails**
 
-- Run `.\verify-update-manifest.ps1`.
+- Run `python verify-update-manifest.py`.
 - Confirm `installer_url` in the manifest points to `https://updates.yofo.bio/<channel>/MIB_Studio_Qt_Update_v<version>.exe`.
 - Check app logs for HTTP status code and response body.
