@@ -1,6 +1,5 @@
-# Publish MIB Studio Tools zip to RustFS (S3-compatible) under stable/tools/
-# Usage: .\publish-tools.ps1 -Zip "tools\dist\MIB_Studio_Tools_v0.1.7_windows.zip" [-Profile rustfs]
-# Version is auto-detected from zip filename if not provided.
+# Compatibility wrapper for the Python tools publishing command.
+# Prefer: python publish-tools.py --zip tools\dist\MIB_Studio_Tools_v0.1.7_windows.zip
 
 param(
     [Parameter(Mandatory=$false)]
@@ -9,134 +8,34 @@ param(
     [Parameter(Mandatory=$false)]
     [string]$Zip,
 
-    [string]$Endpoint = "https://s3.yofo.bio",
+    [string]$Endpoint = $env:MIB_STUDIO_R2_ENDPOINT,
     [string]$Bucket = "mib-studio-qt-updates",
+    [string]$PublicBaseUrl = "https://updates.yofo.bio",
     [string]$Channel = "stable",
-    [string]$Profile = ""
+    [string]$Profile = $env:MIB_STUDIO_R2_PROFILE,
+    [string]$Acl = "",
+    [string]$ManifestOut = "",
+    [ValidateSet("auto", "s3", "wrangler")]
+    [string]$UploadMethod = "auto",
+    [string]$WranglerBin = $env:WRANGLER_BIN,
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
 
-function Restore-ChecksumEnvVar {
-    param(
-        [string]$Name,
-        [string]$PreviousValue
-    )
+$python = if ($env:PYTHON) { $env:PYTHON } else { "python" }
+$script = Join-Path $PSScriptRoot "publish-tools.py"
 
-    if ($null -eq $PreviousValue) {
-        Remove-Item "Env:$Name" -ErrorAction SilentlyContinue
-    } else {
-        Set-Item "Env:$Name" $PreviousValue
-    }
-}
+$args = @($script, "--bucket", $Bucket, "--public-base-url", $PublicBaseUrl, "--channel", $Channel, "--upload-method", $UploadMethod)
+if ($Version) { $args += @("--version", $Version) }
+if ($Zip) { $args += @("--zip", $Zip) }
+if ($Endpoint) { $args += @("--endpoint", $Endpoint) }
+if ($Profile) { $args += @("--profile", $Profile) }
+if ($Acl) { $args += @("--acl", $Acl) }
+if ($ManifestOut) { $args += @("--manifest-out", $ManifestOut) }
+if ($WranglerBin) { $args += @("--wrangler-bin", $WranglerBin) }
+if ($DryRun) { $args += "--dry-run" }
+if ($env:S3_UPLOAD_DEBUG) { $args += "--debug" }
 
-# Default zip path: tools/dist/MIB_Studio_Tools_vX.Y.Z_windows.zip (use latest if single zip)
-if (-not $Zip) {
-    $toolsDist = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "tools\dist"
-    $zips = Get-ChildItem -Path $toolsDist -Filter "MIB_Studio_Tools_v*_windows.zip" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
-    if (-not $zips) {
-        Write-Host "ERROR: No tools zip found in tools\dist. Build with tools\build_windows.ps1 then tools\package-tools.ps1" -ForegroundColor Red
-        exit 1
-    }
-    $Zip = $zips[0].FullName
-    Write-Host "Using zip: $Zip" -ForegroundColor Cyan
-}
-
-if (-not (Test-Path $Zip)) {
-    Write-Host "ERROR: Zip file does not exist: $Zip" -ForegroundColor Red
-    exit 1
-}
-
-if (-not $Version) {
-    $filename = Split-Path -Leaf $Zip
-    if ($filename -match 'MIB_Studio_Tools_v(\d+\.\d+\.\d+)_windows\.zip$') {
-        $Version = $matches[1]
-        Write-Host "Extracted version from filename: $Version" -ForegroundColor Cyan
-    } else {
-        Write-Host "ERROR: Cannot extract version from filename. Expected: MIB_Studio_Tools_vX.Y.Z_windows.zip" -ForegroundColor Red
-        exit 1
-    }
-}
-
-Write-Host "=== Publishing MIB Studio Tools ===" -ForegroundColor Cyan
-
-$zipInfo = Get-Item $Zip
-$sizeBytes = $zipInfo.Length
-if ($sizeBytes -le 0) {
-    Write-Host "ERROR: Zip file size is invalid" -ForegroundColor Red
-    exit 1
-}
-
-Write-Host "1. Computing SHA-256 hash..." -ForegroundColor Yellow
-$hash = (Get-FileHash -Algorithm SHA256 $Zip).Hash.ToLower()
-Write-Host "   Hash: $hash" -ForegroundColor Green
-Write-Host "   Size: $sizeBytes bytes" -ForegroundColor Green
-
-$zipFileName = Split-Path -Leaf $Zip
-$toolsPrefix = "${Channel}/tools"
-$zipKey = "$toolsPrefix/$zipFileName"
-$manifestKey = "$toolsPrefix/tools-latest.json"
-
-$endpointNoSlash = $Endpoint.TrimEnd('/')
-$zipUrl = "$endpointNoSlash/$Bucket/$zipKey"
-
-Write-Host "`n2. Generating manifest..." -ForegroundColor Yellow
-$manifest = @{
-    version = $Version
-    zip_url = $zipUrl
-    zip_sha256 = $hash
-    zip_size_bytes = $sizeBytes
-    published_at = (Get-Date).ToUniversalTime().ToString("o")
-}
-$manifestJson = $manifest | ConvertTo-Json -Depth 10
-$manifestPath = Join-Path $env:TEMP "mib_tools_latest_$(New-Guid).json"
-$manifestJson | Out-File -FilePath $manifestPath -Encoding UTF8 -NoNewline
-
-$awsArgs = @("--endpoint-url", $Endpoint)
-if ($Profile) { $awsArgs += @("--profile", $Profile) }
-
-# Force AWS CLI checksum behavior that is compatible with S3-compatible endpoints.
-$previousRequestChecksumCalculation = $env:AWS_REQUEST_CHECKSUM_CALCULATION
-$previousResponseChecksumValidation = $env:AWS_RESPONSE_CHECKSUM_VALIDATION
-$env:AWS_REQUEST_CHECKSUM_CALCULATION = "when_required"
-$env:AWS_RESPONSE_CHECKSUM_VALIDATION = "when_required"
-
-Write-Host "`n3. Uploading zip..." -ForegroundColor Yellow
-$uploadArgs = $awsArgs + @(
-    "s3api", "put-object",
-    "--bucket", $Bucket,
-    "--key", $zipKey,
-    "--body", $Zip,
-    "--content-type", "application/zip",
-    "--acl", "public-read"
-)
-$result = & aws $uploadArgs 2>&1
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "ERROR: Zip upload failed!" -ForegroundColor Red
-    Write-Host $result -ForegroundColor Red
-    Remove-Item $manifestPath -ErrorAction SilentlyContinue
-    Restore-ChecksumEnvVar -Name "AWS_REQUEST_CHECKSUM_CALCULATION" -PreviousValue $previousRequestChecksumCalculation
-    Restore-ChecksumEnvVar -Name "AWS_RESPONSE_CHECKSUM_VALIDATION" -PreviousValue $previousResponseChecksumValidation
-    exit 1
-}
-Write-Host "   Zip uploaded successfully" -ForegroundColor Green
-
-Write-Host "`n4. Uploading tools-latest.json..." -ForegroundColor Yellow
-$manifestUploadArgs = $awsArgs + @("s3", "cp", $manifestPath, "s3://$Bucket/$manifestKey", "--content-type", "application/json", "--acl", "public-read")
-$result = & aws $manifestUploadArgs 2>&1
-Remove-Item $manifestPath -ErrorAction SilentlyContinue
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "ERROR: Manifest upload failed!" -ForegroundColor Red
-    Write-Host $result -ForegroundColor Red
-    Restore-ChecksumEnvVar -Name "AWS_REQUEST_CHECKSUM_CALCULATION" -PreviousValue $previousRequestChecksumCalculation
-    Restore-ChecksumEnvVar -Name "AWS_RESPONSE_CHECKSUM_VALIDATION" -PreviousValue $previousResponseChecksumValidation
-    exit 1
-}
-Write-Host "   Manifest uploaded successfully" -ForegroundColor Green
-
-Restore-ChecksumEnvVar -Name "AWS_REQUEST_CHECKSUM_CALCULATION" -PreviousValue $previousRequestChecksumCalculation
-Restore-ChecksumEnvVar -Name "AWS_RESPONSE_CHECKSUM_VALIDATION" -PreviousValue $previousResponseChecksumValidation
-
-Write-Host "`n=== Publish Complete ===" -ForegroundColor Cyan
-Write-Host "Manifest URL: $endpointNoSlash/$Bucket/$manifestKey" -ForegroundColor Green
-Write-Host "Zip URL: $zipUrl" -ForegroundColor Green
+& $python @args
+exit $LASTEXITCODE

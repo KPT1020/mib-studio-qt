@@ -61,26 +61,28 @@ After building installers, see [Publishing Updates](#publishing-updates) below t
 
 ## Publishing Updates
 
-After building installers, use `publish-update.ps1` to upload them to RustFS (S3-compatible storage) for distribution.
+After building installers, use `publish-update.py` to upload them to the dedicated Cloudflare R2 update bucket for distribution through `https://updates.yofo.bio`.
 
 **Prerequisites:**
-- AWS CLI installed and configured
-- RustFS credentials (via profile or environment variables)
+- Python
+- Either Wrangler logged in with R2 access, or `boto3` plus S3-compatible R2 credentials
+- For S3 uploads: configure `MIB_STUDIO_R2_ENDPOINT` and credentials via `MIB_STUDIO_R2_PROFILE`, AWS environment variables, or CI secrets
 
 **Publish update package (for auto-updates):**
-```powershell
-.\publish-update.ps1 -Installer "resources\build\dist\MIB_Studio_Qt_Update_v0.2.0.exe" -Profile rustfs
+```bash
+# Uses Wrangler automatically when MIB_STUDIO_R2_ENDPOINT is not set.
+python publish-update.py --installer "resources/build/dist/MIB_Studio_Qt_Update_v0.2.0.exe"
 ```
 
 **Publish full installer (optional, for manual downloads):**
-```powershell
-.\publish-update.ps1 -Installer "resources\build\dist\MIB_Studio_Qt_Setup_v0.2.0.exe" -Profile rustfs
+```bash
+python publish-update.py --installer "resources/build/dist/MIB_Studio_Qt_Setup_v0.2.0.exe"
 ```
 
-The script auto-detects version from filename, computes SHA-256, generates a manifest, and uploads files with public-read ACL.
+The script auto-detects version from filename, computes SHA-256, generates a manifest, uploads files to R2, and prints the final public URLs. Windows PowerShell wrappers remain available as `publish-update.ps1`, `publish-tools.ps1`, and `verify-update-manifest.ps1`.
 
 For complete release workflow, see [docs/howto/release-workflow.md](docs/howto/release-workflow.md).  
-For detailed publishing information, see [docs/howto/auto-update-rustfs.md](docs/howto/auto-update-rustfs.md).
+For detailed publishing information, see [docs/howto/auto-update-r2.md](docs/howto/auto-update-r2.md).
 
 ## Version Management
 

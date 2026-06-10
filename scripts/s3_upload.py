@@ -13,9 +13,13 @@ payload_signing_enabled forces full-body SigV4 (plain PUT, no trailers).
 Credentials come from the standard AWS env vars / --profile /
 ~/.aws/credentials chain.
 """
+from __future__ import annotations
+
 import argparse
 import logging
 import os
+import shlex
+import subprocess
 import sys
 
 # Disable automatic CRC32 checksum trailers — they force aws-chunked encoding
@@ -24,34 +28,38 @@ import sys
 os.environ.setdefault("AWS_REQUEST_CHECKSUM_CALCULATION", "when_required")
 os.environ.setdefault("AWS_RESPONSE_CHECKSUM_VALIDATION", "when_required")
 
-import boto3
-from botocore.config import Config
-from botocore.exceptions import BotoCoreError, ClientError
+def upload_file_to_s3(
+    *,
+    endpoint: str,
+    bucket: str,
+    key: str,
+    file_path: str,
+    content_type: str = "application/octet-stream",
+    cache_control: str | None = None,
+    acl: str | None = None,
+    profile: str | None = None,
+    debug: bool = False,
+) -> None:
+    """Upload a file with explicit Content-Length to S3-compatible storage."""
+    try:
+        import boto3
+        from botocore.config import Config
+    except ImportError as exc:
+        raise RuntimeError(
+            "boto3 is required for S3/R2 uploads. Install it with: python -m pip install boto3"
+        ) from exc
 
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--endpoint", required=True)
-    parser.add_argument("--bucket", required=True)
-    parser.add_argument("--key", required=True)
-    parser.add_argument("--file", required=True)
-    parser.add_argument("--content-type", default="application/octet-stream")
-    parser.add_argument("--acl", default="public-read")
-    parser.add_argument("--profile", default=None)
-    parser.add_argument("--debug", action="store_true")
-    args = parser.parse_args()
-
-    if args.debug:
+    if debug:
         boto3.set_stream_logger("botocore", level=logging.DEBUG)
 
     session = (
-        boto3.Session(profile_name=args.profile)
-        if args.profile
+        boto3.Session(profile_name=profile)
+        if profile
         else boto3.Session()
     )
     s3 = session.client(
         "s3",
-        endpoint_url=args.endpoint,
+        endpoint_url=endpoint,
         config=Config(
             signature_version="s3v4",
             s3={
@@ -63,18 +71,79 @@ def main() -> int:
         ),
     )
 
-    file_size = os.path.getsize(args.file)
+    file_size = os.path.getsize(file_path)
+    with open(file_path, "rb") as fh:
+        put_args = {
+            "Bucket": bucket,
+            "Key": key,
+            "Body": fh,
+            "ContentLength": file_size,
+            "ContentType": content_type,
+        }
+        if cache_control:
+            put_args["CacheControl"] = cache_control
+        if acl:
+            put_args["ACL"] = acl
+        s3.put_object(**put_args)
+
+
+def upload_file_with_wrangler(
+    *,
+    bucket: str,
+    key: str,
+    file_path: str,
+    content_type: str = "application/octet-stream",
+    cache_control: str | None = None,
+    wrangler_bin: str = "wrangler",
+    remote: bool = True,
+) -> None:
+    """Upload a file to R2 with Wrangler's authenticated session."""
+    cmd = [
+        wrangler_bin,
+        "r2",
+        "object",
+        "put",
+        f"{bucket}/{key}",
+        "--file",
+        file_path,
+        "--content-type",
+        content_type,
+        "--force",
+    ]
+    if cache_control:
+        cmd += ["--cache-control", cache_control]
+    cmd.append("--remote" if remote else "--local")
+
+    print(f"   Command: {shlex.join(cmd)}")
+    subprocess.run(cmd, check=True)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--endpoint", required=True)
+    parser.add_argument("--bucket", required=True)
+    parser.add_argument("--key", required=True)
+    parser.add_argument("--file", required=True)
+    parser.add_argument("--content-type", default="application/octet-stream")
+    parser.add_argument("--cache-control", default=None)
+    parser.add_argument("--acl", default=None)
+    parser.add_argument("--profile", default=None)
+    parser.add_argument("--debug", action="store_true")
+    args = parser.parse_args()
+
     try:
-        with open(args.file, "rb") as fh:
-            s3.put_object(
-                Bucket=args.bucket,
-                Key=args.key,
-                Body=fh,
-                ContentLength=file_size,
-                ContentType=args.content_type,
-                ACL=args.acl,
-            )
-    except (BotoCoreError, ClientError) as e:
+        upload_file_to_s3(
+            endpoint=args.endpoint,
+            bucket=args.bucket,
+            key=args.key,
+            file_path=args.file,
+            content_type=args.content_type,
+            cache_control=args.cache_control,
+            acl=args.acl,
+            profile=args.profile,
+            debug=args.debug,
+        )
+    except Exception as e:
         print(f"ERROR: upload failed: {e}", file=sys.stderr)
         return 1
 

@@ -31,7 +31,7 @@ namespace {
 constexpr int kDefaultTimeoutMs = 6000;
 
 QUrl defaultManifestUrl() {
-    return QUrl(QStringLiteral("https://s3.yofo.bio/mib-studio-qt-updates/stable/latest.json"));
+    return QUrl(QStringLiteral("https://updates.yofo.bio/stable/latest.json"));
 }
 
 QVersionNumber currentAppVersion() {
@@ -463,4 +463,3 @@ bool AutoUpdater::launchInstallerElevated(const QString& installerPath, QString*
 }
 
 } // namespace frontend
-

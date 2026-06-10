@@ -12,7 +12,7 @@
   [[../services/ProcessingService]] / [[ConfigTabs]] on change. See
   `docs/howto/live-config-reload.md`.
 - **`AutoUpdater`** — periodic update check; see
-  `docs/howto/auto-update-rustfs.md` and `docs/howto/release-workflow.md`.
+  `docs/howto/auto-update-r2.md` and `docs/howto/release-workflow.md`.
 - **`DeviceInitManager`** — runs [[../services/CameraControlService]]
   `discoverCameras()` off the UI thread. Emits a signal when discovery
   completes (including "no cameras found").
