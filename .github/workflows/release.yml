@@ -91,6 +91,35 @@ jobs:
             conan-${{ runner.os }}-${{ hashFiles('conanfile.txt') }}-
             conan-${{ runner.os }}-
 
+      - name: Download eGrabber SDK
+        run: |
+          $sdkUrl = "https://updates.yofo.bio/egrabber-sdk-installer/egrabber-win-x86_64-25.10.0.57.exe"
+          curl.exe --fail --location --retry 3 --output egrabber-sdk.exe $sdkUrl
+          $sdkSize = (Get-Item egrabber-sdk.exe).Length
+          if ($sdkSize -lt 100MB) {
+            Write-Host "ERROR: Downloaded eGrabber SDK is unexpectedly small: $sdkSize bytes" -ForegroundColor Red
+            exit 1
+          }
+          $installer = Start-Process -FilePath .\egrabber-sdk.exe -ArgumentList '/S' -Wait -PassThru
+          if ($installer.ExitCode -ne 0) {
+            Write-Host "ERROR: eGrabber SDK installer failed with exit code $($installer.ExitCode)" -ForegroundColor Red
+            exit $installer.ExitCode
+          }
+          if (!(Test-Path "C:\Program Files\Euresys\eGrabber\include")) {
+            Write-Host "ERROR: eGrabber SDK headers not found" -ForegroundColor Red
+            exit 1
+          }
+          Write-Host "eGrabber SDK installed"
+          New-Item -ItemType Directory -Force resources\installers | Out-Null
+          Copy-Item egrabber-sdk.exe resources\installers\egrabber-win-x86_64-25.10.0.57.exe
+        shell: pwsh
+
+      - name: Download VC++ Redistributable
+        run: |
+          New-Item -ItemType Directory -Force resources\installers | Out-Null
+          curl.exe --fail --location --retry 3 --output resources\installers\vc_redist.x64.exe "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+        shell: pwsh
+
       - name: Install dependencies
         shell: pwsh
         run: |
