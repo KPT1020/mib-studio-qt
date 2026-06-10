@@ -151,7 +151,16 @@ jobs:
 
       # ── Build ──────────────────────────────────────────────────
       - name: Conan install
-        run: conan install . -of build --build=missing -s build_type=Release -pr ci
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          try {
+            conan install . -of build --build=missing -s build_type=Release -pr ci
+          } catch {
+            Write-Host "WARNING: Conan install failed with current remotes (possibly team-conan). Retrying after disabling team-conan remote." -ForegroundColor Yellow
+            conan remote remove team-conan 2>$null
+            conan install . -of build --build=missing -s build_type=Release -pr ci
+          }
 
       - name: Upload packages to team remote
         if: always() && env.CONAN_REMOTE_URL != ''
