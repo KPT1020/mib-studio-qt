@@ -4,7 +4,7 @@
 
 ## Step 1 — Orient
 
-1. Read `CLAUDE.md` (top-level project instructions, build commands, conventions).
+1. Read `AGENTS.md` (top-level agent map: navigation, build commands, hard conventions).
 2. Read [[architecture/Overview]] — what this app is and how it's layered.
 3. Read [[architecture/Data-Flow]] — the realtime path from camera to HDF5.
 
@@ -55,8 +55,8 @@ The vault is the onboarding path for the **next** agent. If your change
 leaves the vault stale, you've broken that path. Every non-trivial commit
 MUST include vault updates alongside code changes.
 
-See `CLAUDE.md` → "Vault Maintenance (required for every change)" for the
-full source-file → vault-note mapping. In short:
+See [[Vault-Maintenance]] for the full source-file → vault-note mapping.
+In short:
 
 - **Touched a service?** Update `knowledge_map/services/<Name>Service.md`
   (Responsibility, Key APIs, Gotchas).

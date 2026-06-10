@@ -35,7 +35,7 @@ Test performance scripts (`scripts/empty_frame_detection.py` and the
 Kedro pipeline under `scripts/kedro_frame_detection/`) log to MLflow at
 `mlflow.yofo.bio`. Set credentials via env vars
 `MLFLOW_TRACKING_USERNAME`, `MLFLOW_TRACKING_PASSWORD` — never hard-code.
-See top-level `CLAUDE.md`.
+See top-level `AGENTS.md`.
 
 ## Backend-only validation mode (build/test)
 

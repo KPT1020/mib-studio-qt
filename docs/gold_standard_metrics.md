@@ -4,7 +4,7 @@ Uniform JSON format for processing pipeline metrics so **mib-studio-qt** pipelin
 
 ## File format
 
-- **Schema**: [gold_standard_metrics.schema.json](gold_standard_metrics.schema.json)
+- **Schema**: `gold_standard_metrics.schema.json` (referenced but never committed; see tech debt TD-6 in [exec-plans/tech-debt-tracker.md](exec-plans/tech-debt-tracker.md))
 - **Top-level fields**:
   - `version`: Schema version (currently `1`).
   - `pixel_to_micron`: Conversion factor (1 pixel = X microns). Required for area in µm².
@@ -35,7 +35,7 @@ Uniform JSON format for processing pipeline metrics so **mib-studio-qt** pipelin
 | `brightness_q3` | number | 75th percentile brightness. |
 | `brightness_q4` | number | 100th percentile (max) brightness. |
 
-Field names align with `FilterResult` and `BrightnessQuantiles` in [ProcessingService.h](../include/backend/services/ProcessingService.h) and with the CSV header used by `export_hdf5.py` (snake_case in JSON).
+Field names align with `FilterResult` and `BrightnessQuantiles` in [ProcessingService.h](../include/backend/processing/ProcessingService.h) and with the CSV header used by `export_hdf5.py` (snake_case in JSON).
 
 ### Processing pipeline (nested contours)
 
@@ -52,7 +52,7 @@ Known failure modes:
 
 ## Workflow (summary)
 
-1. **Gold standard**: Run MIB-Studio pipeline → export CSV from saved data → convert CSV to gold-standard JSON with [convert_legacy_csv_to_json.py](../scripts/convert_legacy_csv_to_json.py).
+1. **Gold standard**: Run MIB-Studio pipeline → export CSV from saved data → convert CSV to gold-standard JSON with `scripts/convert_legacy_csv_to_json.py` (referenced but never committed; see tech debt TD-6).
 2. **Qt pipeline**: Run mib-studio-qt → save experiment to HDF5 → export to gold-standard JSON with `export_hdf5.py --format json`.
 3. **Compare**: Run [compare_metrics.py](../scripts/compare_metrics.py) on the two JSON files (with optional per-field tolerances).
 

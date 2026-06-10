@@ -5,8 +5,10 @@ This folder hosts living documentation as we build functionality. Keep content c
 ## Structure
 - `architecture/` — system and component overviews
 - `integration/` — external integrations (e.g., Euresys EGrabber)
-- `decisions/` — Architecture Decision Records (ADRs)
+- `decisions/` — Architecture Decision Records ([index](decisions/README.md))
 - `howto/` — task-oriented guides and runbooks
+- `exec-plans/` — execution plans and tech debt ([conventions](exec-plans/README.md))
+- [golden-principles.md](golden-principles.md) — mechanical rules that keep the repo agent-legible
 
 ## Conventions
 - Use clear headings and short sections.
@@ -17,3 +19,7 @@ This folder hosts living documentation as we build functionality. Keep content c
 - Integration: EGrabber — see `integration/egrabber.md`
 - Tasks/issues live in `knowledge_map/task/`
 - Post-processing tools (export, reanalyse) — see [howto/tools.md](howto/tools.md)
+- Known debt — see [exec-plans/tech-debt-tracker.md](exec-plans/tech-debt-tracker.md)
+- Agent map — see [../AGENTS.md](../AGENTS.md)
+
+Run `python3 scripts/check_docs.py` after editing any markdown; CI enforces it.

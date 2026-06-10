@@ -2,11 +2,12 @@
 
 ## Documentation
 See `docs/README.md` for structure and links. Active tasks live in `knowledge_map/task/`.
+Agents start at [AGENTS.md](AGENTS.md), then the knowledge vault (`knowledge_map/`).
 
 
 ## Algorithm Experiments & MLflow
 
-When running algorithm experiments (reanalysis, parameter sweeps, pipeline comparisons), all intermediate images and results must be uploaded to the MLflow tracking server at `mlflow.yofo.bio`. This includes intermediate pipeline images (original, blurred, diff, thresh, mask, overlay), metrics CSV, processing parameters, and summary metrics. See `CLAUDE.md` for detailed integration instructions and example code.
+When running algorithm experiments (reanalysis, parameter sweeps, pipeline comparisons), all intermediate images and results must be uploaded to the MLflow tracking server at `mlflow.yofo.bio`. This includes intermediate pipeline images (original, blurred, diff, thresh, mask, overlay), metrics CSV, processing parameters, and summary metrics. Credentials come from `MLFLOW_TRACKING_USERNAME` / `MLFLOW_TRACKING_PASSWORD` environment variables — never hardcode them.
 
 ## Post-processing tools
 

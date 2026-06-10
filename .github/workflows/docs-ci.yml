@@ -1,0 +1,16 @@
+name: Docs CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  knowledge-base:
+    name: Knowledge base checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check docs and vault integrity
+        run: python3 scripts/check_docs.py

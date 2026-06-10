@@ -1,6 +1,6 @@
 # Code Conventions
 
-> Distilled from top-level `CLAUDE.md` and recurring review feedback.
+> Distilled from top-level `AGENTS.md` and recurring review feedback.
 
 ## Logging
 

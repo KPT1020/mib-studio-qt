@@ -65,12 +65,14 @@ following `[[WikiLinks]]`. If you are a new agent, start here:
 ## Maintenance
 
 This vault is required reading *and* required writing. Every code change
-must land with matching vault updates in the same commit. See the
-"Vault Maintenance" section in `CLAUDE.md` for the source-file → vault-note
-mapping, and [[Agent-Onboarding]] for the pre-commit checklist.
+must land with matching vault updates in the same commit. See
+[[Vault-Maintenance]] for the source-file → vault-note mapping, and
+[[Agent-Onboarding]] for the pre-commit checklist. `scripts/check_docs.py`
+verifies wikilink integrity (enforced in CI).
 
 ## Related
 
+- `AGENTS.md` — top-level agent map (read first)
 - `docs/` — user-facing how-tos (`docs/howto/*.md`) and integration notes
-- `knowledge_map/task/` — 19 dated task records (historical design/debug notes)
-- `CLAUDE.md` — top-level project instructions (read first)
+- `docs/golden-principles.md` — mechanical rules for this repo
+- `knowledge_map/task/` — dated task records (historical design/debug notes)
