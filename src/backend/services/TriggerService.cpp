@@ -31,11 +31,17 @@ void TriggerService::setCamera(camera::common::ICamera* camera) {
     }
 }
 
-void TriggerService::onTargetGroupResult(bool isTargetGroup) {
-    if (isTargetGroup) {
-        triggerRequested_.store(true, std::memory_order_release);
-        triggerCV_.notify_one();
+void TriggerService::onTargetGroupResult(const TargetGroupSignal& signal) {
+    if (!signal.isTargetGroup) {
+        return;
     }
+
+    SPDLOG_DEBUG("TriggerService target-group callback: objectId={}, trackId={}", signal.objectId, signal.trackId);
+
+    lastTriggerObjectId_.store(signal.objectId, std::memory_order_release);
+    lastTriggerTrackId_.store(signal.trackId, std::memory_order_release);
+    triggerRequested_.store(true, std::memory_order_release);
+    triggerCV_.notify_one();
 }
 
 void TriggerService::triggerLoop() {

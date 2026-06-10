@@ -99,6 +99,12 @@ struct FilterResult {
     std::vector<cv::Vec4i> hierarchy;
 };
 
+struct TargetGroupEvent {
+    bool isTargetGroup{false};
+    int objectId{-1};
+    int trackId{-1};
+};
+
 struct ProcessedFrame {
     uint64_t index{0};
     uint64_t timestampNs{0};
@@ -316,9 +322,10 @@ public:
     using RingRatioCallback = std::function<void(double ringRatio, int64_t timestampNs)>;
     void setRingRatioCallback(RingRatioCallback callback);
 
-    // Target group trigger callback (called for each valid frame with target group result)
-    using TargetGroupCallback = std::function<void(bool isTargetGroup)>;
+    // Target group trigger callback (one deterministic event per source frame)
+    using TargetGroupCallback = std::function<void(const TargetGroupEvent& event)>;
     void setTargetGroupCallback(TargetGroupCallback callback);
+    TargetGroupEvent selectTargetGroupTriggerOwner(const std::vector<FilterResult>& validations) const;
 
     // Young's modulus LUT loading
     bool loadEModulusLut(const std::string& path);
@@ -357,7 +364,7 @@ private:
     BatchPipelineConfig makeRealtimeBatchPipelineConfig() const;
     void refreshRealtimeBatchPipelineConfig();
     void publishRealtimeBatchFrame(ProcessedFrame&& frame);
-    void publishRealtimeValidationCallbacks(const FilterResult& validation, uint64_t timestampNs);
+    void publishRealtimeValidationCallbacks(const std::vector<FilterResult>& validations, uint64_t timestampNs);
     void appendRealtimeMonitoringFrame(uint64_t index,
                                        uint64_t timestampNs,
                                        const FilterResult& validation,

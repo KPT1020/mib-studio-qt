@@ -166,7 +166,11 @@ namespace frontend
         periodicTriggerTimer_ = new QTimer(this);
         periodicTriggerTimer_->setInterval(ui->periodicTriggerIntervalSpin->value());
         connect(periodicTriggerTimer_, &QTimer::timeout, this, [this]() {
-            backend_.trigger().onTargetGroupResult(true);
+            backend_.trigger().onTargetGroupResult([] {
+                backend::services::TargetGroupSignal signal;
+                signal.isTargetGroup = true;
+                return signal;
+            }());
             ++periodicTriggerPulseCount_;
         });
         connect(ui->periodicTriggerBtn, &QPushButton::toggled, this, &ExperimentMonitoringTab::onPeriodicTriggerToggled);
@@ -1038,7 +1042,9 @@ namespace frontend
 
     void ExperimentMonitoringTab::onSortTrigger()
     {
-        backend_.trigger().onTargetGroupResult(true);
+        backend::services::TargetGroupSignal signal;
+        signal.isTargetGroup = true;
+        backend_.trigger().onTargetGroupResult(signal);
         SPDLOG_INFO("Manual sort trigger fired");
     }
 

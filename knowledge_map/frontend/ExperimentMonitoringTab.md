@@ -20,12 +20,13 @@
 - `showEvent` / `hideEvent` pause rendering when the tab isn't visible.
 - **Top-row trigger controls:**
   - `sortTriggerBtn` — single manual pulse; calls
-    `backend_.trigger().onTargetGroupResult(true)`.
+    `backend_.trigger().onTargetGroupResult(services::TargetGroupSignal{.isTargetGroup=true})`.
   - `triggerDurationSpin` — pulse width in µs
     (`TriggerService::setPulseDurationUs`).
   - `periodicTriggerBtn` (checkable) + `periodicTriggerIntervalSpin` —
     periodic test pulses. When armed, `periodicTriggerTimer_`
-    (`QTimer`) fires `onTargetGroupResult(true)` every N ms. The
+    (`QTimer`) fires `onTargetGroupResult(services::TargetGroupSignal{.isTargetGroup=true})`
+    every N ms. The
     interval spinbox is disabled while armed; the timer is disarmed in
     `hideEvent`. Intended for oscilloscope/sorter bring-up without
     needing live target-group classifications. See

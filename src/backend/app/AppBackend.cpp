@@ -311,9 +311,13 @@ namespace backend
         // Wire target group trigger: processing -> trigger service
         if (bootProcessing && bootTrigger)
         {
-            processingService_->setTargetGroupCallback([this](bool isTargetGroup) {
+            processingService_->setTargetGroupCallback([this](const services::TargetGroupEvent& event) {
                 if (triggerService_) {
-                    triggerService_->onTargetGroupResult(isTargetGroup);
+                    services::TargetGroupSignal signal;
+                    signal.isTargetGroup = event.isTargetGroup;
+                    signal.objectId = event.objectId;
+                    signal.trackId = event.trackId;
+                    triggerService_->onTargetGroupResult(signal);
                 }
             });
         }
