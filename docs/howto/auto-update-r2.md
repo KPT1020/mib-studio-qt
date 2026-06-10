@@ -7,7 +7,7 @@ MIB Studio checks a public update manifest, downloads the latest Windows update 
 - **Public update hostname**: `https://updates.yofo.bio`
 - **R2 bucket**: `mib-studio-qt-updates`
 - **R2 S3 API endpoint**: set locally with `MIB_STUDIO_R2_ENDPOINT` (`https://<account-id>.r2.cloudflarestorage.com`)
-- **Channel prefixes**: `stable/` for production, `test/` for beta/pre-release builds
+- **Channel prefixes**: `stable/` for production, `beta/` for beta/pre-release builds
 - **Production manifest**: `https://updates.yofo.bio/stable/latest.json`
 - **Override for testing**: set `MIB_STUDIO_UPDATE_MANIFEST_URL` to any HTTPS URL returning a compatible manifest JSON
 
@@ -22,7 +22,7 @@ Keep objects at the root of the public custom domain:
 - `stable/MIB_Studio_Qt_Setup_v<version>.exe` (optional, full installer for manual downloads)
 - `stable/tools/tools-latest.json`
 - `stable/tools/MIB_Studio_Tools_v<version>_windows.zip`
-- `test/...` for beta/pre-release equivalents
+- `beta/...` for beta/pre-release equivalents
 
 The public URL is `https://updates.yofo.bio/<object-key>`. Do not include the bucket name in public manifest URLs when using the R2 custom domain.
 
@@ -60,7 +60,7 @@ Configure these outside the repo:
 2. Attach the public custom domain `updates.yofo.bio` to that bucket.
 3. Configure public read access through Cloudflare for update artifacts.
 4. Configure cache behavior:
-   - `stable/latest.json`, `test/latest.json`, and `*/tools/tools-latest.json`: short TTL or bypass cache because manifests are mutable.
+   - `stable/latest.json`, `beta/latest.json`, and `*/tools/tools-latest.json`: short TTL or bypass cache because manifests are mutable.
    - Versioned `.exe` and `.zip` artifacts: long TTL because filenames are immutable.
 5. Create least-privilege write credentials for release publishing. Credentials need object write access to the updater bucket only.
 6. Store credentials in a local AWS profile such as `mib-studio-r2`, environment variables, or CI secrets.
@@ -84,8 +84,8 @@ export MIB_STUDIO_R2_ENDPOINT="https://<account-id>.r2.cloudflarestorage.com"
 aws --endpoint-url https://s3.yofo.bio --profile rustfs s3 sync s3://mib-studio-qt-updates/stable ./tmp-updates/stable
 aws --endpoint-url "$MIB_STUDIO_R2_ENDPOINT" --profile mib-studio-r2 s3 sync ./tmp-updates/stable s3://mib-studio-qt-updates/stable
 
-aws --endpoint-url https://s3.yofo.bio --profile rustfs s3 sync s3://mib-studio-qt-updates/test ./tmp-updates/test
-aws --endpoint-url "$MIB_STUDIO_R2_ENDPOINT" --profile mib-studio-r2 s3 sync ./tmp-updates/test s3://mib-studio-qt-updates/test
+aws --endpoint-url https://s3.yofo.bio --profile rustfs s3 sync s3://mib-studio-qt-updates/beta ./tmp-updates/beta
+aws --endpoint-url "$MIB_STUDIO_R2_ENDPOINT" --profile mib-studio-r2 s3 sync ./tmp-updates/beta s3://mib-studio-qt-updates/beta
 ```
 
 After copying, update migrated manifests if they still point at `https://s3.yofo.bio/mib-studio-qt-updates/...`. The app expects the manifest's `installer_url` to be publicly downloadable without credentials.
@@ -133,10 +133,10 @@ Run the public manifest verifier after publishing:
 python verify-update-manifest.py
 ```
 
-For test channel smoke tests:
+For beta channel smoke tests:
 
 ```bash
-python verify-update-manifest.py --manifest-url "https://updates.yofo.bio/test/latest.json"
+python verify-update-manifest.py --manifest-url "https://updates.yofo.bio/beta/latest.json"
 ```
 
 Manual checks:

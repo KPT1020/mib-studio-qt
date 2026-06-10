@@ -311,31 +311,45 @@ jobs:
           }
         shell: pwsh
 
-      # ── Publish to rustfs ──────────────────────────────────────
-      - name: Publish update package to rustfs
+      - name: Check Cloudflare R2 publishing credentials
+        id: r2
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.R2_ACCESS_KEY_ID }}" ] && [ -n "${{ secrets.R2_SECRET_ACCESS_KEY }}" ] && [ -n "${{ secrets.MIB_STUDIO_R2_ENDPOINT }}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Publish to Cloudflare R2 ───────────────────────────────
+      - name: Publish update package to Cloudflare R2
+        if: steps.r2.outputs.available == 'true'
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          S3_UPLOAD_DEBUG: "1"
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          MIB_STUDIO_R2_ENDPOINT: ${{ secrets.MIB_STUDIO_R2_ENDPOINT }}
         run: |
           $version = "${{ steps.version.outputs.version }}"
           $channel = "${{ steps.version.outputs.channel }}"
           $updateInstaller = Get-ChildItem "build\dist\MIB_Studio_Qt_Update_v*.exe" | Select-Object -First 1
           if ($updateInstaller) {
-            .\publish-update.ps1 -Installer $updateInstaller.FullName -Version $version -Channel $channel
+            python publish-update.py `
+              --installer $updateInstaller.FullName `
+              --version $version `
+              --channel $channel `
+              --upload-method s3 `
+              --release-notes-url "https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }}"
           } else {
             Write-Host "WARNING: Update package not found, skipping" -ForegroundColor Yellow
           }
         shell: pwsh
 
-      - name: Skip full installer rustfs publish
+      - name: Skip full installer Cloudflare R2 publish
         run: |
           $setupInstaller = Get-ChildItem "build\dist\MIB_Studio_Qt_Setup_v*.exe" | Select-Object -First 1
           if ($setupInstaller) {
             $sizeMb = [math]::Round($setupInstaller.Length / 1MB, 1)
             Write-Host "Full installer: $($setupInstaller.Name) ($sizeMb MiB)"
-            Write-Host "Skipping RustFS upload for the full installer because s3.yofo.bio rejects large single PUTs."
-            Write-Host "The full installer remains attached to the GitHub Release; RustFS latest.json points to the update package."
+            Write-Host "Skipping Cloudflare R2 upload for the full installer because large installers are attached to GitHub Release only."
+            Write-Host "The full installer remains attached to the GitHub Release; Cloudflare R2 latest.json points to the update package."
           } else {
             Write-Host "WARNING: Full installer not found, skipping" -ForegroundColor Yellow
           }

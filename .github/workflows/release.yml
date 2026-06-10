@@ -34,8 +34,14 @@ jobs:
             TAG="${GITHUB_REF#refs/tags/}"
           fi
           VERSION="${TAG#v}"
+          if [[ "$TAG" == *-beta.* ]]; then
+            CHANNEL="beta"
+          else
+            CHANNEL="stable"
+          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
           echo "Building release: $TAG (version $VERSION)"
 
       - name: Setup MSVC
@@ -150,28 +156,32 @@ jobs:
             build/dist/MIB_Studio_Qt_Setup_v*.exe
             build/dist/MIB_Studio_Qt_Update_v*.exe
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.version.outputs.channel == 'beta' }}
 
-      - name: Check RustFS credentials
-        id: rustfs
+      - name: Check Cloudflare R2 credentials
+        id: r2
         shell: bash
         run: |
-          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+          if [ -n "${{ secrets.R2_ACCESS_KEY_ID }}" ] && [ -n "${{ secrets.R2_SECRET_ACCESS_KEY }}" ] && [ -n "${{ secrets.MIB_STUDIO_R2_ENDPOINT }}" ]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Publish to RustFS (auto-update server)
-        if: steps.rustfs.outputs.available == 'true'
+      - name: Publish update package to Cloudflare R2
+        if: steps.r2.outputs.available == 'true'
         shell: pwsh
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          MIB_STUDIO_R2_ENDPOINT: ${{ secrets.MIB_STUDIO_R2_ENDPOINT }}
         run: |
           $updateExe = Get-ChildItem "build/dist/MIB_Studio_Qt_Update_v*.exe" | Select-Object -First 1
           if ($updateExe) {
-            .\publish-update.ps1 `
-              -Installer $updateExe.FullName `
-              -ReleaseNotesUrl "https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }}"
+            python publish-update.py `
+              --installer $updateExe.FullName `
+              --version "${{ steps.version.outputs.version }}" `
+              --channel "${{ steps.version.outputs.channel }}" `
+              --upload-method s3 `
+              --release-notes-url "https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }}"
           } else {
-            Write-Host "WARNING: Update package not found, skipping RustFS publish"
+            Write-Host "WARNING: Update package not found, skipping Cloudflare R2 publish"
           }
