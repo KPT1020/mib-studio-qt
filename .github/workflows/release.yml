@@ -97,10 +97,12 @@ jobs:
           $ErrorActionPreference = "Stop"
           try {
             conan install . -of build --build=missing -s build_type=Release -pr ci
+            if ($LASTEXITCODE -ne 0) { throw "Conan install failed with current remotes." }
           } catch {
             Write-Host "WARNING: Conan install failed with current remotes (possibly team-conan). Retrying after disabling team-conan remote." -ForegroundColor Yellow
             conan remote remove team-conan 2>$null
             conan install . -of build --build=missing -s build_type=Release -pr ci
+            if ($LASTEXITCODE -ne 0) { throw "Conan fallback install failed." }
           }
 
       - name: Upload packages to team remote
