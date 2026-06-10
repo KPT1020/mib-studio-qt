@@ -155,6 +155,7 @@ jobs:
 
       - name: Upload packages to team remote
         if: always() && env.CONAN_REMOTE_URL != ''
+        continue-on-error: true
         run: conan upload "*" -r team-conan -c
         env:
           CONAN_REMOTE_URL: ${{ secrets.CONAN_REMOTE_URL }}
