@@ -67,6 +67,11 @@ Before starting a release, ensure you have:
      - `R2_ACCESS_KEY_ID`
      - `R2_SECRET_ACCESS_KEY`
      - `MIB_STUDIO_R2_ENDPOINT`
+   - GitHub Actions publish step maps to AWS env vars:
+     - `AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}`
+     - `AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }}`
+     - `MIB_STUDIO_R2_ENDPOINT=${{ secrets.MIB_STUDIO_R2_ENDPOINT }}`
+     - and invokes `publish-update.py --upload-method s3`
    - Optional proprietary dependency secrets:
      - `CONAN_REMOTE_URL`
      - `CONAN_REMOTE_USER`
