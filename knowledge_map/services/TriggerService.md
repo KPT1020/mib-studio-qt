@@ -13,8 +13,10 @@
 - Hold a non-owning `ICamera*` (handed to it by
   [[CaptureService]]::CameraReadyCallback via
   [[../architecture/AppBackend]]).
-- On `onTargetGroupResult(true)`, signal the trigger thread to raise the
+- On `onTargetGroupResult(signal)`, signal the trigger thread to raise the
   configured output line, sleep `pulseDurationUs_`, then lower it.
+- `TargetGroupSignal` carries source identity (`objectId`, `trackId`) and is used
+  for metadata at trigger fire time.
 - Expose metrics: `getTriggerCount`, `getLastOnsetUs`, `resetMetrics`.
 
 ## Threading
@@ -26,9 +28,10 @@ microseconds (default 1 µs).
 
 - Manual single pulse: `sortTriggerBtn` in
   [[../frontend/ExperimentMonitoringTab]] calls
-  `onTargetGroupResult(true)` once.
+  `onTargetGroupResult(services::TargetGroupSignal{.isTargetGroup=true})` once.
 - Periodic test pulses: `periodicTriggerBtn` + `periodicTriggerIntervalSpin`
-  in the same tab arm a `QTimer` that calls `onTargetGroupResult(true)`
+  in the same tab arm a `QTimer` that calls
+  `onTargetGroupResult(services::TargetGroupSignal{.isTargetGroup=true})`
   every N ms. Useful for bring-up / oscilloscope checks without needing
   a running pipeline that classifies real "target group" frames.
 
@@ -49,7 +52,7 @@ microseconds (default 1 µs).
   so the CV notification is not serialised behind autofocus buffer
   maintenance + sort.
 - The trigger thread is fully decoupled from the Qt event loop: it waits
-  on `triggerCV_`, wakes on `onTargetGroupResult(true)` (atomic store +
+  on `triggerCV_`, wakes on `onTargetGroupResult(signal)` (atomic store +
   `notify_one`), fires a pulse, busy-waits `pulseDurationUs_`, and lowers
   the line. The UI thread only calls `onTargetGroupResult` for the manual
   `sortTriggerBtn` / `periodicTriggerBtn` paths — those are non-blocking

@@ -35,7 +35,8 @@
    - `isTargetGroup` (second gate for trigger-worthy frames)
 4. Emits:
    - **Ring ratio** via `RingRatioCallback` → [[AutofocusService]].
-   - **Target group** bool via `TargetGroupCallback` → [[TriggerService]].
+   - **Target-group** event via `TargetGroupCallback` carrying owner identity
+     (`objectId`, `trackId`) → [[TriggerService]].
    - **Background capture** (if auto-background enabled) via
      `BackgroundCaptureCallback` → UI notifier.
 
@@ -136,6 +137,11 @@ current/max queue depth, batch size, worker count, and running state. See
   cannot stall the [[TriggerService]] wake-up. Do not move these callback
   calls back inside the monitoring-mutex scope; hold-time there directly
   becomes trigger-onset jitter (see 2026-04-15 task record).
+- **Target-group ownership policy**: after each frame's detections are
+  evaluated, at most one `TargetGroupCallback` is emitted per frame, by
+  taking the first target-group object in deterministic contour-sort order
+  (the same order used for `objectId` assignment). This is the source object
+  for that frame's trigger request.
 - **Callback order: target-group THEN ring-ratio.** Within the hoisted
   callback block, `TargetGroupCallback` fires **first** so the
   [[TriggerService]] condition variable is notified before

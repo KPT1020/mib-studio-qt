@@ -1583,23 +1583,38 @@ void ProcessingService::refreshRealtimeBatchPipelineConfig() {
     batchConfig_.roi = fresh.roi;
 }
 
-void ProcessingService::publishRealtimeValidationCallbacks(const FilterResult& validation, uint64_t timestampNs) {
-    if (validation.isValid) {
+TargetGroupEvent ProcessingService::selectTargetGroupTriggerOwner(const std::vector<FilterResult>& validations) const {
+    for (const auto& validation : validations) {
+        if (!validation.isValid || !validation.isTargetGroup) {
+            continue;
+        }
+        return {true, validation.objectId, validation.trackId};
+    }
+    return {};
+}
+
+void ProcessingService::publishRealtimeValidationCallbacks(const std::vector<FilterResult>& validations, uint64_t timestampNs) {
+    const auto targetOwner = selectTargetGroupTriggerOwner(validations);
+    if (targetOwner.isTargetGroup) {
         TargetGroupCallback tgCb;
         {
             std::scoped_lock cbLk(targetGroupCallbackMutex_);
             tgCb = targetGroupCallback_;
         }
-        if (tgCb) tgCb(validation.isTargetGroup);
+        if (tgCb) tgCb(targetOwner);
+    }
 
-        if (validation.ringRatio > 0.0) {
-            RingRatioCallback rrCb;
-            {
-                std::scoped_lock cbLk(ringRatioCallbackMutex_);
-                rrCb = ringRatioCallback_;
-            }
-            if (rrCb) rrCb(validation.ringRatio, static_cast<int64_t>(timestampNs));
+    for (const auto& validation : validations) {
+        if (!validation.isValid || validation.ringRatio <= 0.0) {
+            continue;
         }
+
+        RingRatioCallback rrCb;
+        {
+            std::scoped_lock cbLk(ringRatioCallbackMutex_);
+            rrCb = ringRatioCallback_;
+        }
+        if (rrCb) rrCb(validation.ringRatio, static_cast<int64_t>(timestampNs));
     }
 }
 
@@ -1634,8 +1649,6 @@ void ProcessingService::publishRealtimeBatchFrame(ProcessedFrame&& frame) {
 
     const uint64_t frameIndex = frame.index;
     const FilterResult validation = frame.validation;
-
-    publishRealtimeValidationCallbacks(validation, frame.timestampNs);
 
     {
         std::scoped_lock snapshotLk(snapshotMutex_);
@@ -1702,15 +1715,37 @@ void ProcessingService::realtimeBatchLoop() {
     rtBatchPipelineActive_.store(true, std::memory_order_release);
     const bool started = startBatchPipeline(initialConfig,
                                             [this, &callbackValid, &callbackInvalid](std::vector<ProcessedFrame> batch) {
+                                                std::vector<FilterResult> frameValidations;
+                                                uint64_t lastFrameIndex = 0;
+                                                uint64_t lastFrameTimestamp = 0;
+                                                bool hasPendingFrame = false;
+
                                                 for (auto& frame : batch) {
                                                     if (frame.validation.isValid) {
                                                         callbackValid.fetch_add(1, std::memory_order_relaxed);
                                                     } else {
                                                         callbackInvalid.fetch_add(1, std::memory_order_relaxed);
                                                     }
+                                                    if (!hasPendingFrame) {
+                                                        lastFrameIndex = frame.index;
+                                                        lastFrameTimestamp = frame.timestampNs;
+                                                        hasPendingFrame = true;
+                                                    } else if (frame.index != lastFrameIndex ||
+                                                               frame.timestampNs != lastFrameTimestamp) {
+                                                        publishRealtimeValidationCallbacks(frameValidations, lastFrameTimestamp);
+                                                        frameValidations.clear();
+                                                        lastFrameIndex = frame.index;
+                                                        lastFrameTimestamp = frame.timestampNs;
+                                                    }
+
+                                                    frameValidations.push_back(frame.validation);
                                                     publishRealtimeBatchFrame(std::move(frame));
                                                 }
-                                            });
+
+                                                if (hasPendingFrame && !frameValidations.empty()) {
+                                                    publishRealtimeValidationCallbacks(frameValidations, lastFrameTimestamp);
+                                                }
+                                                });
     if (!started) {
         rtBatchPipelineActive_.store(false, std::memory_order_release);
         rtRunning_.store(false, std::memory_order_release);
@@ -2081,9 +2116,7 @@ void ProcessingService::realtimeInlineLoop() {
                     }
                 }
                 
-                for (const auto& objectValidation : validations) {
-                    publishRealtimeValidationCallbacks(objectValidation, f.timestamp);
-                }
+                publishRealtimeValidationCallbacks(validations, f.timestamp);
 
                 // Always accumulate frames for monitoring (with size limit)
                 for (const auto& objectValidation : validations) {
@@ -2122,6 +2155,26 @@ void ProcessingService::realtimeInlineLoop() {
             // Also accumulate frames for experiment if active
             if (experimentActive_.load()) {
                 const bool multiImageMode = config.multi_image_enabled && config.multi_image_count > 1;
+                const TargetGroupEvent targetOwner = selectTargetGroupTriggerOwner(validations);
+                const FilterResult* triggerAnchor = nullptr;
+                if (targetOwner.isTargetGroup) {
+                    for (const auto& objectValidation : validations) {
+                        if (objectValidation.isValid && objectValidation.isTargetGroup &&
+                            objectValidation.objectId == targetOwner.objectId &&
+                            objectValidation.trackId == targetOwner.trackId) {
+                            triggerAnchor = &objectValidation;
+                            break;
+                        }
+                    }
+                }
+                if (!triggerAnchor) {
+                    const auto triggerFallbackIt = std::find_if(
+                        validations.begin(), validations.end(),
+                        [](const FilterResult& result) { return result.isValid; });
+                    if (triggerFallbackIt != validations.end()) {
+                        triggerAnchor = &(*triggerFallbackIt);
+                    }
+                }
 
                 // Helper: create full frame from ROI path data
                 auto makeFullGray = [&]() -> cv::Mat {
@@ -2146,7 +2199,7 @@ void ProcessingService::realtimeInlineLoop() {
                     }
                 } else {
                     bool shouldSave = false;
-                    if (validation.isValid) {
+                    if (triggerAnchor) {
                         if (multiImageMode) {
                             // Start new multi-image series
                             cv::Mat fullGray = makeFullGray();
@@ -2157,7 +2210,7 @@ void ProcessingService::realtimeInlineLoop() {
                             pendingMultiImageFrame = ProcessedFrame{};
                             pendingMultiImageFrame.index = idx;
                             pendingMultiImageFrame.timestampNs = f.timestamp;
-                            pendingMultiImageFrame.validation = validation;
+                            pendingMultiImageFrame.validation = *triggerAnchor;
                             pendingMultiImageFrame.originalImage = fullGray.clone();
                             pendingMultiImageFrame.processedImage = fullMask.clone();
                             pendingMultiImageFrame.seriesImages.push_back(std::move(fullGray));
@@ -2179,7 +2232,7 @@ void ProcessingService::realtimeInlineLoop() {
                         ProcessedFrame frame;
                         frame.index = idx;
                         frame.timestampNs = f.timestamp;
-                        frame.validation = validation;
+                        frame.validation = triggerAnchor ? *triggerAnchor : validation;
                         cv::Mat fullGray = makeFullGray();
                         cv::Mat fullMask(fullGray.rows, fullGray.cols, CV_8UC1, cv::Scalar(0));
                         cv::Rect fullCvRoi(roi.x, roi.y, roi.w, roi.h);
@@ -2190,7 +2243,7 @@ void ProcessingService::realtimeInlineLoop() {
                         appendExperimentFrame(std::move(frame), validation.isValid);
                     }
                 }
-            } else if (multiImagePending) {
+                    } else if (multiImagePending) {
                 // Experiment ended while collecting series — save partial
                 SPDLOG_WARN("Multi-image series incomplete (ROI path, experiment ended): trigger_idx={}, collected={}",
                             pendingMultiImageFrame.index, pendingMultiImageFrame.seriesImages.size());
@@ -2395,9 +2448,7 @@ void ProcessingService::realtimeInlineLoop() {
                     }
                 }
                 
-                for (const auto& objectValidation : validations) {
-                    publishRealtimeValidationCallbacks(objectValidation, f.timestamp);
-                }
+                publishRealtimeValidationCallbacks(validations, f.timestamp);
 
                 // Always accumulate frames for monitoring (with size limit)
                 cv::Mat roiOriginal = gray(cvRoi);
@@ -2732,9 +2783,7 @@ void ProcessingService::realtimeInlineLoop() {
                     }
                 }
 
-                for (const auto& objectValidation : validations) {
-                    publishRealtimeValidationCallbacks(objectValidation, f.timestamp);
-                }
+                publishRealtimeValidationCallbacks(validations, f.timestamp);
 
                 // Always accumulate frames for monitoring (with size limit)
                 cv::Mat roiOriginal = gray(cvRoi);
@@ -2772,6 +2821,26 @@ void ProcessingService::realtimeInlineLoop() {
                 // Also accumulate frames for experiment if active
                 if (experimentActive_.load()) {
                     const bool multiImageMode = config.multi_image_enabled && config.multi_image_count > 1;
+                    const TargetGroupEvent targetOwner = selectTargetGroupTriggerOwner(validations);
+                    const FilterResult* triggerAnchor = nullptr;
+                    if (targetOwner.isTargetGroup) {
+                        for (const auto& objectValidation : validations) {
+                            if (objectValidation.isValid && objectValidation.isTargetGroup &&
+                                objectValidation.objectId == targetOwner.objectId &&
+                                objectValidation.trackId == targetOwner.trackId) {
+                                triggerAnchor = &objectValidation;
+                                break;
+                            }
+                        }
+                    }
+                    if (!triggerAnchor) {
+                        const auto triggerFallbackIt = std::find_if(
+                            validations.begin(), validations.end(),
+                            [](const FilterResult& result) { return result.isValid; });
+                        if (triggerFallbackIt != validations.end()) {
+                            triggerAnchor = &(*triggerFallbackIt);
+                        }
+                    }
 
                     if (multiImagePending) {
                         // We're collecting series images for a pending multi-image trigger frame
@@ -2791,9 +2860,7 @@ void ProcessingService::realtimeInlineLoop() {
                     } else {
                         // Normal experiment accumulation (or start of new multi-image series)
                         if (multiImageMode) {
-                            const auto firstValid = std::find_if(validations.begin(), validations.end(),
-                                                                 [](const FilterResult& result) { return result.isValid; });
-                            if (firstValid != validations.end()) {
+                            if (triggerAnchor) {
                                 const size_t validObjectCount = static_cast<size_t>(
                                     std::count_if(validations.begin(), validations.end(),
                                                   [](const FilterResult& result) { return result.isValid; }));
@@ -2805,7 +2872,7 @@ void ProcessingService::realtimeInlineLoop() {
                                 pendingMultiImageFrame = ProcessedFrame{};
                                 pendingMultiImageFrame.index = idx;
                                 pendingMultiImageFrame.timestampNs = f.timestamp;
-                                pendingMultiImageFrame.validation = *firstValid;
+                                pendingMultiImageFrame.validation = *triggerAnchor;
                                 pendingMultiImageFrame.originalImage = gray.clone();
                                 pendingMultiImageFrame.processedImage = mask.clone();
                                 pendingMultiImageFrame.seriesImages.push_back(gray.clone());

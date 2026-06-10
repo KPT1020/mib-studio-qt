@@ -6,6 +6,7 @@
 #include <cmath>
 #include <filesystem>
 #include <iostream>
+#include <cstdlib>
 #include <random>
 #include <vector>
 
@@ -47,6 +48,28 @@ std::string makeTempPath()
     return (std::filesystem::temp_directory_path() /
             ("mib_processing_multi_object_" + std::to_string(dist(gen)) + ".h5"))
         .string();
+}
+
+void validateTriggerOwner(const backend::services::ProcessingService& service,
+                         const std::vector<backend::services::FilterResult>& candidates,
+                         bool expectedTarget,
+                         int expectedObjectId,
+                         int expectedTrackId)
+{
+    const auto owner = service.selectTargetGroupTriggerOwner(candidates);
+    if (owner.isTargetGroup != expectedTarget)
+    {
+        std::cerr << "target ownership target-flag mismatch: got=" << owner.isTargetGroup
+                  << " expected=" << expectedTarget << "\n";
+        std::exit(20);
+    }
+    if (owner.objectId != expectedObjectId || owner.trackId != expectedTrackId)
+    {
+        std::cerr << "trigger owner mismatch: objectId=" << owner.objectId
+                  << " trackId=" << owner.trackId
+                  << " expected=" << expectedObjectId << "/" << expectedTrackId << "\n";
+        std::exit(21);
+    }
 }
 } // namespace
 
@@ -162,6 +185,93 @@ int main()
                       << " ringRatio=" << validation.ringRatio << "\n";
             return 12;
         }
+    }
+
+    {
+        backend::services::ProcessingConfig targetConfig = permissiveRingConfig();
+        targetConfig.enable_target_group = true;
+        targetConfig.target_group_area_min = 60;
+        targetConfig.target_group_area_max = 220;
+
+        const auto mixedResults = service.processBatch({makeTwoRingObjects()}, targetConfig);
+        if (mixedResults.size() != 2)
+        {
+            std::cerr << "expected 2 object records from mixed target-test path, got " << mixedResults.size() << "\n";
+            return 13;
+        }
+
+        // Explicit deterministic mixed-order ownership test (non-target object first, target second).
+        std::vector<backend::services::FilterResult> mixedValidations;
+        {
+            backend::services::FilterResult nonTarget;
+            nonTarget.isValid = true;
+            nonTarget.isTargetGroup = false;
+            nonTarget.objectId = 21;
+            nonTarget.trackId = 210;
+            mixedValidations.push_back(nonTarget);
+        }
+        {
+            backend::services::FilterResult target;
+            target.isValid = true;
+            target.isTargetGroup = true;
+            target.objectId = 22;
+            target.trackId = 211;
+            mixedValidations.push_back(target);
+        }
+        validateTriggerOwner(service, mixedValidations, true, 22, 211);
+    }
+
+    std::vector<backend::services::FilterResult> syntheticCandidates;
+    {
+        backend::services::FilterResult candidate;
+        candidate.isValid = true;
+        candidate.isTargetGroup = false;
+        candidate.objectId = 9;
+        candidate.trackId = 9001;
+        syntheticCandidates.push_back(candidate);
+    }
+    {
+        backend::services::FilterResult candidate;
+        candidate.isValid = true;
+        candidate.isTargetGroup = true;
+        candidate.objectId = 11;
+        candidate.trackId = 42;
+        syntheticCandidates.push_back(candidate);
+    }
+    {
+        backend::services::FilterResult candidate;
+        candidate.isValid = false;
+        candidate.isTargetGroup = true;
+        candidate.objectId = 12;
+        candidate.trackId = 43;
+        syntheticCandidates.push_back(candidate);
+    }
+    validateTriggerOwner(service, syntheticCandidates, true, 11, 42);
+    {
+        std::vector<backend::services::FilterResult> noneTarget;
+        backend::services::FilterResult noTarget;
+        noTarget.isValid = true;
+        noTarget.isTargetGroup = false;
+        noTarget.objectId = 99;
+        noTarget.trackId = 100;
+        noneTarget.push_back(noTarget);
+        validateTriggerOwner(service, noneTarget, false, -1, -1);
+    }
+    {
+        std::vector<backend::services::FilterResult> twoTargets;
+        backend::services::FilterResult target1;
+        target1.isValid = true;
+        target1.isTargetGroup = true;
+        target1.objectId = 21;
+        target1.trackId = 1;
+        twoTargets.push_back(target1);
+        backend::services::FilterResult target2;
+        target2.isValid = true;
+        target2.isTargetGroup = true;
+        target2.objectId = 22;
+        target2.trackId = 2;
+        twoTargets.push_back(target2);
+        validateTriggerOwner(service, twoTargets, true, 21, 1);
     }
 
     return 0;
