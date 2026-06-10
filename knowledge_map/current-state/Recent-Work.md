@@ -5,6 +5,8 @@
 
 ## Features shipped
 
+- **Conan remote health precheck workflow** (2026-06-10) — Added `.github/workflows/conan-remote-health.yml`, a scheduled/manual GitHub Actions health check that verifies ConanCenter and optional team remote (`CONAN_REMOTE_URL`) reachability, detects non-Conan/Cloudflare HTML responses from `/v1/ping`, validates auth when username/password secrets are present, and writes per-remote status to the run summary. Updated `docs/howto/release-workflow.md` to point release operators to this tracker as a release preflight step.
+
 - **Long-run experiment backlog hardening** (2026-06-02) - `ProcessingService`
   now bounds the in-memory experiment frame backlog derived from the flush
   interval, drops sampled invalid frames before valid frames when HDF5 cannot
