@@ -154,14 +154,16 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          try {
-            conan install . -of build --build=missing -s build_type=Release -pr ci
-            if ($LASTEXITCODE -ne 0) { throw "Conan install failed with current remotes." }
-          } catch {
+
+          conan install . -of build --build=missing -s build_type=Release -pr ci
+          if ($LASTEXITCODE -ne 0) {
             Write-Host "WARNING: Conan install failed with current remotes (possibly team-conan). Retrying after disabling team-conan remote." -ForegroundColor Yellow
             conan remote remove team-conan 2>$null
             conan install . -of build --build=missing -s build_type=Release -pr ci
-            if ($LASTEXITCODE -ne 0) { throw "Conan fallback install failed." }
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "ERROR: Conan install failed after removing team-conan remote." -ForegroundColor Red
+              exit 1
+            }
           }
 
       - name: Upload packages to team remote
