@@ -17,6 +17,7 @@
 #include "backend/services/TriggerService.h"
 #include "backend/services/YoloService.h"
 #include "backend/services/SyringePumpService.h"
+#include "backend/processing/EModulusLutCatalog.h"
 
 #include <algorithm>
 #include <chrono>
@@ -26,6 +27,7 @@
 #include <filesystem>
 #include <string>
 #include <utility>
+#include <QString>
 #include <spdlog/spdlog.h>
 #ifdef _WIN32
 #include <windows.h>
@@ -281,11 +283,52 @@ namespace backend
         // Load Young's modulus LUT for emodulus gating
         if (bootProcessing)
         {
-            std::filesystem::path lutPath = exeDir / "resources" / "isoelastic_curve" / "scaled_isoelastic_data_LUT_6.16-4.24.txt";
-            if (!processingService_->loadEModulusLut(lutPath.string()))
+            std::filesystem::path bundledLutPath = exeDir / "resources" / "isoelastic_curve" / "scaled_isoelastic_data_LUT_6.16-4.24.txt";
+            backend::EModulusLutCatalog lutCatalog;
+            backend::EModulusLutCatalog::ManagedLutInfo lutInfo;
+            QString activeLutPath = QString::fromStdString(bundledLutPath.string());
+            QString managedLutPath = activeLutPath;
+            QString managedError;
+            if (!lutCatalog.ensureManagedLut(QString::fromStdString(bundledLutPath.string()), &managedLutPath, &lutInfo, &managedError))
             {
-                SPDLOG_WARN("Young's modulus LUT not loaded - emodulus gating will not be available");
+                SPDLOG_WARN("AppBackend: LUT catalog resolution failed, falling back to bundled path {}: {}",
+                            bundledLutPath.string(), managedError.toStdString());
+                activeLutPath = QString::fromStdString(bundledLutPath.string());
+                lutInfo.sourceType = "bundled-fallback";
+                lutInfo.revision = "bundled";
+                lutInfo.localPath = activeLutPath;
+                lutInfo.checksumStatus = "unknown";
             }
+            else
+            {
+                activeLutPath = managedLutPath;
+            }
+
+            if (!processingService_->loadEModulusLut(activeLutPath.toStdString()))
+            {
+                const QString bundledLutPathStr = QString::fromStdString(bundledLutPath.string());
+                if (activeLutPath != bundledLutPathStr && processingService_->loadEModulusLut(bundledLutPath.string()))
+                {
+                    activeLutPath = bundledLutPathStr;
+                    lutInfo.sourceType = "bundled-fallback";
+                    lutInfo.revision = "bundled";
+                    lutInfo.localPath = activeLutPath;
+                    lutInfo.usedBundledFallback = true;
+                    SPDLOG_WARN("AppBackend: managed LUT load failed, bundled fallback succeeded");
+                }
+                else
+                {
+                    SPDLOG_WARN("Young's modulus LUT not loaded - emodulus gating will not be available");
+                }
+            }
+            SPDLOG_INFO("AppBackend: Young's modulus LUT source={}, revision={}, path={}, checksum_status={}, remote_updated={}, bundled_fallback={}, manifest={}",
+                        lutInfo.sourceType.toStdString(),
+                        lutInfo.revision.toStdString(),
+                        lutInfo.localPath.toStdString().empty() ? activeLutPath.toStdString() : lutInfo.localPath.toStdString(),
+                        lutInfo.checksumStatus.toStdString(),
+                        lutInfo.remoteUpdated,
+                        lutInfo.usedBundledFallback,
+                        lutInfo.manifestUrl.toStdString());
             processingService_->start();
         }
         else

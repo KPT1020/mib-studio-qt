@@ -24,12 +24,14 @@ From `CMakePresets.json`:
 | `mib_studio_qt` | executable (`WIN32` on Windows) | Production app |
 | `mock_studio_qt` | executable | Dev app with mock-camera GUI selector |
 | `mib_backend_smoke_test` | executable test | Backend-only HDF5/open/flush smoke test (`ctest -L backend`) |
+| `emodulus_lut_catalog_test` | executable test | Backend-only LUT manifest/cache smoke test (`ctest -L backend`) |
 
 `mib_backend` is linked by both executables. Source is in
 `src/backend/`, `src/camera/`, and `src/backend/playback/`.
 
 Backend-only builds set `MIB_BUILD_BACKEND_ONLY=ON` and skip frontend target
-generation entirely.
+generation entirely, but still require Qt `Core+Gui+SerialPort+Network`
+because the backend now fetches the LUT manifest directly at startup.
 
 ## Commands
 
@@ -45,7 +47,7 @@ cmake --build build --preset windows-default-build-release
 
 # Backend-only (Linux)
 cmake --preset linux-backend-only
-cmake --build --preset linux-backend-only-build --target mib_backend mib_backend_smoke_test
+cmake --build --preset linux-backend-only-build --target mib_backend mib_backend_smoke_test emodulus_lut_catalog_test
 ctest --preset linux-backend-only-test -L backend --output-on-failure
 
 # Deploy Qt runtime (CMake auto-triggers post-build; can run manually)
