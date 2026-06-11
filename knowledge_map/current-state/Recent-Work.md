@@ -5,6 +5,16 @@
 
 ## Features shipped
 
+- **Experiment config sync hardening** (2026-06-11) — `AppConfigWatcher`
+  now writes back the full supported `image_processing` config section,
+  including blur, background, auto-background, target-group emodulus, and
+  `multi_image` fields, then emits `configFileChanged` immediately so the
+  Preview JSON editor/table and Monitoring Tune Params refresh without
+  waiting for filesystem-watcher timing. `ExperimentMonitoringTab` now
+  updates the histogram ring-ratio defaults through the chart-range setter,
+  and the shared `JsonFlatten` utility gained round-trip helpers plus tests
+  covering nested objects, arrays of objects, arrays of scalars, root
+  scalar tables, and the bundled `resources/defaults/config.json`.
 - **Conan remote health precheck workflow** (2026-06-10) — Added `.github/workflows/conan-remote-health.yml`, a scheduled/manual GitHub Actions health check that verifies ConanCenter and optional team remote (`CONAN_REMOTE_URL`) reachability, detects non-Conan/Cloudflare HTML responses from `/v1/ping`, validates auth when username/password secrets are present, and writes per-remote status to the run summary. Updated `docs/howto/release-workflow.md` to point release operators to this tracker as a release preflight step.
 - **Cloudflare R2 CI publishing path cleanup** (2026-06-10) — Both
   Windows GitHub Actions release workflows now wire stable/beta publishing

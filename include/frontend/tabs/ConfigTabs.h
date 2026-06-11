@@ -57,13 +57,14 @@ private slots:
 	void onSaveProfile();
 	void onDeleteProfile();
 	void onRenameProfile();
-	void onIncludeJsToggled(bool checked);
+    void onIncludeJsToggled(bool checked);
 
 private:
     QString appDirIncludePath(const QString& fileName) const;
     QString defaultJsonPath() const { return appDirIncludePath("config.json"); }
     QString defaultJsPath() const { return appDirIncludePath("egrabberConfig.js"); }
     QString currentJsonPath() const;
+    void clearJsonSyncIndicators();
     bool loadFileToEditor(const QString& path, QPlainTextEdit* editor, QString* err);
     bool saveEditorToFile(QPlainTextEdit* editor, const QString& path, QString* err);
     void refreshJsonTableModel();
@@ -101,6 +102,7 @@ private:
     QPushButton* jsonClearBtn_ = nullptr;
     QLabel* jsonPathLabel_ = nullptr;
 	QLabel* jsonUnsavedLabel_ = nullptr;
+	QLabel* jsonConflictLabel_ = nullptr;
 	QComboBox* profileSelect_ = nullptr;
 	QPushButton* saveProfileBtn_ = nullptr;
 	QPushButton* deleteProfileBtn_ = nullptr;
@@ -121,6 +123,5 @@ private:
 };
 
 } // namespace frontend
-
 
 

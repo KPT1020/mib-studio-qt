@@ -9,7 +9,10 @@
 
 - **`AppConfigWatcher`** — `QFileSystemWatcher` over an external JSON
   config. Reloads config and propagates to
-  [[../services/ProcessingService]] / [[ConfigTabs]] on change. See
+  [[../services/ProcessingService]] / [[ConfigTabs]] on change. Monitoring
+  apply now writes the full supported `ProcessingConfig` back to the active
+  config file and emits `configFileChanged` immediately so Preview and
+  Monitoring refresh without waiting for watcher feedback. See
   `docs/howto/live-config-reload.md`.
 - **`AutoUpdater`** — periodic update check; see
   `docs/howto/auto-update-r2.md` and `docs/howto/release-workflow.md`.
@@ -38,6 +41,13 @@
 
 - **`ZoomableChartView`** — subclass of `QChartView` with scroll/zoom.
   Used by [[ExperimentMonitoringTab]] and [[HdfReviewTab]].
+
+## Gotchas
+
+- `AppConfigWatcher` is still the source of truth for live config reloads,
+  but programmatic write-back now emits a direct change notification after
+  persisting the file so sibling tabs do not depend on filesystem watcher
+  timing.
 
 ## Cross-thread Qt signals
 

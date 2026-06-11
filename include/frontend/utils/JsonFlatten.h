@@ -3,6 +3,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QJsonValue>
 #include <QStringList>
 #include <QVector>
 #include <QMap>
@@ -26,8 +27,15 @@ FlattenTable flattenJsonForTable(const QJsonDocument& doc);
 // Each section's table has 3 columns: key (relative to section), value, and type (empty for now).
 QMap<QString, FlattenTable> groupJsonBySections(const QJsonDocument& doc);
 
-} // namespace frontend::jsonutil
+// Rebuilds a JSON value from grouped tables. The returned value may be an object,
+// array, or scalar depending on the input tables.
+QJsonValue rebuildJsonValueFromSections(const QMap<QString, FlattenTable>& sections);
 
+// Rebuilds a JSON document from grouped tables. Object/array roots are preserved;
+// scalar roots return a null document because QJsonDocument cannot represent them.
+QJsonDocument rebuildJsonDocumentFromSections(const QMap<QString, FlattenTable>& sections);
+
+} // namespace frontend::jsonutil
 
 
 

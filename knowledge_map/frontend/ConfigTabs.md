@@ -27,6 +27,12 @@
 - Parameter-tuning panel must stay in sync bidirectionally with the config
   table (see recent fix in
   `git log`: "fix: sync param tuning panel with config table").
+- External config changes while the JSON editor has unsaved edits now set a
+  visible stale/conflict warning instead of silently leaving the editor and
+  table behind the backend state.
+- JSON table rebuild is shared with `frontend::jsonutil` so the round-trip
+  semantics for nested objects, arrays of objects, and arrays of scalars
+  stay testable in one place.
 - Some gates require their `enable_*` flag too (e.g.
   `enable_ring_ratio_check`). Editing thresholds alone won't change
   classification.

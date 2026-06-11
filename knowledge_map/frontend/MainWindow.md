@@ -33,6 +33,10 @@
   tabs), `playbackPanel_`, `sidebarWidget_`, `updater_`, `initManager_`.
 - `QFutureWatcher<size_t> flushWatcher_` — used to await the final HDF5
   flush on experiment stop without blocking the UI thread.
+- The nested Experiment pages wire Monitoring apply into
+  `AppConfigWatcher::writeBackProcessingConfig()`, which now emits a direct
+  config-change signal after persistence so Preview and Monitoring refresh
+  without waiting for a filesystem watcher round-trip.
 
 ## Boot disable GUI
 
