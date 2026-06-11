@@ -1,6 +1,7 @@
 #include "frontend/utils/BackgroundPreviewWidget.h"
 
 #include <QLabel>
+#include <QPalette>
 #include <QVBoxLayout>
 #include <QPaintEvent>
 #include <QPainter>
@@ -16,7 +17,8 @@ namespace frontend
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         setMinimumHeight(100);
         setMaximumHeight(300);
-        setStyleSheet("background-color: black;");
+        setAutoFillBackground(true);
+        setBackgroundRole(QPalette::Window);
 
         layout_ = new QVBoxLayout(this);
         layout_->setContentsMargins(4, 4, 4, 4);
@@ -26,7 +28,8 @@ namespace frontend
         textLabel_ = new QLabel(this);
         textLabel_->setAlignment(Qt::AlignCenter);
         textLabel_->setText("No background set");
-        textLabel_->setStyleSheet("color: gray; background-color: black;");
+        textLabel_->setBackgroundRole(QPalette::Window);
+        textLabel_->setAutoFillBackground(true);
         textLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         textLabel_->setMaximumHeight(20);
         layout_->addWidget(textLabel_);
@@ -34,7 +37,8 @@ namespace frontend
         // Image label for preview
         imageLabel_ = new QLabel(this);
         imageLabel_->setAlignment(Qt::AlignCenter);
-        imageLabel_->setStyleSheet("background-color: black;");
+        imageLabel_->setBackgroundRole(QPalette::Base);
+        imageLabel_->setAutoFillBackground(true);
         imageLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         imageLabel_->setMinimumHeight(80);
         layout_->addWidget(imageLabel_);
