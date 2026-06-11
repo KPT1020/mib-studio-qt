@@ -22,6 +22,10 @@ mib_add_backend_test_executable(backend_facade_boundary_test backend/backend_fac
 add_test(NAME backend.facade_boundary COMMAND $<TARGET_FILE:backend_facade_boundary_test>)
 set_tests_properties(backend.facade_boundary PROPERTIES LABELS "backend;bridge")
 
+mib_add_backend_test_executable(mindvision_selection_state_test backend/mindvision_selection_state_test.cpp)
+add_test(NAME backend.mindvision_selection_state COMMAND $<TARGET_FILE:mindvision_selection_state_test>)
+set_tests_properties(backend.mindvision_selection_state PROPERTIES LABELS "backend;camera")
+
 mib_add_backend_test_executable(mock_camera_smoke_test camera/mock_camera_smoke_test.cpp)
 add_test(NAME camera.mock_smoke COMMAND $<TARGET_FILE:mock_camera_smoke_test>)
 set_tests_properties(camera.mock_smoke PROPERTIES LABELS "camera;backend")

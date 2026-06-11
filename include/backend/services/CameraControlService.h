@@ -6,7 +6,14 @@
 
 namespace backend::services {
 
+enum class CameraType {
+    EGrabber,
+    MindVision,
+};
+
 struct DiscoveredCamera {
+    CameraType cameraType = CameraType::EGrabber;
+    int cameraIndex = -1; // MindVision index; -1 for EGrabber entries.
     int interfaceIndex = -1;
     int deviceIndex = -1;
     std::string interfaceID;
@@ -40,12 +47,18 @@ public:
     ~CameraControlService() = default;
 
     std::vector<DiscoveredCamera> discoverCameras();
+    std::vector<DiscoveredCamera> discoverMindVisionCameras();
+    std::vector<DiscoveredCamera> discoverAllCameras();
     std::vector<DiscoveredFramegrabber> discoverFramegrabbers();
 
     bool applyScriptToDevice(int interfaceIndex,
                              int deviceIndex,
                              const std::string& scriptPath,
                              std::string* errorOut = nullptr);
+
+    bool applyMindVisionConfig(int cameraIndex,
+                               const std::string& jsonPath,
+                               std::string* errorOut = nullptr);
 
     // Issue GenICam SFNC DeviceReset to a specific device.
     // Best effort stops acquisition first; returns true on success.
@@ -55,6 +68,4 @@ public:
 };
 
 } // namespace backend::services
-
-
 

@@ -3,9 +3,13 @@
 #include <spdlog/spdlog.h>
 
 #include <sstream>
+#include <string>
 
 #ifndef MIB_HAS_EGRABBER
 #define MIB_HAS_EGRABBER 0
+#endif
+#ifndef MIB_HAS_MINDVISION
+#define MIB_HAS_MINDVISION 0
 #endif
 
 #if MIB_HAS_EGRABBER
@@ -13,8 +17,141 @@
 using namespace Euresys;
 #endif
 
+#if MIB_HAS_MINDVISION
+#ifdef _WIN32
+#include <windows.h>
+#include <stdio.h>
+#endif
+
+#define API_LOAD_MAIN
+#include "MindVision/CameraApiLoad.h"
+
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QString>
+#endif
+
 namespace backend::services
 {
+    namespace
+    {
+        bool reportUnsupported(const char *operation, std::string *errorOut, const char *message)
+        {
+            static bool loggedOnce = false;
+            if (!loggedOnce)
+            {
+                SPDLOG_WARN("CameraControlService hardware operations unavailable: {}", message);
+                loggedOnce = true;
+            }
+            if (errorOut)
+            {
+                *errorOut = message;
+            }
+            (void)operation;
+            return false;
+        }
+
+#if MIB_HAS_MINDVISION
+        std::string buildMindVisionLabel(const tSdkCameraDevInfo &info, int index)
+        {
+            std::ostringstream oss;
+            if (info.acFriendlyName[0] != '\0')
+            {
+                oss << info.acFriendlyName;
+            }
+            else if (info.acProductName[0] != '\0')
+            {
+                oss << info.acProductName;
+            }
+            else
+            {
+                oss << "MindVision " << index;
+            }
+
+            if (info.acSn[0] != '\0')
+            {
+                oss << " [" << info.acSn << "]";
+            }
+            return oss.str();
+        }
+
+        bool applyMindVisionJsonToCamera(CameraHandle hCamera,
+                                         const std::string &jsonPath,
+                                         std::string *errorOut)
+        {
+            auto setErr = [&](const std::string &message)
+            {
+                if (errorOut && errorOut->empty())
+                {
+                    *errorOut = message;
+                }
+            };
+
+            QFile file(QString::fromStdString(jsonPath));
+            if (!file.open(QIODevice::ReadOnly))
+            {
+                setErr("Failed to open MindVision config file: " + jsonPath);
+                return false;
+            }
+
+            QJsonParseError parseErr{};
+            const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parseErr);
+            file.close();
+            if (doc.isNull())
+            {
+                setErr("JSON parse error: " + parseErr.errorString().toStdString());
+                return false;
+            }
+
+            const QJsonObject obj = doc.object();
+            const int width = obj.value("width").toInt(512);
+            const int height = obj.value("height").toInt(96);
+            const int offsetX = obj.value("offset_x").toInt(0);
+            const int offsetY = obj.value("offset_y").toInt(0);
+            const double exposureUs = obj.value("exposure_time_us").toDouble(3000.0);
+            const int triggerMode = obj.value("trigger_mode").toInt(0);
+            const int analogGain = obj.value("analog_gain").toInt(1);
+
+            tSdkImageResolution res{};
+            res.iIndex = 0xFF;
+            res.iHOffsetFOV = offsetX;
+            res.iVOffsetFOV = offsetY;
+            res.iWidthFOV = width;
+            res.iHeightFOV = height;
+            res.iWidth = width;
+            res.iHeight = height;
+
+            CameraSdkStatus status = CameraSetImageResolution(hCamera, &res);
+            if (status != CAMERA_STATUS_SUCCESS)
+            {
+                SPDLOG_WARN("MindVision config: CameraSetImageResolution returned {}", status);
+                setErr("CameraSetImageResolution failed (status=" + std::to_string(status) + ")");
+            }
+
+            status = CameraSetExposureTime(hCamera, exposureUs);
+            if (status != CAMERA_STATUS_SUCCESS)
+            {
+                SPDLOG_WARN("MindVision config: CameraSetExposureTime returned {}", status);
+            }
+
+            status = CameraSetTriggerMode(hCamera, triggerMode);
+            if (status != CAMERA_STATUS_SUCCESS)
+            {
+                SPDLOG_WARN("MindVision config: CameraSetTriggerMode returned {}", status);
+            }
+
+            status = CameraSetAnalogGain(hCamera, analogGain);
+            if (status != CAMERA_STATUS_SUCCESS)
+            {
+                SPDLOG_WARN("MindVision config: CameraSetAnalogGain returned {}", status);
+            }
+
+            return true;
+        }
+#endif
+    } // namespace
+
 #if MIB_HAS_EGRABBER
 
     std::vector<DiscoveredCamera> CameraControlService::discoverCameras()
@@ -24,25 +161,20 @@ namespace backend::services
         {
             EGenTL genTL;
             EGrabberDiscovery discovery(genTL);
-            discovery.discover(); // Discover cameras (default behavior)
+            discovery.discover();
 
             for (int i = 0; i < discovery.cameraCount(); ++i)
             {
                 EGrabberCameraInfo cameraInfo = discovery.cameras(i);
-
-                // Use the first grabber from the camera (master device for multi-bank cameras)
                 if (cameraInfo.grabbers.empty())
                 {
                     continue;
                 }
 
                 const EGrabberInfo &grabberInfo = cameraInfo.grabbers[0];
+                const int interfaceIndex = grabberInfo.interfaceIndex;
+                const int deviceIndex = grabberInfo.deviceIndex;
 
-                // EGrabberInfo provides indices directly
-                int interfaceIndex = grabberInfo.interfaceIndex;
-                int deviceIndex = grabberInfo.deviceIndex;
-
-                // Try to query model name and firmware version by temporarily opening an EGrabber
                 std::string modelName = grabberInfo.isRemoteAvailable ? grabberInfo.deviceModelName : "Unknown";
                 std::string firmwareVersion = "Unknown";
 
@@ -58,7 +190,6 @@ namespace backend::services
                     }
                     catch (const gentl_error &)
                     {
-                        // ignore if not available
                     }
                     try
                     {
@@ -66,7 +197,6 @@ namespace backend::services
                     }
                     catch (const gentl_error &)
                     {
-                        // ignore if not available
                     }
                 }
                 catch (const std::exception &ex)
@@ -76,25 +206,25 @@ namespace backend::services
                 }
 
                 DiscoveredCamera dc{};
+                dc.cameraType = CameraType::EGrabber;
+                dc.cameraIndex = -1;
                 dc.interfaceIndex = interfaceIndex;
                 dc.deviceIndex = deviceIndex;
                 dc.interfaceID = grabberInfo.interfaceID;
                 dc.deviceID = grabberInfo.deviceID;
                 dc.modelName = modelName;
                 dc.firmwareVersion = firmwareVersion;
+                std::ostringstream oss;
+                oss << grabberInfo.interfaceID << "/" << grabberInfo.deviceID;
+                if (!modelName.empty() && modelName != "Unknown")
                 {
-                    std::ostringstream oss;
-                    oss << grabberInfo.interfaceID << "/" << grabberInfo.deviceID;
-                    if (!modelName.empty() && modelName != "Unknown")
-                    {
-                        oss << " (" << modelName << ")";
-                    }
-                    if (!firmwareVersion.empty() && firmwareVersion != "Unknown")
-                    {
-                        oss << " [Firmware: " << firmwareVersion << "]";
-                    }
-                    dc.label = oss.str();
+                    oss << " (" << modelName << ")";
                 }
+                if (!firmwareVersion.empty() && firmwareVersion != "Unknown")
+                {
+                    oss << " [Firmware: " << firmwareVersion << "]";
+                }
+                dc.label = oss.str();
                 results.push_back(std::move(dc));
             }
 
@@ -115,18 +245,15 @@ namespace backend::services
         {
             EGenTL genTL;
             EGrabberDiscovery discovery(genTL);
-            discovery.discover(); // Discover both eGrabbers and cameras
+            discovery.discover();
 
             for (int i = 0; i < discovery.egrabberCount(); ++i)
             {
                 EGrabberInfo grabberInfo = discovery.egrabbers(i);
+                const int interfaceIndex = grabberInfo.interfaceIndex;
+                const int deviceIndex = grabberInfo.deviceIndex;
+                const int streamIndex = grabberInfo.streamIndex;
 
-                // EGrabberInfo provides indices directly
-                int interfaceIndex = grabberInfo.interfaceIndex;
-                int deviceIndex = grabberInfo.deviceIndex;
-                int streamIndex = grabberInfo.streamIndex;
-
-                // Try to query model name by temporarily opening an EGrabber
                 std::string modelName = grabberInfo.isRemoteAvailable ? grabberInfo.deviceModelName : "Unknown";
 
                 try
@@ -141,7 +268,6 @@ namespace backend::services
                     }
                     catch (const gentl_error &)
                     {
-                        // ignore if not available
                     }
                 }
                 catch (const std::exception &ex)
@@ -158,15 +284,13 @@ namespace backend::services
                 df.deviceID = grabberInfo.deviceID;
                 df.streamID = grabberInfo.streamID;
                 df.modelName = modelName;
+                std::ostringstream oss;
+                oss << grabberInfo.interfaceID << "/" << grabberInfo.deviceID << "/" << grabberInfo.streamID;
+                if (!modelName.empty() && modelName != "Unknown")
                 {
-                    std::ostringstream oss;
-                    oss << grabberInfo.interfaceID << "/" << grabberInfo.deviceID << "/" << grabberInfo.streamID;
-                    if (!modelName.empty() && modelName != "Unknown")
-                    {
-                        oss << " (" << modelName << ")";
-                    }
-                    df.label = oss.str();
+                    oss << " (" << modelName << ")";
                 }
+                df.label = oss.str();
                 results.push_back(std::move(df));
             }
 
@@ -193,7 +317,6 @@ namespace backend::services
             SPDLOG_INFO("Applying script to camera [{}:{}]: {}", interfaceIndex, deviceIndex, scriptPath);
             g.runScript(scriptPath);
 
-            // Safety: ensure acquisition is stopped after script application
             try
             {
                 g.execute<RemoteModule>("AcquisitionStop");
@@ -225,7 +348,6 @@ namespace backend::services
             EGenTL genTL;
             EGrabber<CallbackOnDemand> g(genTL, interfaceIndex, deviceIndex);
 
-            // Best-effort: stop acquisition before reset
             try
             {
                 g.execute<RemoteModule>("AcquisitionStop");
@@ -252,34 +374,16 @@ namespace backend::services
     }
 
 #else
-    namespace
-    {
-        bool reportUnsupported(const char *operation, std::string *errorOut)
-        {
-            static bool loggedOnce = false;
-            if (!loggedOnce)
-            {
-                SPDLOG_WARN("CameraControlService hardware operations unavailable on this platform (EGrabber SDK is Windows-only)");
-                loggedOnce = true;
-            }
-            if (errorOut)
-            {
-                *errorOut = "EGrabber SDK is unavailable on this platform";
-            }
-            (void)operation;
-            return false;
-        }
-    } // namespace
 
     std::vector<DiscoveredCamera> CameraControlService::discoverCameras()
     {
-        reportUnsupported("discoverCameras", nullptr);
+        reportUnsupported("discoverCameras", nullptr, "EGrabber SDK is unavailable on this platform");
         return {};
     }
 
     std::vector<DiscoveredFramegrabber> CameraControlService::discoverFramegrabbers()
     {
-        reportUnsupported("discoverFramegrabbers", nullptr);
+        reportUnsupported("discoverFramegrabbers", nullptr, "EGrabber SDK is unavailable on this platform");
         return {};
     }
 
@@ -291,7 +395,7 @@ namespace backend::services
         (void)interfaceIndex;
         (void)deviceIndex;
         (void)scriptPath;
-        return reportUnsupported("applyScriptToDevice", errorOut);
+        return reportUnsupported("applyScriptToDevice", errorOut, "EGrabber SDK is unavailable on this platform");
     }
 
     bool CameraControlService::deviceReset(int interfaceIndex,
@@ -300,8 +404,158 @@ namespace backend::services
     {
         (void)interfaceIndex;
         (void)deviceIndex;
-        return reportUnsupported("deviceReset", errorOut);
+        return reportUnsupported("deviceReset", errorOut, "EGrabber SDK is unavailable on this platform");
     }
 
 #endif
+
+#if MIB_HAS_MINDVISION
+
+    std::vector<DiscoveredCamera> CameraControlService::discoverMindVisionCameras()
+    {
+        std::vector<DiscoveredCamera> results;
+        try
+        {
+            if (LoadSdkApi() != CAMERA_STATUS_SUCCESS)
+            {
+                SPDLOG_WARN("CameraControlService::discoverMindVisionCameras: SDK DLL not available");
+                return results;
+            }
+
+            CameraSdkStatus status = CameraSdkInit(0);
+            if (status != CAMERA_STATUS_SUCCESS)
+            {
+                SPDLOG_WARN("CameraControlService: CameraSdkInit returned {}", status);
+            }
+
+            tSdkCameraDevInfo devList[32];
+            INT count = 32;
+            status = CameraEnumerateDevice(devList, &count);
+            if (status != CAMERA_STATUS_SUCCESS || count <= 0)
+            {
+                SPDLOG_WARN("CameraControlService: CameraEnumerateDevice returned {} (count={})", status, count);
+                return results;
+            }
+
+            for (int i = 0; i < count; ++i)
+            {
+                const tSdkCameraDevInfo &info = devList[i];
+
+                DiscoveredCamera dc{};
+                dc.cameraType = CameraType::MindVision;
+                dc.cameraIndex = i;
+                dc.interfaceIndex = -1;
+                dc.deviceIndex = -1;
+                dc.modelName = info.acProductName[0] != '\0' ? info.acProductName : "Unknown";
+                dc.label = buildMindVisionLabel(info, i);
+                results.push_back(std::move(dc));
+            }
+
+            SPDLOG_INFO("MindVision discovery found {} camera(s)", results.size());
+        }
+        catch (const std::exception &ex)
+        {
+            SPDLOG_ERROR("CameraControlService::discoverMindVisionCameras failed: {}", ex.what());
+            results.clear();
+        }
+        return results;
+    }
+
+    bool CameraControlService::applyMindVisionConfig(int cameraIndex,
+                                                     const std::string &jsonPath,
+                                                     std::string *errorOut)
+    {
+        auto setErr = [&](const std::string &message)
+        {
+            if (errorOut && errorOut->empty())
+            {
+                *errorOut = message;
+            }
+        };
+
+        try
+        {
+            if (LoadSdkApi() != CAMERA_STATUS_SUCCESS)
+            {
+                setErr("MindVision SDK DLL not available");
+                return false;
+            }
+
+            CameraSdkStatus status = CameraSdkInit(0);
+            if (status != CAMERA_STATUS_SUCCESS)
+            {
+                SPDLOG_WARN("CameraControlService: CameraSdkInit returned {}", status);
+            }
+
+            tSdkCameraDevInfo devList[32];
+            INT count = 32;
+            status = CameraEnumerateDevice(devList, &count);
+            if (status != CAMERA_STATUS_SUCCESS || count <= 0)
+            {
+                setErr("CameraEnumerateDevice failed (status=" + std::to_string(status) + ", count=" + std::to_string(count) + ")");
+                return false;
+            }
+            if (cameraIndex < 0 || cameraIndex >= count)
+            {
+                setErr("MindVision camera index out of range");
+                return false;
+            }
+
+            CameraHandle hCamera = -1;
+            status = CameraInit(&devList[cameraIndex], -1, -1, &hCamera);
+            if (status != CAMERA_STATUS_SUCCESS)
+            {
+                setErr("CameraInit failed (status=" + std::to_string(status) + ")");
+                return false;
+            }
+
+            const bool ok = applyMindVisionJsonToCamera(hCamera, jsonPath, errorOut);
+            CameraUnInit(hCamera);
+            if (ok)
+            {
+                SPDLOG_INFO("CameraControlService: MindVision config applied to camera index {} from {}", cameraIndex, jsonPath);
+            }
+            else
+            {
+                SPDLOG_ERROR("CameraControlService: MindVision config application failed for camera index {}", cameraIndex);
+            }
+            return ok;
+        }
+        catch (const std::exception &ex)
+        {
+            SPDLOG_ERROR("applyMindVisionConfig failed: {}", ex.what());
+            if (errorOut)
+            {
+                *errorOut = ex.what();
+            }
+            return false;
+        }
+    }
+
+#else
+
+    std::vector<DiscoveredCamera> CameraControlService::discoverMindVisionCameras()
+    {
+        reportUnsupported("discoverMindVisionCameras", nullptr, "MindVision SDK is disabled at build time");
+        return {};
+    }
+
+    bool CameraControlService::applyMindVisionConfig(int cameraIndex,
+                                                     const std::string &jsonPath,
+                                                     std::string *errorOut)
+    {
+        (void)cameraIndex;
+        (void)jsonPath;
+        return reportUnsupported("applyMindVisionConfig", errorOut, "MindVision SDK is disabled at build time");
+    }
+
+#endif
+
+    std::vector<DiscoveredCamera> CameraControlService::discoverAllCameras()
+    {
+        std::vector<DiscoveredCamera> results = discoverCameras();
+        const auto mindVision = discoverMindVisionCameras();
+        results.insert(results.end(), mindVision.begin(), mindVision.end());
+        return results;
+    }
 } // namespace backend::services

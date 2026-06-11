@@ -15,6 +15,15 @@
   and the shared `JsonFlatten` utility gained round-trip helpers plus tests
   covering nested objects, arrays of objects, arrays of scalars, root
   scalar tables, and the bundled `resources/defaults/config.json`.
+- **MindVision camera SDK compatibility** (2026-06-11) - Added a separate
+  MindVision camera backend and discovery path alongside the existing
+  EGrabber and mock workflows. CMake now exposes `MIB_ENABLE_MINDVISION`
+  and fails clearly when the SDK headers/runtime DLL are missing on Windows.
+  The Connect tab has a dedicated MindVision selection path, `AppBackend`
+  understands `MIB_CAMERA_MODE=mindvision`, and Windows packaging copies the
+  MindVision runtime DLL when enabled. Backend build/tests and docs/vault notes
+  were updated to keep the non-MindVision CI path green.
+
 - **Conan remote health precheck workflow** (2026-06-10) — Added `.github/workflows/conan-remote-health.yml`, a scheduled/manual GitHub Actions health check that verifies ConanCenter and optional team remote (`CONAN_REMOTE_URL`) reachability, detects non-Conan/Cloudflare HTML responses from `/v1/ping`, validates auth when username/password secrets are present, and writes per-remote status to the run summary. Updated `docs/howto/release-workflow.md` to point release operators to this tracker as a release preflight step.
 - **Cloudflare R2 CI publishing path cleanup** (2026-06-10) — Both
   Windows GitHub Actions release workflows now wire stable/beta publishing

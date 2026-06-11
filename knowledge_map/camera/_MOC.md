@@ -6,6 +6,7 @@
 
 - [[ICamera]] — abstract base + `CameraConfig`, `CameraStats`, `Frame`
 - [[EGrabberCamera]] — hardware via Euresys EGrabber SDK
+- [[MindVisionCamera]] — hardware via MindVision SDK
 - [[MockCamera]] — folder-backed dev camera
 
 **Up**: [[../README|Vault home]] · **See also**: [[../services/CaptureService]]

@@ -10,6 +10,7 @@
 #include "backend/playback/PlaybackService.h"
 #include "backend/playback/FrameStore.h"
 #include "backend/camera/egrabber/EGrabberCamera.h"
+#include "backend/camera/mindvision/MindVisionCamera.h"
 #include "backend/camera/mock/MockCamera.h"
 #include "backend/services/CameraControlService.h"
 #include "backend/services/AutofocusService.h"
@@ -33,6 +34,9 @@
 
 #ifndef MIB_HAS_EGRABBER
 #define MIB_HAS_EGRABBER 0
+#endif
+#ifndef MIB_HAS_MINDVISION
+#define MIB_HAS_MINDVISION 0
 #endif
 
 namespace backend
@@ -396,16 +400,8 @@ namespace backend
             // Wire capture -> frame store for playback/display
             captureService_->setFrameStore(frameStore_);
 
-            // Configure camera source (hardware or mock) before we start streaming.
-#if !MIB_HAS_EGRABBER
-            if (cameraMode != "mock")
-            {
-                SPDLOG_WARN("AppBackend: forcing mock camera mode because EGrabber SDK is unavailable on this platform");
-                cameraMode = "mock";
-            }
-#endif
-
-            if (cameraMode == "mock")
+            // Configure camera source (hardware, MindVision, or mock) before we start streaming.
+            auto configureMock = [&]()
             {
                 camera::mock::MockCameraOptions options;
                 if (const char *envDir = std::getenv("MIB_MOCK_CAMERA_DIR"))
@@ -448,21 +444,80 @@ namespace backend
                 captureService_->setCameraFactory([options]() mutable
                                                   { return std::make_unique<camera::mock::MockCamera>(options); });
                 mockCameraConfigured_ = true;
+                selectedIfIndex_ = -1;
+                selectedDevIndex_ = -1;
+                selectedMvCameraIndex_ = -1;
+                selectedLabel_.clear();
+                lastMindVisionConfigPath_.clear();
+            };
+
+            if (cameraMode == "mock")
+            {
+                configureMock();
             }
-            else
+            else if (cameraMode == "mindvision")
+            {
+#if MIB_HAS_MINDVISION
+                int cameraIndex = 0;
+                if (const char *envIndex = std::getenv("MIB_MINDVISION_CAMERA_INDEX"))
+                {
+                    try
+                    {
+                        cameraIndex = std::max(0, std::stoi(envIndex));
+                    }
+                    catch (const std::exception &)
+                    {
+                        SPDLOG_WARN("Invalid MIB_MINDVISION_CAMERA_INDEX value: {}", envIndex);
+                    }
+                }
+                std::string configPath;
+                if (const char *envConfig = std::getenv("MIB_MINDVISION_CONFIG"))
+                {
+                    configPath = envConfig;
+                }
+                SPDLOG_INFO("AppBackend: configuring MindVision camera (index={}, config={})",
+                            cameraIndex, configPath.empty() ? "<none>" : configPath);
+                captureService_->setCameraFactory([cameraIndex, configPath]() mutable
+                                                  { return std::make_unique<camera::common::MindVisionCamera>(cameraIndex, configPath); });
+                mockCameraConfigured_ = false;
+                selectedIfIndex_ = -1;
+                selectedDevIndex_ = -1;
+                selectedMvCameraIndex_ = cameraIndex;
+                selectedLabel_ = configPath.empty()
+                    ? std::string("MindVision camera ") + std::to_string(cameraIndex)
+                    : std::string("MindVision camera ") + std::to_string(cameraIndex) + " (" + configPath + ")";
+                lastMindVisionConfigPath_ = configPath;
+#else
+                SPDLOG_WARN("AppBackend: MindVision mode requested but MindVision SDK is unavailable; falling back to mock camera");
+                cameraMode = "mock";
+                configureMock();
+#endif
+            }
+            else if (cameraMode == "egrabber" || cameraMode == "hardware")
             {
 #if MIB_HAS_EGRABBER
                 SPDLOG_INFO("AppBackend: configuring hardware EGrabber camera");
                 captureService_->setCameraFactory([]()
                                                   { return std::make_unique<camera::common::EGrabberCamera>(); });
                 mockCameraConfigured_ = false;
-#else
+                selectedMvCameraIndex_ = -1;
+            #else
                 SPDLOG_WARN("AppBackend: hardware mode requested but EGrabber SDK is unavailable; keeping mock camera");
-                camera::mock::MockCameraOptions options;
-                options.folder = std::filesystem::path(dataDir) / "mock_frames";
-                captureService_->setCameraFactory([options]() mutable
-                                                  { return std::make_unique<camera::mock::MockCamera>(options); });
-                mockCameraConfigured_ = true;
+                cameraMode = "mock";
+                configureMock();
+#endif
+            }
+            else
+            {
+                SPDLOG_WARN("AppBackend: unknown camera mode '{}'; falling back to hardware/mock defaults", cameraMode);
+#if MIB_HAS_EGRABBER
+                captureService_->setCameraFactory([]()
+                                                  { return std::make_unique<camera::common::EGrabberCamera>(); });
+                mockCameraConfigured_ = false;
+                selectedMvCameraIndex_ = -1;
+#else
+                cameraMode = "mock";
+                configureMock();
 #endif
             }
 
@@ -475,7 +530,9 @@ namespace backend
             cameraMode = "disabled";
             selectedIfIndex_ = -1;
             selectedDevIndex_ = -1;
+            selectedMvCameraIndex_ = -1;
             selectedLabel_.clear();
+            lastMindVisionConfigPath_.clear();
             mockCameraConfigured_ = false;
         }
 
@@ -528,7 +585,9 @@ namespace backend
                                           { return std::make_unique<camera::mock::MockCamera>(options); });
         selectedIfIndex_ = -1;
         selectedDevIndex_ = -1;
+        selectedMvCameraIndex_ = -1;
         selectedLabel_.clear();
+        lastMindVisionConfigPath_.clear();
         mockCameraConfigured_ = true;
     }
 
@@ -545,7 +604,9 @@ namespace backend
                                           { return std::make_unique<camera::mock::MockCamera>(options); });
         selectedIfIndex_ = -1;
         selectedDevIndex_ = -1;
+        selectedMvCameraIndex_ = -1;
         selectedLabel_.clear();
+        lastMindVisionConfigPath_.clear();
         mockCameraConfigured_ = true;
         {
             auto& mirror = backend::diagnostics::CrashStateMirror::instance();
@@ -568,12 +629,48 @@ namespace backend
         selectedIfIndex_ = interfaceIndex;
         selectedDevIndex_ = deviceIndex;
         selectedLabel_ = label;
+        selectedMvCameraIndex_ = -1;
+        lastMindVisionConfigPath_.clear();
         mockCameraConfigured_ = false;
 
         captureService_->setCameraFactory([interfaceIndex, deviceIndex]()
                                           { return std::make_unique<camera::common::EGrabberCamera>(interfaceIndex, deviceIndex); });
         SPDLOG_INFO("Hardware camera selected: {} (if={}, dev={})",
                     label, interfaceIndex, deviceIndex);
+    }
+
+    void AppBackend::setMindVisionCameraSelection(int cameraIndex, const std::string &label)
+    {
+        if (!captureService_)
+            return;
+
+        selectedMvCameraIndex_ = cameraIndex;
+        selectedIfIndex_ = -1;
+        selectedDevIndex_ = -1;
+        selectedLabel_ = label;
+        mockCameraConfigured_ = false;
+
+#if MIB_HAS_MINDVISION
+        const std::string configPath = lastMindVisionConfigPath_;
+        captureService_->setCameraFactory([cameraIndex, configPath]()
+                                          { return std::make_unique<camera::common::MindVisionCamera>(cameraIndex, configPath); });
+#else
+        SPDLOG_WARN("MindVision camera selection requested but MindVision SDK is unavailable; falling back to mock camera");
+        camera::mock::MockCameraOptions options;
+        options.folder = std::filesystem::path("data") / "mock_frames";
+        captureService_->setCameraFactory([options]() mutable
+                                          { return std::make_unique<camera::mock::MockCamera>(options); });
+        lastMindVisionConfigPath_.clear();
+        mockCameraConfigured_ = false;
+#endif
+
+        auto &mirror = backend::diagnostics::CrashStateMirror::instance();
+        mirror.app.selectedInterface.store(-1);
+        mirror.app.selectedDevice.store(-1);
+        mirror.app.mockCamera.store(mockCameraConfigured_);
+        mirror.setCameraLabel(selectedLabel_);
+
+        SPDLOG_INFO("MindVision camera selected: {} (index={})", label, cameraIndex);
     }
 
     bool AppBackend::applyCameraScriptFromFile(const std::string &path, std::string *errorOut)
@@ -592,6 +689,38 @@ namespace backend
         }
         SPDLOG_INFO("Applying camera script to {} from {}", selectedLabel_, path);
         return cameraControlService_->applyScriptToDevice(selectedIfIndex_, selectedDevIndex_, path, errorOut);
+    }
+
+    bool AppBackend::applyMindVisionConfigFromFile(const std::string &path, std::string *errorOut)
+    {
+        if (selectedMvCameraIndex_ < 0)
+        {
+            if (errorOut)
+                *errorOut = "No MindVision camera selected";
+            return false;
+        }
+        if (captureService_ && captureService_->isRunning())
+        {
+            SPDLOG_INFO("Stopping capture before applying MindVision config");
+            captureService_->stop();
+        }
+        SPDLOG_INFO("Applying MindVision config to {} from {}", selectedLabel_, path);
+        const bool ok = cameraControlService_->applyMindVisionConfig(selectedMvCameraIndex_, path, errorOut);
+        if (ok)
+        {
+            lastMindVisionConfigPath_ = path;
+            const int idx = selectedMvCameraIndex_;
+            const std::string configPath = lastMindVisionConfigPath_;
+            captureService_->setCameraFactory([idx, configPath]()
+                                              { return std::make_unique<camera::common::MindVisionCamera>(idx, configPath); });
+            SPDLOG_INFO("MindVision capture factory updated with config: {}", path);
+        }
+        return ok;
+    }
+
+    bool AppBackend::isMindVisionCameraSelected() const
+    {
+        return selectedMvCameraIndex_ >= 0;
     }
 
     bool AppBackend::resetSelectedHardwareCamera(std::string *errorOut)
@@ -614,8 +743,10 @@ namespace backend
 
     bool AppBackend::isCameraConfigured() const
     {
-        // Camera is configured if hardware camera is selected OR mock camera is configured
-        return (selectedIfIndex_ >= 0 && selectedDevIndex_ >= 0) || mockCameraConfigured_;
+        // Camera is configured if a hardware, MindVision, or mock camera is selected.
+        return (selectedIfIndex_ >= 0 && selectedDevIndex_ >= 0)
+            || (selectedMvCameraIndex_ >= 0)
+            || mockCameraConfigured_;
     }
 
     bool AppBackend::startFrameRecording(const std::string& hdf5FilePath) {

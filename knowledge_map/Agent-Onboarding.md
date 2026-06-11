@@ -20,7 +20,7 @@ Jump to the notes that match your task:
 
 | If you're touching... | Start here |
 |---|---|
-| Frame acquisition / camera | [[services/CaptureService]] + [[camera/_MOC]] |
+| Frame acquisition / camera | [[services/CaptureService]] + [[camera/_MOC]] (`[[camera/MindVisionCamera]]`, `[[camera/EGrabberCamera]]`, `[[camera/MockCamera]]`) |
 | Image analysis / metrics | [[services/ProcessingService]] + [[domain/Microscopy-Pipeline]] |
 | Saving/reading experiment files | [[services/Hdf5Service]] + [[data-model/HDF5-Storage]] |
 | Live preview / ROI / overlays | [[frontend/PreviewPage]], [[frontend/ConfigTabs]] |

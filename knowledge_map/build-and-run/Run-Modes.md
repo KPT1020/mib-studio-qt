@@ -2,7 +2,8 @@
 
 > Three executables, two camera sources, a handful of env vars.
 
-**Related:** [[../camera/MockCamera]], [[../frontend/ConnectTab]]
+**Related:** [[../camera/MockCamera]], [[../camera/MindVisionCamera]],
+[[../frontend/ConnectTab]]
 
 ## Executables
 
@@ -18,9 +19,12 @@ Read at startup (see `main.cpp` and [[../architecture/AppBackend]]):
 | Variable | Default | Effect |
 |---|---|---|
 | `MIB_CAMERA_MODE=mock` | unset | Force mock (bypasses ConnectTab) |
+| `MIB_CAMERA_MODE=mindvision` | unset | Force MindVision selection (uses `MIB_MINDVISION_CAMERA_INDEX` / `MIB_MINDVISION_CONFIG` if present) |
 | `MIB_MOCK_CAMERA_DIR=<path>` | — | Folder with PNG/TIFF/JPEG frames |
 | `MIB_MOCK_CAMERA_INTERVAL_MS=<ms>` | 33 | Frame cadence |
 | `MIB_MOCK_CAMERA_LOOP=true\|false` | true | Loop or stop at end |
+| `MIB_MINDVISION_CAMERA_INDEX=<n>` | 0 | MindVision device index used by startup selection |
+| `MIB_MINDVISION_CONFIG=<path>` | — | JSON config applied before MindVision capture starts |
 | `MIB_DISABLED_SERVICES=<csv>` | unset | Disable startup paths (`sqlite,hdf5,processing,yolo,autofocus,trigger,capture/camera,playback,auto_update,all`) |
 
 Sample frames ship at `data/mock_frames/frame_00000.tiff`.
@@ -28,6 +32,8 @@ Sample frames ship at `data/mock_frames/frame_00000.tiff`.
 The GUI Settings action **Boot Service Toggles...** stores a persisted
 `QSettings` value (`Startup/DisabledServices`) that `main.cpp` maps into
 `MIB_DISABLED_SERVICES` before backend startup (unless the env var is already set externally).
+- The startup camera mode picker now recognizes `mock`, `mindvision`, and the
+  hardware/eGrabber default path.
 
 ## MLflow (test metrics only)
 

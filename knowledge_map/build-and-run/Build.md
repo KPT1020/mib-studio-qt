@@ -67,6 +67,12 @@ different Conan package IDs after reinstalls).
 - `CMakeLists.txt` sets `MIB_HAS_EGRABBER`:
   - `ON` on Windows
   - `OFF` on non-Windows
+- `cmake/MIBOptions.cmake` adds `MIB_ENABLE_MINDVISION`:
+  - `OFF` by default
+  - `ON` enables MindVision SDK discovery on Windows
+- `cmake/MIBDependencies.cmake` sets `MIB_HAS_MINDVISION`:
+  - `ON` when `WIN32 AND MIB_ENABLE_MINDVISION`
+  - `OFF` otherwise
 - When `MIB_HAS_EGRABBER=OFF`, build wiring skips:
   - EGrabber include path (`C:/Program Files/Euresys/eGrabber/include`)
   - Coremor include path (`include/Coremor`)
@@ -74,55 +80,13 @@ different Conan package IDs after reinstalls).
   - Windows-only autofocus implementation (`AutofocusService.cpp`)
 - Non-Windows uses `src/backend/services/AutofocusService.stub.cpp` so Linux
   cloud builds can compile and run mock/non-hardware workflows.
-
-## Linux cloud toolchain note (`cannot find -lstdc++`)
-
-Some cloud images can fail during compiler smoke-test before project
-configuration with:
-
-`/usr/bin/ld: cannot find -lstdc++`
-
-In those cases, `/usr/bin/c++` is often set to `clang++` via alternatives while
-the image lacks the expected unversioned `libstdc++.so` path for that clang
-setup.
-
-Workaround:
-
-```bash
-sudo update-alternatives --set c++ /usr/bin/g++
-printf 'int main(){return 0;}' | c++ -x c++ - -o /tmp/cxx-link-test
-```
-
-If this succeeds, rerun CMake/Conan. Any next failure is likely dependency
-resolution/provisioning, not the runtime linker.
-
-## Linux cloud dependency fallback (ONNX Runtime optional)
-
-Linux cloud images may not have a discoverable CMake package for ONNX Runtime
-(`onnxruntimeConfig.cmake`), and Conan graph resolution can fail because of
-upstream version conflicts (`qt/opencv/onnxruntime` transitive deps).
-
-To keep non-hardware workflows buildable in cloud:
-
-- `find_package(onnxruntime CONFIG QUIET)` is optional.
-- `MIB_HAS_ONNXRUNTIME` is set from `TARGET onnxruntime::onnxruntime`.
-- When ONNX Runtime is unavailable:
-  - build uses `src/backend/services/YoloService.stub.cpp`
-  - compile definition `MIB_HAS_ONNXRUNTIME=0` is exported
-  - CMake emits a warning and continues.
-
-## Platform guards (hardware SDKs)
-
-- `CMakeLists.txt` sets `MIB_HAS_EGRABBER`:
-  - `ON` on Windows
-  - `OFF` on non-Windows
-- When `MIB_HAS_EGRABBER=OFF`, build wiring skips:
-  - EGrabber include path (`C:/Program Files/Euresys/eGrabber/include`)
-  - Coremor include path (`include/Coremor`)
-  - Coremor import library (`XMT_DLL_SER.lib`)
-  - Windows-only autofocus implementation (`AutofocusService.cpp`)
-- Non-Windows uses `src/backend/services/AutofocusService.stub.cpp` so Linux
-  cloud builds can compile and run mock/non-hardware workflows.
+- When `MIB_HAS_MINDVISION=ON`, CMake requires:
+  - `MindVision/CameraApiLoad.h` (or `CameraApiLoad.h`)
+  - `MVCAMSDK.dll` or `MVCAMSDK_X64.dll`
+  - SDK root overrides via `MIB_MINDVISION_SDK_ROOT` or the
+    `MIB_MINDVISION_SDK_DIR` environment variable
+- When MindVision is disabled, the backend still compiles a stub camera
+  implementation and the connect UI keeps mock/EGrabber workflows intact.
 
 ## Linux cloud toolchain note (`cannot find -lstdc++`)
 
