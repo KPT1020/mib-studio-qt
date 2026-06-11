@@ -5,6 +5,13 @@
 
 ## Features shipped
 
+- **Public R2-backed profile catalog + manual updates** (2026-06-11) —
+  `ConfigTabs` now uses a dedicated `ProfileManager` helper to scan local
+  profiles, lazily create `profile.meta.json`, fetch public catalogs on
+  demand, verify SHA-256 for staged downloads, back up the previous local
+  profile files, install profile updates, and surface field-level config
+  diffs plus local/remote/update state in the profile row. Bundled defaults
+  gained `config_schema_version` so migrated configs stay self-describing.
 - **Experiment config sync hardening** (2026-06-11) — `AppConfigWatcher`
   now writes back the full supported `image_processing` config section,
   including blur, background, auto-background, target-group emodulus, and

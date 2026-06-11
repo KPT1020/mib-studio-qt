@@ -16,6 +16,10 @@
   `docs/howto/live-config-reload.md`.
 - **`AutoUpdater`** — periodic update check; see
   `docs/howto/auto-update-r2.md` and `docs/howto/release-workflow.md`.
+- **`ProfileManager`** — profile catalog/metadata helper for
+  `ConfigTabs`. Scans local profiles, lazily generates `profile.meta.json`,
+  parses public R2 catalogs, computes SHA-256, stages/installs updates, and
+  produces field-level JSON diffs for manual update review.
 - **`DeviceInitManager`** — runs [[../services/CameraControlService]]
   `discoverCameras()` off the UI thread. Emits a signal when discovery
   completes (including "no cameras found").
@@ -48,6 +52,9 @@
   but programmatic write-back now emits a direct change notification after
   persisting the file so sibling tabs do not depend on filesystem watcher
   timing.
+- Profile catalog checks are manual only. `ConfigTabs` now owns the user
+  interaction, while `ProfileManager` handles the file/network/hash work and
+  keeps local metadata synchronized with updated local profiles.
 
 ## Cross-thread Qt signals
 

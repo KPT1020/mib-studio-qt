@@ -27,13 +27,20 @@ This app supports using external files for both the application JSON config and 
 
 ## Profiles
 - Profiles let users save and switch configurations quickly.
-- Storage: `../include/profiles/<profileName>/config.json` (+ optional `egrabberConfig.js`)
-- Use the Profile combo to select a profile, Save Profile to create/update, and Delete/Rename to manage.
-- When loading a profile, the app sets the external paths to the profile files and resets the editors. The live watcher applies changes automatically.
+- Storage: `../include/profiles/<profileName>/config.json` plus
+  `profile.meta.json` and optional `egrabberConfig.js`.
+- Use the Profile combo plus Save Profile, Delete, Rename, Check Updates,
+  Update Selected, Show Diff, and Duplicate as Local to manage profiles.
+- Local profiles without metadata still load; the app lazily creates a
+  `profile.meta.json` file on scan and keeps it updated for local changes.
+- When loading a profile, the app sets the external paths to the profile
+  files and resets the editors. The live watcher applies changes
+  automatically.
+- Remote-managed profiles come from the public R2 catalog and can be updated
+  manually after a catalog check.
 
 ## Notes (SDK pattern)
 - This mirrors Euresys sample patterns (e.g., high frame rate scripts) by running the script directly on the device.
-
 
 
 

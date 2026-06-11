@@ -100,6 +100,8 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/include/frontend/system/AutoUpdater.h
     ${PROJECT_SOURCE_DIR}/src/frontend/system/DeviceInitManager.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/system/DeviceInitManager.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/system/ProfileManager.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/system/ProfileManager.h
     ${PROJECT_SOURCE_DIR}/src/frontend/system/PlaybackPanel.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/system/PlaybackPanel.h
     # Resources
