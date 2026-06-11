@@ -19,26 +19,43 @@
 
 namespace {
 
-struct DeviceIdx {
+struct CameraSelection {
+    backend::services::CameraType type = backend::services::CameraType::EGrabber;
     int ifIndex = -1;
     int devIndex = -1;
+    int cameraIndex = -1;
 };
 
-QVariant toVariant(const DeviceIdx& d) {
-    return QVariant::fromValue<QString>(QString("%1:%2").arg(d.ifIndex).arg(d.devIndex));
+QVariant toVariant(const CameraSelection& d) {
+    switch (d.type) {
+    case backend::services::CameraType::MindVision:
+        return QVariant::fromValue<QString>(QString("mindvision:%1").arg(d.cameraIndex));
+    case backend::services::CameraType::EGrabber:
+    default:
+        return QVariant::fromValue<QString>(QString("egrabber:%1:%2").arg(d.ifIndex).arg(d.devIndex));
+    }
 }
 
-bool fromVariant(const QVariant& v, DeviceIdx& out) {
+bool fromVariant(const QVariant& v, CameraSelection& out) {
     const auto s = v.toString();
     const auto parts = s.split(':');
-    if (parts.size() != 2) return false;
-    bool ok1 = false, ok2 = false;
-    const int a = parts[0].toInt(&ok1);
-    const int b = parts[1].toInt(&ok2);
-    if (!ok1 || !ok2) return false;
-    out.ifIndex = a;
-    out.devIndex = b;
-    return true;
+    if (parts.isEmpty()) return false;
+    if (parts[0] == "mindvision") {
+        if (parts.size() != 2) return false;
+        bool ok = false;
+        out.type = backend::services::CameraType::MindVision;
+        out.cameraIndex = parts[1].toInt(&ok);
+        return ok;
+    }
+    if (parts[0] == "egrabber") {
+        if (parts.size() != 3) return false;
+        bool ok1 = false, ok2 = false;
+        out.type = backend::services::CameraType::EGrabber;
+        out.ifIndex = parts[1].toInt(&ok1);
+        out.devIndex = parts[2].toInt(&ok2);
+        return ok1 && ok2;
+    }
+    return false;
 }
 
 } // namespace
@@ -85,21 +102,33 @@ void ConnectTab::tryAutoConnect()
 
     auto &cc = backend_.cameraControl();
     const auto cameras = cc.discoverCameras();
+    const auto mindVisionCameras = cc.discoverMindVisionCameras();
 
-    SPDLOG_INFO("ConnectTab: auto-connect discovery found {} camera(s)", cameras.size());
+    SPDLOG_INFO("ConnectTab: auto-connect discovery found {} eGrabber camera(s) and {} MindVision camera(s)",
+                cameras.size(), mindVisionCameras.size());
 
-    if (cameras.empty())
+    if (cameras.empty() && mindVisionCameras.empty())
     {
         ui->statusLabel->setText(tr("No cameras found."));
         emit noCamerasFound();
         return;
     }
 
-    if (cameras.size() == 1)
+    const std::size_t totalCameras = cameras.size() + mindVisionCameras.size();
+    if (totalCameras == 1)
     {
-        const auto &cam = cameras[0];
-        backend_.setHardwareCameraSelection(cam.interfaceIndex, cam.deviceIndex, cam.label);
-        applyCameraSelection(cam.interfaceIndex, cam.deviceIndex, QString::fromStdString(cam.label));
+        if (!cameras.empty())
+        {
+            const auto &cam = cameras[0];
+            backend_.setHardwareCameraSelection(cam.interfaceIndex, cam.deviceIndex, cam.label);
+            applyCameraSelection(cam.interfaceIndex, cam.deviceIndex, QString::fromStdString(cam.label));
+        }
+        else
+        {
+            const auto &cam = mindVisionCameras[0];
+            backend_.setMindVisionCameraSelection(cam.cameraIndex, cam.label);
+            applyMindVisionSelection(cam.cameraIndex, QString::fromStdString(cam.label));
+        }
         return;
     }
 
@@ -108,6 +137,8 @@ void ConnectTab::tryAutoConnect()
 
 void ConnectTab::applyCameraSelection(int interfaceIndex, int deviceIndex, const QString& label)
 {
+    (void)interfaceIndex;
+    (void)deviceIndex;
     ui->statusLabel->setText(tr("Connected to %1 (not capturing)").arg(label));
     ui->tabWidget->setCurrentIndex(0);
     for (int i = 0; i < ui->cameraList->count(); ++i)
@@ -116,6 +147,23 @@ void ConnectTab::applyCameraSelection(int interfaceIndex, int deviceIndex, const
         if (item && item->text() == label)
         {
             ui->cameraList->setCurrentRow(i);
+            break;
+        }
+    }
+    emit connected();
+}
+
+void ConnectTab::applyMindVisionSelection(int cameraIndex, const QString& label)
+{
+    (void)cameraIndex;
+    ui->statusLabel->setText(tr("Connected to %1 (not capturing)").arg(label));
+    ui->tabWidget->setCurrentIndex(1);
+    for (int i = 0; i < ui->mindVisionList->count(); ++i)
+    {
+        auto *item = ui->mindVisionList->item(i);
+        if (item && item->text() == label)
+        {
+            ui->mindVisionList->setCurrentRow(i);
             break;
         }
     }
@@ -136,6 +184,7 @@ void ConnectTab::reportMultipleCameras()
 void ConnectTab::populateDevices() {
     ui->framegrabberList->clear();
     ui->cameraList->clear();
+    ui->mindVisionList->clear();
 
     auto& cc = backend_.cameraControl();
     
@@ -143,7 +192,7 @@ void ConnectTab::populateDevices() {
     const auto framegrabbers = cc.discoverFramegrabbers();
     for (const auto& fg : framegrabbers) {
         auto* item = new QListWidgetItem(QString::fromStdString(fg.label));
-        item->setData(Qt::UserRole, toVariant(DeviceIdx{fg.interfaceIndex, fg.deviceIndex}));
+        item->setData(Qt::UserRole, toVariant(CameraSelection{backend::services::CameraType::EGrabber, fg.interfaceIndex, fg.deviceIndex, -1}));
         ui->framegrabberList->addItem(item);
     }
     
@@ -151,11 +200,11 @@ void ConnectTab::populateDevices() {
         ui->framegrabberList->setCurrentRow(0);
     }
     
-    // Populate cameras tab
+    // Populate eGrabber cameras tab
     const auto cameras = cc.discoverCameras();
     for (const auto& cam : cameras) {
         auto* item = new QListWidgetItem(QString::fromStdString(cam.label));
-        item->setData(Qt::UserRole, toVariant(DeviceIdx{cam.interfaceIndex, cam.deviceIndex}));
+        item->setData(Qt::UserRole, toVariant(CameraSelection{cam.cameraType, cam.interfaceIndex, cam.deviceIndex, cam.cameraIndex}));
         ui->cameraList->addItem(item);
     }
     
@@ -163,11 +212,24 @@ void ConnectTab::populateDevices() {
         ui->cameraList->setCurrentRow(0);
     }
 
-    ui->statusLabel->setText(QString("Found %1 framegrabber(s), %2 camera(s)")
+    // Populate MindVision cameras tab
+    const auto mindVisionCameras = cc.discoverMindVisionCameras();
+    for (const auto& cam : mindVisionCameras) {
+        auto* item = new QListWidgetItem(QString::fromStdString(cam.label));
+        item->setData(Qt::UserRole, toVariant(CameraSelection{cam.cameraType, cam.interfaceIndex, cam.deviceIndex, cam.cameraIndex}));
+        ui->mindVisionList->addItem(item);
+    }
+
+    if (ui->mindVisionList->count() > 0) {
+        ui->mindVisionList->setCurrentRow(0);
+    }
+
+    ui->statusLabel->setText(QString("Found %1 framegrabber(s), %2 eGrabber camera(s), %3 MindVision camera(s)")
                          .arg(ui->framegrabberList->count())
-                         .arg(ui->cameraList->count()));
-    SPDLOG_INFO("ConnectTab: refreshed, {} framegrabber(s), {} camera(s) listed", 
-                ui->framegrabberList->count(), ui->cameraList->count());
+                         .arg(ui->cameraList->count())
+                         .arg(ui->mindVisionList->count()));
+    SPDLOG_INFO("ConnectTab: refreshed, {} framegrabber(s), {} eGrabber camera(s), {} MindVision camera(s) listed",
+                ui->framegrabberList->count(), ui->cameraList->count(), ui->mindVisionList->count());
 }
 
 void ConnectTab::onConnect() {
@@ -185,8 +247,11 @@ void ConnectTab::onConnect() {
     int currentTab = ui->tabWidget->currentIndex();
     if (currentTab == 0) {
         currentList = ui->cameraList;
-        deviceType = tr("camera");
+        deviceType = tr("eGrabber camera");
     } else if (currentTab == 1) {
+        currentList = ui->mindVisionList;
+        deviceType = tr("MindVision camera");
+    } else if (currentTab == 2) {
         currentList = ui->framegrabberList;
         deviceType = tr("framegrabber");
     } else {
@@ -201,17 +266,22 @@ void ConnectTab::onConnect() {
         return;
     }
 
-    DeviceIdx idx{};
+    CameraSelection idx{};
     if (!fromVariant(item->data(Qt::UserRole), idx)) {
         QMessageBox::warning(this, tr("Connect Device"), tr("Internal error: invalid selection."));
         return;
     }
 
     const QString label = item->text();
-    SPDLOG_INFO("ConnectTab: selecting hardware device {} ({}:{})",
-                label.toStdString(), idx.ifIndex, idx.devIndex);
-
-    backend_.setHardwareCameraSelection(idx.ifIndex, idx.devIndex, label.toStdString());
+    if (idx.type == backend::services::CameraType::MindVision) {
+        SPDLOG_INFO("ConnectTab: selecting MindVision camera {} ({})",
+                    label.toStdString(), idx.cameraIndex);
+        backend_.setMindVisionCameraSelection(idx.cameraIndex, label.toStdString());
+    } else {
+        SPDLOG_INFO("ConnectTab: selecting hardware device {} ({}:{})",
+                    label.toStdString(), idx.ifIndex, idx.devIndex);
+        backend_.setHardwareCameraSelection(idx.ifIndex, idx.devIndex, label.toStdString());
+    }
     ui->statusLabel->setText(tr("Connected to %1 (not capturing)").arg(label));
     emit connected();
 }
@@ -251,6 +321,3 @@ void ConnectTab::onConfigureMock() {
 }
 
 } // namespace frontend
-
-
-

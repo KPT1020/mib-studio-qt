@@ -49,6 +49,32 @@
        </item>
       </layout>
      </widget>
+     <widget class="QWidget" name="mindVisionTab">
+      <attribute name="title">
+       <string>MindVision</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="mindVisionLayout">
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="topMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
+       <item>
+        <widget class="QListWidget" name="mindVisionList">
+         <property name="selectionMode">
+          <enum>QAbstractItemView::SingleSelection</enum>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
      <widget class="QWidget" name="framegrabberTab">
       <attribute name="title">
        <string>Framegrabbers</string>

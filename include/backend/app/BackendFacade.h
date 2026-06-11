@@ -32,6 +32,7 @@ namespace backend::bridge
     {
         ConfigureMockCamera,
         SelectHardwareCamera,
+        SelectMindVisionCamera,
         ApplyCameraScript,
         ResetSelectedHardwareCamera,
         StartCapture,
@@ -47,6 +48,9 @@ namespace backend::bridge
         int hardwareInterfaceIndex{-1};
         int hardwareDeviceIndex{-1};
         std::string hardwareLabel;
+        int mindVisionCameraIndex{-1};
+        std::string mindVisionLabel;
+        std::string mindVisionConfigPath;
         std::string cameraScriptPath;
     };
 

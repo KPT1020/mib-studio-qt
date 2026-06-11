@@ -28,3 +28,6 @@ If your Conan Qt package does not include debug Qt DLLs, windeploy for Debug may
 ## Notes
 - No env vars needed when plugins are deployed next to the exe.
 - If you must run from a different folder, set `QT_QPA_PLATFORM_PLUGIN_PATH` to the `platforms` directory.
+- When `MIB_ENABLE_MINDVISION=ON`, the post-build deployment step also copies
+  the MindVision runtime DLL next to the exe. The SDK itself is not vendored;
+  it must already be installed and discoverable at configure time.

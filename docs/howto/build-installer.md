@@ -76,6 +76,9 @@ The installer includes:
 - **Qt Runtime**: All Qt DLLs, plugins, and dependencies deployed by windeployqt
 - **Third-party Libraries**: OpenCV, HDF5, spdlog, and other dependencies
 - **eGrabber Installer**: Bundled eGrabber SDK installer (optional installation)
+- **MindVision Runtime**: Copied next to the application only when
+  `MIB_ENABLE_MINDVISION=ON`; the proprietary SDK is still installed
+  separately on target systems
 - **Start Menu Shortcuts**: Shortcut for the application
 - **Desktop Shortcut**: Optional desktop icon
 - **Uninstaller**: Complete uninstallation support
@@ -98,6 +101,14 @@ During installation, users can choose to install the bundled eGrabber SDK:
 - If found, prompts user to skip installation
 - If selected, runs the eGrabber installer silently
 - eGrabber installer is located at: `resources/installers/egrabber-win-x86_64-25.10.0.57.exe`
+
+### MindVision Installation
+
+- The MindVision SDK is not bundled in the installer.
+- Build the app with `MIB_ENABLE_MINDVISION=ON` only when the SDK is installed
+  on the build machine and the runtime DLL is discoverable by CMake.
+- Operators should install the MindVision driver/SDK separately on the target
+  machine before launching the app.
 
 ## Testing the Installer
 
@@ -157,6 +168,16 @@ If the eGrabber installer is missing:
 1. Verify `resources/installers/egrabber-win-x86_64-25.10.0.57.exe` exists
 2. Check the file name matches the `#define EgrabberInstaller` in the InnoSetup script
 3. Update the script if the eGrabber installer version has changed
+
+### MindVision SDK Not Found
+
+If CMake fails with a MindVision SDK error:
+
+1. Verify the SDK is installed on the machine building the installer
+2. Set `MIB_MINDVISION_SDK_ROOT` or `MIB_MINDVISION_SDK_DIR` to the SDK root
+3. Confirm the build can find `MindVision/CameraApiLoad.h` and
+   `MVCAMSDK.dll` / `MVCAMSDK_X64.dll`
+4. Reconfigure with `-DMIB_ENABLE_MINDVISION=ON`
 
 ## Updating the Installer Script
 

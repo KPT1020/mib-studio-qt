@@ -312,6 +312,16 @@ function(mib_configure_windows_deployment app_target)
         COMMENT "Copy Coremor DLL: ${app_target}"
     )
 
+    # Copy MindVision SDK runtime DLL when the integration is enabled.
+    if(MIB_HAS_MINDVISION)
+        add_custom_command(TARGET ${app_target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${MIB_MINDVISION_RUNTIME_DLL}"
+                    "$<TARGET_FILE_DIR:${app_target}>/"
+            COMMENT "Copy MindVision DLL: ${app_target}"
+        )
+    endif()
+
     # Copy Conan package DLLs (OpenCV, HDF5, SQLite3, etc.).
     add_custom_command(TARGET ${app_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
