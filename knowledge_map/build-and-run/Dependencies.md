@@ -17,6 +17,10 @@
 - **Euresys EGrabber SDK** — `egrabber-sample-programs/` (reference source
   tree); actual SDK is assumed installed system-side. See
   `docs/integration/egrabber.md`.
+- **MindVision SDK** — not vendored. Configure with
+  `MIB_ENABLE_MINDVISION=ON` on Windows and point CMake at the SDK root via
+  `MIB_MINDVISION_SDK_ROOT` or `MIB_MINDVISION_SDK_DIR`. The build expects
+  the MindVision include tree plus `MVCAMSDK.dll` or `MVCAMSDK_X64.dll`.
 - **Coremor XMT DLL** — `include/Coremor/` (`.h`, `.lib`, `.dll`). Used by
   [[../services/AutofocusService]].
 
@@ -35,6 +39,12 @@
   (`WIN32` => `ON`, otherwise `OFF`):
   - EGrabber headers/system path are only added when `MIB_HAS_EGRABBER=1`.
   - Coremor include/lib wiring is only added when `MIB_HAS_EGRABBER=1`.
+- MindVision SDK linkage is gated separately by `MIB_ENABLE_MINDVISION` /
+  `MIB_HAS_MINDVISION`:
+  - CMake locates the MindVision SDK include tree and runtime DLL only when
+    `MIB_ENABLE_MINDVISION=ON` on Windows.
+  - Default builds keep MindVision disabled so Linux/cloud CI does not require
+    proprietary SDK files.
 
 ## Linux cloud build notes
 

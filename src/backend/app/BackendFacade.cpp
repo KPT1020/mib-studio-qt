@@ -294,6 +294,23 @@ namespace backend::bridge
                                                 command.hardwareLabel);
             emitEvent(makeCameraStatus(CameraState::Configured, command.hardwareLabel));
             return {true, BackendCommandType::Camera, "Hardware camera selected"};
+        case CameraCommandAction::SelectMindVisionCamera:
+        {
+            backend_.setMindVisionCameraSelection(command.mindVisionCameraIndex,
+                                                 command.mindVisionLabel);
+            if (!command.mindVisionConfigPath.empty())
+            {
+                std::string error;
+                if (!backend_.applyMindVisionConfigFromFile(command.mindVisionConfigPath, &error))
+                {
+                    const std::string message = error.empty() ? "MindVision config apply failed" : error;
+                    emitEvent(BackendErrorEvent{BackendErrorSource::Camera, BackendCommandType::Camera, message});
+                    return {false, BackendCommandType::Camera, message};
+                }
+            }
+            emitEvent(makeCameraStatus(CameraState::Configured, command.mindVisionLabel));
+            return {true, BackendCommandType::Camera, "MindVision camera selected"};
+        }
         case CameraCommandAction::ApplyCameraScript:
         {
             std::string error;

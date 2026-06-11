@@ -22,6 +22,7 @@ add_library(mib_backend STATIC
     ${PROJECT_SOURCE_DIR}/src/backend/services/TriggerService.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/playback/FrameStore.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/camera/egrabber/EGrabberCamera.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/camera/mindvision/MindVisionCamera.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/camera/mock/MockCamera.cpp
 )
 
@@ -61,6 +62,12 @@ else()
     target_compile_definitions(mib_backend PUBLIC MIB_HAS_EGRABBER=0)
 endif()
 
+if(MIB_HAS_MINDVISION)
+    target_compile_definitions(mib_backend PUBLIC MIB_HAS_MINDVISION=1)
+else()
+    target_compile_definitions(mib_backend PUBLIC MIB_HAS_MINDVISION=0)
+endif()
+
 if(MIB_HAS_ONNXRUNTIME)
     target_compile_definitions(mib_backend PUBLIC MIB_HAS_ONNXRUNTIME=1)
 else()
@@ -74,6 +81,11 @@ if(MIB_HAS_EGRABBER)
     target_include_directories(mib_backend PUBLIC
         ${PROJECT_SOURCE_DIR}/include/Coremor
         "C:/Program Files/Euresys/eGrabber/include"
+    )
+endif()
+if(MIB_HAS_MINDVISION)
+    target_include_directories(mib_backend PUBLIC
+        ${MIB_MINDVISION_INCLUDE_DIR}
     )
 endif()
 

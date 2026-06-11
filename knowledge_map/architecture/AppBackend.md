@@ -44,8 +44,9 @@ See `src/backend/AppBackend.cpp` around lines 79–200.
    - `ProcessingService::BackgroundCaptureCallback` → emits Qt signal via
      [[../frontend/System-Utilities]] `BackgroundCaptureNotifier`
 8. Seeds the [[../diagnostics/CrashStateMirror]] with initial app context
-   (camera label, data dir, mock vs hardware, FrameStore capacity) and sets
-   the Sentry tags (`camera_mode`, `data_dir`) on [[../services/CrashReporter]].
+   (camera label, data dir, mock vs hardware vs MindVision, FrameStore
+   capacity) and sets the Sentry tags (`camera_mode`, `data_dir`) on
+   [[../services/CrashReporter]].
    The reporter itself is initialized earlier in `main()`, before AppBackend
    exists.
 
@@ -75,18 +76,24 @@ Notes:
 ## Camera selection
 
 - `setHardwareCameraSelection(ifIdx, devIdx, label)` — choose device (no start)
+- `setMindVisionCameraSelection(cameraIndex, label)` — choose a MindVision
+  device (no start)
 - `configureMockCamera(options)` — choose mock folder instead
 - `applyCameraScriptFromFile(path)` — push a GenICam JS config to the selected
   device (stops capture first, does not restart)
 - `resetSelectedHardwareCamera()` — issue GenICam `DeviceReset`
+- `applyMindVisionConfigFromFile(path)` — apply the selected MindVision JSON
+  config and refresh the capture factory path
 
 ### Platform behavior
 
-- On non-Windows builds (`MIB_HAS_EGRABBER=0`), initialization forces
-  `cameraMode` to mock and logs a warning when hardware mode is requested.
+- On non-Windows builds, hardware camera initialization is forced to mock and
+  logs a warning when a hardware mode is requested.
 - `setHardwareCameraSelection()` becomes a guarded fallback on non-Windows:
   it logs a warning, switches the capture factory to `MockCamera`, clears
   selected hardware indices, and keeps `mockCameraConfigured_ = true`.
+- `setMindVisionCameraSelection()` preserves the selected camera state even
+  when the SDK is unavailable so the UI/backend selection remains explicit.
 
 ## Frame recording mode
 

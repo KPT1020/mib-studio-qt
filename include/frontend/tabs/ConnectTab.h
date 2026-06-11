@@ -21,6 +21,8 @@ public:
 
     /** Called by DeviceInitManager on main thread after setting backend selection. Updates UI and emits connected(). */
     void applyCameraSelection(int interfaceIndex, int deviceIndex, const QString& label);
+    /** Called by DeviceInitManager on main thread after setting MindVision selection. Updates UI and emits connected(). */
+    void applyMindVisionSelection(int cameraIndex, const QString& label);
     /** Called by DeviceInitManager on main thread when discovery finds 0 cameras. Updates UI and emits noCamerasFound(). */
     void reportNoCameras();
     /** Called by DeviceInitManager on main thread when discovery finds 2+ cameras. Updates status only. */
@@ -48,6 +50,5 @@ private:
 };
 
 } // namespace frontend
-
 
 
