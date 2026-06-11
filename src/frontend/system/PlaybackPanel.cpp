@@ -97,7 +97,9 @@ namespace
         void paintEvent(QPaintEvent *) override
         {
             QPainter p(this);
-            p.fillRect(rect(), Qt::black);
+            // Use the active widget palette so the preview surface follows the
+            // same application theme as the rest of the tab content.
+            p.fillRect(rect(), palette().window());
             if (!image_ || image_->isNull())
                 return;
 
