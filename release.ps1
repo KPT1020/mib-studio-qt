@@ -4,8 +4,8 @@
 # Usage:
 #   .\release.ps1 --patch                    # Production: bump, build, tag (v0.2.2)
 #   .\release.ps1 --patch --push             # Production: bump, build, tag, push, create GitHub Release, publish to stable
-#   .\release.ps1 --patch --beta             # Test: bump, build, tag as v0.2.2-beta.1
-#   .\release.ps1 --patch --beta --push      # Test: bump, build, tag, push, create GitHub pre-release, publish to test
+#   .\release.ps1 --patch --beta             # Beta: bump, build, tag as v0.2.2-beta.1
+#   .\release.ps1 --patch --beta --push      # Beta: bump, build, tag, push, create GitHub pre-release, publish to beta
 #   .\release.ps1 --patch --skip-build --push # Bump, tag, push (skip build + publish)
 #   .\release.ps1 --patch --dry-run          # Preview what would happen
 
@@ -37,7 +37,7 @@ if ($bumpCount -ne 1) {
     Write-Host "  --patch       Bump patch version (bug fixes)"
     Write-Host "  --minor       Bump minor version (new features)"
     Write-Host "  --major       Bump major version (breaking changes)"
-    Write-Host "  --beta        Create a test/pre-release (publishes to test channel)"
+    Write-Host "  --beta        Create a beta/pre-release (publishes to beta channel)"
     Write-Host "  --push        Push tag, create GitHub Release, publish to Cloudflare R2"
     Write-Host "  --skip-build  Skip local build (tag and push only)"
     Write-Host "  --dry-run     Show what would happen without making changes"
@@ -114,7 +114,7 @@ if ($Beta) {
         }
     }
     $tagName = "v$newVersion-beta.$betaNum"
-    $channel = "test"
+    $channel = "beta"
 } else {
     $tagName = "v$newVersion"
     $channel = "stable"

@@ -6,6 +6,15 @@
 ## Features shipped
 
 - **Conan remote health precheck workflow** (2026-06-10) — Added `.github/workflows/conan-remote-health.yml`, a scheduled/manual GitHub Actions health check that verifies ConanCenter and optional team remote (`CONAN_REMOTE_URL`) reachability, detects non-Conan/Cloudflare HTML responses from `/v1/ping`, validates auth when username/password secrets are present, and writes per-remote status to the run summary. Updated `docs/howto/release-workflow.md` to point release operators to this tracker as a release preflight step.
+- **Cloudflare R2 CI publishing path cleanup** (2026-06-10) — Both
+  Windows GitHub Actions release workflows now wire stable/beta publishing
+  directly through `python publish-update.py`, map R2 credentials from
+  `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `MIB_STUDIO_R2_ENDPOINT`
+  into S3 environment variables, and label Cloudflare R2 steps explicitly.
+  Beta manifests now target `beta/latest.json`, while stable remains
+  `stable/latest.json`. `docs/howto/release-workflow.md` and
+  `docs/howto/auto-update-r2.md` were updated to document this channel naming
+  and secret contract.
 
 - **Long-run experiment backlog hardening** (2026-06-02) - `ProcessingService`
   now bounds the in-memory experiment frame backlog derived from the flush
