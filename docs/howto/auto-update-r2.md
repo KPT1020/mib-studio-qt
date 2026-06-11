@@ -24,6 +24,29 @@ Keep objects at the root of the public custom domain:
 - `stable/tools/MIB_Studio_Tools_v<version>_windows.zip`
 - `beta/...` for beta/pre-release equivalents
 
+### Profile Catalogs
+
+Public profile catalogs live under `profiles/<channel>/` and are read
+without authentication:
+
+- `profiles/stable/catalog.json`
+- `profiles/stable/<profile-id>/profile.meta.json`
+- `profiles/stable/<profile-id>/config.json`
+- `profiles/stable/<profile-id>/egrabberConfig.js`
+
+The app checks these only when the user requests it from `ConfigTabs`.
+Catalogs and mutable per-profile metadata should use short cache lifetimes;
+versioned immutable objects can be cached longer if they are added later.
+
+Example public URLs:
+
+```text
+https://updates.yofo.bio/profiles/stable/catalog.json
+https://updates.yofo.bio/profiles/stable/lab-default/profile.meta.json
+https://updates.yofo.bio/profiles/stable/lab-default/config.json
+https://updates.yofo.bio/profiles/stable/lab-default/egrabberConfig.js
+```
+
 The public URL is `https://updates.yofo.bio/<object-key>`. Do not include the bucket name in public manifest URLs when using the R2 custom domain.
 
 ### Manifest Format

@@ -1,12 +1,13 @@
 # ConfigTabs
 
 > Docked panel with multiple sub-tabs for tuning: processing config, JSON
-> table viewer, camera JS script loader, ROI and monitoring settings.
+> table viewer, camera JS script loader, ROI and monitoring settings. Also
+> owns the profile selector/actions for local and R2-backed profile catalogs.
 
 **Source:** `src/frontend/tabs/ConfigTabs.cpp`,
 `include/frontend/tabs/ConfigTabs.h`
 **Related:** [[../services/ProcessingService]]::`ProcessingConfig`,
-[[../frontend/System-Utilities]] (`AppConfigWatcher`),
+[[../frontend/System-Utilities]] (`AppConfigWatcher`, `ProfileManager`),
 [[Dialogs]] (`ProcessingSettingsDialog`, `MonitoringSettingsDialog`)
 
 ## Responsibility
@@ -21,6 +22,9 @@
   `utils/JsonFlatten.cpp`.
 - Persist config via `utils/ConfigPathManager.cpp` and
   [[../frontend/System-Utilities]] `AppConfigWatcher`.
+- Manage profiles, lazy `profile.meta.json` generation, manual catalog
+  checks, checksum-verified updates, and field-level diffing through
+  [[../frontend/System-Utilities]] `ProfileManager`.
 
 ## Gotchas
 
@@ -33,8 +37,12 @@
 - JSON table rebuild is shared with `frontend::jsonutil` so the round-trip
   semantics for nested objects, arrays of objects, and arrays of scalars
   stay testable in one place.
+- Profile state is now schema-aware: local profiles get a generated
+  `profile.meta.json`, remote-managed profiles show update/incompatibility
+  state, and the manual update flow stages downloads before replacing local
+  files.
 - Some gates require their `enable_*` flag too (e.g.
   `enable_ring_ratio_check`). Editing thresholds alone won't change
   classification.
 - See task `knowledge_map/task/2025-11-25-config-profiles.md` for the
-  planned Save/Load profiles feature.
+  profile management history and current implementation notes.

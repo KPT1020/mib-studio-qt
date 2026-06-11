@@ -32,6 +32,11 @@
 #include <QScrollArea>
 #include <QGridLayout>
 #include <QGroupBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QTableWidget>
+#include <QHeaderView>
+#include <QLineEdit>
 
 #include <spdlog/spdlog.h>
 #ifdef _WIN32
@@ -41,6 +46,7 @@
 #endif
 
 #include "backend/app/AppBackend.h"
+#include "frontend/system/ProfileManager.h"
 #include "frontend/models/JsonTableModel.h"
 #include "frontend/utils/JsonFlatten.h"
 
@@ -116,6 +122,15 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         saveProfileBtn_ = new QPushButton(tr("Save Profile"), page);
         deleteProfileBtn_ = new QPushButton(tr("Delete"), page);
         renameProfileBtn_ = new QPushButton(tr("Rename"), page);
+        checkUpdatesBtn_ = new QPushButton(tr("Check Updates"), page);
+        updateSelectedBtn_ = new QPushButton(tr("Update Selected"), page);
+        showDiffBtn_ = new QPushButton(tr("Show Diff"), page);
+        duplicateAsLocalBtn_ = new QPushButton(tr("Duplicate as Local"), page);
+        profileStatusLabel_ = new QLabel(page);
+        profileStatusLabel_->setText(tr("No profile selected"));
+        profileStatusLabel_->setTextFormat(Qt::PlainText);
+        profileStatusLabel_->setWordWrap(false);
+        profileStatusLabel_->setMinimumWidth(220);
         row->addWidget(jsonReloadBtn_);
         row->addWidget(jsonSaveBtn_);
         row->addWidget(jsonBrowseBtn_);
@@ -132,6 +147,11 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         row->addWidget(saveProfileBtn_);
         row->addWidget(renameProfileBtn_);
         row->addWidget(deleteProfileBtn_);
+        row->addWidget(checkUpdatesBtn_);
+        row->addWidget(updateSelectedBtn_);
+        row->addWidget(showDiffBtn_);
+        row->addWidget(duplicateAsLocalBtn_);
+        row->addWidget(profileStatusLabel_);
 		row->addWidget(jsonTableToggle_);
         v->addLayout(row);
 
@@ -271,6 +291,11 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
     connect(saveProfileBtn_, &QPushButton::clicked, this, &ConfigTabs::onSaveProfile);
     connect(deleteProfileBtn_, &QPushButton::clicked, this, &ConfigTabs::onDeleteProfile);
     connect(renameProfileBtn_, &QPushButton::clicked, this, &ConfigTabs::onRenameProfile);
+    connect(checkUpdatesBtn_, &QPushButton::clicked, this, &ConfigTabs::onCheckProfileUpdates);
+    connect(updateSelectedBtn_, &QPushButton::clicked, this, &ConfigTabs::onUpdateSelectedProfile);
+    connect(showDiffBtn_, &QPushButton::clicked, this, &ConfigTabs::onShowProfileDiff);
+    connect(duplicateAsLocalBtn_, &QPushButton::clicked, this, &ConfigTabs::onDuplicateProfileAsLocal);
+    refreshProfileStatusLabel();
 }
 
 QString ConfigTabs::appDirIncludePath(const QString& fileName) const {
@@ -800,12 +825,11 @@ void ConfigTabs::rebuildJsonFromTable() {
 
 // ===== Profiles helpers =====
 QString ConfigTabs::profilesBaseDir() const {
-    // Use centralized helper to get user-writable config directory
-    return QDir(getUserConfigDir()).absoluteFilePath("profiles");
+    return profileManager_.profilesBaseDir();
 }
 
 bool ConfigTabs::ensureProfilesDirExists(QString* err) const {
-    QDir dir(profilesBaseDir());
+    QDir dir(profileManager_.profilesBaseDir());
     if (dir.exists()) return true;
     if (!dir.mkpath(".")) {
         if (err) *err = tr("Failed to create profiles dir: %1").arg(dir.absolutePath());
@@ -816,14 +840,13 @@ bool ConfigTabs::ensureProfilesDirExists(QString* err) const {
 
 QStringList ConfigTabs::listProfiles() const {
     QStringList result;
-    QDir dir(profilesBaseDir());
-    if (!dir.exists()) return result;
-    const QFileInfoList entries = dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
-    for (const QFileInfo& fi : entries) {
-        const QString cfg = QDir(fi.absoluteFilePath()).absoluteFilePath("config.json");
-        if (QFile::exists(cfg)) {
-            result << fi.fileName();
-        }
+    QString err;
+    const auto summaries = profileManager_.scanLocalProfiles(true, remoteCatalog_ ? &*remoteCatalog_ : nullptr, &err);
+    if (!err.isEmpty()) {
+        SPDLOG_WARN("ConfigTabs: failed to scan profiles for list: {}", err.toStdString());
+    }
+    for (const auto& summary : summaries) {
+        result << summary.profileName;
     }
     return result;
 }
@@ -831,20 +854,25 @@ QStringList ConfigTabs::listProfiles() const {
 void ConfigTabs::refreshProfilesList() {
     if (!profileSelect_) return;
     const QString last = QSettings().value("Profiles/LastProfileName").toString();
-    const QStringList profiles = listProfiles();
+    QString err;
+    const auto summaries = profileManager_.scanLocalProfiles(true, remoteCatalog_ ? &*remoteCatalog_ : nullptr, &err);
+    if (!err.isEmpty()) {
+        SPDLOG_WARN("ConfigTabs: profile scan warning: {}", err.toStdString());
+    }
     const bool blocked = profileSelect_->blockSignals(true);
     profileSelect_->clear();
     profileSelect_->addItem(tr("<no profile>"), "");
-    for (const QString& p : profiles) {
-        profileSelect_->addItem(p, p);
+    for (const auto& summary : summaries) {
+        profileSelect_->addItem(profileLabelForSummary(summary), summary.profileName);
     }
     int idx = profileSelect_->findData(last);
     if (idx < 0) idx = 0;
     profileSelect_->setCurrentIndex(idx);
     profileSelect_->blockSignals(blocked);
-    // Auto-load if not <no profile>
     if (idx > 0) {
         onProfileSelectionChanged(idx);
+    } else {
+        refreshProfileStatusLabel();
     }
 }
 
@@ -890,6 +918,122 @@ QString ConfigTabs::profileJsPath(const QString& profileName) const {
     return QDir(profileDirPath(profileName)).absoluteFilePath("egrabberConfig.js");
 }
 
+QString ConfigTabs::selectedProfileName() const {
+    if (!profileSelect_) {
+        return QString();
+    }
+    return profileSelect_->currentData().toString();
+}
+
+std::optional<frontend::ProfileManager::LocalProfile> ConfigTabs::selectedProfileSummary() const {
+    const QString name = selectedProfileName();
+    if (name.isEmpty()) {
+        return std::nullopt;
+    }
+    QString err;
+    const auto summaries = profileManager_.scanLocalProfiles(true, remoteCatalog_ ? &*remoteCatalog_ : nullptr, &err);
+    if (!err.isEmpty()) {
+        SPDLOG_WARN("ConfigTabs: failed to fetch selected profile summary: {}", err.toStdString());
+    }
+    for (const auto& summary : summaries) {
+        if (summary.profileName == name) {
+            return summary;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<frontend::ProfileManager::CatalogEntry> ConfigTabs::selectedRemoteCatalogEntry() const {
+    const auto summary = selectedProfileSummary();
+    if (!summary.has_value() || !summary->remoteEntry.has_value()) {
+        return std::nullopt;
+    }
+    return summary->remoteEntry;
+}
+
+QString ConfigTabs::profileLabelForSummary(const frontend::ProfileManager::LocalProfile& summary) const {
+    QStringList tags;
+    if (summary.remoteEntry.has_value()) {
+        tags << tr("remote");
+    } else {
+        tags << tr("local");
+    }
+    if (summary.updateAvailable) {
+        tags << tr("update available");
+    }
+    if (summary.dirty) {
+        tags << tr("dirty");
+    }
+    if (summary.incompatible) {
+        tags << tr("incompatible");
+    }
+    const QString base = summary.displayName.trimmed().isEmpty() ? summary.profileName : summary.displayName.trimmed();
+    return tags.isEmpty() ? base : QStringLiteral("%1 [%2]").arg(base, tags.join(QStringLiteral(", ")));
+}
+
+void ConfigTabs::refreshProfileStatusLabel() {
+    if (!profileStatusLabel_) {
+        return;
+    }
+    const auto summary = selectedProfileSummary();
+    if (!summary.has_value()) {
+        profileStatusLabel_->setText(tr("No profile selected"));
+        profileStatusLabel_->setToolTip(QString());
+        return;
+    }
+
+    QStringList details;
+    details << (summary->remoteEntry.has_value() ? tr("remote") : tr("local-only"));
+    if (summary->updateAvailable) {
+        details << tr("update available");
+    }
+    if (summary->dirty) {
+        details << tr("dirty");
+    }
+    if (summary->incompatible) {
+        details << tr("incompatible");
+    }
+    profileStatusLabel_->setText(details.join(QStringLiteral(" | ")));
+    profileStatusLabel_->setToolTip(QStringLiteral("Profile: %1\nConfig: %2\nMetadata: %3")
+                                        .arg(summary->profileName,
+                                             summary->hasConfig ? summary->configPath : tr("missing"),
+                                             summary->hasMetadata ? summary->metaPath : tr("missing")));
+}
+
+void ConfigTabs::showDiffDialog(const QString& title, const QVector<frontend::ProfileManager::DiffRow>& rows) {
+    QDialog dialog(this);
+    dialog.setWindowTitle(title);
+    dialog.resize(1100, 640);
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* table = new QTableWidget(&dialog);
+    table->setColumnCount(6);
+    table->setHorizontalHeaderLabels({tr("Path"), tr("Status"), tr("Local value"), tr("Remote value"), tr("Risk"), tr("Source")});
+    table->setRowCount(rows.size());
+    table->setAlternatingRowColors(true);
+    table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    table->setSelectionBehavior(QAbstractItemView::SelectRows);
+    table->setSelectionMode(QAbstractItemView::SingleSelection);
+    table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    table->horizontalHeader()->setStretchLastSection(true);
+
+    for (int i = 0; i < rows.size(); ++i) {
+        const auto& row = rows.at(i);
+        const QString status = frontend::ProfileManager::diffStatusToString(row.status);
+        table->setItem(i, 0, new QTableWidgetItem(row.path));
+        table->setItem(i, 1, new QTableWidgetItem(status));
+        table->setItem(i, 2, new QTableWidgetItem(row.localValue));
+        table->setItem(i, 3, new QTableWidgetItem(row.remoteValue));
+        table->setItem(i, 4, new QTableWidgetItem(row.risk));
+        table->setItem(i, 5, new QTableWidgetItem(row.source));
+    }
+
+    layout->addWidget(table, 1);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+    dialog.exec();
+}
+
 void ConfigTabs::loadSelectedProfileInternal(const QString& profileName) {
     if (profileName.isEmpty()) return;
     const QString cfgPath = profileJsonPath(profileName);
@@ -913,6 +1057,7 @@ void ConfigTabs::loadSelectedProfileInternal(const QString& profileName) {
         QSettings().setValue("Config/ExternalCameraScriptPath", jsPath);
         onReloadJs();
     }
+    refreshProfileStatusLabel();
 }
 
 // ===== Profiles slots =====
@@ -928,6 +1073,7 @@ void ConfigTabs::onProfileSelectionChanged(int index) {
         SPDLOG_INFO("Profiles: cleared active profile; reverting to default include paths");
         onReloadJson();
         onReloadJs();
+        refreshProfileStatusLabel();
         return;
     }
     loadSelectedProfileInternal(profileName);
@@ -1013,6 +1159,7 @@ void ConfigTabs::onSaveProfile() {
     }
     SPDLOG_INFO("Profiles: saved profile '{}' (json={}, js_included={})",
                 name.toStdString(), cfgPath.toStdString(), includeJs ? 1 : 0);
+    refreshProfileStatusLabel();
 }
 
 void ConfigTabs::onDeleteProfile() {
@@ -1093,6 +1240,154 @@ void ConfigTabs::onRenameProfile() {
     refreshProfilesList();
     const int idx = profileSelect_->findData(newName);
     if (idx >= 0) profileSelect_->setCurrentIndex(idx);
+    refreshProfileStatusLabel();
+}
+
+void ConfigTabs::onCheckProfileUpdates() {
+    const QUrl catalogUrl = profileManager_.catalogUrlFromEnvOrDefault(QStringLiteral("stable"));
+    QString err;
+    const auto catalog = profileManager_.fetchCatalog(catalogUrl, &err);
+    if (!catalog.has_value()) {
+        QMessageBox::warning(this, tr("Check Updates"), tr("Failed to fetch catalog:\n%1").arg(err));
+        SPDLOG_WARN("ConfigTabs: catalog fetch failed from {}: {}", catalogUrl.toString().toStdString(), err.toStdString());
+        return;
+    }
+    if (catalog->catalogSchemaVersion <= 0) {
+        QMessageBox::warning(this, tr("Check Updates"), tr("Catalog is missing catalog_schema_version."));
+        return;
+    }
+
+    remoteCatalog_ = catalog;
+    refreshProfilesList();
+
+    const int remoteCount = catalog->profiles.size();
+    int updateCount = 0;
+    const auto refreshed = profileManager_.scanLocalProfiles(true, &*remoteCatalog_, nullptr);
+    for (const auto& profile : refreshed) {
+        if (profile.updateAvailable) {
+            ++updateCount;
+        }
+    }
+    QMessageBox::information(this,
+                             tr("Check Updates"),
+                             tr("Catalog refreshed from %1.\n\nProfiles in catalog: %2\nProfiles with updates: %3")
+                                 .arg(catalogUrl.toString())
+                                 .arg(remoteCount)
+                                 .arg(updateCount));
+}
+
+void ConfigTabs::onUpdateSelectedProfile() {
+    const auto selected = selectedProfileSummary();
+    if (!selected.has_value()) {
+        QMessageBox::information(this, tr("Update Selected"), tr("No profile selected."));
+        return;
+    }
+    if (!selected->remoteEntry.has_value()) {
+        QMessageBox::information(this, tr("Update Selected"), tr("The selected profile does not have remote catalog data."));
+        return;
+    }
+    const auto ret = QMessageBox::question(this,
+                                           tr("Update Selected"),
+                                           tr("Update profile '%1' from the public catalog?\n\nThis will replace config.json and any matching camera script after checksum verification.").arg(selected->profileName),
+                                           QMessageBox::Yes | QMessageBox::No,
+                                           QMessageBox::Yes);
+    if (ret != QMessageBox::Yes) {
+        return;
+    }
+
+    QString err;
+    if (!profileManager_.installRemoteProfile(*selected->remoteEntry, selected->profileName, &err)) {
+        QMessageBox::warning(this, tr("Update Selected"), tr("Failed to install profile update:\n%1").arg(err));
+        SPDLOG_WARN("ConfigTabs: failed to install remote profile '{}': {}", selected->profileName.toStdString(), err.toStdString());
+        return;
+    }
+
+    refreshProfilesList();
+    const QString cfgPath = profileJsonPath(selected->profileName);
+    const bool active = QFileInfo(currentJsonPath()).absoluteFilePath() == QFileInfo(cfgPath).absoluteFilePath();
+    if (active) {
+        emit appConfigPathChanged(cfgPath);
+        onReloadJson();
+        const bool includeJs = profilesIncludeJsCheck_ ? profilesIncludeJsCheck_->isChecked() : true;
+        if (includeJs && QFile::exists(profileJsPath(selected->profileName))) {
+            QSettings().setValue("Config/ExternalCameraScriptPath", profileJsPath(selected->profileName));
+            onReloadJs();
+        }
+    }
+    refreshProfileStatusLabel();
+    QMessageBox::information(this, tr("Update Selected"), tr("Profile update installed successfully."));
+}
+
+void ConfigTabs::onShowProfileDiff() {
+    const auto selected = selectedProfileSummary();
+    if (!selected.has_value()) {
+        QMessageBox::information(this, tr("Show Diff"), tr("No profile selected."));
+        return;
+    }
+    if (!remoteCatalog_.has_value() || !selected->remoteEntry.has_value()) {
+        QMessageBox::information(this, tr("Show Diff"), tr("Fetch the public catalog first, then select a remote-managed profile."));
+        return;
+    }
+
+    QByteArray remoteConfig;
+    QString remoteErr;
+    if (!profileManager_.downloadUrlBlocking(selected->remoteEntry->configUrl, &remoteConfig, &remoteErr)) {
+        QMessageBox::warning(this, tr("Show Diff"), tr("Failed to download remote config:\n%1").arg(remoteErr));
+        return;
+    }
+
+    QString localErr;
+    const auto localBytes = profileManager_.readFileBytes(profileJsonPath(selected->profileName), &localErr);
+    if (!localBytes.has_value()) {
+        QMessageBox::warning(this, tr("Show Diff"), tr("Failed to read local config:\n%1").arg(localErr));
+        return;
+    }
+
+    QString diffErr;
+    const auto rows = profileManager_.diffConfigBytes(*localBytes, remoteConfig, &diffErr);
+    if (!diffErr.isEmpty()) {
+        QMessageBox::warning(this, tr("Show Diff"), tr("Failed to diff configs:\n%1").arg(diffErr));
+        return;
+    }
+    if (rows.isEmpty()) {
+        QMessageBox::information(this, tr("Show Diff"), tr("No configuration differences detected."));
+        return;
+    }
+    showDiffDialog(tr("Profile Diff: %1").arg(selected->profileName), rows);
+}
+
+void ConfigTabs::onDuplicateProfileAsLocal() {
+    const auto selected = selectedProfileSummary();
+    if (!selected.has_value()) {
+        QMessageBox::information(this, tr("Duplicate as Local"), tr("No profile selected."));
+        return;
+    }
+    QString newName = QInputDialog::getText(this,
+                                            tr("Duplicate as Local"),
+                                            tr("New local profile name:"),
+                                            QLineEdit::Normal,
+                                            selected->profileName + QStringLiteral("-copy"));
+    if (newName.isNull()) {
+        return;
+    }
+    newName = sanitizeProfileName(newName);
+    if (newName.isEmpty()) {
+        QMessageBox::warning(this, tr("Duplicate as Local"), tr("Invalid profile name."));
+        return;
+    }
+
+    QString err;
+    if (!profileManager_.duplicateProfileAsLocal(selected->profileName, newName, &err)) {
+        QMessageBox::warning(this, tr("Duplicate as Local"), tr("Failed to duplicate profile:\n%1").arg(err));
+        return;
+    }
+
+    refreshProfilesList();
+    const int idx = profileSelect_ ? profileSelect_->findData(newName) : -1;
+    if (idx >= 0) {
+        profileSelect_->setCurrentIndex(idx);
+    }
+    QMessageBox::information(this, tr("Duplicate as Local"), tr("Created local profile '%1'.").arg(newName));
 }
 
 void ConfigTabs::onIncludeJsToggled(bool checked) {
