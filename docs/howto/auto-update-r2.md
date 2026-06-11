@@ -38,6 +38,78 @@ The app checks these only when the user requests it from `ConfigTabs`.
 Catalogs and mutable per-profile metadata should use short cache lifetimes;
 versioned immutable objects can be cached longer if they are added later.
 
+### Young's Modulus LUT
+
+The Young's modulus LUT is managed separately from app installers and follows
+the same operational pattern: publish a public manifest, download/update into
+a user-writable cache, verify SHA-256, and fall back to the bundled copy when
+offline or incompatible.
+
+Public object layout:
+
+- `stable/emodulus-lut/latest.json`
+- `stable/emodulus-lut/scaled_isoelastic_data_LUT_6.16-4.24.txt`
+- `beta/emodulus-lut/...` for beta/testing LUTs if you need a separate track
+
+Manifest format:
+
+- `manifest_schema_version` (number): currently `1`
+- `lut_id` (string): stable LUT identifier
+- `display_name` (string): human-friendly label
+- `revision` (string): published LUT revision
+- `download_url` (string): HTTPS or `file://` URL to the LUT payload
+- `sha256` (string): lowercase or uppercase hex SHA-256 of the LUT file
+- `size_bytes` (number): file size in bytes
+- `published_at` (optional string): ISO8601 timestamp
+- `app_min_version` / `app_max_version` (optional strings): compatibility bounds
+
+Example:
+
+```json
+{
+  "manifest_schema_version": 1,
+  "lut_id": "scaled_isoelastic_data_LUT_6.16-4.24",
+  "display_name": "Scaled Isoelastic LUT",
+  "revision": "2026.06.11-1",
+  "download_url": "https://updates.yofo.bio/stable/emodulus-lut/scaled_isoelastic_data_LUT_6.16-4.24.txt",
+  "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "size_bytes": 1234567,
+  "published_at": "2026-06-11T12:34:56Z"
+}
+```
+
+Publishing:
+
+```bash
+python publish-emodulus-lut.py \
+  --lut "resources/isoelastic_curve/scaled_isoelastic_data_LUT_6.16-4.24.txt" \
+  --revision "2026.06.11-1"
+```
+
+Verification:
+
+```bash
+python verify-emodulus-lut-manifest.py
+```
+
+Runtime behavior:
+
+- New builds check `MIB_STUDIO_EMODULUS_LUT_MANIFEST_URL` first; otherwise they
+  use `https://updates.yofo.bio/stable/emodulus-lut/latest.json`.
+- Downloaded LUTs are cached under the user-local app data tree, in
+  `isoelastic_curve/scaled_isoelastic_data_LUT_6.16-4.24.txt` by default.
+- `MIB_STUDIO_EMODULUS_LUT_CACHE_DIR` can redirect the cache for testing.
+- If the manifest fetch fails, the app keeps the last known-good local copy or
+  falls back to the bundled LUT on first run/offline launches.
+
+Rollback:
+
+1. Publish a corrected `stable/emodulus-lut/latest.json` that points to the
+   last known-good LUT.
+2. Verify with `python verify-emodulus-lut-manifest.py`.
+3. If the cache is corrupted locally, delete the LUT cache directory to force a
+   fresh seed from the bundled copy or the next successful remote manifest.
+
 Example public URLs:
 
 ```text

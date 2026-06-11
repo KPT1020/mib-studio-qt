@@ -51,7 +51,8 @@ All gates in one struct. Notable fields:
   `auto_background_cooldown_frames`
 - Target-group gate: `target_group_area_*`, `target_group_deformability_*`,
   `enable_target_group_emodulus` + `target_group_emodulus_*` (uses
-  `EModulusLut`)
+  `EModulusLut`, which is now fed from the managed LUT cache prepared by
+  `AppBackend` at startup)
 - Multi-image mode: `multi_image_enabled`, `multi_image_count`
 
 ## Accumulation modes
@@ -157,3 +158,6 @@ current/max queue depth, batch size, worker count, and running state. See
 - `computeProcessedFrame` intentionally omits the auto-background /
   previous-frame-diff path used in `realtimeLoop()`. Callers needing that
   should continue to drive frames through `FrameStore` + `startRealtime`.
+- Young's modulus gating still depends on the LUT path loaded during backend
+  startup; if the managed cache cannot be updated, the pipeline keeps using
+  the last known-good local copy or the bundled fallback.

@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Remote-managed Young's modulus LUT** (2026-06-11) — Added a new
+  `EModulusLutCatalog` backend helper that checks a public R2 manifest,
+  downloads the LUT into a user-writable app-local cache, verifies the
+  SHA-256 before activation, and preserves the bundled LUT as an automatic
+  fallback when offline or incompatible. `AppBackend` now logs the active LUT
+  source, revision, path, and checksum status at startup, the backend-only
+  build links `QtNetwork`, and the repo gained `publish-emodulus-lut.py`,
+  `verify-emodulus-lut-manifest.py`, and a backend smoke test covering remote
+  update + fallback behavior. Docs were updated for the LUT R2 object layout
+  and cache/rollback flow.
+
 - **Public R2-backed profile catalog + manual updates** (2026-06-11) —
   `ConfigTabs` now uses a dedicated `ProfileManager` helper to scan local
   profiles, lazily create `profile.meta.json`, fetch public catalogs on
