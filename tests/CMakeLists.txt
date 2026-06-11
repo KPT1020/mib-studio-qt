@@ -85,3 +85,20 @@ set_tests_properties(backend.processing_multi_object PROPERTIES LABELS "processi
 mib_add_backend_test_executable(mib_processing_object_tracking_test processing/processing_object_tracking_test.cpp)
 add_test(NAME backend.processing_object_tracking COMMAND $<TARGET_FILE:mib_processing_object_tracking_test>)
 set_tests_properties(backend.processing_object_tracking PROPERTIES LABELS "processing;backend")
+
+add_executable(json_flatten_roundtrip_test
+    ${PROJECT_SOURCE_DIR}/tests/frontend/json_flatten_roundtrip_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/JsonFlatten.cpp
+)
+target_include_directories(json_flatten_roundtrip_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+)
+target_compile_definitions(json_flatten_roundtrip_test PRIVATE
+    MIB_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+)
+target_link_libraries(json_flatten_roundtrip_test PRIVATE Qt6::Core)
+set_target_properties(json_flatten_roundtrip_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+)
+add_test(NAME frontend.json_flatten_roundtrip COMMAND $<TARGET_FILE:json_flatten_roundtrip_test>)
+set_tests_properties(frontend.json_flatten_roundtrip PROPERTIES LABELS "frontend;utility")

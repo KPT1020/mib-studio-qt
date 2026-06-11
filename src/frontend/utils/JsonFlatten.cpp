@@ -1,5 +1,7 @@
 #include "frontend/utils/JsonFlatten.h"
 
+#include <algorithm>
+
 #include <QMap>
 #include <QSet>
 
@@ -15,6 +17,60 @@ static QString toScalarString(const QJsonValue& v) {
 	return QString::fromUtf8(QJsonDocument::fromVariant(v.toVariant()).toJson(QJsonDocument::Compact));
 }
 
+static QJsonValue parseValueFromString(const QString& text) {
+	const QString t = text.trimmed();
+	if (t == "true") return QJsonValue(true);
+	if (t == "false") return QJsonValue(false);
+	if (t == "null" || t == "undefined") return QJsonValue();
+
+	bool ok = false;
+	const double d = t.toDouble(&ok);
+	if (ok && !t.isEmpty()) {
+		return QJsonValue(d);
+	}
+
+	if (!t.isEmpty() && (t.front() == '{' || t.front() == '[')) {
+		const QJsonParseError err = [&]() {
+			QJsonParseError parseError;
+			if (t.front() == '[') {
+				const QByteArray wrapped = QByteArrayLiteral("{\"__value__\":") + t.toUtf8() + QByteArrayLiteral("}");
+				(void)QJsonDocument::fromJson(wrapped, &parseError);
+			} else {
+				(void)QJsonDocument::fromJson(t.toUtf8(), &parseError);
+			}
+			return parseError;
+		}();
+		if (err.error == QJsonParseError::NoError) {
+			const QJsonDocument doc = (t.front() == '[')
+				? QJsonDocument::fromJson(QByteArrayLiteral("{\"__value__\":") + t.toUtf8() + QByteArrayLiteral("}"))
+				: QJsonDocument::fromJson(t.toUtf8());
+			if (t.front() == '[') {
+				return doc.object().value("__value__");
+			}
+			if (doc.isObject()) return QJsonValue(doc.object());
+			if (doc.isArray()) return QJsonValue(doc.array());
+		}
+	}
+
+	return QJsonValue(t);
+}
+
+static void setObjectValueByPath(QJsonObject& obj, const QString& path, const QJsonValue& value) {
+	const QStringList parts = path.split('.', Qt::SkipEmptyParts);
+	std::function<void(QJsonObject&, int)> setByIndex = [&](QJsonObject& node, int idx) {
+		if (idx >= parts.size()) return;
+		const QString& key = parts.at(idx);
+		if (idx == parts.size() - 1) {
+			node.insert(key, value);
+			return;
+		}
+		QJsonObject child = node.value(key).toObject();
+		setByIndex(child, idx + 1);
+		node.insert(key, child);
+	};
+	setByIndex(obj, 0);
+}
+
 static void flattenInto(const QJsonValue& value, const QString& prefix, QMap<QString, QString>& out) {
 	if (value.isObject()) {
 		const QJsonObject obj = value.toObject();
@@ -26,16 +82,12 @@ static void flattenInto(const QJsonValue& value, const QString& prefix, QMap<QSt
 	}
 	if (value.isArray()) {
 		const QJsonArray arr = value.toArray();
-		QStringList items;
-		items.reserve(arr.size());
-		for (const QJsonValue& e : arr) {
-			if (e.isObject() || e.isArray()) {
-				items << QString::fromUtf8(QJsonDocument::fromVariant(e.toVariant()).toJson(QJsonDocument::Compact));
-			} else {
-				items << toScalarString(e);
-			}
+		if (arr.size() > 0) {
+			out.insert(prefix.isEmpty() ? "(value)" : prefix,
+			           QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
+		} else {
+			out.insert(prefix.isEmpty() ? "(value)" : prefix, "[]");
 		}
-		out.insert(prefix.isEmpty() ? "(value)" : prefix, items.join(", "));
 		return;
 	}
 	out.insert(prefix.isEmpty() ? "(value)" : prefix, toScalarString(value));
@@ -98,10 +150,7 @@ FlattenTable flattenJsonForTable(const QJsonDocument& doc) {
 		const bool allScalars = std::all_of(arr.begin(), arr.end(), [](const QJsonValue& v) { return !v.isObject() && !v.isArray(); });
 		QString valueStr;
 		if (allScalars) {
-			QStringList items;
-			items.reserve(arr.size());
-			for (const QJsonValue& v : arr) items << toScalarString(v);
-			valueStr = items.join(", ");
+			valueStr = QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact));
 		} else {
 			valueStr = QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact));
 		}
@@ -128,15 +177,30 @@ QMap<QString, FlattenTable> groupJsonBySections(const QJsonDocument& doc) {
 		// For arrays or scalars, put everything in "General" section
 		FlattenTable general = flattenJsonForTable(doc);
 		if (!general.rows.isEmpty()) {
-			// Convert to 3-column format if needed
-			if (general.columns.size() == 2) {
+			bool handled = false;
+			if (doc.isArray()) {
+				const QJsonArray arr = doc.array();
+				if (std::all_of(arr.begin(), arr.end(), [](const QJsonValue& v) { return v.isObject(); })) {
+					// Preserve arrays of objects as array rows, not key/value rows.
+					general.columns.prepend("key");
+					general.columns.append("type");
+					for (auto& row : general.rows) {
+						row.prepend("");
+						row.append("");
+					}
+					handled = true;
+				}
+			}
+			if (!handled && general.columns.size() == 2) {
 				general.columns = {"key", "value", "type"};
 				for (auto& row : general.rows) {
 					if (row.size() == 2) {
 						row.append(""); // Add empty type column
 					}
 				}
-			} else if (general.columns.size() == 1) {
+				handled = true;
+			}
+			if (!handled && general.columns.size() == 1) {
 				general.columns = {"key", "value", "type"};
 				for (auto& row : general.rows) {
 					QString val = row.isEmpty() ? QString() : row[0];
@@ -213,15 +277,11 @@ QMap<QString, FlattenTable> groupJsonBySections(const QJsonDocument& doc) {
 				}
 			} else {
 				// Array of scalars - single row
-				QStringList items;
-				items.reserve(arr.size());
-				for (const QJsonValue& v : arr) {
-					items << toScalarString(v);
-				}
+				const QString valueStr = QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact));
 				sectionTable.columns = {"key", "value", "type"};
 				sectionTable.rows.append(QVector<QString>{
 					"(value)",
-					items.join(", "),
+					valueStr,
 					""
 				});
 			}
@@ -256,9 +316,117 @@ QMap<QString, FlattenTable> groupJsonBySections(const QJsonDocument& doc) {
 	return result;
 }
 
+static QJsonValue rebuildSectionValue(const QString& sectionName, const FlattenTable& table, bool* consumedWholeSection)
+{
+	if (consumedWholeSection) {
+		*consumedWholeSection = false;
+	}
+
+	if (table.columns.size() >= 2 && table.columns.at(0) == "key" && table.columns.at(1) == "value") {
+		if (sectionName == "General" && table.rows.size() == 1 && table.rows.first().size() >= 2 && table.rows.first().at(0) == "(value)") {
+			if (consumedWholeSection) {
+				*consumedWholeSection = true;
+			}
+			return parseValueFromString(table.rows.first().at(1));
+		}
+
+		QJsonObject sectionObj;
+		for (const auto& r : table.rows) {
+			if (r.size() < 2) continue;
+			const QString keyPath = r.at(0);
+			const QString valStr = r.at(1);
+			if (!keyPath.isEmpty() && keyPath != "(value)") {
+				setObjectValueByPath(sectionObj, keyPath, parseValueFromString(valStr));
+			} else if (keyPath == "(value)") {
+				if (consumedWholeSection) {
+					*consumedWholeSection = true;
+				}
+				return parseValueFromString(valStr);
+			}
+		}
+		return sectionObj;
+	}
+
+	if (table.columns.size() > 2) {
+		QJsonArray arr;
+		for (const auto& r : table.rows) {
+			QJsonObject obj;
+			for (int c = 0; c < table.columns.size() && c < r.size(); ++c) {
+				const QString keyPath = table.columns.at(c);
+				const QString valStr = r.at(c);
+				if (!keyPath.isEmpty() && keyPath != "key" && keyPath != "type") {
+					setObjectValueByPath(obj, keyPath, parseValueFromString(valStr));
+				}
+			}
+			if (!obj.isEmpty()) {
+				arr.append(obj);
+			}
+		}
+		if (sectionName == "General" && consumedWholeSection) {
+			*consumedWholeSection = true;
+		}
+		return arr;
+	}
+
+	return QJsonValue();
+}
+
+QJsonValue rebuildJsonValueFromSections(const QMap<QString, FlattenTable>& sections)
+{
+	if (sections.isEmpty()) {
+		return QJsonValue();
+	}
+
+	QJsonObject rootObject;
+	bool rootValueSet = false;
+	QJsonValue rootValue;
+
+	for (auto it = sections.constBegin(); it != sections.constEnd(); ++it) {
+		const QString& sectionName = it.key();
+		const FlattenTable& table = it.value();
+		bool consumedWholeSection = false;
+		const QJsonValue sectionValue = rebuildSectionValue(sectionName, table, &consumedWholeSection);
+
+		if (sectionName == "General" && consumedWholeSection) {
+			if (rootObject.isEmpty() && !rootValueSet) {
+				rootValue = sectionValue;
+				rootValueSet = true;
+			} else {
+				rootObject.insert(sectionName, sectionValue);
+			}
+			continue;
+		}
+
+		if (sectionName == "General" && sectionValue.isObject()) {
+			const QJsonObject sectionObj = sectionValue.toObject();
+			for (auto it = sectionObj.constBegin(); it != sectionObj.constEnd(); ++it) {
+				rootObject.insert(it.key(), it.value());
+			}
+			continue;
+		}
+
+		if (!sectionValue.isUndefined()) {
+			rootObject.insert(sectionName, sectionValue);
+		}
+	}
+
+	if (rootObject.isEmpty() && rootValueSet) {
+		return rootValue;
+	}
+
+	return rootObject;
+}
+
+QJsonDocument rebuildJsonDocumentFromSections(const QMap<QString, FlattenTable>& sections)
+{
+	const QJsonValue value = rebuildJsonValueFromSections(sections);
+	if (value.isObject()) {
+		return QJsonDocument(value.toObject());
+	}
+	if (value.isArray()) {
+		return QJsonDocument(value.toArray());
+	}
+	return QJsonDocument();
+}
+
 } // namespace frontend::jsonutil
-
-
-
-
-

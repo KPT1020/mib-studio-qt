@@ -537,6 +537,10 @@ namespace frontend
 
 		// Update image_processing section
 		QJsonObject ip = root.value("image_processing").toObject();
+		ip.insert("gaussian_blur_size", pcfg.gaussian_blur_size);
+		ip.insert("bg_subtract_threshold", pcfg.bg_subtract_threshold);
+		ip.insert("morph_kernel_size", pcfg.morph_kernel_size);
+		ip.insert("morph_iterations", pcfg.morph_iterations);
 		ip.insert("area_threshold_min", pcfg.area_threshold_min);
 		ip.insert("area_threshold_max", pcfg.area_threshold_max);
 		ip.insert("deformability_threshold_min", pcfg.deformability_threshold_min);
@@ -544,6 +548,10 @@ namespace frontend
 		ip.insert("area_ratio_threshold_max", pcfg.area_ratio_threshold_max);
 		ip.insert("ring_ratio_min", pcfg.ring_ratio_min);
 		ip.insert("ring_ratio_max", pcfg.ring_ratio_max);
+		ip.insert("empty_frame_pixel_threshold", pcfg.empty_frame_pixel_threshold);
+		ip.insert("auto_background_enabled", pcfg.auto_background_enabled);
+		ip.insert("auto_background_empty_frames", pcfg.auto_background_empty_frames);
+		ip.insert("auto_background_cooldown_frames", pcfg.auto_background_cooldown_frames);
 
 		// Update filters sub-object
 		QJsonObject fl = ip.value("filters").toObject();
@@ -562,7 +570,16 @@ namespace frontend
 		tg.insert("area_max", pcfg.target_group_area_max);
 		tg.insert("deformability_min", pcfg.target_group_deformability_min);
 		tg.insert("deformability_max", pcfg.target_group_deformability_max);
+		tg.insert("emodulus_enabled", pcfg.enable_target_group_emodulus);
+		tg.insert("emodulus_min", pcfg.target_group_emodulus_min);
+		tg.insert("emodulus_max", pcfg.target_group_emodulus_max);
 		ip.insert("target_group", tg);
+
+		// Update multi-image settings
+		QJsonObject mi = ip.value("multi_image").toObject();
+		mi.insert("enabled", pcfg.multi_image_enabled);
+		mi.insert("count", pcfg.multi_image_count);
+		ip.insert("multi_image", mi);
 
 		root.insert("image_processing", ip);
 		doc.setObject(root);
@@ -570,10 +587,14 @@ namespace frontend
 		file.resize(0);
 		file.seek(0);
 		QTextStream out(&file);
-		out << doc.toJson(QJsonDocument::Indented);
+		const QByteArray serialized = doc.toJson(QJsonDocument::Indented);
+		out << serialized;
 		file.close();
 
+		backend_.setLastConfigJson(serialized.toStdString());
+
 		SPDLOG_INFO("AppConfigWatcher: wrote back processing config to {}", watchedPath_.toStdString());
+		emit configFileChanged(watchedPath_);
 	}
 
 } // namespace frontend

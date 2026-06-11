@@ -71,43 +71,6 @@ static QString getUserConfigDir() {
     return QDir(appDir).absoluteFilePath("../include");
 }
 
-static QJsonValue parseValueFromString(const QString& text) {
-	const QString t = text.trimmed();
-	if (t == "true") return QJsonValue(true);
-	if (t == "false") return QJsonValue(false);
-	if (t == "null" || t == "undefined") return QJsonValue();
-	// Try number
-	bool ok = false;
-	double d = t.toDouble(&ok);
-	if (ok && !t.isEmpty()) return QJsonValue(d);
-	// Try array/object JSON
-	if ((!t.isEmpty() && (t.front() == '{' || t.front() == '['))) {
-		QJsonParseError err;
-		const QJsonDocument doc = QJsonDocument::fromJson(t.toUtf8(), &err);
-		if (err.error == QJsonParseError::NoError) {
-			if (doc.isObject()) return QJsonValue(doc.object());
-			if (doc.isArray()) return QJsonValue(doc.array());
-		}
-	}
-	return QJsonValue(t);
-}
-
-static void setObjectValueByPath(QJsonObject& obj, const QString& path, const QJsonValue& value) {
-	const QStringList parts = path.split('.', Qt::SkipEmptyParts);
-	std::function<void(QJsonObject&, int)> setByIndex = [&](QJsonObject& node, int idx) {
-		if (idx >= parts.size()) return;
-		const QString& key = parts.at(idx);
-		if (idx == parts.size() - 1) {
-			node.insert(key, value);
-			return;
-		}
-		QJsonObject child = node.value(key).toObject();
-		setByIndex(child, idx + 1);
-		node.insert(key, child);
-	};
-	setByIndex(obj, 0);
-}
-
 } // namespace
 
 ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
@@ -144,6 +107,11 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         jsonUnsavedLabel_->setVisible(false);
         jsonUnsavedLabel_->setStyleSheet("color: #d17a00;");
         jsonUnsavedLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+        jsonConflictLabel_ = new QLabel(page);
+        jsonConflictLabel_->setText(tr("Config changed elsewhere; reload before saving if you want the latest file."));
+        jsonConflictLabel_->setVisible(false);
+        jsonConflictLabel_->setStyleSheet("color: #b00020;");
+        jsonConflictLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
         profileSelect_ = new QComboBox(page);
         saveProfileBtn_ = new QPushButton(tr("Save Profile"), page);
         deleteProfileBtn_ = new QPushButton(tr("Delete"), page);
@@ -156,6 +124,8 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
 		row->addWidget(jsonPathLabel_);
         row->addSpacing(8);
         row->addWidget(jsonUnsavedLabel_);
+        row->addSpacing(8);
+        row->addWidget(jsonConflictLabel_);
         row->addSpacing(8);
         row->addWidget(new QLabel(tr("Profile:"), page));
         row->addWidget(profileSelect_);
@@ -322,6 +292,17 @@ QString ConfigTabs::currentJsPath() const {
     return defaultJsPath();
 }
 
+void ConfigTabs::clearJsonSyncIndicators()
+{
+    if (jsonUnsavedLabel_) {
+        jsonUnsavedLabel_->setVisible(false);
+        jsonUnsavedLabel_->setText(tr("Unsaved changes – click Save to apply."));
+    }
+    if (jsonConflictLabel_) {
+        jsonConflictLabel_->setVisible(false);
+    }
+}
+
 bool ConfigTabs::loadFileToEditor(const QString& path, QPlainTextEdit* editor, QString* err) {
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
@@ -332,7 +313,9 @@ bool ConfigTabs::loadFileToEditor(const QString& path, QPlainTextEdit* editor, Q
     const bool blocked = editor->blockSignals(true);
     editor->setPlainText(in.readAll());
     editor->blockSignals(blocked);
-    if (editor == jsonEdit_ && jsonUnsavedLabel_) jsonUnsavedLabel_->setVisible(false);
+    if (editor == jsonEdit_) {
+        clearJsonSyncIndicators();
+    }
     if (editor == jsEdit_ && jsUnsavedLabel_) jsUnsavedLabel_->setVisible(false);
     return true;
 }
@@ -393,7 +376,7 @@ void ConfigTabs::onReloadJson() {
         return;
     }
     jsonPathLabel_->setText(path);
-    if (jsonUnsavedLabel_) jsonUnsavedLabel_->setVisible(false);
+    clearJsonSyncIndicators();
     if (jsonStack_ && jsonStack_->currentIndex() == 1) {
         refreshJsonTableModel();
     }
@@ -408,7 +391,7 @@ void ConfigTabs::onSaveJson() {
         return;
     }
     QMessageBox::information(this, tr("Save config.json"), tr("Saved."));
-    if (jsonUnsavedLabel_) jsonUnsavedLabel_->setVisible(false);
+    clearJsonSyncIndicators();
     if (jsonStack_ && jsonStack_->currentIndex() == 1) {
         refreshJsonTableModel();
     }
@@ -522,7 +505,7 @@ void ConfigTabs::onBrowseJson() {
         return;
     }
     jsonPathLabel_->setText(selected);
-    if (jsonUnsavedLabel_) jsonUnsavedLabel_->setVisible(false);
+    clearJsonSyncIndicators();
     if (jsonStack_ && jsonStack_->currentIndex() == 1) {
         refreshJsonTableModel();
     }
@@ -757,33 +740,36 @@ void ConfigTabs::onExternalConfigFileChanged(const QString& path) {
     if (path != currentJsonPath()) {
         return;
     }
-    
-    // Only reload if there are no unsaved changes to avoid overwriting user edits
+
+    // Only reload if there are no unsaved changes to avoid overwriting user edits.
     if (jsonUnsavedLabel_ && jsonUnsavedLabel_->isVisible()) {
-        SPDLOG_DEBUG("ConfigTabs: skipping external file reload due to unsaved changes");
+        if (jsonConflictLabel_) {
+            jsonConflictLabel_->setVisible(true);
+        }
+        SPDLOG_WARN("ConfigTabs: config changed externally while editor has unsaved changes");
         return;
     }
-    
+
     // Reload the file into the editor
     QString err;
     if (!loadFileToEditor(path, jsonEdit_, &err)) {
         SPDLOG_WARN("ConfigTabs: failed to reload config.json from {}: {}", path.toStdString(), err.toStdString());
         return;
     }
-    
+
     // Refresh the JSON table if it's visible
     if (jsonStack_ && jsonStack_->currentIndex() == 1) {
         refreshJsonTableModel();
     }
-    
+
     SPDLOG_DEBUG("ConfigTabs: reloaded config.json from external change");
 }
 
 void ConfigTabs::rebuildJsonFromTable() {
 	if (!jsonEdit_) return;
-	
-	QJsonObject root;
-	
+
+	QMap<QString, jsonutil::FlattenTable> sections;
+
 	// Collect data from all section tables
 	for (auto it = jsonSectionModels_.constBegin(); it != jsonSectionModels_.constEnd(); ++it) {
 		const QString& sectionName = it.key();
@@ -792,81 +778,19 @@ void ConfigTabs::rebuildJsonFromTable() {
 		
 		const auto& cols = model->columns();
 		const auto& rows = model->rows();
-		
-		if (cols.size() >= 2 && cols.at(0) == "key" && cols.at(1) == "value") {
-			// Key-value format: build nested object under section name
-			QJsonObject sectionObj;
-			for (const auto& r : rows) {
-				if (r.size() < 2) continue;
-				const QString keyPath = r.at(0);
-				const QString valStr = r.at(1);
-				if (!keyPath.isEmpty() && keyPath != "(value)") {
-					setObjectValueByPath(sectionObj, keyPath, parseValueFromString(valStr));
-				} else if (keyPath == "(value)") {
-					// Scalar value for the section itself
-					root.insert(sectionName, parseValueFromString(valStr));
-					sectionObj = QJsonObject(); // Clear, we've set it directly
-					break;
-				}
-			}
-			if (!sectionObj.isEmpty()) {
-				root.insert(sectionName, sectionObj);
-			}
-		} else if (cols.size() > 2) {
-			// Array of objects format: build array under section name
-			QJsonArray arr;
-			for (const auto& r : rows) {
-				QJsonObject obj;
-				for (int c = 0; c < cols.size() && c < r.size(); ++c) {
-					const QString keyPath = cols.at(c);
-					const QString valStr = r.at(c);
-					if (!keyPath.isEmpty() && keyPath != "key" && keyPath != "type") {
-						setObjectValueByPath(obj, keyPath, parseValueFromString(valStr));
-					}
-				}
-				if (!obj.isEmpty()) {
-					arr.append(obj);
-				}
-			}
-			if (!arr.isEmpty()) {
-				root.insert(sectionName, arr);
-			}
-		}
+		sections.insert(sectionName, jsonutil::FlattenTable{cols, rows});
 	}
-	
-	// Fallback to legacy single table if no section tables exist
-	if (root.isEmpty() && jsonModel_) {
-		const auto& cols = jsonModel_->columns();
-		const auto& rows = jsonModel_->rows();
-		if (cols.size() == 2 && cols.at(0) == "key" && cols.at(1) == "value") {
-			for (const auto& r : rows) {
-				if (r.size() < 2) continue;
-				const QString keyPath = r.at(0);
-				const QString valStr = r.at(1);
-				setObjectValueByPath(root, keyPath, parseValueFromString(valStr));
-			}
-		} else {
-			QJsonArray arr;
-			for (const auto& r : rows) {
-				QJsonObject obj;
-				for (int c = 0; c < cols.size() && c < r.size(); ++c) {
-					const QString keyPath = cols.at(c);
-					const QString valStr = r.at(c);
-					setObjectValueByPath(obj, keyPath, parseValueFromString(valStr));
-				}
-				arr.append(obj);
-			}
-			QJsonDocument arrDoc(arr);
-			// Update editor without triggering table refresh loop
-			const bool blocked = jsonEdit_->blockSignals(true);
-			jsonEdit_->setPlainText(QString::fromUtf8(arrDoc.toJson(QJsonDocument::Indented)));
-			jsonEdit_->blockSignals(blocked);
-			if (jsonUnsavedLabel_) jsonUnsavedLabel_->setVisible(true);
-			return;
-		}
+
+	if (sections.isEmpty() && jsonModel_) {
+		sections.insert(QStringLiteral("General"),
+		                jsonutil::FlattenTable{jsonModel_->columns(), jsonModel_->rows()});
 	}
-	
-	QJsonDocument outDoc(root);
+
+	const QJsonDocument outDoc = jsonutil::rebuildJsonDocumentFromSections(sections);
+	if (outDoc.isNull()) {
+		return;
+	}
+
 	// Update editor without triggering table refresh loop
 	const bool blocked = jsonEdit_->blockSignals(true);
 	jsonEdit_->setPlainText(QString::fromUtf8(outDoc.toJson(QJsonDocument::Indented)));
@@ -1176,6 +1100,3 @@ void ConfigTabs::onIncludeJsToggled(bool checked) {
 }
 
 } // namespace frontend
-
-
-

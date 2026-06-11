@@ -5,6 +5,16 @@
 
 ## Features shipped
 
+- **Experiment config sync hardening** (2026-06-11) — `AppConfigWatcher`
+  now writes back the full supported `image_processing` config section,
+  including blur, background, auto-background, target-group emodulus, and
+  `multi_image` fields, then emits `configFileChanged` immediately so the
+  Preview JSON editor/table and Monitoring Tune Params refresh without
+  waiting for filesystem-watcher timing. `ExperimentMonitoringTab` now
+  updates the histogram ring-ratio defaults through the chart-range setter,
+  and the shared `JsonFlatten` utility gained round-trip helpers plus tests
+  covering nested objects, arrays of objects, arrays of scalars, root
+  scalar tables, and the bundled `resources/defaults/config.json`.
 - **MindVision camera SDK compatibility** (2026-06-11) - Added a separate
   MindVision camera backend and discovery path alongside the existing
   EGrabber and mock workflows. CMake now exposes `MIB_ENABLE_MINDVISION`

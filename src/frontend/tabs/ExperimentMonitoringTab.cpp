@@ -354,9 +354,8 @@ namespace frontend
         ringRatioCheckBox_->setChecked(cfg.enable_ring_ratio_check);
         singleInnerCheckBox_->setChecked(cfg.require_single_inner_contour);
 
-        // Sync histogram axis defaults from ring ratio config
-        histogramXMin_ = cfg.ring_ratio_min;
-        histogramXMax_ = cfg.ring_ratio_max;
+        // Sync histogram axis defaults from ring ratio config and refresh the chart defaults.
+        setHistogramXRange(cfg.ring_ratio_min, cfg.ring_ratio_max);
 
         targetGroupEnableBox_->setChecked(cfg.enable_target_group);
         targetAreaMinSpin_->setValue(cfg.target_group_area_min);
