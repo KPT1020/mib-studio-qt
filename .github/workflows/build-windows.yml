@@ -135,26 +135,53 @@ jobs:
 
       - name: Download eGrabber SDK
         run: |
-          curl -L -o egrabber-sdk.exe "https://s3.yofo.bio/egrabber-sdk-installer/egrabber-win-x86_64-25.10.0.57.exe"
-          Start-Process -FilePath .\egrabber-sdk.exe -ArgumentList '/S' -Wait
+          $sdkUrl = "https://updates.yofo.bio/egrabber-sdk-installer/egrabber-win-x86_64-25.10.0.57.exe"
+          curl.exe --fail --location --retry 3 --output egrabber-sdk.exe $sdkUrl
+          $sdkSize = (Get-Item egrabber-sdk.exe).Length
+          if ($sdkSize -lt 100MB) {
+            Write-Host "ERROR: Downloaded eGrabber SDK is unexpectedly small: $sdkSize bytes" -ForegroundColor Red
+            exit 1
+          }
+          $installer = Start-Process -FilePath .\egrabber-sdk.exe -ArgumentList '/S' -Wait -PassThru
+          if ($installer.ExitCode -ne 0) {
+            Write-Host "ERROR: eGrabber SDK installer failed with exit code $($installer.ExitCode)" -ForegroundColor Red
+            exit $installer.ExitCode
+          }
           if (!(Test-Path "C:\Program Files\Euresys\eGrabber\include")) {
             Write-Host "ERROR: eGrabber SDK headers not found" -ForegroundColor Red
             exit 1
           }
           Write-Host "eGrabber SDK installed"
+          New-Item -ItemType Directory -Force resources\installers | Out-Null
           Copy-Item egrabber-sdk.exe resources\installers\egrabber-win-x86_64-25.10.0.57.exe
         shell: pwsh
 
       - name: Download VC++ Redistributable
-        run: curl -L -o resources\installers\vc_redist.x64.exe "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+        run: |
+          New-Item -ItemType Directory -Force resources\installers | Out-Null
+          curl.exe --fail --location --retry 3 --output resources\installers\vc_redist.x64.exe "https://aka.ms/vs/17/release/vc_redist.x64.exe"
         shell: pwsh
 
       # ── Build ──────────────────────────────────────────────────
       - name: Conan install
-        run: conan install . -of build --build=missing -s build_type=Release -pr ci
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          conan install . -of build --build=missing -s build_type=Release -pr ci
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "WARNING: Conan install failed with current remotes (possibly team-conan). Retrying after disabling team-conan remote." -ForegroundColor Yellow
+            conan remote remove team-conan 2>$null
+            conan install . -of build --build=missing -s build_type=Release -pr ci
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "ERROR: Conan install failed after removing team-conan remote." -ForegroundColor Red
+              exit 1
+            }
+          }
 
       - name: Upload packages to team remote
         if: always() && env.CONAN_REMOTE_URL != ''
+        continue-on-error: true
         run: conan upload "*" -r team-conan -c
         env:
           CONAN_REMOTE_URL: ${{ secrets.CONAN_REMOTE_URL }}
@@ -311,31 +338,45 @@ jobs:
           }
         shell: pwsh
 
-      # ── Publish to rustfs ──────────────────────────────────────
-      - name: Publish update package to rustfs
+      - name: Check Cloudflare R2 publishing credentials
+        id: r2
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.R2_ACCESS_KEY_ID }}" ] && [ -n "${{ secrets.R2_SECRET_ACCESS_KEY }}" ] && [ -n "${{ secrets.MIB_STUDIO_R2_ENDPOINT }}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Publish to Cloudflare R2 ───────────────────────────────
+      - name: Publish update package to Cloudflare R2
+        if: steps.r2.outputs.available == 'true'
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          S3_UPLOAD_DEBUG: "1"
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          MIB_STUDIO_R2_ENDPOINT: ${{ secrets.MIB_STUDIO_R2_ENDPOINT }}
         run: |
           $version = "${{ steps.version.outputs.version }}"
           $channel = "${{ steps.version.outputs.channel }}"
           $updateInstaller = Get-ChildItem "build\dist\MIB_Studio_Qt_Update_v*.exe" | Select-Object -First 1
           if ($updateInstaller) {
-            .\publish-update.ps1 -Installer $updateInstaller.FullName -Version $version -Channel $channel
+            python publish-update.py `
+              --installer $updateInstaller.FullName `
+              --version $version `
+              --channel $channel `
+              --upload-method s3 `
+              --release-notes-url "https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }}"
           } else {
             Write-Host "WARNING: Update package not found, skipping" -ForegroundColor Yellow
           }
         shell: pwsh
 
-      - name: Skip full installer rustfs publish
+      - name: Skip full installer Cloudflare R2 publish
         run: |
           $setupInstaller = Get-ChildItem "build\dist\MIB_Studio_Qt_Setup_v*.exe" | Select-Object -First 1
           if ($setupInstaller) {
             $sizeMb = [math]::Round($setupInstaller.Length / 1MB, 1)
             Write-Host "Full installer: $($setupInstaller.Name) ($sizeMb MiB)"
-            Write-Host "Skipping RustFS upload for the full installer because s3.yofo.bio rejects large single PUTs."
-            Write-Host "The full installer remains attached to the GitHub Release; RustFS latest.json points to the update package."
+            Write-Host "Skipping Cloudflare R2 upload for the full installer because large installers are attached to GitHub Release only."
+            Write-Host "The full installer remains attached to the GitHub Release; Cloudflare R2 latest.json points to the update package."
           } else {
             Write-Host "WARNING: Full installer not found, skipping" -ForegroundColor Yellow
           }

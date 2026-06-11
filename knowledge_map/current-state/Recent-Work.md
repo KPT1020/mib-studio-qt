@@ -5,6 +5,16 @@
 
 ## Features shipped
 
+- **Cloudflare R2 CI publishing path cleanup** (2026-06-10) — Both
+  Windows GitHub Actions release workflows now wire stable/beta publishing
+  directly through `python publish-update.py`, map R2 credentials from
+  `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `MIB_STUDIO_R2_ENDPOINT`
+  into S3 environment variables, and label Cloudflare R2 steps explicitly.
+  Beta manifests now target `beta/latest.json`, while stable remains
+  `stable/latest.json`. `docs/howto/release-workflow.md` and
+  `docs/howto/auto-update-r2.md` were updated to document this channel naming
+  and secret contract.
+
 - **Long-run experiment backlog hardening** (2026-06-02) - `ProcessingService`
   now bounds the in-memory experiment frame backlog derived from the flush
   interval, drops sampled invalid frames before valid frames when HDF5 cannot

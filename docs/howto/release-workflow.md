@@ -12,7 +12,7 @@ The release pipeline builds on a local Windows machine with the required proprie
 # Production: bump, build, tag, push, create GitHub Release, publish to stable
 .\release.ps1 --patch --push
 
-# Test: bump, build, tag as v0.2.2-beta.1, push, publish to test channel
+# Beta: bump, build, tag as v0.2.2-beta.1, push, publish to beta channel
 .\release.ps1 --patch --beta --push
 
 # Preview what would happen
@@ -24,7 +24,7 @@ The release pipeline builds on a local Windows machine with the required proprie
 | Tag Format | Channel | GitHub Release | R2 Manifest | Auto-Update |
 |---|---|---|---|---|
 | `v1.2.3` | `stable` | Full release | `https://updates.yofo.bio/stable/latest.json` | All users |
-| `v1.2.3-beta.1` | `test` | Pre-release | `https://updates.yofo.bio/test/latest.json` | Testers only |
+| `v1.2.3-beta.1` | `beta` | Pre-release | `https://updates.yofo.bio/beta/latest.json` | Testers only |
 
 ### What `release.ps1 --push` Does
 
@@ -40,7 +40,7 @@ The release pipeline builds on a local Windows machine with the required proprie
 Options:
 
 - `--patch|--minor|--major`: version bump type (required)
-- `--beta`: create a test/pre-release (`v0.2.2-beta.1`, channel `test`)
+- `--beta`: create a beta/pre-release (`v0.2.2-beta.1`, channel `beta`)
 - `--push`: push tag, create GitHub Release, and publish to R2
 - `--skip-build`: skip build and publish; tag and push only
 - `--dry-run`: show what would happen without making changes
@@ -63,6 +63,25 @@ Before starting a release, ensure you have:
    - Dedicated bucket: `mib-studio-qt-updates`
    - Preferred for agent/Linux publishing: authenticated Wrangler session with R2 access.
    - S3 alternative: `MIB_STUDIO_R2_ENDPOINT="https://<account-id>.r2.cloudflarestorage.com"` plus `MIB_STUDIO_R2_PROFILE="mib-studio-r2"` or AWS credential environment variables.
+   - GitHub Actions secrets:
+     - `R2_ACCESS_KEY_ID`
+     - `R2_SECRET_ACCESS_KEY`
+     - `MIB_STUDIO_R2_ENDPOINT`
+   - GitHub Actions publish step maps to AWS env vars:
+     - `AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}`
+     - `AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }}`
+     - `MIB_STUDIO_R2_ENDPOINT=${{ secrets.MIB_STUDIO_R2_ENDPOINT }}`
+     - and invokes `publish-update.py --upload-method s3`
+   - Optional proprietary dependency secrets:
+     - `CONAN_REMOTE_URL`
+     - `CONAN_REMOTE_USER`
+     - `CONAN_REMOTE_PASSWORD`
+   - Optional symbol upload secrets:
+     - `SENTRY_DSN`
+     - `SENTRY_AUTH_TOKEN`
+     - `SENTRY_URL`
+     - `SENTRY_ORG`
+     - `SENTRY_PROJECT`
    - Do not commit R2 credentials or write tokens to the repo.
 5. Python. Install `boto3` only when using the S3-compatible upload backend instead of Wrangler.
 
@@ -145,7 +164,7 @@ Important parameters:
 - `--endpoint`: R2 S3 API endpoint; defaults to `MIB_STUDIO_R2_ENDPOINT`
 - `--bucket`: R2 bucket; defaults to `mib-studio-qt-updates`
 - `--public-base-url`: public custom domain; defaults to `https://updates.yofo.bio`
-- `--channel`: `stable` by default, `test` for beta releases
+- `--channel`: `stable` by default, `beta` for beta releases
 - `--profile`: AWS/R2 profile; defaults to `MIB_STUDIO_R2_PROFILE`
 - `--acl`: optional ACL for legacy S3-compatible targets; leave empty for R2
 - `--release-notes-url`: optional GitHub release or changelog URL
@@ -159,10 +178,10 @@ After publishing, verify public access from a network path that does not use pri
 python verify-update-manifest.py
 ```
 
-For test channel:
+For beta channel:
 
 ```bash
-python verify-update-manifest.py --manifest-url "https://updates.yofo.bio/test/latest.json"
+python verify-update-manifest.py --manifest-url "https://updates.yofo.bio/beta/latest.json"
 ```
 
 Manual checks:
@@ -192,7 +211,7 @@ $env:MIB_STUDIO_R2_ENDPOINT = "https://<account-id>.r2.cloudflarestorage.com"
 $env:MIB_STUDIO_R2_PROFILE = "mib-studio-r2"
 .\release.ps1 --patch --push
 
-# Test release
+# Beta release
 .\release.ps1 --patch --beta --push
 ```
 
@@ -228,7 +247,7 @@ flowchart TD
     Commit -->|--beta| BetaTag[Tag: v0.2.2-beta.1]
     BetaTag --> Build
     R2 -->|stable| Stable[stable/latest.json]
-    R2 -->|test| Test[test/latest.json]
+    R2 -->|beta| Beta[beta/latest.json]
 ```
 
 ## Legacy Client Compatibility
