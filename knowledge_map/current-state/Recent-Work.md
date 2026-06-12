@@ -5,6 +5,27 @@
 
 ## Features shipped
 
+- **OpenAI Symphony workflow setup** (2026-06-11) - Added the repo-owned
+  `WORKFLOW.md` contract for the existing Linear `mib-studio` project, plus
+  `scripts/start-symphony.ps1` to bootstrap the OpenAI Symphony Elixir
+  reference implementation and run it against Codex app-server. Documented the
+  trusted-environment assumptions, Linear project slug, workspace location, and
+  startup path in `docs/howto/symphony.md`.
+
+- **MindVision local SDK build enablement** (2026-06-11) - Reconfigured the
+  Windows Debug build for `MIB_ENABLE_MINDVISION=ON` against the installed
+  MindVision SDK layout, and fixed the SDK include handling so both
+  `MindVision/CameraApiLoad.h` and flat `CameraApiLoad.h` installs compile.
+  The SDK dynamic-loader symbols are now owned by `MindVisionCamera.cpp`, the
+  Windows `max` macro no longer breaks the boot-time
+  `MIB_CAMERA_MODE=mindvision` path, and hosted Windows GitHub workflows
+  explicitly keep MindVision disabled because runners do not install the
+  proprietary SDK. The release workflow now builds the default target set
+  before `ctest` so test executables exist when release tests run; backend
+  lifecycle tests now clean temporary directories only after backend teardown.
+  The Overview/Experiment tab switch path now skips EGrabber JS script
+  application when a MindVision camera is selected.
+
 - **Public R2-backed profile catalog + manual updates** (2026-06-11) —
   `ConfigTabs` now uses a dedicated `ProfileManager` helper to scan local
   profiles, lazily create `profile.meta.json`, fetch public catalogs on

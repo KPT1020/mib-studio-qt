@@ -45,5 +45,8 @@ Synchronous, called from main thread.
   `AppBackend::configureMockCamera`.
 - MindVision selection is handled separately from EGrabber selection in
   [[../frontend/ConnectTab]] and `AppBackend`.
+- MindVision SDK loader symbols are defined by
+  [[../camera/MindVisionCamera]]; this service includes the SDK header without
+  `API_LOAD_MAIN` to avoid duplicate loader definitions.
 - See `docs/howto/external-config-and-camera-script.md` for script format
   and `docs/integration/egrabber.md` for SDK notes.

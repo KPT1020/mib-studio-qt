@@ -35,6 +35,12 @@
 
 - The SDK is discovered at configure time through `MIB_MINDVISION_SDK_ROOT`
   or the `MIB_MINDVISION_SDK_DIR` environment variable.
+- The implementation accepts both SDK include layouts:
+  `MindVision/CameraApiLoad.h` and a flat `CameraApiLoad.h` directly under
+  the configured include directory.
+- `MindVisionCamera.cpp` owns the SDK dynamic-loader definitions by defining
+  `API_LOAD_MAIN`; other MindVision users include the SDK header as extern
+  declarations only.
 - Runtime deployment copies the MindVision DLL next to the app when Windows
   packaging is enabled.
 - The current backend treats MindVision as a separate camera provider; mock

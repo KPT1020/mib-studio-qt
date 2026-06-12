@@ -83,7 +83,8 @@ int main()
     if (!cv::imwrite(mockFramePath.string(), frame))
     {
         std::cerr << "failed to write mock frame fixture\n";
-        std::filesystem::remove_all(dataDir);
+        std::error_code cleanupError;
+        std::filesystem::remove_all(dataDir, cleanupError);
         return 1;
     }
 
@@ -92,43 +93,41 @@ int main()
     setEnv("MIB_MOCK_CAMERA_INTERVAL_MS", "1");
     setEnv("MIB_MOCK_CAMERA_LOOP", "true");
 
-    backend::AppBackend backend;
-    bridge::BackendFacade facade(backend);
-    std::vector<bridge::BackendEvent> events;
-    facade.setEventSink([&events](const bridge::BackendEvent &event) {
-        events.push_back(event);
-    });
+    const int result = [&]() -> int {
+        backend::AppBackend backend;
+        bridge::BackendFacade facade(backend);
+        std::vector<bridge::BackendEvent> events;
+        facade.setEventSink([&events](const bridge::BackendEvent &event) {
+            events.push_back(event);
+        });
 
-    if (!facade.initialize(dataDir.string()) || !facade.isInitialized())
-    {
-        std::cerr << "BackendFacade should initialize AppBackend explicitly\n";
-        std::filesystem::remove_all(dataDir);
-        return 2;
-    }
+        if (!facade.initialize(dataDir.string()) || !facade.isInitialized())
+        {
+            std::cerr << "BackendFacade should initialize AppBackend explicitly\n";
+            return 2;
+        }
 
-    bridge::ProcessingSettingsCommand processingCommand;
-    auto config = backend.processing().getProcessingConfig();
-    config.empty_frame_pixel_threshold = 12;
-    processingCommand.config = config;
-    processingCommand.roi = backend::services::ProcessingService::Roi{1, 2, 8, 9};
-    processingCommand.realtimeEnabled = false;
-    processingCommand.realtimeDropFrames = true;
-    processingCommand.pixelToMicronFactor = 2.5;
-    if (!facade.dispatch(processingCommand).ok)
-    {
-        std::cerr << "ProcessingSettingsCommand should apply through ProcessingService\n";
-        std::filesystem::remove_all(dataDir);
-        return 3;
-    }
-    if (backend.processing().getProcessingConfig().empty_frame_pixel_threshold != 12 ||
-        backend.processing().getRealtimeRoi().w != 8 ||
-        !backend.processing().getRealtimeDropFrames() ||
-        backend.processing().getPixelToMicronFactor() != 2.5)
-    {
-        std::cerr << "Processing settings were not delegated to ProcessingService\n";
-        std::filesystem::remove_all(dataDir);
-        return 4;
-    }
+        bridge::ProcessingSettingsCommand processingCommand;
+        auto config = backend.processing().getProcessingConfig();
+        config.empty_frame_pixel_threshold = 12;
+        processingCommand.config = config;
+        processingCommand.roi = backend::services::ProcessingService::Roi{1, 2, 8, 9};
+        processingCommand.realtimeEnabled = false;
+        processingCommand.realtimeDropFrames = true;
+        processingCommand.pixelToMicronFactor = 2.5;
+        if (!facade.dispatch(processingCommand).ok)
+        {
+            std::cerr << "ProcessingSettingsCommand should apply through ProcessingService\n";
+            return 3;
+        }
+        if (backend.processing().getProcessingConfig().empty_frame_pixel_threshold != 12 ||
+            backend.processing().getRealtimeRoi().w != 8 ||
+            !backend.processing().getRealtimeDropFrames() ||
+            backend.processing().getPixelToMicronFactor() != 2.5)
+        {
+            std::cerr << "Processing settings were not delegated to ProcessingService\n";
+            return 4;
+        }
 
     bridge::CameraCommand configureMock;
     configureMock.action = bridge::CameraCommandAction::ConfigureMockCamera;
@@ -138,7 +137,6 @@ int main()
     if (!facade.dispatch(configureMock).ok)
     {
         std::cerr << "CameraCommand should configure mock camera through AppBackend\n";
-        std::filesystem::remove_all(dataDir);
         return 5;
     }
 
@@ -147,7 +145,6 @@ int main()
     if (!facade.dispatch(startCapture).ok)
     {
         std::cerr << "CameraCommand should start capture through CaptureService\n";
-        std::filesystem::remove_all(dataDir);
         return 6;
     }
 
@@ -156,7 +153,6 @@ int main()
     {
         std::cerr << "BackendFacade should expose Qt-widget-free frame copies\n";
         facade.shutdown();
-        std::filesystem::remove_all(dataDir);
         return 7;
     }
 
@@ -166,7 +162,6 @@ int main()
     {
         std::cerr << "PlaybackSeekCommand should resolve through PlaybackService\n";
         facade.shutdown();
-        std::filesystem::remove_all(dataDir);
         return 8;
     }
 
@@ -178,7 +173,6 @@ int main()
     {
         std::cerr << "RecordingCommand should start frame recording through AppBackend\n";
         facade.shutdown();
-        std::filesystem::remove_all(dataDir);
         return 9;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(25));
@@ -190,7 +184,6 @@ int main()
     {
         std::cerr << "RecordingCommand should stop frame recording through AppBackend\n";
         facade.shutdown();
-        std::filesystem::remove_all(dataDir);
         return 10;
     }
 
@@ -200,7 +193,6 @@ int main()
     {
         std::cerr << "RecordingLoadCommand should load recorded HDF5 through Hdf5Service\n";
         facade.shutdown();
-        std::filesystem::remove_all(dataDir);
         return 11;
     }
 
@@ -210,7 +202,6 @@ int main()
     {
         std::cerr << "CameraCommand should stop capture through CaptureService\n";
         facade.shutdown();
-        std::filesystem::remove_all(dataDir);
         return 12;
     }
 
@@ -218,7 +209,6 @@ int main()
     if (facade.isInitialized())
     {
         std::cerr << "BackendFacade shutdown should make lifecycle explicit\n";
-        std::filesystem::remove_all(dataDir);
         return 13;
     }
 
@@ -229,10 +219,13 @@ int main()
         !hasEvent<bridge::ProcessingResultEvent>(events))
     {
         std::cerr << "BackendFacade should emit frontend-neutral event variants\n";
-        std::filesystem::remove_all(dataDir);
         return 14;
     }
 
-    std::filesystem::remove_all(dataDir);
-    return 0;
+        return 0;
+    }();
+
+    std::error_code cleanupError;
+    std::filesystem::remove_all(dataDir, cleanupError);
+    return result;
 }

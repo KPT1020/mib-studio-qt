@@ -3,6 +3,7 @@ build/
 CMakeUserPresets.json
 export/
 data/logs/app.log
+data/logs/symphony-*.log
 data/empty_detection_results/
 review_artifacts/
 .cache/

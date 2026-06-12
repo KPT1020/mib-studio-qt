@@ -144,10 +144,10 @@ jobs:
           CONAN_REMOTE_URL: ${{ secrets.CONAN_REMOTE_URL }}
 
       - name: Configure CMake
-        run: cmake --preset windows-default
+        run: cmake --preset windows-default -DMIB_ENABLE_MINDVISION=OFF
 
       - name: Build Release
-        run: cmake --build build --config Release --target mib_studio_qt
+        run: cmake --build build --config Release
 
       - name: Run tests
         run: ctest --test-dir build --build-config Release --output-on-failure --timeout 30

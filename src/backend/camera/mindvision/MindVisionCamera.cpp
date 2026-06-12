@@ -7,12 +7,21 @@
 #if MIB_HAS_MINDVISION
 
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #include <stdio.h>
 #endif
 
 #define API_LOAD_MAIN
-#include "MindVision/CameraApiLoad.h"
+#if __has_include(<MindVision/CameraApiLoad.h>)
+#include <MindVision/CameraApiLoad.h>
+#elif __has_include(<CameraApiLoad.h>)
+#include <CameraApiLoad.h>
+#else
+#error "MindVision CameraApiLoad.h not found"
+#endif
 
 #include <QFile>
 #include <QJsonDocument>

@@ -1109,6 +1109,11 @@ void MainWindow::onTabChanged(int index)
         return;
     }
 
+    if (backend_.isMindVisionCameraSelected()) {
+        SPDLOG_DEBUG("MainWindow::onTabChanged: Skipping EGrabber script application for MindVision camera");
+        return;
+    }
+
     // Check if camera is currently running
     bool wasRunning = backend_.capture().isRunning();
 

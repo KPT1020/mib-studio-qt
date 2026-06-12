@@ -3,7 +3,7 @@
 > Composition root. Owns every backend service and the shared `FrameStore`.
 > Frontend code holds a single `backend::AppBackend&` and calls getters.
 
-**Source:** `src/backend/AppBackend.cpp`, `include/backend/AppBackend.h`
+**Source:** `src/backend/app/AppBackend.cpp`, `include/backend/app/AppBackend.h`
 **Related:** [[Overview]], [[Data-Flow]], [[Threading-Model]],
 [[../data-model/FrameStore]]
 
@@ -89,6 +89,9 @@ Notes:
 
 - On non-Windows builds, hardware camera initialization is forced to mock and
   logs a warning when a hardware mode is requested.
+- On Windows, `MIB_CAMERA_MODE=mindvision` configures the MindVision capture
+  factory when the build was configured with `MIB_ENABLE_MINDVISION=ON`; the
+  startup parser clamps `MIB_MINDVISION_CAMERA_INDEX` to a non-negative index.
 - `setHardwareCameraSelection()` becomes a guarded fallback on non-Windows:
   it logs a warning, switches the capture factory to `MockCamera`, clears
   selected hardware indices, and keeps `mockCameraConfigured_ = true`.

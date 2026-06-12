@@ -27,6 +27,9 @@
 - `onNoCamerasFound` — shows a friendly dialog when
   `DeviceInitManager` reports empty discovery.
 
+- EGrabber JavaScript camera scripts are skipped during `onTabChanged` when
+  a MindVision camera is selected.
+
 ## Composition
 
 - `connectTab_`, `overviewTab_`, `experimentTabs_` (QTabWidget with child

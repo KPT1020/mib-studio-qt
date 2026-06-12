@@ -28,6 +28,9 @@
 #include <utility>
 #include <spdlog/spdlog.h>
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #include <shlobj.h>
 #endif
@@ -463,7 +466,7 @@ namespace backend
                 {
                     try
                     {
-                        cameraIndex = std::max(0, std::stoi(envIndex));
+                        cameraIndex = (std::max)(0, std::stoi(envIndex));
                     }
                     catch (const std::exception &)
                     {
