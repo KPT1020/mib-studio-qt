@@ -14,6 +14,10 @@ mib_add_backend_test_executable(mib_backend_smoke_test backend/backend_smoke_tes
 add_test(NAME backend.smoke COMMAND $<TARGET_FILE:mib_backend_smoke_test>)
 set_tests_properties(backend.smoke PROPERTIES LABELS "backend")
 
+mib_add_backend_test_executable(emodulus_lut_catalog_test backend/emodulus_lut_catalog_test.cpp)
+add_test(NAME backend.emodulus_lut_catalog COMMAND $<TARGET_FILE:emodulus_lut_catalog_test>)
+set_tests_properties(backend.emodulus_lut_catalog PROPERTIES LABELS "backend;processing")
+
 mib_add_backend_test_executable(backend_lifecycle_smoke_test backend/backend_lifecycle_smoke_test.cpp)
 add_test(NAME backend.lifecycle_smoke COMMAND $<TARGET_FILE:backend_lifecycle_smoke_test>)
 set_tests_properties(backend.lifecycle_smoke PROPERTIES LABELS "backend")

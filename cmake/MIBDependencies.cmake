@@ -1,9 +1,9 @@
 # Optional sentry-native integration (CMake-managed clone).
 include(Sentry)
 
-set(MIB_QT_COMPONENTS Core Gui SerialPort)
+set(MIB_QT_COMPONENTS Core Gui SerialPort Network)
 if(NOT MIB_BUILD_BACKEND_ONLY)
-    list(APPEND MIB_QT_COMPONENTS Widgets Charts Network Concurrent)
+    list(APPEND MIB_QT_COMPONENTS Widgets Charts Concurrent)
 endif()
 find_package(Qt6 COMPONENTS ${MIB_QT_COMPONENTS} REQUIRED)
 find_package(spdlog CONFIG REQUIRED)

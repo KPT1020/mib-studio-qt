@@ -31,8 +31,10 @@ See `src/backend/AppBackend.cpp` around lines 79–200.
 3. `sqliteService_->initialize(dataDir/app.sqlite3)`,
    `hdf5Service_->initialize(dataDir)`.
 4. Loads optional YOLO model from `resources/models/yolo11n-seg.onnx`.
-5. Loads Young's modulus LUT from
-   `resources/isoelastic_curve/scaled_isoelastic_data_LUT_6.16-4.24.txt`.
+5. Resolves the Young's modulus LUT through the managed R2/cache helper,
+   preferring the user-writable copy under the app-local data tree and
+   falling back to the bundled `resources/isoelastic_curve/...` file on
+   first run, offline launches, or update failures.
 6. Starts the processing worker pool (`processingService_->start()`).
    Realtime loop is **not** started here — it starts when the Experiment tab
    becomes active.
@@ -45,10 +47,23 @@ See `src/backend/AppBackend.cpp` around lines 79–200.
      [[../frontend/System-Utilities]] `BackgroundCaptureNotifier`
 8. Seeds the [[../diagnostics/CrashStateMirror]] with initial app context
    (camera label, data dir, mock vs hardware vs MindVision, FrameStore
-   capacity) and sets the Sentry tags (`camera_mode`, `data_dir`) on
-   [[../services/CrashReporter]].
-   The reporter itself is initialized earlier in `main()`, before AppBackend
-   exists.
+  capacity) and sets the Sentry tags (`camera_mode`, `data_dir`) on
+  [[../services/CrashReporter]].
+  The reporter itself is initialized earlier in `main()`, before AppBackend
+  exists.
+
+### LUT management
+
+The Young's modulus LUT now follows the same managed-asset model as the
+profile catalog:
+
+- `EModulusLutCatalog` checks `https://updates.yofo.bio/stable/emodulus-lut/latest.json`
+  by default, with `MIB_STUDIO_EMODULUS_LUT_MANIFEST_URL` as an override.
+- Remote payloads are verified with SHA-256 before replacing the local cache.
+- The active LUT path is logged with source, revision, checksum status, and
+  remote update outcome.
+- `MIB_STUDIO_EMODULUS_LUT_CACHE_DIR` can redirect the cache path for tests
+  or local validation.
 
 ### Boot-time service toggles (`MIB_DISABLED_SERVICES`)
 

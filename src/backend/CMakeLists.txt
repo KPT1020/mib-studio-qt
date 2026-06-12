@@ -7,6 +7,7 @@ add_library(mib_backend STATIC
     ${PROJECT_SOURCE_DIR}/include/backend/app/BackgroundFrame.h
     ${PROJECT_SOURCE_DIR}/src/backend/app/Tools.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/processing/EModulusLut.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/processing/EModulusLutCatalog.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/services/Logger.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/services/CrashReporter.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/diagnostics/CrashStateMirror.cpp
@@ -93,6 +94,7 @@ target_link_libraries(mib_backend PUBLIC
     spdlog::spdlog
     Qt6::Core
     Qt6::Gui
+    Qt6::Network
     Qt6::SerialPort
 )
 

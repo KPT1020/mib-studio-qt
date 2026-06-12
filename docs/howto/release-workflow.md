@@ -5,6 +5,7 @@ This guide documents the end-to-end process for releasing a new version of MIB S
 ## Overview
 
 The release pipeline builds on a local Windows machine with the required proprietary dependencies, publishes installer assets to GitHub Releases with `gh`, and publishes the auto-update package to Cloudflare R2 through the Python command `publish-update.py`.
+Calibration and lookup-table updates can be published independently with `publish-emodulus-lut.py`; see [`auto-update-r2.md`](auto-update-r2.md) for the LUT-specific object layout and rollback behavior.
 
 ### One-Command Release (`release.ps1`)
 
