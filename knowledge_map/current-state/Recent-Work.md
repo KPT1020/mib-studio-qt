@@ -5,6 +5,15 @@
 
 ## Features shipped
 
+- **Multi-image stop-lag hardening** (2026-06-16) — Reduced experiment-stop
+  stalls in `multi_image_count=15` runs by throttling HDF5 recovery checkpoint
+  sidecar copies on append paths (while still forcing checkpoints on metadata
+  finalization), packing `series_images` writes as one HDF5 record per frame
+  instead of per-image calls, and ending experiment accumulation before final
+  stop-time flushes in both `MainWindow` and `ExperimentController`. Added
+  backend regression coverage in
+  `hdf5_recovery_checkpoint_throttle_test.cpp`.
+
 - **OpenAI Symphony workflow setup** (2026-06-11) - Added the repo-owned
   `WORKFLOW.md` contract for the existing Linear `mib-studio` project, plus
   `scripts/start-symphony.ps1` to bootstrap the OpenAI Symphony Elixir

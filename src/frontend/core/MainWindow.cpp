@@ -710,7 +710,15 @@ void MainWindow::onStopExperiment()
                     sinceMs(t0), wasInProgress);
     }
 
-    // Flush any remaining buffered frames (synchronous for final flush)
+    {
+        const auto t0 = stop_clock::now();
+        processing.endExperiment();
+        backend_.processing().resetRealtimeMetrics();
+        SPDLOG_INFO("stop-lag: endExperiment+resetRealtimeMetrics took {:.3f} ms", sinceMs(t0));
+    }
+
+    // Flush any remaining buffered frames (synchronous for final flush) after
+    // ending the experiment so no new frames are accumulated during shutdown.
     auto &hdf5 = backend_.hdf5();
     if (hdf5.isFileOpen())
     {
@@ -722,13 +730,6 @@ void MainWindow::onStopExperiment()
         {
             SPDLOG_INFO("Final flush: {} frames written to HDF5", flushed);
         }
-    }
-
-    {
-        const auto t0 = stop_clock::now();
-        processing.endExperiment();
-        backend_.processing().resetRealtimeMetrics();
-        SPDLOG_INFO("stop-lag: endExperiment+resetRealtimeMetrics took {:.3f} ms", sinceMs(t0));
     }
 
     // Get final frame counts (should be empty after flush, but check anyway)

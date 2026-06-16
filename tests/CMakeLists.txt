@@ -26,6 +26,10 @@ mib_add_backend_test_executable(backend_facade_boundary_test backend/backend_fac
 add_test(NAME backend.facade_boundary COMMAND $<TARGET_FILE:backend_facade_boundary_test>)
 set_tests_properties(backend.facade_boundary PROPERTIES LABELS "backend;bridge")
 
+mib_add_backend_test_executable(hdf5_recovery_checkpoint_throttle_test backend/hdf5_recovery_checkpoint_throttle_test.cpp)
+add_test(NAME backend.hdf5_recovery_checkpoint_throttle COMMAND $<TARGET_FILE:hdf5_recovery_checkpoint_throttle_test>)
+set_tests_properties(backend.hdf5_recovery_checkpoint_throttle PROPERTIES LABELS "backend;recording")
+
 mib_add_backend_test_executable(mindvision_selection_state_test backend/mindvision_selection_state_test.cpp)
 add_test(NAME backend.mindvision_selection_state COMMAND $<TARGET_FILE:mindvision_selection_state_test>)
 set_tests_properties(backend.mindvision_selection_state PROPERTIES LABELS "backend;camera")

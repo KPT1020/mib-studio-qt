@@ -17,7 +17,9 @@
 - `onStartExperiment` / `onStopExperiment` — drive
   [[Controllers]] `ExperimentController`. Stop path now issues an explicit
   `Hdf5Service::flush()` immediately before `writeExperimentInfo()` to reduce
-  risk of metadata writes invalidating already-persisted frame batches.
+  risk of metadata writes invalidating already-persisted frame batches. It also
+  calls `ProcessingService::endExperiment()` **before** the final synchronous
+  flush so no new frames are accumulated while stop-time I/O is running.
 - `onUpdateStats` — timer tick; pulls `CaptureStats`, count-only
   `ProcessingService::getBufferedFrameCounts()`, and autofocus state for the
   status bar/sidebar. It must not copy full `ProcessedFrame` buffers on the

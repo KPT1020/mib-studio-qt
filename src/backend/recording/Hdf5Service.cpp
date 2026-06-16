@@ -31,6 +31,9 @@ namespace backend::services
         hsize_t validFramesWritten_{0};
         hsize_t invalidFramesWritten_{0};
         hsize_t seriesImagesWritten_{0}; // tracks /valid_frames/series_images row count
+        bool hasRecoveryCheckpoint_{false};
+        uint64_t recoveryCheckpointSizeBytes_{0};
+        std::chrono::steady_clock::time_point lastRecoveryCheckpointAt_{};
 
         ~Impl()
         {
@@ -44,6 +47,20 @@ namespace backend::services
 
     namespace
     {
+        constexpr auto kRecoveryCheckpointMinInterval = std::chrono::seconds(30);
+        constexpr uint64_t kRecoveryCheckpointMinGrowthBytes = 128ULL * 1024ULL * 1024ULL;
+
+        uint64_t safeFileSizeBytes(const std::string &path)
+        {
+            std::error_code ec;
+            const auto size = std::filesystem::file_size(path, ec);
+            if (ec)
+            {
+                return 0;
+            }
+            return static_cast<uint64_t>(size);
+        }
+
         std::string recoveryPathFor(const std::string &filePath)
         {
             return filePath + ".recovery.h5";
@@ -65,6 +82,44 @@ namespace backend::services
                             filePath, ec.message());
                 return false;
             }
+            return true;
+        }
+
+        bool maybeWriteRecoveryCheckpoint(const std::string &filePath,
+                                          bool &hasCheckpoint,
+                                          uint64_t &checkpointSizeBytes,
+                                          std::chrono::steady_clock::time_point &lastCheckpointAt,
+                                          bool force,
+                                          const char *reason)
+        {
+            if (filePath.empty())
+            {
+                return false;
+            }
+
+            const uint64_t fileSizeBytes = safeFileSizeBytes(filePath);
+            const auto now = std::chrono::steady_clock::now();
+
+            const bool intervalElapsed = !hasCheckpoint ||
+                                         (now - lastCheckpointAt) >= kRecoveryCheckpointMinInterval;
+            const bool grewEnough = !hasCheckpoint ||
+                                    fileSizeBytes >= checkpointSizeBytes + kRecoveryCheckpointMinGrowthBytes;
+
+            if (!force && hasCheckpoint && !intervalElapsed && !grewEnough)
+            {
+                return false;
+            }
+
+            if (!writeRecoveryCheckpoint(filePath))
+            {
+                return false;
+            }
+
+            hasCheckpoint = true;
+            checkpointSizeBytes = fileSizeBytes;
+            lastCheckpointAt = now;
+            SPDLOG_DEBUG("HDF5 recovery checkpoint updated for {} (reason={}, force={}, size_bytes={})",
+                         filePath, reason, force ? 1 : 0, fileSizeBytes);
             return true;
         }
 
@@ -229,6 +284,9 @@ namespace backend::services
         impl_->validFramesWritten_ = 0;
         impl_->invalidFramesWritten_ = 0;
         impl_->seriesImagesWritten_ = 0;
+        impl_->hasRecoveryCheckpoint_ = false;
+        impl_->recoveryCheckpointSizeBytes_ = 0;
+        impl_->lastRecoveryCheckpointAt_ = std::chrono::steady_clock::time_point{};
         {
             auto& m = backend::diagnostics::CrashStateMirror::instance();
             m.hdf5.fileOpen.store(true);
@@ -776,42 +834,51 @@ namespace backend::services
             return false;
         }
 
-        // Write each record's series as a hyperslab
-        const size_t seriesFrameBytes = static_cast<size_t>(height) * width;
-        std::vector<uint8_t> scratch;
+        // Write one HDF5 record per frame (all series images in one call).
+        const size_t seriesFrameBytes = static_cast<size_t>(height) * static_cast<size_t>(width);
+        const size_t seriesRecordBytes = seriesCount * seriesFrameBytes;
+        std::vector<uint8_t> packed(seriesRecordBytes, 0);
 
         for (size_t n = 0; n < seriesFrames.size(); ++n) {
             const auto &frame = *seriesFrames[n];
-            for (size_t s = 0; s < seriesCount && s < frame.seriesImages.size(); ++s) {
+            std::fill(packed.begin(), packed.end(), 0);
+            const size_t copyCount = std::min(seriesCount, frame.seriesImages.size());
+            for (size_t s = 0; s < copyCount; ++s) {
                 const cv::Mat &img = frame.seriesImages[s];
-                hid_t fileSpace = H5Dget_space(datasetId);
-                hsize_t start[4] = {static_cast<hsize_t>(n), static_cast<hsize_t>(s), 0, 0};
-                hsize_t count[4] = {1, 1, static_cast<hsize_t>(height), static_cast<hsize_t>(width)};
-                H5Sselect_hyperslab(fileSpace, H5S_SELECT_SET, start, nullptr, count, nullptr);
-                hid_t memSpace = H5Screate_simple(4, count, nullptr);
-
-                const void *srcPtr = nullptr;
-                if (img.isContinuous()) {
-                    srcPtr = img.data;
-                } else {
-                    if (scratch.size() < seriesFrameBytes) scratch.resize(seriesFrameBytes);
-                    size_t off = 0;
-                    for (int r = 0; r < img.rows; ++r) {
-                        std::memcpy(scratch.data() + off, img.ptr(r), img.cols);
-                        off += img.cols;
-                    }
-                    srcPtr = scratch.data();
-                }
-
-                herr_t status = H5Dwrite(datasetId, H5T_NATIVE_UINT8, memSpace, fileSpace, H5P_DEFAULT, srcPtr);
-                H5Sclose(memSpace);
-                H5Sclose(fileSpace);
-                if (status < 0) {
-                    SPDLOG_ERROR("Failed to write series image [{},{}] to {}", n, s, datasetPath);
+                if (img.rows != height || img.cols != width) {
+                    SPDLOG_ERROR("Series image shape mismatch at frame {} image {}: got {}x{}, expected {}x{}",
+                                 n, s, img.rows, img.cols, height, width);
                     H5Dclose(datasetId);
                     H5Sclose(dataspaceId);
                     return false;
                 }
+
+                uint8_t *dst = packed.data() + (s * seriesFrameBytes);
+                if (img.isContinuous()) {
+                    std::memcpy(dst, img.data, seriesFrameBytes);
+                } else {
+                    size_t off = 0;
+                    for (int r = 0; r < img.rows; ++r) {
+                        std::memcpy(dst + off, img.ptr(r), static_cast<size_t>(img.cols));
+                        off += static_cast<size_t>(img.cols);
+                    }
+                }
+            }
+
+            hid_t fileSpace = H5Dget_space(datasetId);
+            hsize_t start[4] = {static_cast<hsize_t>(n), 0, 0, 0};
+            hsize_t count[4] = {1, static_cast<hsize_t>(seriesCount), static_cast<hsize_t>(height), static_cast<hsize_t>(width)};
+            H5Sselect_hyperslab(fileSpace, H5S_SELECT_SET, start, nullptr, count, nullptr);
+            hid_t memSpace = H5Screate_simple(4, count, nullptr);
+
+            const herr_t status = H5Dwrite(datasetId, H5T_NATIVE_UINT8, memSpace, fileSpace, H5P_DEFAULT, packed.data());
+            H5Sclose(memSpace);
+            H5Sclose(fileSpace);
+            if (status < 0) {
+                SPDLOG_ERROR("Failed to write series record [{}] to {}", n, datasetPath);
+                H5Dclose(datasetId);
+                H5Sclose(dataspaceId);
+                return false;
             }
         }
 
@@ -856,55 +923,60 @@ namespace backend::services
             return false;
         }
 
-        std::vector<uint8_t> scratch;
-        const size_t seriesFrameBytes = static_cast<size_t>(height) * width;
+        const size_t seriesFrameBytes = static_cast<size_t>(height) * static_cast<size_t>(width);
+        const size_t seriesRecordBytes = seriesCount * seriesFrameBytes;
+        std::vector<uint8_t> packed(seriesRecordBytes, 0);
 
-        // stop-lag diagnostic: this nested loop issues N*seriesCount
-        // H5Dwrite calls, each with its own hyperslab setup. It is the
-        // leading suspect for the stop-lag when multi-image is enabled.
         const auto tLoopStart = std::chrono::steady_clock::now();
         size_t writesDone = 0;
 
         for (size_t n = 0; n < seriesFrames.size(); ++n) {
             const auto &frame = *seriesFrames[n];
-            for (size_t s = 0; s < seriesCount && s < frame.seriesImages.size(); ++s) {
+            std::fill(packed.begin(), packed.end(), 0);
+            const size_t copyCount = std::min(seriesCount, frame.seriesImages.size());
+            for (size_t s = 0; s < copyCount; ++s) {
                 const cv::Mat &img = frame.seriesImages[s];
-                fileSpace = H5Dget_space(datasetId);
-                hsize_t start[4] = {currentDims[0] + static_cast<hsize_t>(n), static_cast<hsize_t>(s), 0, 0};
-                hsize_t count[4] = {1, 1, static_cast<hsize_t>(height), static_cast<hsize_t>(width)};
-                H5Sselect_hyperslab(fileSpace, H5S_SELECT_SET, start, nullptr, count, nullptr);
-                hid_t memSpace = H5Screate_simple(4, count, nullptr);
-
-                const void *srcPtr = nullptr;
-                if (img.isContinuous()) {
-                    srcPtr = img.data;
-                } else {
-                    if (scratch.size() < seriesFrameBytes) scratch.resize(seriesFrameBytes);
-                    size_t off = 0;
-                    for (int r = 0; r < img.rows; ++r) {
-                        std::memcpy(scratch.data() + off, img.ptr(r), img.cols);
-                        off += img.cols;
-                    }
-                    srcPtr = scratch.data();
-                }
-
-                status = H5Dwrite(datasetId, H5T_NATIVE_UINT8, memSpace, fileSpace, H5P_DEFAULT, srcPtr);
-                H5Sclose(memSpace);
-                H5Sclose(fileSpace);
-                if (status < 0) {
-                    SPDLOG_ERROR("Failed to append series image [{},{}] to {}", n, s, datasetPath);
+                if (img.rows != height || img.cols != width) {
+                    SPDLOG_ERROR("Series image shape mismatch at frame {} image {}: got {}x{}, expected {}x{}",
+                                 n, s, img.rows, img.cols, height, width);
                     H5Dclose(datasetId);
                     return false;
                 }
-                ++writesDone;
+
+                uint8_t *dst = packed.data() + (s * seriesFrameBytes);
+                if (img.isContinuous()) {
+                    std::memcpy(dst, img.data, seriesFrameBytes);
+                } else {
+                    size_t off = 0;
+                    for (int r = 0; r < img.rows; ++r) {
+                        std::memcpy(dst + off, img.ptr(r), static_cast<size_t>(img.cols));
+                        off += static_cast<size_t>(img.cols);
+                    }
+                }
             }
+
+            fileSpace = H5Dget_space(datasetId);
+            hsize_t start[4] = {currentDims[0] + static_cast<hsize_t>(n), 0, 0, 0};
+            hsize_t count[4] = {1, static_cast<hsize_t>(seriesCount), static_cast<hsize_t>(height), static_cast<hsize_t>(width)};
+            H5Sselect_hyperslab(fileSpace, H5S_SELECT_SET, start, nullptr, count, nullptr);
+            hid_t memSpace = H5Screate_simple(4, count, nullptr);
+
+            status = H5Dwrite(datasetId, H5T_NATIVE_UINT8, memSpace, fileSpace, H5P_DEFAULT, packed.data());
+            H5Sclose(memSpace);
+            H5Sclose(fileSpace);
+            if (status < 0) {
+                SPDLOG_ERROR("Failed to append series record [{}] to {}", n, datasetPath);
+                H5Dclose(datasetId);
+                return false;
+            }
+            ++writesDone;
         }
 
         const double loopMs = std::chrono::duration<double, std::milli>(
                                   std::chrono::steady_clock::now() - tLoopStart)
                                   .count();
         const double avgMs = writesDone > 0 ? loopMs / static_cast<double>(writesDone) : 0.0;
-        SPDLOG_INFO("stop-lag/hdf5: appendSeriesImageDataset wrote {} images "
+        SPDLOG_INFO("stop-lag/hdf5: appendSeriesImageDataset wrote {} records "
                     "({} frames x {} series, {}x{}) in {:.3f} ms (avg {:.3f} ms/write)",
                     writesDone, seriesFrames.size(), seriesCount, height, width,
                     loopMs, avgMs);
@@ -960,6 +1032,14 @@ namespace backend::services
         };
         double msValidImages = 0.0, msSeries = 0.0, msInvalid = 0.0;
         size_t seriesFramesCount = 0;
+        size_t seriesFramesInput = 0;
+        for (const auto &frame : validFrames)
+        {
+            if (!frame.seriesImages.empty())
+            {
+                ++seriesFramesInput;
+            }
+        }
 
         // Initialize datasets if needed
         if (!impl_->datasetsInitialized_)
@@ -1007,13 +1087,8 @@ namespace backend::services
             msValidImages = elapsedMs(tVS);
 
             // Write multi-image series data if any frames have series images
-            bool hasSeriesImages = false;
-            for (const auto &frame : validFrames) {
-                if (!frame.seriesImages.empty()) {
-                    hasSeriesImages = true;
-                    ++seriesFramesCount;
-                }
-            }
+            const bool hasSeriesImages = seriesFramesInput > 0;
+            seriesFramesCount = seriesFramesInput;
             if (hasSeriesImages) {
                 const auto tSeries = lag_clock::now();
                 if (impl_->seriesImagesWritten_ == 0) {
@@ -1099,7 +1174,12 @@ namespace backend::services
             {
                 SPDLOG_WARN("appendFrames: post-write flush failed");
             }
-            writeRecoveryCheckpoint(impl_->filePath_);
+            maybeWriteRecoveryCheckpoint(impl_->filePath_,
+                                         impl_->hasRecoveryCheckpoint_,
+                                         impl_->recoveryCheckpointSizeBytes_,
+                                         impl_->lastRecoveryCheckpointAt_,
+                                         false,
+                                         "appendFrames");
         }
 
         return true;
@@ -1375,7 +1455,12 @@ namespace backend::services
         {
             SPDLOG_WARN("writeExperimentInfo: post-write flush failed");
         }
-        writeRecoveryCheckpoint(impl_->filePath_);
+        maybeWriteRecoveryCheckpoint(impl_->filePath_,
+                                     impl_->hasRecoveryCheckpoint_,
+                                     impl_->recoveryCheckpointSizeBytes_,
+                                     impl_->lastRecoveryCheckpointAt_,
+                                     true,
+                                     "writeExperimentInfo");
 
         SPDLOG_DEBUG("Wrote experiment info, processing config, and ROI to HDF5");
         return true;
@@ -1434,7 +1519,12 @@ namespace backend::services
             {
                 SPDLOG_WARN("writeConfigJson: post-write flush failed");
             }
-            writeRecoveryCheckpoint(impl_->filePath_);
+            maybeWriteRecoveryCheckpoint(impl_->filePath_,
+                                         impl_->hasRecoveryCheckpoint_,
+                                         impl_->recoveryCheckpointSizeBytes_,
+                                         impl_->lastRecoveryCheckpointAt_,
+                                         true,
+                                         "writeConfigJson");
             SPDLOG_DEBUG("Wrote config JSON ({} bytes) to HDF5 metadata", jsonContent.size());
         }
         else
@@ -2935,7 +3025,12 @@ namespace backend::services {
         {
             SPDLOG_WARN("appendRecordingFrames: post-write flush failed");
         }
-        writeRecoveryCheckpoint(impl_->filePath_);
+        maybeWriteRecoveryCheckpoint(impl_->filePath_,
+                                     impl_->hasRecoveryCheckpoint_,
+                                     impl_->recoveryCheckpointSizeBytes_,
+                                     impl_->lastRecoveryCheckpointAt_,
+                                     false,
+                                     "appendRecordingFrames");
         SPDLOG_DEBUG("Recording: appended {} frames (total: {})", images.size(), impl_->validFramesWritten_);
         return true;
     }
@@ -3002,7 +3097,12 @@ namespace backend::services {
         {
             SPDLOG_WARN("writeRecordingInfo: post-write flush failed");
         }
-        writeRecoveryCheckpoint(impl_->filePath_);
+        maybeWriteRecoveryCheckpoint(impl_->filePath_,
+                                     impl_->hasRecoveryCheckpoint_,
+                                     impl_->recoveryCheckpointSizeBytes_,
+                                     impl_->lastRecoveryCheckpointAt_,
+                                     true,
+                                     "writeRecordingInfo");
         SPDLOG_INFO("Recording info written: recorded={}, filtered={}", totalFrames, filteredFrames);
         return true;
     }
