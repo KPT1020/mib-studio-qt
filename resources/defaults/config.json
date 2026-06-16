@@ -45,7 +45,10 @@
         },
         "multi_image": {
             "enabled": false,
-            "count": 1
+            "count": 1,
+            "save_all": true,
+            "save_start": 1,
+            "save_end": 1
         }
     },
     "save_directory": "testing",

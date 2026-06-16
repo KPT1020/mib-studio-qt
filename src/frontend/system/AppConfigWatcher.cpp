@@ -280,6 +280,16 @@ namespace frontend
 						pcfg.multi_image_enabled = mi.value("enabled").toBool(pcfg.multi_image_enabled);
 					if (mi.contains("count"))
 						pcfg.multi_image_count = std::max(1, mi.value("count").toInt(pcfg.multi_image_count));
+					if (mi.contains("save_all"))
+						pcfg.multi_image_save_all = mi.value("save_all").toBool(pcfg.multi_image_save_all);
+					if (mi.contains("save_start"))
+						pcfg.multi_image_save_start = std::max(1, mi.value("save_start").toInt(pcfg.multi_image_save_start));
+					if (mi.contains("save_end"))
+						pcfg.multi_image_save_end = std::max(1, mi.value("save_end").toInt(pcfg.multi_image_save_end));
+					if (pcfg.multi_image_save_start > pcfg.multi_image_save_end)
+						std::swap(pcfg.multi_image_save_start, pcfg.multi_image_save_end);
+					pcfg.multi_image_save_start = std::min(pcfg.multi_image_save_start, pcfg.multi_image_count);
+					pcfg.multi_image_save_end = std::min(pcfg.multi_image_save_end, pcfg.multi_image_count);
 				}
 			}
 		}
@@ -296,7 +306,9 @@ namespace frontend
 					pcfg.target_group_deformability_min, pcfg.target_group_deformability_max,
 					pcfg.enable_target_group_emodulus, pcfg.target_group_emodulus_min, pcfg.target_group_emodulus_max);
 		if (pcfg.multi_image_enabled) {
-			SPDLOG_INFO("AppConfigWatcher: multi_image enabled, count={}", pcfg.multi_image_count);
+			SPDLOG_INFO("AppConfigWatcher: multi_image enabled, count={}, save_all={}, save_range={}..{}",
+			            pcfg.multi_image_count, pcfg.multi_image_save_all,
+			            pcfg.multi_image_save_start, pcfg.multi_image_save_end);
 		}
 
 		// 2) Flush interval (buffer threshold)
@@ -579,6 +591,9 @@ namespace frontend
 		QJsonObject mi = ip.value("multi_image").toObject();
 		mi.insert("enabled", pcfg.multi_image_enabled);
 		mi.insert("count", pcfg.multi_image_count);
+		mi.insert("save_all", pcfg.multi_image_save_all);
+		mi.insert("save_start", pcfg.multi_image_save_start);
+		mi.insert("save_end", pcfg.multi_image_save_end);
 		ip.insert("multi_image", mi);
 
 		root.insert("image_processing", ip);

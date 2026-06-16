@@ -18,6 +18,11 @@
   `QBarSeries`, etc. `frontend::ZoomableChartView` adds scroll/zoom.
 - Live totals: valid count, invalid count, algo FPS, valid FPS.
 - `showEvent` / `hideEvent` pause rendering when the tab isn't visible.
+- Tune Params → Multi-Image now controls runtime capture persistence:
+  - `Images per trigger` (`multi_image_count`)
+  - `Save all series frames`
+  - `Save start/end (1-based)` for selective series saving during experiment
+    (example: `9-15` when count is 15)
 - **Top-row trigger controls:**
   - `sortTriggerBtn` — single manual pulse; calls
     `backend_.trigger().onTargetGroupResult(services::TargetGroupSignal{.isTargetGroup=true})`.

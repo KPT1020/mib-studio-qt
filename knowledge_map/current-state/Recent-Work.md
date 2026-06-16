@@ -5,6 +5,15 @@
 
 ## Features shipped
 
+- **Runtime multi-image save-range control** (2026-06-16) — Multi-image mode
+  now supports runtime save selection during experiment capture: save all
+  frames in each trigger series, or save only a custom 1-based range
+  (example `9-15` for a 15-frame series). `ExperimentMonitoringTab` Tune
+  Params gained save-all + save-start/save-end controls, `AppConfigWatcher`
+  now round-trips these fields under `image_processing.multi_image`, and
+  realtime accumulation applies the range while still retaining trigger
+  frames for metrics.
+
 - **OpenAI Symphony workflow setup** (2026-06-11) - Added the repo-owned
   `WORKFLOW.md` contract for the existing Linear `mib-studio` project, plus
   `scripts/start-symphony.ps1` to bootstrap the OpenAI Symphony Elixir

@@ -318,6 +318,36 @@ namespace frontend
         multiImageLayout->addWidget(multiImageEnableBox_);
 
         addSpinRow(multiImageLayout, tr("Images per trigger"), multiImageCountSpin_, 1, 32, 1, 1);
+        multiImageSaveAllBox_ = new QCheckBox(tr("Save all series frames"));
+        multiImageSaveAllBox_->setChecked(true);
+        multiImageLayout->addWidget(multiImageSaveAllBox_);
+        addSpinRow(multiImageLayout, tr("Save start (1-based)"), multiImageSaveStartSpin_, 1, 32, 1, 1);
+        addSpinRow(multiImageLayout, tr("Save end (1-based)"), multiImageSaveEndSpin_, 1, 32, 1, 1);
+        auto* saveHintLabel = new QLabel(
+            tr("Trigger frame is always saved for metrics; this range controls additional series frames "
+               "(example: 9-15 when count is 15)."),
+            multiImageGroup);
+        saveHintLabel->setWordWrap(true);
+        saveHintLabel->setStyleSheet("QLabel { color: #666; font-size: 10px; }");
+        multiImageLayout->addWidget(saveHintLabel);
+        connect(multiImageCountSpin_, qOverload<int>(&QSpinBox::valueChanged), this,
+                [this](int) { updateMultiImageSaveControls(); });
+        connect(multiImageEnableBox_, &QCheckBox::toggled, this,
+                [this](bool) { updateMultiImageSaveControls(); });
+        connect(multiImageSaveAllBox_, &QCheckBox::toggled, this,
+                [this](bool) { updateMultiImageSaveControls(); });
+        connect(multiImageSaveStartSpin_, qOverload<int>(&QSpinBox::valueChanged), this,
+                [this](int startVal) {
+                    if (multiImageSaveEndSpin_ && multiImageSaveEndSpin_->value() < startVal) {
+                        multiImageSaveEndSpin_->setValue(startVal);
+                    }
+                });
+        connect(multiImageSaveEndSpin_, qOverload<int>(&QSpinBox::valueChanged), this,
+                [this](int endVal) {
+                    if (multiImageSaveStartSpin_ && multiImageSaveStartSpin_->value() > endVal) {
+                        multiImageSaveStartSpin_->setValue(endVal);
+                    }
+                });
         contentLayout->addWidget(multiImageGroup);
 
         // --- Apply Button ---
@@ -365,6 +395,39 @@ namespace frontend
 
         multiImageEnableBox_->setChecked(cfg.multi_image_enabled);
         multiImageCountSpin_->setValue(std::max(1, cfg.multi_image_count));
+        multiImageSaveAllBox_->setChecked(cfg.multi_image_save_all);
+        multiImageSaveStartSpin_->setValue(std::max(1, cfg.multi_image_save_start));
+        multiImageSaveEndSpin_->setValue(std::max(1, cfg.multi_image_save_end));
+        updateMultiImageSaveControls();
+    }
+
+    void ExperimentMonitoringTab::updateMultiImageSaveControls()
+    {
+        if (!multiImageCountSpin_ || !multiImageSaveAllBox_ ||
+            !multiImageSaveStartSpin_ || !multiImageSaveEndSpin_) {
+            return;
+        }
+
+        const int count = std::max(1, multiImageCountSpin_->value());
+        const bool multiImageEnabled = multiImageEnableBox_ && multiImageEnableBox_->isChecked();
+        multiImageSaveStartSpin_->setRange(1, count);
+        multiImageSaveEndSpin_->setRange(1, count);
+
+        if (multiImageSaveStartSpin_->value() > count) {
+            multiImageSaveStartSpin_->setValue(count);
+        }
+        if (multiImageSaveEndSpin_->value() > count) {
+            multiImageSaveEndSpin_->setValue(count);
+        }
+        if (multiImageSaveStartSpin_->value() > multiImageSaveEndSpin_->value()) {
+            multiImageSaveEndSpin_->setValue(multiImageSaveStartSpin_->value());
+        }
+
+        const bool saveAll = multiImageSaveAllBox_->isChecked();
+        multiImageCountSpin_->setEnabled(true);
+        multiImageSaveAllBox_->setEnabled(multiImageEnabled);
+        multiImageSaveStartSpin_->setEnabled(multiImageEnabled && !saveAll);
+        multiImageSaveEndSpin_->setEnabled(multiImageEnabled && !saveAll);
     }
 
     void ExperimentMonitoringTab::onApplyParams()
@@ -398,13 +461,21 @@ namespace frontend
         // Multi-image acquisition
         cfg.multi_image_enabled = multiImageEnableBox_->isChecked();
         cfg.multi_image_count = multiImageCountSpin_->value();
+        cfg.multi_image_save_all = multiImageSaveAllBox_->isChecked();
+        cfg.multi_image_save_start = multiImageSaveStartSpin_->value();
+        cfg.multi_image_save_end = multiImageSaveEndSpin_->value();
+        if (cfg.multi_image_save_start > cfg.multi_image_save_end) {
+            std::swap(cfg.multi_image_save_start, cfg.multi_image_save_end);
+        }
+        cfg.multi_image_save_start = std::min(cfg.multi_image_save_start, cfg.multi_image_count);
+        cfg.multi_image_save_end = std::min(cfg.multi_image_save_end, cfg.multi_image_count);
 
         backend_.processing().setProcessingConfig(cfg);
 
         SPDLOG_INFO("Tune panel: applied config (area=[{},{}], deform=[{:.2f},{:.2f}], "
                      "ring=[{:.1f},{:.1f}], border={}, areaRange={}, deformRange={}, "
                      "areaRatio={}, ringRatio={}, singleInner={}, targetGroup={}, "
-                     "multiImage={}/{} )",
+                     "multiImage={}/{}, save_all={}, save_range={}..{} )",
                      cfg.area_threshold_min, cfg.area_threshold_max,
                      cfg.deformability_threshold_min, cfg.deformability_threshold_max,
                      cfg.ring_ratio_min, cfg.ring_ratio_max,
@@ -412,7 +483,9 @@ namespace frontend
                      cfg.enable_deformability_range_check, cfg.enable_area_ratio_check,
                      cfg.enable_ring_ratio_check,
                      cfg.require_single_inner_contour, cfg.enable_target_group,
-                     cfg.multi_image_enabled, cfg.multi_image_count);
+                     cfg.multi_image_enabled, cfg.multi_image_count,
+                     cfg.multi_image_save_all,
+                     cfg.multi_image_save_start, cfg.multi_image_save_end);
 
         emit processingConfigApplied();
     }

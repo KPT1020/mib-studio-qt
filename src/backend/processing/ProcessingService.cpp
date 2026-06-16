@@ -34,6 +34,29 @@ size_t defaultMaxBufferedFrames(size_t flushInterval) {
     return std::max(flushInterval, std::min(preferred, kSoftMaxBufferedFrames));
 }
 
+struct MultiImageSaveRange {
+    size_t startFrame{1}; // inclusive, 1-based
+    size_t endFrame{1};   // inclusive, 1-based
+};
+
+MultiImageSaveRange resolveMultiImageSaveRange(const ProcessingConfig& config) {
+    const size_t totalFrames = static_cast<size_t>(std::max(1, config.multi_image_count));
+    if (config.multi_image_save_all) {
+        return MultiImageSaveRange{1, totalFrames};
+    }
+
+    int startFrame = std::max(1, config.multi_image_save_start);
+    int endFrame = std::max(1, config.multi_image_save_end);
+    if (startFrame > endFrame) {
+        std::swap(startFrame, endFrame);
+    }
+    startFrame = std::min(startFrame, static_cast<int>(totalFrames));
+    endFrame = std::min(endFrame, static_cast<int>(totalFrames));
+    return MultiImageSaveRange{
+        static_cast<size_t>(startFrame),
+        static_cast<size_t>(endFrame)};
+}
+
 double rectArea(const cv::Rect2d& rect) {
     return std::max(0.0, rect.width) * std::max(0.0, rect.height);
 }
@@ -1897,6 +1920,9 @@ void ProcessingService::realtimeInlineLoop() {
     ProcessedFrame pendingMultiImageFrame;
     size_t multiImageRemaining = 0; // frames still needed to complete current series
     bool multiImagePending = false;
+    size_t pendingSeriesSaveStart = 1; // inclusive, 1-based sequence frame number
+    size_t pendingSeriesSaveEnd = 1;   // inclusive, 1-based sequence frame number
+    size_t pendingSeriesNextFrameNumber = 2; // next frame number to collect after trigger
 
     while (rtRunning_.load()) {
         if (!rtStore_) {
@@ -2186,7 +2212,11 @@ void ProcessingService::realtimeInlineLoop() {
 
                 if (multiImagePending) {
                     // Collecting series images for pending multi-image trigger
-                    pendingMultiImageFrame.seriesImages.push_back(makeFullGray());
+                    if (pendingSeriesNextFrameNumber >= pendingSeriesSaveStart &&
+                        pendingSeriesNextFrameNumber <= pendingSeriesSaveEnd) {
+                        pendingMultiImageFrame.seriesImages.push_back(makeFullGray());
+                    }
+                    ++pendingSeriesNextFrameNumber;
                     --multiImageRemaining;
                     SPDLOG_TRACE("Multi-image series (ROI path): captured frame {} (remaining={})", idx, multiImageRemaining);
 
@@ -2202,6 +2232,7 @@ void ProcessingService::realtimeInlineLoop() {
                     if (triggerAnchor) {
                         if (multiImageMode) {
                             // Start new multi-image series
+                            const MultiImageSaveRange saveRange = resolveMultiImageSaveRange(config);
                             cv::Mat fullGray = makeFullGray();
                             cv::Mat fullMask(fullGray.rows, fullGray.cols, CV_8UC1, cv::Scalar(0));
                             cv::Rect fullCvRoi(roi.x, roi.y, roi.w, roi.h);
@@ -2216,7 +2247,11 @@ void ProcessingService::realtimeInlineLoop() {
                             pendingMultiImageFrame.seriesImages.push_back(std::move(fullGray));
                             multiImageRemaining = static_cast<size_t>(config.multi_image_count - 1);
                             multiImagePending = true;
-                            SPDLOG_DEBUG("Multi-image series started (ROI path): trigger_idx={}, count={}", idx, config.multi_image_count);
+                            pendingSeriesSaveStart = saveRange.startFrame;
+                            pendingSeriesSaveEnd = saveRange.endFrame;
+                            pendingSeriesNextFrameNumber = 2;
+                            SPDLOG_DEBUG("Multi-image series started (ROI path): trigger_idx={}, count={}, save_range={}..{}",
+                                         idx, config.multi_image_count, pendingSeriesSaveStart, pendingSeriesSaveEnd);
                         } else {
                             shouldSave = true;
                         }
@@ -2249,6 +2284,7 @@ void ProcessingService::realtimeInlineLoop() {
                             pendingMultiImageFrame.index, pendingMultiImageFrame.seriesImages.size());
                 multiImagePending = false;
                 multiImageRemaining = 0;
+                pendingSeriesNextFrameNumber = 2;
                 appendExperimentFrame(std::move(pendingMultiImageFrame), true);
                 pendingMultiImageFrame = ProcessedFrame{};
             }
@@ -2712,7 +2748,11 @@ void ProcessingService::realtimeInlineLoop() {
                     
                     // Even on empty frames, capture series images if multi-image collection is active
                     if (multiImagePending && experimentActive_.load()) {
-                        pendingMultiImageFrame.seriesImages.push_back(gray.clone());
+                        if (pendingSeriesNextFrameNumber >= pendingSeriesSaveStart &&
+                            pendingSeriesNextFrameNumber <= pendingSeriesSaveEnd) {
+                            pendingMultiImageFrame.seriesImages.push_back(gray.clone());
+                        }
+                        ++pendingSeriesNextFrameNumber;
                         --multiImageRemaining;
                         SPDLOG_TRACE("Multi-image series: captured empty frame {} (remaining={})", idx, multiImageRemaining);
                         if (multiImageRemaining == 0) {
@@ -2844,7 +2884,11 @@ void ProcessingService::realtimeInlineLoop() {
 
                     if (multiImagePending) {
                         // We're collecting series images for a pending multi-image trigger frame
-                        pendingMultiImageFrame.seriesImages.push_back(gray.clone());
+                        if (pendingSeriesNextFrameNumber >= pendingSeriesSaveStart &&
+                            pendingSeriesNextFrameNumber <= pendingSeriesSaveEnd) {
+                            pendingMultiImageFrame.seriesImages.push_back(gray.clone());
+                        }
+                        ++pendingSeriesNextFrameNumber;
                         --multiImageRemaining;
                         SPDLOG_TRACE("Multi-image series: captured frame {} for series (remaining={})", idx, multiImageRemaining);
 
@@ -2861,6 +2905,7 @@ void ProcessingService::realtimeInlineLoop() {
                         // Normal experiment accumulation (or start of new multi-image series)
                         if (multiImageMode) {
                             if (triggerAnchor) {
+                                const MultiImageSaveRange saveRange = resolveMultiImageSaveRange(config);
                                 const size_t validObjectCount = static_cast<size_t>(
                                     std::count_if(validations.begin(), validations.end(),
                                                   [](const FilterResult& result) { return result.isValid; }));
@@ -2878,7 +2923,11 @@ void ProcessingService::realtimeInlineLoop() {
                                 pendingMultiImageFrame.seriesImages.push_back(gray.clone());
                                 multiImageRemaining = static_cast<size_t>(config.multi_image_count - 1);
                                 multiImagePending = true;
-                                SPDLOG_DEBUG("Multi-image series started: trigger_idx={}, count={}", idx, config.multi_image_count);
+                                pendingSeriesSaveStart = saveRange.startFrame;
+                                pendingSeriesSaveEnd = saveRange.endFrame;
+                                pendingSeriesNextFrameNumber = 2;
+                                SPDLOG_DEBUG("Multi-image series started: trigger_idx={}, count={}, save_range={}..{}",
+                                             idx, config.multi_image_count, pendingSeriesSaveStart, pendingSeriesSaveEnd);
                             }
                         } else {
                             for (const auto& objectValidation : validations) {
@@ -2910,6 +2959,7 @@ void ProcessingService::realtimeInlineLoop() {
                                 pendingMultiImageFrame.seriesImages.size() + multiImageRemaining);
                     multiImagePending = false;
                     multiImageRemaining = 0;
+                    pendingSeriesNextFrameNumber = 2;
                     appendExperimentFrame(std::move(pendingMultiImageFrame), true);
                     pendingMultiImageFrame = ProcessedFrame{};
                 }

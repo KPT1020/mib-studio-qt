@@ -5,8 +5,8 @@
 > ring-ratio to [[AutofocusService]] and target-group events to
 > [[TriggerService]].
 
-**Source:** `src/backend/services/ProcessingService.cpp`,
-`include/backend/services/ProcessingService.h`
+**Source:** `src/backend/processing/ProcessingService.cpp`,
+`include/backend/processing/ProcessingService.h`
 **Related:** [[CaptureService]], [[Hdf5Service]], [[AutofocusService]],
 [[TriggerService]], [[../architecture/Data-Flow]],
 [[../domain/Microscopy-Pipeline]]
@@ -54,6 +54,8 @@ All gates in one struct. Notable fields:
   `EModulusLut`, which is now fed from the managed LUT cache prepared by
   `AppBackend` at startup)
 - Multi-image mode: `multi_image_enabled`, `multi_image_count`
+- Multi-image runtime save window: `multi_image_save_all`,
+  `multi_image_save_start`, `multi_image_save_end` (1-based)
 
 ## Accumulation modes
 
@@ -161,3 +163,6 @@ current/max queue depth, batch size, worker count, and running state. See
 - Young's modulus gating still depends on the LUT path loaded during backend
   startup; if the managed cache cannot be updated, the pipeline keeps using
   the last known-good local copy or the bundled fallback.
+- Multi-image save window is applied during experiment accumulation. The
+  trigger frame is still retained for metrics; the configured save range
+  controls which additional series frames are persisted.

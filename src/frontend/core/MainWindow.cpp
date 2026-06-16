@@ -812,13 +812,19 @@ void MainWindow::onStopExperiment()
 
     const auto cfgAtStop = processing.getProcessingConfig();
     const double stopTotalMs = sinceMs(tStopBegin);
-    SPDLOG_INFO("stop-lag: onStopExperiment total {:.3f} ms (multiImage={}/{})",
+    SPDLOG_INFO("stop-lag: onStopExperiment total {:.3f} ms (multiImage={}/{}, save_all={}, save_range={}..{})",
                 stopTotalMs,
-                cfgAtStop.multi_image_enabled, cfgAtStop.multi_image_count);
+                cfgAtStop.multi_image_enabled, cfgAtStop.multi_image_count,
+                cfgAtStop.multi_image_save_all,
+                cfgAtStop.multi_image_save_start, cfgAtStop.multi_image_save_end);
     {
         std::ostringstream data;
         data << "{\"multi_image_enabled\":" << (cfgAtStop.multi_image_enabled ? 1 : 0)
-             << ",\"multi_image_count\":" << cfgAtStop.multi_image_count << "}";
+             << ",\"multi_image_count\":" << cfgAtStop.multi_image_count
+             << ",\"multi_image_save_all\":" << (cfgAtStop.multi_image_save_all ? 1 : 0)
+             << ",\"multi_image_save_start\":" << cfgAtStop.multi_image_save_start
+             << ",\"multi_image_save_end\":" << cfgAtStop.multi_image_save_end
+             << "}";
         backend::services::CrashReporter::capturePerformanceTransaction(
             "experiment.stop", "ui.action", stopTotalMs, data.str());
     }

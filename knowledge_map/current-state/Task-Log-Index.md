@@ -29,6 +29,7 @@
 ### Config system
 - `task/2025-11-24-live-config-reload.md`
 - `task/2025-11-25-config-profiles.md`
+- `task/2026-06-16-multi-image-runtime-save-range.md`
 - `task/2026-05-22-boot-service-toggles.md`
 - `task/2026-05-22-boot-service-toggles-gui.md`
 - `task/external-config-browse.md`
@@ -52,7 +53,7 @@
 - `task/2026-04-15-trigger-timing-bug.md`
 - `task/2026-04-16-thread-performance-audit.md`
 
-## By filename (all 30)
+## By filename (all 31)
 
 ```
 2025-11-14-safe-start-stop-egrabber.md
@@ -71,6 +72,7 @@
 2026-06-01-backend-only-build-test-mode.md
 2026-06-01-hdf5-crash-recovery-checkpoints.md
 2026-06-02-long-run-frame-growth.md
+2026-06-16-multi-image-runtime-save-range.md
 camera-reset.md
 diagnostic-logging.md
 external-config-browse.md

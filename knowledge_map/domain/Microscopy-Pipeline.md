@@ -36,6 +36,9 @@ per-cell mechanical properties (deformability, area, stiffness).
 When `ProcessingConfig::multi_image_enabled` is true, each valid detection
 captures `multi_image_count` consecutive frames (the "trigger" frame plus
 subsequent ones). Metrics are computed only from the first frame.
+Runtime config can keep all series frames or only a selected 1-based
+sub-range for saved series images (for example `9-15`), while retaining
+the trigger frame for metrics.
 `ProcessedFrame::seriesImages` carries the series; stored as 4D
 `(N, seriesCount, H, W)` in HDF5.
 

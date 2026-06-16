@@ -66,6 +66,13 @@ struct ProcessingConfig {
     // Metrics are computed only from the first (trigger) frame
     bool multi_image_enabled{false};
     int multi_image_count{1}; // Number of images per series (1 = disabled, >1 = series)
+    // Runtime save selection for multi-image mode:
+    // - when true, save all frames in the captured series.
+    // - when false, save only the inclusive 1-based range [multi_image_save_start, multi_image_save_end]
+    //   relative to trigger frame index (example N=15, start=9, end=15).
+    bool multi_image_save_all{true};
+    int multi_image_save_start{1};
+    int multi_image_save_end{1};
 };
 
 struct FilterResult {

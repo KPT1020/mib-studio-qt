@@ -101,6 +101,7 @@ public slots:
 private:
     void setupCharts();
     void setupTuneParamsPanel();
+    void updateMultiImageSaveControls();
     void loadIsoelasticCurves();
     void updateScatterplot(const std::vector<backend::services::ProcessedFrame>& validFrames);
     void updateHistogram(const std::vector<backend::services::ProcessedFrame>& validFrames);
@@ -208,6 +209,9 @@ private:
     // Multi-image acquisition
     QCheckBox* multiImageEnableBox_ = nullptr;
     QSpinBox* multiImageCountSpin_ = nullptr;
+    QCheckBox* multiImageSaveAllBox_ = nullptr;
+    QSpinBox* multiImageSaveStartSpin_ = nullptr;
+    QSpinBox* multiImageSaveEndSpin_ = nullptr;
 };
 
 } // namespace frontend
