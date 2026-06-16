@@ -23,6 +23,9 @@ machine and the HDF5 file path for the current run.
 - `startExperiment(hdf5FilePath, errorMsg)`,
   `stopExperiment(errorMsg)`
 - `startTimeNs()`, `endTimeNs()` accessors for metadata
+- `stopExperiment(...)` now transitions processing to ended state before final
+  `flushBufferedFrames(...)` so long stop-time HDF5 writes do not race with new
+  experiment-frame accumulation.
 - Signals: `stateChanged(State)`,
   `experimentStarted(startTimeNs)`,
   `experimentStopped(endTimeNs, validFrames, invalidFrames)`,

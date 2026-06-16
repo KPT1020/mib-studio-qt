@@ -4,8 +4,8 @@
 > frame-recording mode and review-time scalable (hyperslab) reads.
 > HDF5 headers are hidden behind a PIMPL.
 
-**Source:** `src/backend/services/Hdf5Service.cpp`,
-`include/backend/services/Hdf5Service.h`
+**Source:** `src/backend/recording/Hdf5Service.cpp`,
+`include/backend/recording/Hdf5Service.h`
 **Related:** [[ProcessingService]], [[../data-model/HDF5-Storage]],
 [[../frontend/HdfReviewTab]]
 
@@ -16,9 +16,12 @@
   (`initializeDatasets` + `appendFrames`).
 - Stores experiment metadata: start/end time (ns), totals, `ProcessingConfig`,
   ROI, optional background image; plus raw config JSON via `writeConfigJson`.
-- After each successful append/metadata write, forces an HDF5 flush and writes
-  a rolling checkpoint copy to `<file>.recovery.h5` so abrupt crashes leave a
-  recoverable snapshot.
+- Forces an HDF5 flush after append/metadata writes and maintains a rolling
+  checkpoint sidecar `<file>.recovery.h5`.
+- Checkpoint copies are **throttled on append paths** (time/size gated) to
+  avoid repeated full-file copies on high-throughput runs; metadata finalization
+  (`writeExperimentInfo`, `writeConfigJson`, `writeRecordingInfo`) still forces
+  an immediate checkpoint refresh.
 - Review reads: `readValidFrames`, `readInvalidFrames`, plus scalable
   `readImageByIndex` / `readImagesRange` using hyperslabs.
 - Metadata-only reads (`readValidMetadata` / `readInvalidMetadata`) skip
@@ -27,6 +30,9 @@
   without batch dim).
 - **Multi-image series** (`multi_image_enabled` in ProcessingConfig):
   `getSeriesImageInfo`, `readSeriesImagesByIndex` — 4D `(N, seriesCount, H, W)`.
+  The write path packs each frame's full series into one HDF5 write call
+  (instead of per-image writes) to reduce stop/flush latency in high
+  `multi_image_count` runs.
 - **Frame recording mode** (raw frames, no contours):
   `initializeRecordingDatasets`, `appendRecordingFrames`, `writeRecordingInfo`
   with `RecordingFrameMeta` (index, timestampNs, width, height).
@@ -50,9 +56,11 @@ Blocking I/O on whichever thread calls it. In practice:
 - `writeConfigJson` must follow `writeExperimentInfo`.
 - `loadFile(path)` now auto-falls back to `path + ".recovery.h5"` if the
   primary file cannot be opened (e.g. interrupted write/corruption).
+- A checkpoint may intentionally lag behind the latest append because append
+  checkpoints are throttled; forced checkpoints occur at metadata/finalization.
 - Scalable reads (`readImageByIndex`, `readImagesRange`) support both 3D
   `(N,H,W)` and 4D `(N,H,W,C)` datasets — use them for large files instead
   of `readValidFrames` to avoid OOM. See task
   `knowledge_map/task/review_2gb_scalability.md`.
 - PIMPL means you can't see HDF5 types in headers — look at
-  `src/backend/services/Hdf5Service.cpp` for dataset paths and dtypes.
+  `src/backend/recording/Hdf5Service.cpp` for dataset paths and dtypes.

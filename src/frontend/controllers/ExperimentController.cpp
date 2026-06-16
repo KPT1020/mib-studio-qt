@@ -96,8 +96,11 @@ namespace frontend
         state_ = State::Stopping;
         emit stateChanged(state_);
 
-        // End experiment and flush any remaining frames
+        // End experiment before final flush so the processing loop stops
+        // accumulating new frames during shutdown.
         auto &processing = backend_.processing();
+        processing.endExperiment();
+        backend_.processing().resetRealtimeMetrics();
 
         // Flush any remaining buffered frames (synchronous for final flush)
         auto &hdf5 = backend_.hdf5();
@@ -162,9 +165,6 @@ namespace frontend
                              std::chrono::system_clock::now().time_since_epoch())
                              .count();
         }
-
-        processing.endExperiment();
-        backend_.processing().resetRealtimeMetrics();
 
         state_ = State::Idle;
         emit stateChanged(state_);

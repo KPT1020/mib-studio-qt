@@ -5,6 +5,14 @@
 
 ## Features shipped
 
+- **Multi-image stop-lag hardening** (2026-06-16) — Reduced experiment-stop
+  stalls in `multi_image_count=15` runs by throttling HDF5 recovery checkpoint
+  sidecar copies on append paths (while still forcing checkpoints on metadata
+  finalization), packing `series_images` writes as one HDF5 record per frame
+  instead of per-image calls, and ending experiment accumulation before final
+  stop-time flushes in both `MainWindow` and `ExperimentController`. Added
+  backend regression coverage in
+  `hdf5_recovery_checkpoint_throttle_test.cpp`.
 - **Experiment multi-image capture mode guard** (2026-06-16) —
   `MainWindow::onStartExperiment` now auto-switches realtime processing from
   `async_batch` to `inline` when multi-image capture is enabled, so experiment
