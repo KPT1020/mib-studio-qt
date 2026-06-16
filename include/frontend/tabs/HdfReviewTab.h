@@ -98,6 +98,7 @@ namespace frontend
         void refreshVisibleThumbnails(bool isValid);
         void pruneOffscreenThumbnails(bool isValid);
         QImage buildThumbnailForIndex(size_t index, bool isValid);
+        void loadRecordingSeriesWindow(size_t frameIndex, backend::services::ProcessedFrame& frame) const;
         // Dataset-path helpers that route to /recorded_frames/* when
         // isRecordingMode_ is true, else to /valid_frames/* or /invalid_frames/*.
         // masksPath() returns "" in recording mode (no masks written).
@@ -152,6 +153,8 @@ namespace frontend
         OverlayMode overlayMode_{OverlayMode::None};
         bool showRoiOverlay_ = false;
         bool isRecordingMode_ = false;
+        bool recordingMultiImageEnabled_ = false;
+        size_t recordingMultiImageCount_ = 1;
         backend::services::ProcessingService::Roi roi_{0, 0, 0, 0};
 
         static constexpr int THUMBNAIL_SIZE = 128;

@@ -17,7 +17,10 @@
 - `onStartExperiment` / `onStopExperiment` — drive
   [[Controllers]] `ExperimentController`. Stop path now issues an explicit
   `Hdf5Service::flush()` immediately before `writeExperimentInfo()` to reduce
-  risk of metadata writes invalidating already-persisted frame batches.
+  risk of metadata writes invalidating already-persisted frame batches. When
+  multi-image is enabled and realtime mode is `async_batch`, start now
+  temporarily switches processing to `inline` for the experiment so series
+  frames are actually captured and reviewable; stop restores the prior mode.
 - `onUpdateStats` — timer tick; pulls `CaptureStats`, count-only
   `ProcessingService::getBufferedFrameCounts()`, and autofocus state for the
   status bar/sidebar. It now also resolves the selected experiment save path

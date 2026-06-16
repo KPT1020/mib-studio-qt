@@ -39,6 +39,11 @@ layout:
   "Frames"; all recorded frames populate `validFrames_`.
 - Metadata comes from `readRecordingMetadata` (only `index` + `timestampNs`
   populated); status text uses `readRecordingInfo`.
+- `readRecordingInfo` also exposes persisted multi-image flags
+  (`multi_image_enabled`, `multi_image_count`). When enabled (`count > 1`),
+  `showFrameViewer` synthesizes a per-frame series window by reading a bounded
+  range from `/recorded_frames/images`, so FrameViewer's series prev/next
+  controls are available in recording review mode.
 - Dataset reads go through `imagesPath(bool)` / `masksPath(bool)` helpers
   that route to `/recorded_frames/images` (and return `""` for masks,
   since recording files have none).

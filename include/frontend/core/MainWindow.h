@@ -65,6 +65,8 @@ private:
     bool experimentActive_{false};
     bool experimentServicesActive_{false};
     bool flushInProgress_{false};
+    bool restoreRealtimeModeAfterExperiment_{false};
+    int realtimeModeBeforeExperiment_{0};
     QFutureWatcher<size_t>* flushWatcher_{nullptr};
     QAction* startExperimentAct_ = nullptr;
     QAction* stopExperimentAct_ = nullptr;
