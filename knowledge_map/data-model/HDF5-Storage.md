@@ -45,10 +45,12 @@
   populate `HdfMetricsModel` without loading image bytes.
 - Recording mode: `isRecordingFile()` probes `/recording_info`;
   `readRecordingMetadata` fills minimal `ProcessedFrame`s (index +
-  timestampNs only); `readRecordingInfo` reads the four attributes
+  timestampNs only); `readRecordingInfo` reads the core attributes
   (`start_time_ns`, `end_time_ns`, `total_recorded_frames`,
-  `total_filtered_empty_frames`). [[../frontend/HdfReviewTab]] uses these
-  to present recording files in a single-tab view.
+  `total_filtered_empty_frames`) plus optional multi-image attributes
+  (`multi_image_enabled`, `multi_image_count`). [[../frontend/HdfReviewTab]]
+  uses these to present recording files in a single-tab view and build
+  recording-series windows in FrameViewer when multi-image was enabled.
 - Single image (bounded memory): `readImageByIndex(datasetPath, idx, cv::Mat&)`.
 - Small batch (e.g. thumbnails): `readImagesRange(datasetPath, start, count, vec)`.
 - Dataset shape discovery: `getDatasetInfo(path, count, H, W, channels)`;
