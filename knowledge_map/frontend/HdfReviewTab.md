@@ -17,8 +17,6 @@
   `readImageByIndex` / `readImagesRange` (hyperslab reads — bounded memory).
 - Display metrics in a `QTableView` backed by `HdfMetricsModel`.
 - Optional charts: scatter + histograms over the saved dataset.
-- `Export All` now prompts how to export multi-image series frames:
-  all frames, a custom 1-based range (for example `9-15`), or skip.
 
 ## Scalability
 
@@ -74,8 +72,6 @@ frames. The currently active
 
 - Multi-image series (4D dataset) need `readSeriesImagesByIndex` — not the
   flat `readImageByIndex`.
-- During `Export All`, the series prompt applies one range selection across
-  every valid multi-image record so exports stay consistent.
 - Chart snapshots stored in the file are 2D/3D — use `readChartSnapshot`
   to display them.
 - See tasks `review_hdf_thumbnail_spacer_crash.md` and
