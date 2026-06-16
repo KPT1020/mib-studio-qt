@@ -9,6 +9,11 @@
   `StatisticsPanel` now shows the selected experiment HDF5 save location and
   live free/total storage for the corresponding volume via `QStorageInfo`,
   with `MainWindow` persisting the chosen save path when an experiment starts.
+- **Multi-image export range selector in Review tab** (2026-06-16) —
+  `HdfReviewTab` `Export All` now detects `series_images` datasets and prompts
+  users to export all series frames, a custom 1-based range (for example
+  `9-15`), or skip series images entirely. The export summary and logs now
+  report selected series range + counts.
 
 - **OpenAI Symphony workflow setup** (2026-06-11) - Added the repo-owned
   `WORKFLOW.md` contract for the existing Linear `mib-studio` project, plus

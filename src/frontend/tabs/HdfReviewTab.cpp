@@ -13,6 +13,7 @@
 #include <QTextStream>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QInputDialog>
 #include <QScrollBar>
 #include <QEventLoop>
 #include <QComboBox>
@@ -59,6 +60,98 @@
 #endif
 #include <windows.h>
 #endif
+
+namespace {
+
+struct SeriesExportSelection {
+    bool exportSeriesImages{false};
+    size_t startInclusive{0}; // zero-based
+    size_t endInclusive{0};   // zero-based
+};
+
+bool promptSeriesExportSelection(QWidget* parent,
+                                 size_t seriesCount,
+                                 SeriesExportSelection& outSelection) {
+    outSelection = SeriesExportSelection{};
+    if (seriesCount == 0) {
+        return true;
+    }
+
+    const int maxSeriesInt = static_cast<int>(std::min(
+        seriesCount, static_cast<size_t>(std::numeric_limits<int>::max())));
+    if (maxSeriesInt <= 0) {
+        return true;
+    }
+
+    QMessageBox modeDialog(parent);
+    modeDialog.setIcon(QMessageBox::Question);
+    modeDialog.setWindowTitle(QObject::tr("Series Export Options"));
+    modeDialog.setText(QObject::tr("Multi-image mode has %1 frames per detection.")
+                           .arg(maxSeriesInt));
+    modeDialog.setInformativeText(
+        QObject::tr("Choose how series frames should be exported "
+                    "(example custom range: 9 to 15)."));
+
+    auto* allButton = modeDialog.addButton(
+        QObject::tr("All %1 Frames").arg(maxSeriesInt), QMessageBox::AcceptRole);
+    auto* customButton = modeDialog.addButton(
+        QObject::tr("Custom Range..."), QMessageBox::ActionRole);
+    auto* skipButton = modeDialog.addButton(
+        QObject::tr("Skip Series Frames"), QMessageBox::DestructiveRole);
+    modeDialog.addButton(QMessageBox::Cancel);
+    modeDialog.exec();
+
+    if (modeDialog.clickedButton() == allButton) {
+        outSelection.exportSeriesImages = true;
+        outSelection.startInclusive = 0;
+        outSelection.endInclusive = static_cast<size_t>(maxSeriesInt - 1);
+        return true;
+    }
+
+    if (modeDialog.clickedButton() == customButton) {
+        bool startOk = false;
+        const int startFrame = QInputDialog::getInt(
+            parent,
+            QObject::tr("Series Range"),
+            QObject::tr("Start frame (1-based):"),
+            1,
+            1,
+            maxSeriesInt,
+            1,
+            &startOk);
+        if (!startOk) {
+            return false;
+        }
+
+        bool endOk = false;
+        const int endFrame = QInputDialog::getInt(
+            parent,
+            QObject::tr("Series Range"),
+            QObject::tr("End frame (1-based):"),
+            maxSeriesInt,
+            startFrame,
+            maxSeriesInt,
+            1,
+            &endOk);
+        if (!endOk) {
+            return false;
+        }
+
+        outSelection.exportSeriesImages = true;
+        outSelection.startInclusive = static_cast<size_t>(startFrame - 1);
+        outSelection.endInclusive = static_cast<size_t>(endFrame - 1);
+        return true;
+    }
+
+    if (modeDialog.clickedButton() == skipButton) {
+        outSelection.exportSeriesImages = false;
+        return true;
+    }
+
+    return false;
+}
+
+} // namespace
 
 namespace frontend {
 
@@ -1573,6 +1666,15 @@ void HdfReviewTab::exportAllImagesToTiff(const QString& baseDir) {
     int seriesH = 0, seriesW = 0;
     bool hasSeriesImages = !isRecordingMode_
         && hdfReader_->getSeriesImageInfo(seriesRecords, seriesCount, seriesH, seriesW);
+    SeriesExportSelection seriesSelection;
+    if (hasSeriesImages) {
+        if (!promptSeriesExportSelection(this, seriesCount, seriesSelection)) {
+            SPDLOG_INFO("HdfReviewTab: series export cancelled by user");
+            return;
+        }
+    }
+    const int seriesDigits = std::max(2, QString::number(
+        static_cast<qulonglong>(std::max<size_t>(seriesCount, 1))).size());
 
     // Export valid frames (in recording mode, these are the only frames)
     const std::string validImgPath = imagesPath(true);
@@ -1591,13 +1693,15 @@ void HdfReviewTab::exportAllImagesToTiff(const QString& baseDir) {
         }
 
         // Export series images if available
-        if (hasSeriesImages && i < seriesRecords) {
+        if (hasSeriesImages && seriesSelection.exportSeriesImages && i < seriesRecords) {
             std::vector<cv::Mat> seriesImages;
-            if (hdfReader_->readSeriesImagesByIndex(i, seriesImages)) {
-                for (size_t s = 0; s < seriesImages.size(); ++s) {
+            if (hdfReader_->readSeriesImagesByIndex(i, seriesImages) && !seriesImages.empty()) {
+                const size_t startSeries = std::min(seriesSelection.startInclusive, seriesImages.size() - 1);
+                const size_t endSeries = std::min(seriesSelection.endInclusive, seriesImages.size() - 1);
+                for (size_t s = startSeries; s <= endSeries; ++s) {
                     QString seriesFileName = QString("valid_frame_%1_series_%2.tiff")
                         .arg(validFrames_[i].index, 6, 10, QChar('0'))
-                        .arg(s, 2, 10, QChar('0'));
+                        .arg(static_cast<qulonglong>(s + 1), seriesDigits, 10, QChar('0'));
                     QString seriesFilePath = dir.filePath(seriesFileName);
                     if (cv::imwrite(seriesFilePath.toStdString(), seriesImages[s])) {
                         seriesExportedCount++;
@@ -1624,11 +1728,25 @@ void HdfReviewTab::exportAllImagesToTiff(const QString& baseDir) {
 
     QString message = tr("Exported %1 of %2 images to:\n%3")
         .arg(exportedCount).arg(totalCount).arg(baseDir);
-    if (seriesExportedCount > 0) {
-        message += tr("\n+ %1 series images").arg(seriesExportedCount);
+    if (hasSeriesImages) {
+        if (seriesSelection.exportSeriesImages) {
+            message += tr("\n+ %1 series images (frames %2-%3)")
+                .arg(seriesExportedCount)
+                .arg(static_cast<qulonglong>(seriesSelection.startInclusive + 1))
+                .arg(static_cast<qulonglong>(seriesSelection.endInclusive + 1));
+        } else {
+            message += tr("\n+ Series images skipped");
+        }
     }
     QMessageBox::information(this, tr("Export Complete"), message);
-    SPDLOG_INFO("Exported {} of {} images + {} series images to {}", exportedCount, totalCount, seriesExportedCount, baseDir.toStdString());
+    SPDLOG_INFO("Exported {} of {} base images, series_exported={} (enabled={}, start={}, end={}) to {}",
+                exportedCount,
+                totalCount,
+                seriesExportedCount,
+                seriesSelection.exportSeriesImages,
+                seriesSelection.startInclusive + 1,
+                seriesSelection.endInclusive + 1,
+                baseDir.toStdString());
 }
 
 bool HdfReviewTab::exportChartFromHdf5(const std::string& datasetPath, const QString& filePath) {
@@ -1666,9 +1784,24 @@ void HdfReviewTab::exportAllData(const QString& baseDir) {
     }
 
     int exportedImages = 0;
+    int exportedSeriesImages = 0;
     int totalImages = static_cast<int>(validFrames_.size() + invalidFrames_.size());
     bool csvExported = false;
     bool chartsExported = !isRecordingMode_;   // N/A for recording files
+
+    size_t seriesCount = 0, seriesRecords = 0;
+    int seriesH = 0, seriesW = 0;
+    bool hasSeriesImages = !isRecordingMode_
+        && hdfReader_->getSeriesImageInfo(seriesRecords, seriesCount, seriesH, seriesW);
+    SeriesExportSelection seriesSelection;
+    if (hasSeriesImages) {
+        if (!promptSeriesExportSelection(this, seriesCount, seriesSelection)) {
+            SPDLOG_INFO("HdfReviewTab: export-all cancelled while selecting series range");
+            return;
+        }
+    }
+    const int seriesDigits = std::max(2, QString::number(
+        static_cast<qulonglong>(std::max<size_t>(seriesCount, 1))).size());
 
     // Export CSV metrics (recording files have no per-frame metrics)
     if (!isRecordingMode_) {
@@ -1691,6 +1824,23 @@ void HdfReviewTab::exportAllData(const QString& baseDir) {
             // Export without compression
             if (cv::imwrite(filePath.toStdString(), image)) {
                 exportedImages++;
+            }
+        }
+
+        if (hasSeriesImages && seriesSelection.exportSeriesImages && i < seriesRecords) {
+            std::vector<cv::Mat> seriesImages;
+            if (hdfReader_->readSeriesImagesByIndex(i, seriesImages) && !seriesImages.empty()) {
+                const size_t startSeries = std::min(seriesSelection.startInclusive, seriesImages.size() - 1);
+                const size_t endSeries = std::min(seriesSelection.endInclusive, seriesImages.size() - 1);
+                for (size_t s = startSeries; s <= endSeries; ++s) {
+                    QString seriesFileName = QString("valid_frame_%1_series_%2.tiff")
+                        .arg(validFrames_[i].index, 6, 10, QChar('0'))
+                        .arg(static_cast<qulonglong>(s + 1), seriesDigits, 10, QChar('0'));
+                    QString seriesFilePath = dir.filePath(seriesFileName);
+                    if (cv::imwrite(seriesFilePath.toStdString(), seriesImages[s])) {
+                        exportedSeriesImages++;
+                    }
+                }
             }
         }
     }
@@ -1765,12 +1915,30 @@ void HdfReviewTab::exportAllData(const QString& baseDir) {
     QString message = tr("Export complete:\n");
     message += tr("- CSV: %1\n").arg(csvExported ? tr("Yes") : tr("No"));
     message += tr("- Images: %1 of %2\n").arg(exportedImages).arg(totalImages);
+    if (hasSeriesImages) {
+        if (seriesSelection.exportSeriesImages) {
+            message += tr("- Series Images: %1 (frames %2-%3)\n")
+                .arg(exportedSeriesImages)
+                .arg(static_cast<qulonglong>(seriesSelection.startInclusive + 1))
+                .arg(static_cast<qulonglong>(seriesSelection.endInclusive + 1));
+        } else {
+            message += tr("- Series Images: Skipped\n");
+        }
+    }
     message += tr("- Charts: %1\n").arg(chartsExported ? tr("Yes") : tr("Partial/No"));
     message += tr("\nLocation: %1").arg(baseDir);
 
     QMessageBox::information(this, tr("Export Complete"), message);
-    SPDLOG_INFO("Exported all data: CSV={}, Images={}/{}, Charts={}, Location={}",
-                csvExported, exportedImages, totalImages, chartsExported, baseDir.toStdString());
+    SPDLOG_INFO("Exported all data: CSV={}, Images={}/{}, Series={} (enabled={}, start={}, end={}), Charts={}, Location={}",
+                csvExported,
+                exportedImages,
+                totalImages,
+                exportedSeriesImages,
+                seriesSelection.exportSeriesImages,
+                seriesSelection.startInclusive + 1,
+                seriesSelection.endInclusive + 1,
+                chartsExported,
+                baseDir.toStdString());
 }
 
 void HdfReviewTab::updateCharts() {
