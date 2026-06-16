@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QString>
 
 class QLabel;
 class QTimer;
@@ -59,6 +60,7 @@ private:
     frontend::SidebarWidget* sidebarWidget_ = nullptr;
     frontend::DeviceInitManager* initManager_ = nullptr;
     QSplitter* mainSplitter_ = nullptr;
+    QString experimentSavePath_;
     uint64_t experimentStartTimeNs_{0};
     bool experimentActive_{false};
     bool experimentServicesActive_{false};

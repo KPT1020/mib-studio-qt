@@ -10,6 +10,7 @@
 #include <QSplitter>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QStorageInfo>
 #include <QMessageBox>
 #include <QSizePolicy>
 #include <QWidget>
@@ -644,6 +645,7 @@ void MainWindow::onStartExperiment()
     {
         hdf5Path += ".h5";
     }
+    experimentSavePath_ = QString::fromStdString(hdf5Path);
 
     // Open HDF5 file
     auto &hdf5 = backend_.hdf5();
@@ -918,6 +920,21 @@ void MainWindow::onUpdateStats()
         data.experimentRuntimeSeconds = experimentRuntimeSeconds;
         data.algoAvgUsAgeMs = algoAvgUsAgeMs;
         data.meanRingRatioAgeMs = meanRingRatioAgeMs;
+        data.experimentSavePath = experimentSavePath_;
+
+        if (!experimentSavePath_.isEmpty())
+        {
+            const QFileInfo saveFileInfo(experimentSavePath_);
+            const QString saveDir = saveFileInfo.absolutePath();
+            QStorageInfo storageInfo(saveDir);
+            storageInfo.refresh();
+            if (storageInfo.isValid() && storageInfo.isReady())
+            {
+                data.storageInfoAvailable = true;
+                data.storageBytesAvailable = static_cast<uint64_t>(storageInfo.bytesAvailable());
+                data.storageBytesTotal = static_cast<uint64_t>(storageInfo.bytesTotal());
+            }
+        }
 
         sidebarWidget_->statisticsPanel()->updateStatistics(data);
     }

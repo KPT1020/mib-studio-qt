@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QWidget>
+#include <QString>
 #include <cstdint>
 #include <cstddef>
 
@@ -30,6 +31,10 @@ namespace frontend
         // Age in ms since last backend update (for stale indicator); 0 = just updated, large = stale
         double algoAvgUsAgeMs = 0.0;
         double meanRingRatioAgeMs = 0.0;
+        QString experimentSavePath;
+        uint64_t storageBytesAvailable = 0;
+        uint64_t storageBytesTotal = 0;
+        bool storageInfoAvailable = false;
     };
 
     class StatisticsPanel : public QWidget
@@ -83,6 +88,10 @@ namespace frontend
         QLabel* validImagesSavedValue_;
         QLabel* experimentRuntimeLabel_;
         QLabel* experimentRuntimeValue_;
+        QLabel* experimentSavePathLabel_;
+        QLabel* experimentSavePathValue_;
+        QLabel* storageFreeLabel_;
+        QLabel* storageFreeValue_;
     };
 
 } // namespace frontend

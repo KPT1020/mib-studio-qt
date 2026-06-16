@@ -23,8 +23,9 @@
   frames are actually captured and reviewable; stop restores the prior mode.
 - `onUpdateStats` — timer tick; pulls `CaptureStats`, count-only
   `ProcessingService::getBufferedFrameCounts()`, and autofocus state for the
-  status bar/sidebar. It must not copy full `ProcessedFrame` buffers on the
-  500 ms UI timer.
+  status bar/sidebar. It now also resolves the selected experiment save path
+  to a storage volume and publishes free/total bytes to `StatisticsPanel`.
+  It must not copy full `ProcessedFrame` buffers on the 500 ms UI timer.
 - `onTabChanged(index)` — starts/stops the realtime loop when entering or
   leaving the experiment-related tabs (ExperimentController state).
 - `onNoCamerasFound` — shows a friendly dialog when
@@ -60,3 +61,6 @@
   the stale `StreamModule` stats seen in `docs/howto/safe-start-stop-egrabber.md`.
 - `experimentServicesActive_` must stay in sync with
   `ExperimentController::State` or buttons wedge.
+- `onStartExperiment` persists the selected HDF5 save path for sidebar
+  telemetry, so storage stats in the left column always match the chosen save
+  location.

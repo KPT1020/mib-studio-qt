@@ -5,6 +5,10 @@
 
 ## Features shipped
 
+- **Sidebar save-location storage telemetry** (2026-06-16) — The left-column
+  `StatisticsPanel` now shows the selected experiment HDF5 save location and
+  live free/total storage for the corresponding volume via `QStorageInfo`,
+  with `MainWindow` persisting the chosen save path when an experiment starts.
 - **Experiment multi-image capture mode guard** (2026-06-16) —
   `MainWindow::onStartExperiment` now auto-switches realtime processing from
   `async_batch` to `inline` when multi-image capture is enabled, so experiment
@@ -17,7 +21,6 @@
   attributes and, for recording files, loads a bounded series window from
   `/recorded_frames/images` into `FrameViewerDialog` so series navigation is
   available during review.
-
 - **Multi-image export range selector in Review tab** (2026-06-16) —
   `HdfReviewTab` `Export All` now detects `series_images` datasets and prompts
   users to export all series frames, a custom 1-based range (for example
