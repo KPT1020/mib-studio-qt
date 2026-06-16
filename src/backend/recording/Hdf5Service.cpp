@@ -18,6 +18,7 @@
 #include <chrono>
 #include <sstream>
 #include <filesystem>
+#include <algorithm>
 
 namespace backend::services
 {
@@ -2817,12 +2818,20 @@ namespace backend::services {
     }
 
     bool Hdf5Service::readRecordingInfo(uint64_t& startTimeNs, uint64_t& endTimeNs,
-                                        uint64_t& totalFrames, uint64_t& filteredFrames)
+                                        uint64_t& totalFrames, uint64_t& filteredFrames,
+                                        bool* multiImageEnabled,
+                                        uint64_t* multiImageCount)
     {
         startTimeNs = 0;
         endTimeNs = 0;
         totalFrames = 0;
         filteredFrames = 0;
+        if (multiImageEnabled) {
+            *multiImageEnabled = false;
+        }
+        if (multiImageCount) {
+            *multiImageCount = 1;
+        }
 
         if (!isFileOpen())
         {
@@ -2859,9 +2868,33 @@ namespace backend::services {
         readAttr("end_time_ns", endTimeNs);
         readAttr("total_recorded_frames", totalFrames);
         readAttr("total_filtered_empty_frames", filteredFrames);
+        if (multiImageEnabled && H5Aexists(groupId, "multi_image_enabled") > 0) {
+            hid_t attr = H5Aopen(groupId, "multi_image_enabled", H5P_DEFAULT);
+            if (attr >= 0) {
+                uint8_t enabled = 0;
+                if (H5Aread(attr, H5T_NATIVE_UINT8, &enabled) >= 0) {
+                    *multiImageEnabled = (enabled != 0);
+                }
+                H5Aclose(attr);
+            }
+        }
+        if (multiImageCount && H5Aexists(groupId, "multi_image_count") > 0) {
+            hid_t attr = H5Aopen(groupId, "multi_image_count", H5P_DEFAULT);
+            if (attr >= 0) {
+                uint64_t count = 1;
+                if (H5Aread(attr, H5T_NATIVE_UINT64, &count) >= 0) {
+                    *multiImageCount = std::max<uint64_t>(1, count);
+                }
+                H5Aclose(attr);
+            }
+        }
 
         H5Gclose(groupId);
-        SPDLOG_INFO("readRecordingInfo: recorded={}, filtered={}", totalFrames, filteredFrames);
+        SPDLOG_INFO("readRecordingInfo: recorded={}, filtered={}, multi_image_enabled={}, multi_image_count={}",
+                    totalFrames,
+                    filteredFrames,
+                    multiImageEnabled ? (*multiImageEnabled ? 1 : 0) : -1,
+                    multiImageCount ? *multiImageCount : 0);
         return true;
     }
 
@@ -3036,7 +3069,9 @@ namespace backend::services {
     }
 
     bool Hdf5Service::writeRecordingInfo(uint64_t startTimeNs, uint64_t endTimeNs,
-                                         uint64_t totalFrames, uint64_t filteredFrames)
+                                         uint64_t totalFrames, uint64_t filteredFrames,
+                                         bool multiImageEnabled,
+                                         uint64_t multiImageCount)
     {
         if (!isFileOpen())
             return false;
@@ -3073,6 +3108,32 @@ namespace backend::services {
         writeAttr("total_recorded_frames", totalFrames);
         writeAttr("total_filtered_empty_frames", filteredFrames);
 
+        const uint8_t multiImageEnabledValue = multiImageEnabled ? 1 : 0;
+        hid_t multiEnabledAttr = H5Aopen(infoGroupId, "multi_image_enabled", H5P_DEFAULT);
+        if (multiEnabledAttr < 0)
+        {
+            multiEnabledAttr = H5Acreate2(infoGroupId, "multi_image_enabled", H5T_NATIVE_UINT8, scalarSpaceId,
+                                          H5P_DEFAULT, H5P_DEFAULT);
+        }
+        if (multiEnabledAttr >= 0)
+        {
+            H5Awrite(multiEnabledAttr, H5T_NATIVE_UINT8, &multiImageEnabledValue);
+            H5Aclose(multiEnabledAttr);
+        }
+
+        const uint64_t multiImageCountValue = std::max<uint64_t>(1, multiImageCount);
+        hid_t multiCountAttr = H5Aopen(infoGroupId, "multi_image_count", H5P_DEFAULT);
+        if (multiCountAttr < 0)
+        {
+            multiCountAttr = H5Acreate2(infoGroupId, "multi_image_count", H5T_NATIVE_UINT64, scalarSpaceId,
+                                        H5P_DEFAULT, H5P_DEFAULT);
+        }
+        if (multiCountAttr >= 0)
+        {
+            H5Awrite(multiCountAttr, H5T_NATIVE_UINT64, &multiImageCountValue);
+            H5Aclose(multiCountAttr);
+        }
+
         // Mark recording mode
         const char* mode = "frame_recording";
         hid_t strType = H5Tcopy(H5T_C_S1);
@@ -3103,7 +3164,11 @@ namespace backend::services {
                                      impl_->lastRecoveryCheckpointAt_,
                                      true,
                                      "writeRecordingInfo");
-        SPDLOG_INFO("Recording info written: recorded={}, filtered={}", totalFrames, filteredFrames);
+        SPDLOG_INFO("Recording info written: recorded={}, filtered={}, multi_image_enabled={}, multi_image_count={}",
+                    totalFrames,
+                    filteredFrames,
+                    multiImageEnabledValue,
+                    multiImageCountValue);
         return true;
     }
 

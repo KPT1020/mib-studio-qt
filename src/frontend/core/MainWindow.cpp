@@ -663,6 +663,27 @@ void MainWindow::onStartExperiment()
 
     // Start experiment (clear frame buffers)
     auto &processing = backend_.processing();
+    restoreRealtimeModeAfterExperiment_ = false;
+    realtimeModeBeforeExperiment_ =
+        static_cast<int>(processing.getRealtimeProcessingMode());
+    const auto processingConfig = processing.getProcessingConfig();
+    const bool multiImageSeriesEnabled =
+        processingConfig.multi_image_enabled && processingConfig.multi_image_count > 1;
+    if (multiImageSeriesEnabled &&
+        processing.getRealtimeProcessingMode() ==
+            backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch)
+    {
+        processing.setRealtimeProcessingMode(
+            backend::services::ProcessingService::RealtimeProcessingMode::Inline);
+        restoreRealtimeModeAfterExperiment_ = true;
+        QMessageBox::information(
+            this,
+            tr("Start Experiment"),
+            tr("Multi-image series capture requires inline realtime processing.\n"
+               "This experiment will run in inline mode so series images remain reviewable.\n"
+               "Your previous realtime mode will be restored when the experiment stops."));
+        SPDLOG_INFO("MainWindow: switched realtime mode async_batch -> inline for multi-image experiment");
+    }
     processing.startExperiment();
 
     // Record experiment start time
@@ -809,6 +830,21 @@ void MainWindow::onStopExperiment()
     }
 
     experimentActive_ = false;
+    if (restoreRealtimeModeAfterExperiment_)
+    {
+        const auto restoreMode =
+            realtimeModeBeforeExperiment_ ==
+                    static_cast<int>(backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch)
+                ? backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch
+                : backend::services::ProcessingService::RealtimeProcessingMode::Inline;
+        processing.setRealtimeProcessingMode(restoreMode);
+        restoreRealtimeModeAfterExperiment_ = false;
+        SPDLOG_INFO("MainWindow: restored realtime mode after experiment stop to {}",
+                    restoreMode ==
+                            backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch
+                        ? "async_batch"
+                        : "inline");
+    }
     updateExperimentButtonStates(); // This will also call updateTabStates() to enable Overview and Review tabs
 
     const auto cfgAtStop = processing.getProcessingConfig();

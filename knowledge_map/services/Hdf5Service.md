@@ -38,7 +38,10 @@
   with `RecordingFrameMeta` (index, timestampNs, width, height).
   Matching readers: `isRecordingFile()` (probes `/recording_info`),
   `readRecordingMetadata(frames)` (fills only index + timestampNs on each
-  `ProcessedFrame`), `readRecordingInfo(start, end, total, filtered)`.
+  `ProcessedFrame`), `readRecordingInfo(start, end, total, filtered, ...)`.
+  Recording info now persists `multi_image_enabled` (`uint8`) and
+  `multi_image_count` (`uint64`) alongside start/end/totals so review mode can
+  reconstruct multi-image windows from `/recorded_frames/images`.
   Used by [[../frontend/HdfReviewTab]] to present recording files.
 
 ## Threading
