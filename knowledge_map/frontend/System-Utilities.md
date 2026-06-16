@@ -41,6 +41,11 @@
 `SidebarWidget`, `SimpleImageCanvas`, `StatisticsPanel`,
 `StatsDisplayManager`.
 
+- **`StatisticsPanel`** — left-column telemetry groups for display, processing,
+  camera, autofocus, and experiment state. Experiment telemetry includes the
+  selected HDF5 save location plus live free/total storage space for the
+  underlying device/volume.
+
 ## Widgets (`src/frontend/widgets/`)
 
 - **`ZoomableChartView`** — subclass of `QChartView` with scroll/zoom.

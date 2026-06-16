@@ -5,6 +5,11 @@
 
 ## Features shipped
 
+- **Sidebar save-location storage telemetry** (2026-06-16) — The left-column
+  `StatisticsPanel` now shows the selected experiment HDF5 save location and
+  live free/total storage for the corresponding volume via `QStorageInfo`,
+  with `MainWindow` persisting the chosen save path when an experiment starts.
+
 - **OpenAI Symphony workflow setup** (2026-06-11) - Added the repo-owned
   `WORKFLOW.md` contract for the existing Linear `mib-studio` project, plus
   `scripts/start-symphony.ps1` to bootstrap the OpenAI Symphony Elixir

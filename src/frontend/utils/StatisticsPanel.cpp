@@ -27,6 +27,20 @@ namespace frontend
                 .arg(minutes, 2, 10, QChar('0'))
                 .arg(secs, 2, 10, QChar('0'));
         }
+
+        QString formatBytes(uint64_t bytes)
+        {
+            static const char* kUnits[] = {"B", "KB", "MB", "GB", "TB"};
+            double value = static_cast<double>(bytes);
+            size_t unitIndex = 0;
+            while (value >= 1024.0 && unitIndex < 4)
+            {
+                value /= 1024.0;
+                ++unitIndex;
+            }
+            const int precision = unitIndex == 0 ? 0 : 1;
+            return QString("%1 %2").arg(QString::number(value, 'f', precision), kUnits[unitIndex]);
+        }
     }
 
     StatisticsPanel::StatisticsPanel(QWidget* parent)
@@ -61,6 +75,10 @@ namespace frontend
         , validImagesSavedValue_(nullptr)
         , experimentRuntimeLabel_(nullptr)
         , experimentRuntimeValue_(nullptr)
+        , experimentSavePathLabel_(nullptr)
+        , experimentSavePathValue_(nullptr)
+        , storageFreeLabel_(nullptr)
+        , storageFreeValue_(nullptr)
     {
         setupUI();
     }
@@ -156,6 +174,15 @@ namespace frontend
         experimentRuntimeValue_ = new QLabel("00:00:00", experimentGroup);
         experimentRuntimeValue_->setStyleSheet("font-weight: bold;");
         experimentLayout->addRow(experimentRuntimeLabel_, experimentRuntimeValue_);
+        experimentSavePathLabel_ = new QLabel(tr("Save Location:"), experimentGroup);
+        experimentSavePathValue_ = new QLabel(tr("Not selected"), experimentGroup);
+        experimentSavePathValue_->setStyleSheet("font-weight: bold;");
+        experimentSavePathValue_->setWordWrap(true);
+        experimentLayout->addRow(experimentSavePathLabel_, experimentSavePathValue_);
+        storageFreeLabel_ = new QLabel(tr("Storage Free:"), experimentGroup);
+        storageFreeValue_ = new QLabel(tr("N/A"), experimentGroup);
+        storageFreeValue_->setStyleSheet("font-weight: bold;");
+        experimentLayout->addRow(storageFreeLabel_, storageFreeValue_);
         mainLayout->addWidget(experimentGroup);
 
         mainLayout->addStretch();
@@ -235,6 +262,22 @@ namespace frontend
             flushStatusValue_->setStyleSheet("font-weight: bold; color: gray;");
             validImagesSavedValue_->setText("0");
             experimentRuntimeValue_->setText("00:00:00");
+        }
+
+        experimentSavePathValue_->setText(data.experimentSavePath.isEmpty()
+                                              ? tr("Not selected")
+                                              : data.experimentSavePath);
+        if (data.storageInfoAvailable)
+        {
+            storageFreeValue_->setText(tr("%1 / %2")
+                                           .arg(formatBytes(data.storageBytesAvailable))
+                                           .arg(formatBytes(data.storageBytesTotal)));
+            storageFreeValue_->setToolTip(tr("Free space / total space for the selected save location"));
+        }
+        else
+        {
+            storageFreeValue_->setText(tr("N/A"));
+            storageFreeValue_->setToolTip(tr("Storage metrics unavailable for the selected save location"));
         }
     }
 
