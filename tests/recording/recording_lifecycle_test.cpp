@@ -66,7 +66,7 @@ int main()
         std::filesystem::remove(path);
         return 4;
     }
-    if (!hdf5.writeRecordingInfo(1000, 4000, 3, 1))
+    if (!hdf5.writeRecordingInfo(1000, 4000, 3, 1, true, 5))
     {
         std::cerr << "failed to write recording info\n";
         hdf5.closeFile();
@@ -93,8 +93,11 @@ int main()
     uint64_t end = 0;
     uint64_t total = 0;
     uint64_t filtered = 0;
-    if (!hdf5.readRecordingInfo(start, end, total, filtered) ||
-        start != 1000 || end != 4000 || total != 3 || filtered != 1)
+    bool multiImageEnabled = false;
+    uint64_t multiImageCount = 0;
+    if (!hdf5.readRecordingInfo(start, end, total, filtered, &multiImageEnabled, &multiImageCount) ||
+        start != 1000 || end != 4000 || total != 3 || filtered != 1 ||
+        !multiImageEnabled || multiImageCount != 5)
     {
         std::cerr << "recording info should round-trip\n";
         hdf5.closeFile();

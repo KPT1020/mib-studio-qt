@@ -413,10 +413,22 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
 
         uint64_t startTimeNs = 0, endTimeNs = 0;
         uint64_t totalFrames = 0, filteredFrames = 0;
-        if (hdfReader_->readRecordingInfo(startTimeNs, endTimeNs, totalFrames, filteredFrames)) {
+        bool multiImageEnabled = false;
+        uint64_t multiImageCount = 1;
+        if (hdfReader_->readRecordingInfo(startTimeNs,
+                                          endTimeNs,
+                                          totalFrames,
+                                          filteredFrames,
+                                          &multiImageEnabled,
+                                          &multiImageCount)) {
+            recordingMultiImageEnabled_ = multiImageEnabled;
+            recordingMultiImageCount_ = std::max<size_t>(1, static_cast<size_t>(multiImageCount));
             ui->statusLabel->setText(tr("Recording: %1 frames, %2 empty skipped")
                                      .arg(static_cast<qulonglong>(totalFrames))
                                      .arg(static_cast<qulonglong>(filteredFrames)));
+            SPDLOG_INFO("HdfReviewTab: recording multi-image enabled={}, count={}",
+                        recordingMultiImageEnabled_,
+                        recordingMultiImageCount_);
         }
 
         size_t count = 0; int h = 0, w = 0, c = 0;
@@ -550,6 +562,8 @@ void HdfReviewTab::clearDisplay() {
     validScrollValue_ = 0;
     invalidScrollValue_ = 0;
     isRecordingMode_ = false;
+    recordingMultiImageEnabled_ = false;
+    recordingMultiImageCount_ = 1;
 
     // Restore the default tab labels/visibility that recording-mode loads
     // may have overridden.
@@ -1435,6 +1449,25 @@ void HdfReviewTab::pruneOffscreenThumbnails(bool isValid) {
     }
 }
 
+void HdfReviewTab::loadRecordingSeriesWindow(size_t frameIndex,
+                                             backend::services::ProcessedFrame& frame) const {
+    if (!hdfReader_ || !isRecordingMode_ || !recordingMultiImageEnabled_ || recordingMultiImageCount_ <= 1) {
+        return;
+    }
+
+    std::vector<cv::Mat> seriesImages;
+    if (hdfReader_->readImagesRange("/recorded_frames/images",
+                                    frameIndex,
+                                    recordingMultiImageCount_,
+                                    seriesImages) &&
+        seriesImages.size() > 1) {
+        frame.seriesImages = std::move(seriesImages);
+        SPDLOG_DEBUG("HdfReviewTab: loaded recording series window for frame {} (count={})",
+                     frameIndex,
+                     frame.seriesImages.size());
+    }
+}
+
 void HdfReviewTab::showFrameViewer(int frameIndex) {
     const auto& framesMeta = isShowingValid_ ? validFrames_ : invalidFrames_;
     if (frameIndex < 0 || frameIndex >= static_cast<int>(framesMeta.size())) {
@@ -1459,12 +1492,16 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
             SPDLOG_TRACE("HdfReviewTab: viewer loaded mask {}[{}] ({}x{}x{})",
                          maskPath, frameIndex, mask.cols, mask.rows, mask.channels());
         }
-        // Load multi-image series data if available (valid frames only; skip in recording mode)
-        if (isShowingValid_ && !isRecordingMode_) {
-            std::vector<cv::Mat> seriesImages;
-            if (hdfReader_->readSeriesImagesByIndex(static_cast<size_t>(frameIndex), seriesImages) && !seriesImages.empty()) {
-                initialFrame.seriesImages = std::move(seriesImages);
-                SPDLOG_DEBUG("HdfReviewTab: loaded {} series images for frame {}", initialFrame.seriesImages.size(), frameIndex);
+        // Load multi-image series data if available.
+        if (isShowingValid_) {
+            if (isRecordingMode_) {
+                loadRecordingSeriesWindow(static_cast<size_t>(frameIndex), initialFrame);
+            } else {
+                std::vector<cv::Mat> seriesImages;
+                if (hdfReader_->readSeriesImagesByIndex(static_cast<size_t>(frameIndex), seriesImages) && !seriesImages.empty()) {
+                    initialFrame.seriesImages = std::move(seriesImages);
+                    SPDLOG_DEBUG("HdfReviewTab: loaded {} series images for frame {}", initialFrame.seriesImages.size(), frameIndex);
+                }
             }
         }
     }
@@ -1481,12 +1518,16 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
     auto* navState = new NavigationState{frameIndex, isShowingValid_};
     
     // Connect navigation signals
-    // Helper lambda to load series images for a frame (skipped in recording mode — no series)
+    // Helper lambda to load series images for a frame.
     auto loadSeriesImages = [this, navState](backend::services::ProcessedFrame& pf, int idx) {
-        if (navState->isValidSet && hdfReader_ && !isRecordingMode_) {
-            std::vector<cv::Mat> seriesImages;
-            if (hdfReader_->readSeriesImagesByIndex(static_cast<size_t>(idx), seriesImages) && !seriesImages.empty()) {
-                pf.seriesImages = std::move(seriesImages);
+        if (navState->isValidSet && hdfReader_) {
+            if (isRecordingMode_) {
+                loadRecordingSeriesWindow(static_cast<size_t>(idx), pf);
+            } else {
+                std::vector<cv::Mat> seriesImages;
+                if (hdfReader_->readSeriesImagesByIndex(static_cast<size_t>(idx), seriesImages) && !seriesImages.empty()) {
+                    pf.seriesImages = std::move(seriesImages);
+                }
             }
         }
     };

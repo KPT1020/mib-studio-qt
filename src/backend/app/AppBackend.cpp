@@ -847,6 +847,11 @@ namespace backend
             const uint64_t startTimeNs = static_cast<uint64_t>(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
                     std::chrono::system_clock::now().time_since_epoch()).count());
+            const auto recordingConfig = processingService_->getProcessingConfig();
+            const bool recordingMultiImageEnabled =
+                recordingConfig.multi_image_enabled && recordingConfig.multi_image_count > 1;
+            const uint64_t recordingMultiImageCount = static_cast<uint64_t>(
+                std::max(1, recordingConfig.multi_image_count));
 
             uint64_t lastProcessedIdx = 0;
             bool firstFrame = true;
@@ -937,7 +942,9 @@ namespace backend
 
             hdf5Service_->writeRecordingInfo(startTimeNs, endTimeNs,
                                              frameRecordingWritten_.load(),
-                                             frameRecordingFiltered_.load());
+                                             frameRecordingFiltered_.load(),
+                                             recordingMultiImageEnabled,
+                                             recordingMultiImageCount);
             hdf5Service_->closeFile();
 
             SPDLOG_INFO("Frame recording stopped: {} frames recorded, {} empty filtered, file: {}",

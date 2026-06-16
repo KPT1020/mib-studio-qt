@@ -5,6 +5,19 @@
 
 ## Features shipped
 
+- **Experiment multi-image capture mode guard** (2026-06-16) —
+  `MainWindow::onStartExperiment` now auto-switches realtime processing from
+  `async_batch` to `inline` when multi-image capture is enabled, so experiment
+  runs actually collect series frames that can be viewed in Review. The
+  previous realtime mode is restored in `onStopExperiment`.
+
+- **Recording review multi-image window support** (2026-06-16) —
+  `writeRecordingInfo` now persists `multi_image_enabled` and
+  `multi_image_count` in `/recording_info`; `HdfReviewTab` reads those
+  attributes and, for recording files, loads a bounded series window from
+  `/recorded_frames/images` into `FrameViewerDialog` so series navigation is
+  available during review.
+
 - **Multi-image export range selector in Review tab** (2026-06-16) —
   `HdfReviewTab` `Export All` now detects `series_images` datasets and prompts
   users to export all series frames, a custom 1-based range (for example
