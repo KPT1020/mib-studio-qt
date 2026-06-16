@@ -50,6 +50,9 @@
   backend initialization (unless the env var is already explicitly set).
 - `auto_update` is honored in `MainWindow` startup: updater construction and
   quiet update checks are skipped when disabled.
+- `main.cpp` now clamps startup window geometry to the active screen's
+  `availableGeometry()` before `show()`, preventing initial windows from
+  opening off-screen on smaller displays.
 
 ## Gotchas
 

@@ -251,6 +251,12 @@
 
 ## Recent fixes
 
+- **2026-06-16** — Improved small-screen window behavior for the Qt app.
+  Startup now clamps `MainWindow` geometry to the active display's
+  `QScreen::availableGeometry()` instead of always forcing `960x600`, and
+  `SidebarWidget` no longer enforces expanded width as a hard minimum so the
+  main window can shrink without overflowing the visible desktop.
+
 - **2026-05-05** — Made `scripts/hdf5_export.spec` and
   `scripts/build_mac.sh` portable for Unix packaging of the HDF5 Export GUI.
   `hdf5_export.spec` now resolves its script directory robustly across
