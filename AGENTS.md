@@ -95,10 +95,10 @@ below are run manually.
   `ProcessingService` (capture → async batch processing → contour/mask output)
   and exits 0 on success.
 - **Full GUI on Linux:** `linux-system-release` (Ninja, system packages) builds
-  `mib_studio_qt` and needs `qt6-charts-dev`. At commit `1a4031f` it fails to
-  compile (`std::max(int, qsizetype)` in `src/frontend/tabs/HdfReviewTab.cpp`);
-  this is a pre-existing code issue, not an environment problem (Linux CI only
-  builds the backend). Run with `MIB_CAMERA_MODE=mock` +
-  `MIB_MOCK_CAMERA_DIR=<frames>` once it compiles.
+  `mib_studio_qt` and needs `qt6-charts-dev`. Run it headed on the VM display
+  with mock frames:
+  `DISPLAY=:1 MIB_CAMERA_MODE=mock MIB_MOCK_CAMERA_DIR=/workspace/data/mock_frames MIB_MOCK_CAMERA_LOOP=true ./build/linux-system/mib_studio_qt`.
+  Sample frames ship in `data/mock_frames/`. The window has Connect / Overview /
+  Experiment / Review tabs; the Overview tab shows the live mock preview.
 - The stale `mock_studio_qt` target referenced in some docs no longer exists;
   mock mode is a runtime mode of `mib_studio_qt` (forced on non-Windows).
