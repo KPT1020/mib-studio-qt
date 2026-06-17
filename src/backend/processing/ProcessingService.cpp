@@ -2260,15 +2260,15 @@ void ProcessingService::realtimeInlineLoop() {
                     // Create full-size mask for snapshot display
                     cv::Mat fullMaskSnapshot;
                     if (useROI) {
-                        // Reuse existing full frame if already created for experiment storage
+                        // Reuse the frame we already fetched for this index. The
+                        // experiment path may have built grayFull already; otherwise
+                        // derive the snapshot from f directly instead of taking the
+                        // contended FrameStore lock a second time for the same idx.
                         cv::Mat grayFullSnap;
                         if (!grayFull.empty()) {
                             grayFullSnap = grayFull;
-                        } else {
-                            backend::playback::Frame fFull{};
-                            if (rtStore_->getByWriteIndex(idx, fFull)) {
-                                grayFullSnap = makeGrayCopy(fFull.width, fFull.height, fFull.linePitch, fFull.data.data());
-                            }
+                        } else if (!f.data.empty()) {
+                            grayFullSnap = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
                         }
                         if (!grayFullSnap.empty()) {
                             fullMaskSnapshot = cv::Mat(grayFullSnap.rows, grayFullSnap.cols, CV_8UC1, cv::Scalar(0));

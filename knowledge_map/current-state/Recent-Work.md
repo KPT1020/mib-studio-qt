@@ -5,6 +5,21 @@
 
 ## Features shipped
 
+- **FrameStore lock-contention throttling fix** (2026-06-17) — the realtime
+  image-processing and triggering pipeline was throttling because
+  [[../data-model/FrameStore]] used a single `std::mutex` held *across the
+  full-frame `memcpy`* on both `pushFrame` (capture) and every `get*`
+  consumer (realtime loop, UI preview, raw-frame recorder). Producer and
+  consumers serialised on that one lock, defeating the ring buffer's
+  decoupling and stalling capture/processing/triggering. Replaced with a
+  two-tier scheme: a `std::shared_mutex structureMutex_` (shared on the hot
+  path, exclusive for `resize` / save / estimate) plus a per-slot
+  `std::mutex` array so the copy in/out holds only that slot's lock. Also
+  removed a redundant second `getByWriteIndex` of the same index in the
+  realtime snapshot path (`ProcessingService::realtimeInlineLoop`) — it now
+  reuses the already-fetched frame. See [[../data-model/FrameStore]]
+  "Threading".
+
 - **Experiment multi-image capture mode guard** (2026-06-16) —
   `MainWindow::onStartExperiment` now auto-switches realtime processing from
   `async_batch` to `inline` when multi-image capture is enabled, so experiment

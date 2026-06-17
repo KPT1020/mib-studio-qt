@@ -22,6 +22,12 @@ mib_add_backend_test_executable(backend_lifecycle_smoke_test backend/backend_lif
 add_test(NAME backend.lifecycle_smoke COMMAND $<TARGET_FILE:backend_lifecycle_smoke_test>)
 set_tests_properties(backend.lifecycle_smoke PROPERTIES LABELS "backend")
 
+mib_add_backend_test_executable(frame_store_concurrency_test backend/frame_store_concurrency_test.cpp)
+find_package(Threads REQUIRED)
+target_link_libraries(frame_store_concurrency_test PRIVATE Threads::Threads)
+add_test(NAME backend.frame_store_concurrency COMMAND $<TARGET_FILE:frame_store_concurrency_test>)
+set_tests_properties(backend.frame_store_concurrency PROPERTIES LABELS "backend")
+
 mib_add_backend_test_executable(backend_facade_boundary_test backend/backend_facade_boundary_test.cpp)
 add_test(NAME backend.facade_boundary COMMAND $<TARGET_FILE:backend_facade_boundary_test>)
 set_tests_properties(backend.facade_boundary PROPERTIES LABELS "backend;bridge")
