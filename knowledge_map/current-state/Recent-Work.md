@@ -5,6 +5,18 @@
 
 ## Features shipped
 
+- **Per-frame detection allocator/CPU cost reduction** (2026-06-17) —
+  follow-up to the FrameStore fix targeting single-thread algo time in
+  [[../services/ProcessingService]]. (1) `FilterResult::allContours` is now a
+  `shared_ptr<const ...>` assigned once per frame instead of deep-copying the
+  whole contour set into every object's result (and again into each monitoring
+  / experiment copy); the write-only `hierarchy` field was deleted. (2)
+  `calculateBrightnessQuantiles` now scans only the object's bounding box via
+  row pointers and drops the needless `clone()` for gray input. Both costs
+  previously scaled linearly with objects-per-frame — the busy/triggering case.
+  Behaviour is bit-identical; covered by the existing multi-object / tracking /
+  integration tests.
+
 - **FrameStore lock-contention throttling fix** (2026-06-17) — the realtime
   image-processing and triggering pipeline was throttling because
   [[../data-model/FrameStore]] used a single `std::mutex` held *across the

@@ -199,7 +199,9 @@ bool writeVisualEvidence(const std::filesystem::path& outputDir, const Processed
 
     cv::Mat overlay;
     cv::cvtColor(sample.originalImage, overlay, cv::COLOR_GRAY2BGR);
-    cv::drawContours(overlay, sample.validation.allContours, -1, cv::Scalar(0, 255, 0), 1);
+    if (sample.validation.allContours) {
+        cv::drawContours(overlay, *sample.validation.allContours, -1, cv::Scalar(0, 255, 0), 1);
+    }
     cv::putText(overlay,
                 "mib app capture -> async batch",
                 cv::Point(8, 18),
@@ -374,7 +376,7 @@ int main(int argc, char* argv[])
                     if (!frame.processedImage.empty() && cv::countNonZero(frame.processedImage) > 0) {
                         ++result.nonEmptyMasks;
                     }
-                    if (!frame.validation.allContours.empty()) {
+                    if (frame.validation.allContours && !frame.validation.allContours->empty()) {
                         ++result.framesWithContours;
                     }
                     if (result.sample.originalImage.empty() &&

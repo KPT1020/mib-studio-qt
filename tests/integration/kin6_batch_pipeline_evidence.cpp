@@ -319,7 +319,7 @@ size_t chooseSampleIndex(const std::vector<ProcessedFrame>& results)
     for (size_t i = 0; i < results.size(); ++i) {
         if (!results[i].processedImage.empty() &&
             cv::countNonZero(results[i].processedImage) > 0 &&
-            !results[i].validation.allContours.empty()) {
+            results[i].validation.allContours && !results[i].validation.allContours->empty()) {
             return i;
         }
     }
@@ -351,7 +351,9 @@ bool writeVisualEvidence(const std::filesystem::path& outputDir,
 
     cv::Mat overlay;
     cv::cvtColor(results[sampleIndex].originalImage, overlay, cv::COLOR_GRAY2BGR);
-    cv::drawContours(overlay, results[sampleIndex].validation.allContours, -1, cv::Scalar(0, 255, 0), 1);
+    if (results[sampleIndex].validation.allContours) {
+        cv::drawContours(overlay, *results[sampleIndex].validation.allContours, -1, cv::Scalar(0, 255, 0), 1);
+    }
     cv::putText(overlay,
                 "row " + std::to_string(records[sampleIndex].rowIndex),
                 cv::Point(8, 18),
@@ -394,7 +396,7 @@ bool writeMetricsJson(const std::filesystem::path& outputPath,
         if (!frame.processedImage.empty() && cv::countNonZero(frame.processedImage) > 0) {
             ++nonEmptyMasks;
         }
-        if (!frame.validation.allContours.empty()) {
+        if (frame.validation.allContours && !frame.validation.allContours->empty()) {
             ++contourFrames;
         }
         if (frame.validation.ringRatio > 0.0) {
@@ -477,7 +479,7 @@ bool writeMetricsJson(const std::filesystem::path& outputPath,
         out << "\"ring_width\": " << validation.ringRatio << ", ";
         out << "\"ring_ratio\": " << validation.ringRatio << ", ";
         out << "\"is_valid\": " << (validation.isValid ? "true" : "false") << ", ";
-        out << "\"contour_count\": " << validation.allContours.size();
+        out << "\"contour_count\": " << (validation.allContours ? validation.allContours->size() : 0);
         out << "}";
         if (i + 1 < results.size()) {
             out << ',';

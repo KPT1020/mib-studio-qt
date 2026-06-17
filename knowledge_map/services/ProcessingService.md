@@ -161,3 +161,15 @@ current/max queue depth, batch size, worker count, and running state. See
 - Young's modulus gating still depends on the LUT path loaded during backend
   startup; if the managed cache cannot be updated, the pipeline keeps using
   the last known-good local copy or the bundled fallback.
+- `FilterResult::allContours` is a `shared_ptr<const ...>`, **not** a value.
+  All per-object `FilterResult`s of a frame share one allocation (assigned
+  once by `filterProcessedObjects` after evaluation), so the monitoring /
+  experiment copies are refcount bumps rather than deep copies of every
+  contour point. Consumers must deref (`*validation.allContours`) and
+  null-check. The write-only `hierarchy` field was removed — nothing read it.
+- `calculateBrightnessQuantiles` takes an optional bbox `region`: the per-
+  object evaluators pass the object's bounding box so the scan only covers
+  pixels that can be non-zero in that object's mask (identical sample set,
+  not the whole ROI). It also uses row pointers instead of `cv::Mat::at<>`
+  and skips the `clone()` for already-single-channel input. These were
+  per-object allocator/CPU costs that scaled with objects-per-frame.
