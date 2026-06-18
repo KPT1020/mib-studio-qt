@@ -18,6 +18,8 @@ This folder hosts living documentation as we build functionality. Keep content c
 ## Quick Links
 - Integration: EGrabber — see `integration/egrabber.md`
 - Tasks/issues live in `knowledge_map/task/`
+- Cloudflare R2 app updates and profile catalogs — see
+  [howto/auto-update-r2.md](howto/auto-update-r2.md)
 - Post-processing tools (export, reanalyse) — see [howto/tools.md](howto/tools.md)
 - Known debt — see [exec-plans/tech-debt-tracker.md](exec-plans/tech-debt-tracker.md)
 - Agent map — see [../AGENTS.md](../AGENTS.md)

@@ -1,4 +1,5 @@
 {
+    "config_schema_version": 1,
     "buffer_threshold": 1000,
     "realtime_processing": {
         "mode": "inline",

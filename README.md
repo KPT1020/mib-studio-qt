@@ -85,6 +85,22 @@ The script auto-detects version from filename, computes SHA-256, generates a man
 For complete release workflow, see [docs/howto/release-workflow.md](docs/howto/release-workflow.md).  
 For detailed publishing information, see [docs/howto/auto-update-r2.md](docs/howto/auto-update-r2.md).
 
+## Publishing Profile Catalogs
+
+Profile catalogs for manual profile updates are hosted in the same public
+Cloudflare R2 bucket under `profiles/<channel>/`.
+
+```bash
+# Dry-run first; uses Wrangler unless MIB_STUDIO_R2_ENDPOINT is set.
+python publish-profiles.py --profiles-root "./profile-catalog/stable" --dry-run
+python publish-profiles.py --profiles-root "./profile-catalog/stable"
+```
+
+The production catalog URL is
+`https://updates.yofo.bio/profiles/stable/catalog.json`. See
+[docs/howto/auto-update-r2.md](docs/howto/auto-update-r2.md#profile-catalog-hosting)
+for Cloudflare setup, cache policy, schema, and credential requirements.
+
 ## Version Management
 
 The project uses semantic versioning (X.Y.Z). Version can be managed in two ways:

@@ -21,6 +21,10 @@
   `utils/JsonFlatten.cpp`.
 - Persist config via `utils/ConfigPathManager.cpp` and
   [[../frontend/System-Utilities]] `AppConfigWatcher`.
+- Profile catalogs for manual remote updates are published outside the app via
+  `publish-profiles.py` to
+  `https://updates.yofo.bio/profiles/<channel>/catalog.json`; see
+  `docs/howto/auto-update-r2.md`.
 
 ## Gotchas
 
@@ -32,3 +36,6 @@
   classification.
 - See task `knowledge_map/task/2025-11-25-config-profiles.md` for the
   planned Save/Load profiles feature.
+- Bundled defaults now include top-level `config_schema_version`. Remote
+  profile support should treat missing schema as legacy local config rather
+  than rejecting existing user profiles at startup.

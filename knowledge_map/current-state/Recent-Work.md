@@ -5,6 +5,15 @@
 
 ## Features shipped
 
+- **Cloudflare R2 profile catalog publishing setup** (2026-06-11) — Added
+  `publish-profiles.py` for KIN-47 profile catalog hosting under
+  `https://updates.yofo.bio/profiles/<channel>/catalog.json`. The publisher
+  validates `config_schema_version`, computes config/script SHA-256 values,
+  generates upload-time `profile.meta.json`, writes `catalog.json`, and reuses
+  the existing Wrangler/S3-compatible R2 credential flow. `docs/howto/auto-update-r2.md`
+  now documents the required Cloudflare public bucket, cache, verification,
+  and no-credential-in-repo setup for remote profile catalogs.
+
 - **Cloudflare R2 CI publishing path cleanup** (2026-06-10) — Both
   Windows GitHub Actions release workflows now wire stable/beta publishing
   directly through `python publish-update.py`, map R2 credentials from
