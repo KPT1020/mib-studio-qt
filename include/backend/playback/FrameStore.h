@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <vector>
 #include <mutex>
+#include <shared_mutex>
 #include <atomic>
 #include <string>
 #include <functional>
@@ -136,12 +137,23 @@ namespace backend::playback
 
     private:
         size_t capacity_;
-        mutable std::mutex mutex_;
+        // Structural lock: guards the identity of ring_ / slotMutexes_, capacity_
+        // and frameFilter_. Held in SHARED mode by the per-frame hot path
+        // (pushFrame / getByWriteIndex / getLatest) so producer and consumers do
+        // not serialize against each other, and in EXCLUSIVE mode only by rare
+        // whole-ring operations (resize / save / estimate) that replace the ring
+        // or touch many slots at once.
+        mutable std::shared_mutex structureMutex_;
+        // Per-slot locks (parallel to ring_): a single slot lock is held only
+        // while copying one frame in/out, so the large memcpy no longer happens
+        // under a global mutex. The producer writing slot A never blocks a
+        // consumer reading slot B.
+        mutable std::vector<std::mutex> slotMutexes_;
         std::vector<Frame> ring_;
         std::atomic<uint64_t> totalWritten_{0};
         std::atomic<uint64_t> totalFiltered_{0};
 
-        // Frame filter (protected by mutex_)
+        // Frame filter (protected by structureMutex_)
         FrameFilter frameFilter_;
 
         // Internal helper to save a single frame as TIFF

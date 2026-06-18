@@ -1219,22 +1219,42 @@ ProcessingService::ContourAnalysis ProcessingService::findContours(const cv::Mat
     return analysis;
 }
 
-BrightnessQuantiles ProcessingService::calculateBrightnessQuantiles(const cv::Mat& originalImage, const cv::Mat& mask) {
+BrightnessQuantiles ProcessingService::calculateBrightnessQuantiles(const cv::Mat& originalImage, const cv::Mat& mask,
+                                                                    const cv::Rect& region) {
     BrightnessQuantiles result;
-    cv::Mat grayImage;
+    if (originalImage.empty() || mask.empty()) {
+        return result;
+    }
+
+    // Avoid cloning when the input is already single-channel (the common case).
+    cv::Mat converted;
+    const cv::Mat* grayPtr = &originalImage;
     if (originalImage.channels() == 3) {
-        cv::cvtColor(originalImage, grayImage, cv::COLOR_BGR2GRAY);
-    } else {
-        grayImage = originalImage.clone();
+        cv::cvtColor(originalImage, converted, cv::COLOR_BGR2GRAY);
+        grayPtr = &converted;
+    }
+    const cv::Mat& grayImage = *grayPtr;
+
+    // Scan the whole image by default, or just the requested sub-rectangle,
+    // clamped to the bounds shared by both images.
+    cv::Rect scan(0, 0, std::min(grayImage.cols, mask.cols), std::min(grayImage.rows, mask.rows));
+    if (region.width > 0 && region.height > 0) {
+        scan &= region;
+    }
+    if (scan.width <= 0 || scan.height <= 0) {
+        return result;
     }
 
     std::vector<uchar> brightness;
-    brightness.reserve(grayImage.rows * grayImage.cols / 4);
+    brightness.reserve(static_cast<size_t>(scan.width) * static_cast<size_t>(scan.height) / 4 + 1);
 
-    for (int y = 0; y < grayImage.rows; y++) {
-        for (int x = 0; x < grayImage.cols; x++) {
-            if (mask.at<uchar>(y, x) > 0) {
-                brightness.push_back(grayImage.at<uchar>(y, x));
+    // Row-pointer access avoids the per-pixel bounds checks of cv::Mat::at<>.
+    for (int y = scan.y; y < scan.y + scan.height; ++y) {
+        const uchar* maskRow = mask.ptr<uchar>(y);
+        const uchar* grayRow = grayImage.ptr<uchar>(y);
+        for (int x = scan.x; x < scan.x + scan.width; ++x) {
+            if (maskRow[x] > 0) {
+                brightness.push_back(grayRow[x]);
             }
         }
     }
@@ -1294,8 +1314,8 @@ FilterResult ProcessingService::evaluateInnerContourObject(const ContourAnalysis
                                                            const ProcessingConfig& config,
                                                            const cv::Mat& originalImage) {
     FilterResult result{};
-    result.allContours = analysis.allContours;
-    result.hierarchy = analysis.hierarchy;
+    // allContours is assigned once (shared) by filterProcessedObjects after all
+    // objects are evaluated; hierarchy is no longer retained on the result.
     result.innerContourCount = static_cast<int>(analysis.innerContours.size());
     result.hasSingleInnerContour = (analysis.innerContours.size() == 1);
     result.objectId = objectId;
@@ -1317,7 +1337,9 @@ FilterResult ProcessingService::evaluateInnerContourObject(const ContourAnalysis
             : innerContour;
     populateGeometry(result, geometryContour);
     if (!originalImage.empty()) {
-        result.brightness = calculateBrightnessQuantiles(originalImage, objectMask);
+        const cv::Rect bbox(static_cast<int>(result.bboxX), static_cast<int>(result.bboxY),
+                            static_cast<int>(result.bboxWidth), static_cast<int>(result.bboxHeight));
+        result.brightness = calculateBrightnessQuantiles(originalImage, objectMask, bbox);
     }
 
     if (config.enable_border_check && contourTouchesRoiBorder(innerContour, roi)) {
@@ -1388,8 +1410,8 @@ FilterResult ProcessingService::evaluateOuterContourObject(const ContourAnalysis
                                                            const ProcessingConfig& config,
                                                            const cv::Mat& originalImage) {
     FilterResult result{};
-    result.allContours = analysis.allContours;
-    result.hierarchy = analysis.hierarchy;
+    // allContours is assigned once (shared) by filterProcessedObjects after all
+    // objects are evaluated; hierarchy is no longer retained on the result.
     result.innerContourCount = static_cast<int>(analysis.innerContours.size());
     result.hasSingleInnerContour = (analysis.innerContours.size() == 1);
     result.objectId = objectId;
@@ -1404,7 +1426,9 @@ FilterResult ProcessingService::evaluateOuterContourObject(const ContourAnalysis
                                               static_cast<int>(contourIdx), -1, false);
     populateGeometry(result, contour);
     if (!originalImage.empty()) {
-        result.brightness = calculateBrightnessQuantiles(originalImage, objectMask);
+        const cv::Rect bbox(static_cast<int>(result.bboxX), static_cast<int>(result.bboxY),
+                            static_cast<int>(result.bboxWidth), static_cast<int>(result.bboxHeight));
+        result.brightness = calculateBrightnessQuantiles(originalImage, objectMask, bbox);
     }
 
     if (config.enable_border_check && contourTouchesRoiBorder(contour, roi)) {
@@ -1465,9 +1489,14 @@ std::vector<FilterResult> ProcessingService::filterProcessedObjects(const cv::Ma
                                                                     const cv::Mat& originalImage) {
     const ContourAnalysis analysis = findContours(processedImage);
 
+    // One shared copy of the frame's contours, referenced by every result (and
+    // by the downstream monitoring / experiment copies) instead of deep-copying
+    // all contour points per object.
+    auto sharedContours =
+        std::make_shared<const std::vector<std::vector<cv::Point>>>(analysis.allContours);
+
     FilterResult emptyResult{};
-    emptyResult.allContours = analysis.allContours;
-    emptyResult.hierarchy = analysis.hierarchy;
+    emptyResult.allContours = sharedContours;
     emptyResult.innerContourCount = static_cast<int>(analysis.innerContours.size());
     emptyResult.hasSingleInnerContour = (analysis.innerContours.size() == 1);
     if (!originalImage.empty()) {
@@ -1496,6 +1525,9 @@ std::vector<FilterResult> ProcessingService::filterProcessedObjects(const cv::Ma
         for (size_t i = 0; i < objectOrder.size(); ++i) {
             results.push_back(evaluateInnerContourObject(analysis, objectOrder[i], static_cast<int>(i + 1), objectCount,
                                                          processedImage, roi, config, originalImage));
+        }
+        for (auto& result : results) {
+            result.allContours = sharedContours;
         }
         return results;
     }
@@ -1526,6 +1558,9 @@ std::vector<FilterResult> ProcessingService::filterProcessedObjects(const cv::Ma
         for (size_t i = 0; i < topLevelContours.size(); ++i) {
             results.push_back(evaluateOuterContourObject(analysis, topLevelContours[i], static_cast<int>(i + 1),
                                                          objectCount, processedImage, roi, config, originalImage));
+        }
+        for (auto& result : results) {
+            result.allContours = sharedContours;
         }
         return results;
     }
@@ -1654,7 +1689,9 @@ void ProcessingService::publishRealtimeBatchFrame(ProcessedFrame&& frame) {
         std::scoped_lock snapshotLk(snapshotMutex_);
         latestSnapshot_.index = frameIndex;
         latestSnapshot_.mask = frame.processedImage.clone();
-        latestSnapshot_.contours = validation.allContours;
+        latestSnapshot_.contours = validation.allContours
+                                       ? *validation.allContours
+                                       : std::vector<std::vector<cv::Point>>{};
         latestSnapshot_.validation = validation;
     }
 
@@ -2098,7 +2135,9 @@ void ProcessingService::realtimeInlineLoop() {
 
                 // Extract contours from validation result and adjust coordinates for full-frame snapshot
                 // Contours from filterProcessedImage are in ROI coordinates, need to adjust for full frame
-                std::vector<std::vector<cv::Point>> contours = validation.allContours;
+                std::vector<std::vector<cv::Point>> contours =
+                    validation.allContours ? *validation.allContours
+                                           : std::vector<std::vector<cv::Point>>{};
                 for (auto& contour : contours) {
                     for (auto& pt : contour) {
                         pt.x += roi.x;
@@ -2260,15 +2299,15 @@ void ProcessingService::realtimeInlineLoop() {
                     // Create full-size mask for snapshot display
                     cv::Mat fullMaskSnapshot;
                     if (useROI) {
-                        // Reuse existing full frame if already created for experiment storage
+                        // Reuse the frame we already fetched for this index. The
+                        // experiment path may have built grayFull already; otherwise
+                        // derive the snapshot from f directly instead of taking the
+                        // contended FrameStore lock a second time for the same idx.
                         cv::Mat grayFullSnap;
                         if (!grayFull.empty()) {
                             grayFullSnap = grayFull;
-                        } else {
-                            backend::playback::Frame fFull{};
-                            if (rtStore_->getByWriteIndex(idx, fFull)) {
-                                grayFullSnap = makeGrayCopy(fFull.width, fFull.height, fFull.linePitch, fFull.data.data());
-                            }
+                        } else if (!f.data.empty()) {
+                            grayFullSnap = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
                         }
                         if (!grayFullSnap.empty()) {
                             fullMaskSnapshot = cv::Mat(grayFullSnap.rows, grayFullSnap.cols, CV_8UC1, cv::Scalar(0));
@@ -2436,7 +2475,9 @@ void ProcessingService::realtimeInlineLoop() {
                 const FilterResult& validation = validations.front();
                 
                 // Extract contours from validation result for snapshot
-                std::vector<std::vector<cv::Point>> contours = validation.allContours;
+                std::vector<std::vector<cv::Point>> contours =
+                    validation.allContours ? *validation.allContours
+                                           : std::vector<std::vector<cv::Point>>{};
                 const auto algoEnd = clock::now();
                 const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
                 algoMsSinceSummary += algoMs;
@@ -2765,7 +2806,9 @@ void ProcessingService::realtimeInlineLoop() {
 
                 // Extract contours from validation result for snapshot
                 // Contours are in ROI-relative coordinates — adjust to full-frame for snapshot/storage
-                std::vector<std::vector<cv::Point>> contours = validation.allContours;
+                std::vector<std::vector<cv::Point>> contours =
+                    validation.allContours ? *validation.allContours
+                                           : std::vector<std::vector<cv::Point>>{};
                 for (auto& contour : contours) {
                     for (auto& pt : contour) {
                         pt.x += roi.x;

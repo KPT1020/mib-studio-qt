@@ -93,10 +93,12 @@ struct FilterResult {
     double youngsModulus{0.0}; // Young's modulus (kPa) from LUT lookup
     BrightnessQuantiles brightness;
     bool isTargetGroup{false}; // True if valid AND matches target group criteria
-    // Contours found during processing (for snapshot/display)
-    // These are in the same coordinate space as the processedImage mask
-    std::vector<std::vector<cv::Point>> allContours;
-    std::vector<cv::Vec4i> hierarchy;
+    // Contours found during processing (for snapshot/display), in the same
+    // coordinate space as the processedImage mask. Shared (not deep-copied) so
+    // that the per-object FilterResults of a frame, plus the monitoring /
+    // experiment copies, all reference one allocation instead of duplicating
+    // every contour point N times. Null when no contours were extracted.
+    std::shared_ptr<const std::vector<std::vector<cv::Point>>> allContours;
 };
 
 struct TargetGroupEvent {
@@ -377,7 +379,11 @@ private:
                                       const ProcessingConfig& config, const cv::Mat& originalImage);
     std::vector<FilterResult> filterProcessedObjects(const cv::Mat& processedImage, const cv::Rect& roi,
                                                      const ProcessingConfig& config, const cv::Mat& originalImage);
-    BrightnessQuantiles calculateBrightnessQuantiles(const cv::Mat& originalImage, const cv::Mat& mask);
+    // region restricts the scan to a sub-rectangle (e.g. an object's bounding
+    // box); an empty rect scans the whole image. Mask pixels outside an object's
+    // bbox are zero, so restricting the scan yields an identical brightness set.
+    BrightnessQuantiles calculateBrightnessQuantiles(const cv::Mat& originalImage, const cv::Mat& mask,
+                                                     const cv::Rect& region = cv::Rect());
     double calculateRingRatio(const std::vector<cv::Point>& innerContour, const std::vector<cv::Point>& outerContour);
     cv::Mat makeObjectMask(const cv::Size& size,
                            const std::vector<std::vector<cv::Point>>& contours,

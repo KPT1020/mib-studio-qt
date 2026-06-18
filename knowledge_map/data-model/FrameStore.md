@@ -95,8 +95,26 @@ hit the ring.
 
 ## Threading
 
-Single `std::mutex` serialises `pushFrame` / `get*` / `resize`. Not lock-
-free, but per-frame work is a `std::vector<uint8_t>` move.
+Two-tier locking so the producer and consumers don't serialise on one lock
+(the previous single-`std::mutex` design forced capture and every reader to
+take turns *while holding the lock across the full-frame `memcpy`*, which
+throttled both capture and the realtime pipeline — see
+[[../current-state/Recent-Work]]):
+
+- **`structureMutex_`** (`std::shared_mutex`) guards the *identity* of the
+  ring (`ring_` / `slotMutexes_` / `capacity_`) and `frameFilter_`. The hot
+  path (`pushFrame` / `getLatest` / `getByWriteIndex` / `getByWriteIndexROI`)
+  takes it in **shared** mode; only whole-ring ops (`resize`, `saveFrames*`,
+  `estimateMemoryBytesForCapacity`, `setFrameFilter`) take it **exclusive**.
+- **`slotMutexes_`** — one `std::mutex` per ring slot. The actual frame copy
+  in/out is done holding only that slot's lock, so the producer writing slot
+  A never blocks a consumer reading slot B. Producer vs. consumer on the
+  *same* slot (a wrap-around overwrite of the frame being read) is still
+  serialised — correctness preserved.
+
+`resize` rebuilds `slotMutexes_` alongside `ring_` under the exclusive lock;
+this is safe because every hot-path op acquires the shared structural lock
+*before* any slot lock, so no slot lock is held when `resize` runs.
 
 ## Gotchas
 

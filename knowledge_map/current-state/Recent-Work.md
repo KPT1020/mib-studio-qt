@@ -5,6 +5,44 @@
 
 ## Features shipped
 
+- **Pipeline timing benchmark** (2026-06-17) — `tests/performance/pipeline_timing_benchmark.cpp`
+  (ctest `performance.pipeline_timing`) quantifies the two throttling fixes
+  below. (A) Runs the shipped per-slot `FrameStore` against an in-test
+  `LegacyRing` (single global mutex held across the full-frame copy) under
+  1 producer + N consumers — measured ~1.6–1.8× higher full-frame-copy
+  throughput on a 4-core box, and ~1.8× faster producer pushes (capture no
+  longer blocked behind consumers). (B) A/Bs the new bbox/row-pointer
+  brightness scan vs the old full-ROI `cv::Mat::at<>` scan, asserting the
+  quantiles are **identical** across 4000 cases (~1.6× faster). Gates are
+  loose (throughput ≥ 0.5× legacy; brightness identical) so CI does not flake.
+
+- **Per-frame detection allocator/CPU cost reduction** (2026-06-17) —
+  follow-up to the FrameStore fix targeting single-thread algo time in
+  [[../services/ProcessingService]]. (1) `FilterResult::allContours` is now a
+  `shared_ptr<const ...>` assigned once per frame instead of deep-copying the
+  whole contour set into every object's result (and again into each monitoring
+  / experiment copy); the write-only `hierarchy` field was deleted. (2)
+  `calculateBrightnessQuantiles` now scans only the object's bounding box via
+  row pointers and drops the needless `clone()` for gray input. Both costs
+  previously scaled linearly with objects-per-frame — the busy/triggering case.
+  Behaviour is bit-identical; covered by the existing multi-object / tracking /
+  integration tests.
+
+- **FrameStore lock-contention throttling fix** (2026-06-17) — the realtime
+  image-processing and triggering pipeline was throttling because
+  [[../data-model/FrameStore]] used a single `std::mutex` held *across the
+  full-frame `memcpy`* on both `pushFrame` (capture) and every `get*`
+  consumer (realtime loop, UI preview, raw-frame recorder). Producer and
+  consumers serialised on that one lock, defeating the ring buffer's
+  decoupling and stalling capture/processing/triggering. Replaced with a
+  two-tier scheme: a `std::shared_mutex structureMutex_` (shared on the hot
+  path, exclusive for `resize` / save / estimate) plus a per-slot
+  `std::mutex` array so the copy in/out holds only that slot's lock. Also
+  removed a redundant second `getByWriteIndex` of the same index in the
+  realtime snapshot path (`ProcessingService::realtimeInlineLoop`) — it now
+  reuses the already-fetched frame. See [[../data-model/FrameStore]]
+  "Threading".
+
 - **Experiment multi-image capture mode guard** (2026-06-16) —
   `MainWindow::onStartExperiment` now auto-switches realtime processing from
   `async_batch` to `inline` when multi-image capture is enabled, so experiment
