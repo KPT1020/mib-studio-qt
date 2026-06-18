@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Pipeline timing benchmark** (2026-06-17) — `tests/performance/pipeline_timing_benchmark.cpp`
+  (ctest `performance.pipeline_timing`) quantifies the two throttling fixes
+  below. (A) Runs the shipped per-slot `FrameStore` against an in-test
+  `LegacyRing` (single global mutex held across the full-frame copy) under
+  1 producer + N consumers — measured ~1.6–1.8× higher full-frame-copy
+  throughput on a 4-core box, and ~1.8× faster producer pushes (capture no
+  longer blocked behind consumers). (B) A/Bs the new bbox/row-pointer
+  brightness scan vs the old full-ROI `cv::Mat::at<>` scan, asserting the
+  quantiles are **identical** across 4000 cases (~1.6× faster). Gates are
+  loose (throughput ≥ 0.5× legacy; brightness identical) so CI does not flake.
+
 - **Per-frame detection allocator/CPU cost reduction** (2026-06-17) —
   follow-up to the FrameStore fix targeting single-thread algo time in
   [[../services/ProcessingService]]. (1) `FilterResult::allContours` is now a
