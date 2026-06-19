@@ -28,6 +28,14 @@ target_link_libraries(frame_store_concurrency_test PRIVATE Threads::Threads)
 add_test(NAME backend.frame_store_concurrency COMMAND $<TARGET_FILE:frame_store_concurrency_test>)
 set_tests_properties(backend.frame_store_concurrency PROPERTIES LABELS "backend")
 
+mib_add_backend_test_executable(frame_store_filter_copy_test backend/frame_store_filter_copy_test.cpp)
+add_test(NAME backend.frame_store_filter_copy COMMAND $<TARGET_FILE:frame_store_filter_copy_test>)
+set_tests_properties(backend.frame_store_filter_copy PROPERTIES LABELS "backend")
+
+mib_add_backend_test_executable(processing_config_generation_test backend/processing_config_generation_test.cpp)
+add_test(NAME backend.processing_config_generation COMMAND $<TARGET_FILE:processing_config_generation_test>)
+set_tests_properties(backend.processing_config_generation PROPERTIES LABELS "processing;backend")
+
 mib_add_backend_test_executable(pipeline_timing_benchmark performance/pipeline_timing_benchmark.cpp)
 target_link_libraries(pipeline_timing_benchmark PRIVATE Threads::Threads)
 add_test(NAME performance.pipeline_timing COMMAND $<TARGET_FILE:pipeline_timing_benchmark>)

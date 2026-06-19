@@ -74,6 +74,18 @@ All gates in one struct. Notable fields:
 `getTotalValidFlushed` for experiment totals, and dropped-frame counters for
 the bounded experiment backlog.
 
+## Config change tracking (hot-path caching)
+
+- `getConfigGeneration()` returns a monotonic counter bumped by
+  `setProcessingConfig`, `setRealtimeRoi`, and `setRealtimeBackgroundGray`.
+  Per-frame consumers (the raw-frame recording loop in
+  [[../architecture/AppBackend]]) cache config/ROI/background and only re-fetch
+  when this value changes — avoiding per-frame locks.
+- `getRealtimeBackgroundShared()` returns the background as a
+  `shared_ptr<const cv::Mat>` (the stored buffer, **no clone**; null when
+  unset). Use this on hot paths instead of `getRealtimeBackgroundGray()`, which
+  clones on every call.
+
 ## Batch processing (offline / re-runs)
 
 For re-generating masks from stream images that are **not** coming from a

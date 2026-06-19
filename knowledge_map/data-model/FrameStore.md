@@ -93,6 +93,14 @@ void resetFilteredCount();
 Used by `AppBackend::startFrameRecording` to drop empty frames before they
 hit the ring.
 
+**Single-copy filter path:** when a filter is installed, `pushFrame` stages
+the bytes once into a local `Frame`, runs the filter on it, and on accept
+**moves** that buffer into the ring slot — so a filtered build pays one
+full-frame copy, not two. The no-filter fast path is unchanged: it reuses the
+slot's existing `data` capacity (`resize` + `copy_n`), so steady-state pushes
+do not allocate. The whole operation runs under a single shared structural
+lock so a concurrent `resize` cannot swap the buffers mid-push.
+
 ## Threading
 
 Two-tier locking so the producer and consumers don't serialise on one lock
@@ -121,8 +129,8 @@ this is safe because every hot-path op acquires the shared structural lock
 - If a consumer holds onto a `getByWriteIndex` copy for longer than
   `capacity / fps` seconds, its data is still valid (copy) but the index
   may fall off the available range.
-- `pushFrame` copies bytes — if you profile and see allocator pressure,
-  investigate here first.
+- `pushFrame` copies bytes once (see "Single-copy filter path") — if you
+  profile and see allocator pressure, investigate here first.
 - `saveFramesToAvi` serialises frames while holding the mutex only long
   enough to snapshot the range; the VideoWriter loop runs outside the
   lock. Same pattern as `saveFramesToDisk`.

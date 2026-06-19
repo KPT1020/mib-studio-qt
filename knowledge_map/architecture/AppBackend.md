@@ -122,6 +122,12 @@ no contour processing.
 - Counters: `frameRecordingCount()`, `frameRecordingFiltered()`
 - Uses a dedicated `frameRecordingThread_` and leverages
   [[../data-model/FrameStore]]'s `setFrameFilter` to drop empty frames.
+- The recording thread caches `ProcessingConfig` / ROI / background and
+  refreshes them only when [[../services/ProcessingService]]'s
+  `getConfigGeneration()` changes, reading the background via
+  `getRealtimeBackgroundShared()` (no per-frame clone). This keeps the
+  per-frame empty-frame check off the config locks and avoids a full-frame
+  background clone on every recorded frame.
 
 ## Config JSON storage
 
