@@ -29,26 +29,33 @@ void FrameStore::pushFrame(const uint8_t* src,
                            uint64_t timestamp) {
     if (capacity_ == 0 || src == nullptr || size == 0) return;
 
-    // Apply frame filter if set (check before acquiring write slot)
-    {
-        std::shared_lock structLk(structureMutex_);
-        if (frameFilter_) {
-            // Build a temporary Frame for the filter to inspect
-            Frame tmp;
-            tmp.width = width;
-            tmp.height = height;
-            tmp.pixelFormat = pixelFormat;
-            tmp.linePitch = linePitch;
-            tmp.timestamp = timestamp;
-            tmp.data.assign(src, src + size);
-            if (frameFilter_(tmp)) {
-                // Frame is empty / should be skipped
-                totalFiltered_.fetch_add(1, std::memory_order_relaxed);
-                backend::diagnostics::CrashStateMirror::instance().frameStore.totalFiltered
-                    .fetch_add(1, std::memory_order_relaxed);
-                return;
-            }
+    // Hold the structural SHARED lock across the whole operation so a concurrent
+    // resize (EXCLUSIVE) cannot swap the buffers between the filter check and the
+    // slot write. Consumers also take the lock in shared mode, so they are not
+    // serialized against the producer.
+    std::shared_lock structLk(structureMutex_);
+
+    // Apply frame filter if set. When a filter is installed we must materialize
+    // the frame bytes for it to inspect; stage them once and MOVE that buffer
+    // into the ring slot on accept, so a filtered build does not pay a second
+    // full-frame copy on the capture hot path.
+    Frame staged;
+    bool haveStaged = false;
+    if (frameFilter_) {
+        staged.width = width;
+        staged.height = height;
+        staged.pixelFormat = pixelFormat;
+        staged.linePitch = linePitch;
+        staged.timestamp = timestamp;
+        staged.data.assign(src, src + size);
+        if (frameFilter_(staged)) {
+            // Frame is empty / should be skipped
+            totalFiltered_.fetch_add(1, std::memory_order_relaxed);
+            backend::diagnostics::CrashStateMirror::instance().frameStore.totalFiltered
+                .fetch_add(1, std::memory_order_relaxed);
+            return;
         }
+        haveStaged = true;
     }
 
     const uint64_t w = totalWritten_.fetch_add(1) + 1; // next write count
@@ -59,12 +66,10 @@ void FrameStore::pushFrame(const uint8_t* src,
         fs.earliestIndex.store(w > capacity_ ? w - capacity_ : 0,
                                std::memory_order_relaxed);
     }
-    // Copy into the ring under the structural SHARED lock (so a concurrent
-    // resize cannot swap the buffers) plus this slot's own lock (so only a
-    // reader of this exact slot can contend). The large memcpy below therefore
-    // does not block consumers reading any other slot.
+    // Write into the ring under this slot's own lock (so only a reader of this
+    // exact slot can contend). The large memcpy below therefore does not block
+    // consumers reading any other slot.
     {
-        std::shared_lock structLk(structureMutex_);
         const size_t idx = static_cast<size_t>((w - 1) % capacity_);
         std::scoped_lock slotLk(slotMutexes_[idx]);
         Frame& f = ring_[idx];
@@ -73,8 +78,15 @@ void FrameStore::pushFrame(const uint8_t* src,
         f.pixelFormat = pixelFormat;
         f.linePitch = linePitch;
         f.timestamp = timestamp;
-        f.data.resize(size);
-        std::copy_n(src, size, f.data.begin());
+        if (haveStaged) {
+            // Move the already-copied buffer in: no second copy.
+            f.data = std::move(staged.data);
+        } else {
+            // No filter: reuse the slot's existing capacity (steady-state: no
+            // allocation, single copy).
+            f.data.resize(size);
+            std::copy_n(src, size, f.data.begin());
+        }
     }
 
     // Periodic stats

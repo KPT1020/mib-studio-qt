@@ -179,6 +179,17 @@ public:
     Roi getRealtimeRoi() const;
     void setRealtimeBackgroundGray(const cv::Mat& bg);
     cv::Mat getRealtimeBackgroundGray() const;
+    // Zero-copy access to the current realtime background. Returns the shared
+    // buffer directly (no clone) for hot-path consumers that only read it; may
+    // be null when no background is set. Treat the pointee as immutable.
+    std::shared_ptr<const cv::Mat> getRealtimeBackgroundShared() const;
+    // Monotonic counter bumped whenever the processing config, realtime ROI, or
+    // realtime background changes. Hot-path consumers (e.g. the recording loop)
+    // cache config/ROI/background and only re-fetch when this value changes,
+    // avoiding per-frame locks and background clones.
+    uint64_t getConfigGeneration() const {
+        return configGeneration_.load(std::memory_order_acquire);
+    }
     bool getLatestSnapshot(RealtimeSnapshot& out);
 
     // Experiment lifecycle
@@ -447,6 +458,10 @@ private:
     Roi rtRoi_{};
     std::shared_ptr<cv::Mat> rtBgGray_; // shared_ptr to avoid cloning on access
     std::atomic<uint64_t> rtLastProcessed_{0};
+
+    // Bumped on any config / ROI / background change so hot-path consumers can
+    // cache and refresh only on change. See getConfigGeneration().
+    std::atomic<uint64_t> configGeneration_{0};
 
     std::mutex snapshotMutex_;
     RealtimeSnapshot latestSnapshot_;

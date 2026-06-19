@@ -253,7 +253,11 @@ testable by extracting pure helpers (no event loop) into free functions.
 
 ## Progress
 
-- [ ] PR 1 — backend hot-path copies (F1, F3, F7)
+- [x] PR 1 — backend hot-path copies (F1, F3, F7) — 2026-06-19. FrameStore
+      single-copy filter path; recording loop caches config/ROI/background via
+      `configGeneration_` + `getRealtimeBackgroundShared()`; redundant snapshot
+      clone removed. Tests `backend.frame_store_filter_copy` +
+      `backend.processing_config_generation` added; full backend suite green.
 - [ ] PR 2 — camera buffer reuse (F2, F4)
 - [ ] PR 3 — HDF5 flush decoupling (F5)
 - [ ] PR 4 — multi-image write batching (F6)

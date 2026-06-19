@@ -331,6 +331,7 @@ void ProcessingService::setRealtimeRoi(const Roi& roi) {
         std::scoped_lock lk(rtMutex_);
         rtRoi_ = roi;
     }
+    configGeneration_.fetch_add(1, std::memory_order_release);
     refreshRealtimeBatchPipelineConfig();
 }
 
@@ -352,6 +353,7 @@ void ProcessingService::setRealtimeBackgroundGray(const cv::Mat& bg) {
             rtBgGray_.reset();
         }
     }
+    configGeneration_.fetch_add(1, std::memory_order_release);
     refreshRealtimeBatchPipelineConfig();
 }
 
@@ -361,6 +363,14 @@ cv::Mat ProcessingService::getRealtimeBackgroundGray() const {
         return rtBgGray_->clone();
     }
     return cv::Mat();
+}
+
+std::shared_ptr<const cv::Mat> ProcessingService::getRealtimeBackgroundShared() const {
+    std::scoped_lock lk(rtMutex_);
+    if (rtBgGray_ && !rtBgGray_->empty()) {
+        return rtBgGray_;
+    }
+    return nullptr;
 }
 
 bool ProcessingService::getLatestSnapshot(RealtimeSnapshot& out) {
@@ -456,6 +466,7 @@ void ProcessingService::setProcessingConfig(const ProcessingConfig& config) {
         std::scoped_lock lk(configMutex_);
         processingConfig_ = config;
     }
+    configGeneration_.fetch_add(1, std::memory_order_release);
     refreshRealtimeBatchPipelineConfig();
 }
 
@@ -2961,8 +2972,9 @@ void ProcessingService::realtimeInlineLoop() {
                 {
                     std::scoped_lock lk(snapshotMutex_);
                     latestSnapshot_.index = idx;
-                    latestSnapshot_.mask = mask; // shallow copy ok; mask will be destroyed after leaving scope, so clone
-                    latestSnapshot_.mask = latestSnapshot_.mask.clone();
+                    // Clone so the snapshot owns an independent buffer (mask is
+                    // reused/destroyed after this scope).
+                    latestSnapshot_.mask = mask.clone();
                     latestSnapshot_.contours = std::move(contours);
                     latestSnapshot_.validation = validation;
                 }

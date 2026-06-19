@@ -22,6 +22,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <limits>
+#include <memory>
 #include <cstring>
 #include <cstdlib>
 #include <filesystem>
@@ -857,6 +859,16 @@ namespace backend
             bool firstFrame = true;
             constexpr size_t FLUSH_BATCH = 50; // Flush every N frames
 
+            // Cache config/ROI/background and refresh only when the processing
+            // service signals a change. Avoids per-frame locks plus a full
+            // background clone on the recording hot path (each frame previously
+            // called getProcessingConfig/getRealtimeRoi/getRealtimeBackgroundGray).
+            uint64_t cachedConfigGen = std::numeric_limits<uint64_t>::max();
+            services::ProcessingConfig cachedConfig{};
+            services::ProcessingService::Roi cachedRoi{};
+            std::shared_ptr<const cv::Mat> cachedBg;
+            const cv::Mat emptyBg;
+
             std::vector<cv::Mat> batchImages;
             std::vector<services::Hdf5Service::RecordingFrameMeta> batchMeta;
             batchImages.reserve(FLUSH_BATCH);
@@ -889,12 +901,17 @@ namespace backend
                         continue;
                     }
 
-                    // Check if empty using processing service config
-                    auto config = processingService_->getProcessingConfig();
-                    auto roi = processingService_->getRealtimeRoi();
-                    auto bg = processingService_->getRealtimeBackgroundGray();
+                    // Refresh cached config/ROI/background only when it changed.
+                    const uint64_t configGen = processingService_->getConfigGeneration();
+                    if (configGen != cachedConfigGen) {
+                        cachedConfig = processingService_->getProcessingConfig();
+                        cachedRoi = processingService_->getRealtimeRoi();
+                        cachedBg = processingService_->getRealtimeBackgroundShared();
+                        cachedConfigGen = configGen;
+                    }
+                    const cv::Mat& bg = cachedBg ? *cachedBg : emptyBg;
 
-                    if (services::ProcessingService::isFrameEmpty(f, config, roi, bg)) {
+                    if (services::ProcessingService::isFrameEmpty(f, cachedConfig, cachedRoi, bg)) {
                         frameRecordingFiltered_.fetch_add(1, std::memory_order_relaxed);
                         lastProcessedIdx = idx;
                         continue;

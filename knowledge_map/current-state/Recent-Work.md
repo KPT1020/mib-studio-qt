@@ -5,6 +5,22 @@
 
 ## Features shipped
 
+- **Real-time hot-path copy reduction — PR 1** (2026-06-19, branch
+  `claude/realtime-performance-issues-3mtp7x`, plan
+  `docs/exec-plans/active/2026-06-19-realtime-performance.md`) — first slice of
+  the real-time performance remediation. (F1) [[../data-model/FrameStore]]
+  `pushFrame` no longer double-copies when a frame filter is installed: it
+  stages the bytes once for the filter and **moves** the buffer into the ring
+  on accept, while the no-filter fast path still reuses slot capacity. (F3) the
+  raw-frame recording loop in [[../architecture/AppBackend]] now caches
+  config/ROI/background and refreshes only when
+  [[../services/ProcessingService]]'s new `getConfigGeneration()` changes,
+  reading the background via the new zero-copy `getRealtimeBackgroundShared()`
+  — removing a per-frame background `clone()` plus three per-frame config
+  locks. (F7) dropped a redundant `mask` assign-then-clone in the realtime
+  snapshot publish. New tests: `backend.frame_store_filter_copy` and
+  `backend.processing_config_generation`. Full backend suite green.
+
 - **Pipeline timing benchmark** (2026-06-17) — `tests/performance/pipeline_timing_benchmark.cpp`
   (ctest `performance.pipeline_timing`) quantifies the two throttling fixes
   below. (A) Runs the shipped per-slot `FrameStore` against an in-test
