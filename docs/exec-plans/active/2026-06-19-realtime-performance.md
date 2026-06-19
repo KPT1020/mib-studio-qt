@@ -152,6 +152,95 @@ update `knowledge_map/frontend/` notes for the touched widgets.
 
 Anything not landed here moves to `docs/exec-plans/tech-debt-tracker.md`.
 
+## Test plan
+
+Conventions to follow (from `tests/`): tests are plain executables linked to
+`mib_backend`, registered in `tests/CMakeLists.txt` via `add_test` with `LABELS`,
+run by `ctest --preset linux-backend-only-test`; they return non-zero on
+failure and print human diagnostics. **Every perf fix ships a benchmark that
+keeps an inline _legacy_ baseline mirroring the pre-fix design, asserts the new
+path is byte-identical, and adds a loose (non-flaky) throughput bound** — the
+pattern already used by `tests/performance/pipeline_timing_benchmark.cpp` and
+`tests/backend/frame_store_concurrency_test.cpp`. Frontend logic is made
+testable by extracting pure helpers (no event loop) into free functions.
+
+### PR 1 — backend hot-path copies (F1, F3, F7)
+
+- **`tests/backend/frame_store_filter_copy_test.cpp`** (new, label `backend`):
+  install a `frameFilter_` that rejects frames by a predicate (e.g. timestamp
+  parity). Push a mixed stream and assert: (a) accepted frames returned by
+  `getByWriteIndex` are byte-identical to the source and carry correct
+  width/height/linePitch/pixelFormat/timestamp — proves the move-on-accept path
+  preserves data; (b) `totalWritten()` counts only accepted frames and
+  `totalFiltered` counts rejects; (c) the no-filter fast path is unchanged.
+- **Extend `frame_store_concurrency_test.cpp`**: run a second pass with an
+  accept-all filter installed so the move-into-slot path is exercised under the
+  1-producer/N-consumer torn-read invariant.
+- **`tests/backend/processing_config_generation_test.cpp`** (new, label
+  `processing;backend`): assert `configGeneration_` increments on
+  `setProcessingConfig` / `setRealtimeRoi` / `setRealtimeBackgroundGray`, that
+  `getRealtimeBackgroundShared()` returns the same `shared_ptr` (pointer
+  identity, no clone), and that a background swap is observed by a cache that
+  refreshes on generation change.
+- **Extend `recording_lifecycle_test.cpp`**: change ROI/background mid-recording
+  and assert the recorder's empty-frame decision reflects the new config within
+  the refresh window — guards against the cache going stale.
+- **Snapshot ownership** (extend `processing_pipeline_smoke_test.cpp`): after a
+  realtime tick, mutate the internal mask and assert the published snapshot mask
+  is unaffected — proves the single-clone still yields an independent buffer.
+
+### PR 2 — camera buffer reuse (F2, F4)
+
+- Extract the recycling pool as a standalone, SDK-free class (e.g.
+  `FrameBufferPool`) so it is testable without hardware.
+- **`tests/backend/frame_buffer_pool_test.cpp`** (new, label `camera;backend`):
+  assert correctness (a checked-out buffer holds exactly the bytes written) and
+  reuse (after warm-up, steady-state acquisitions cause no capacity growth /
+  reallocation — track `capacity()` and an allocation counter).
+- **Extend `mock_camera_smoke_test.cpp`**: soak N frames and assert frame data
+  integrity across the recycled path; EGrabber/MindVision stay hardware-gated
+  and rely on the pool unit test plus a manual `MIB_CAMERA_MODE=mock` soak that
+  watches the existing memory log for flat steady-state RSS.
+
+### PR 3 — HDF5 flush decoupling (F5)
+
+- **Extend `recording_lifecycle_test.cpp`**: (a) write frames and read them back
+  byte-identical to prove throttled flush keeps integrity; (b) stop after fewer
+  frames than the flush interval and assert the file is complete/readable —
+  proves flush-on-stop; (c) simulate slow arrival and assert the time-cap forces
+  a flush before the batch fills (observe batch counter / file growth).
+
+### PR 4 — multi-image write batching (F6)
+
+- **`tests/recording/recording_multi_image_test.cpp`** (new, label
+  `recording;backend`): write a known multi-image series and read each series
+  image back byte-for-byte. Keep an inline legacy nested-write reference and
+  assert the batched output is identical (golden). Add a loose stop-latency
+  bound (batched ≤ legacy within margin) to lock in the stop-lag fix.
+
+### PR 5 — frontend GUI-thread work (F8, F9, F10)
+
+- Extract pure decision helpers and unit-test them in
+  **`tests/frontend/realtime_render_helpers_test.cpp`** (new): frame-skip
+  decision (skip when index unchanged), scaled-image cache key/invalidation
+  (recompute only on size or source change), and incremental chart-append index
+  tracking (only new points appended, monotonic, bounded).
+- Manual verification via the `run` skill / mock camera: UI stays responsive at
+  target frame rate, overlay output unchanged vs `main` (spot-check), thumbnail
+  grid updates without flicker.
+
+### Cross-cutting regression guard
+
+- **Extend `tests/performance/pipeline_timing_benchmark.cpp`** with two new
+  new-vs-legacy comparisons following the existing harness: F1 (filtered
+  `pushFrame`: one copy vs two) and F3 (recording per-frame cost: cached
+  config/shared bg vs per-frame fetch+clone). Each asserts bit-identical results
+  and a loose speedup floor so a regression that reintroduces the extra copies
+  fails CI.
+- Register every new test in `tests/CMakeLists.txt` with labels; the full set
+  must pass under `ctest --preset linux-backend-only-test`. Performance tests
+  get a `TIMEOUT` like the existing benchmark (180s).
+
 ## Decision log
 
 - 2026-06-19: Sequenced backend copy fixes (PR 1) first — highest leverage,
