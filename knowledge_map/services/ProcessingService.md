@@ -125,6 +125,17 @@ current/max queue depth, batch size, worker count, and running state. See
 ## Gotchas
 
 - Realtime drop-frames mode is ignored while an experiment is active.
+- **Live-view overlay backlog (drop-frames off):** the inline realtime loop
+  consumes `FrameStore` sequentially via `rtLastProcessed_`. With
+  `rtDropFrames_` off (the default), when capture outpaces processing the
+  processed snapshot (`getLatestSnapshot`, source of the mask/contour overlay
+  and trigger decision) falls progressively behind the live write head — an
+  accumulating backlog that only resets when realtime restarts. The raw preview
+  is unaffected (it reads `FrameStore::getLatest`). `setRealtimeDropFrames(true)`
+  makes the loop jump to the newest index and bounds the lag. Characterized by
+  `tests/integration/e2e_live_view_latency_test.cpp`
+  (`integration.e2e_live_view_latency`): under sustained overload the default
+  lags tens of thousands of frames vs. a few hundred with drop-frames on.
 - When the experiment backlog reaches `maxBufferedFrames_`, sampled invalid
   frames are dropped first. Valid frames can evict old invalid frames; valid
   drops only happen if the backlog is entirely valid and still over cap. This

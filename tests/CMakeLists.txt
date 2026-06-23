@@ -107,6 +107,11 @@ target_link_libraries(e2e_pipeline_stress_test PRIVATE Threads::Threads)
 add_test(NAME integration.e2e_pipeline_stress COMMAND $<TARGET_FILE:e2e_pipeline_stress_test>)
 set_tests_properties(integration.e2e_pipeline_stress PROPERTIES LABELS "integration;e2e" TIMEOUT 180)
 
+mib_add_backend_test_executable(e2e_live_view_latency_test integration/e2e_live_view_latency_test.cpp)
+target_link_libraries(e2e_live_view_latency_test PRIVATE Threads::Threads)
+add_test(NAME integration.e2e_live_view_latency COMMAND $<TARGET_FILE:e2e_live_view_latency_test>)
+set_tests_properties(integration.e2e_live_view_latency PROPERTIES LABELS "integration;e2e;processing" TIMEOUT 120)
+
 mib_add_backend_test_executable(mib_processing_multi_object_test processing/processing_multi_object_test.cpp)
 add_test(NAME backend.processing_multi_object COMMAND $<TARGET_FILE:mib_processing_multi_object_test>)
 set_tests_properties(backend.processing_multi_object PROPERTIES LABELS "processing;backend")
