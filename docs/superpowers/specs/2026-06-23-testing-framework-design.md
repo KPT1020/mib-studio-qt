@@ -190,13 +190,22 @@ Deferred (low value / high churn — tracked, not done):
 - **P2.10 Refactor existing tests onto the support headers** — new tests use the
   headers; refactoring the older tests is churn without behavior change.
 
-Findings surfaced by the new lanes:
+Findings surfaced by the new lanes (TSan + ASan/UBSan now both green):
 
-- **`FrameStore::resize` data race (FIXED).** The TSan lane (via
+- **`FrameStore::resize` data race (FIXED).** TSan (via
   `frame_store_resize_under_load_test`) flagged a race between `resize()`'s write
   of `capacity_` and the lock-free guard reads. Fixed by making `capacity_`
-  atomic. Library-level TSan/LSan noise (OpenCV/GDAL, Qt, glib) is filtered via
-  `tests/sanitizer/{tsan,lsan}.supp`.
+  atomic.
+- **`MockCamera` lifecycle race (FIXED).** TSan flagged `CaptureService::stop()`
+  calling `camera->stop()` while the capture thread runs `grabFrame()`;
+  `MockCamera::running_` was a plain bool and `stop()` also reset `nextIndex_`.
+  Fixed by making `running_` atomic and dropping the `nextIndex_` reset from
+  `stop()` (`start()` already resets it).
+- **Qt-network TSan noise (eliminated at source).** The LUT manifest fetch used
+  `QNetworkAccessManager` (glib/libproxy/gio threads TSan can't model). CI points
+  `MIB_STUDIO_EMODULUS_LUT_MANIFEST_URL` at a `file:` URL so startup avoids the
+  network stack entirely. Remaining suppressions in `tests/sanitizer/tsan.supp`
+  cover only OpenCV/GDAL image-decode + glib init.
 - **`.recovery.h5` checkpoint broken on Windows (open, not fixed).** The
   checkpoint is written by `copy_file` of the *open* HDF5 file; on Windows that
   fails every time ("another process has locked a portion of the file"), so the
