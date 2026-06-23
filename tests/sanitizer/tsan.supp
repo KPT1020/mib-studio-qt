@@ -3,13 +3,14 @@
 # races / lock-order-inversions during image decode and Qt/glib init. Our code
 # must remain clean; do NOT add suppressions for backend::* here.
 
+# called_from_lib must name exactly one library (an ambiguous substring is a
+# fatal error in TSan), so each entry is a specific soname.
 called_from_lib:libgdal.so
 called_from_lib:libglib-2.0.so
 called_from_lib:libgobject-2.0.so
+# Qt network proxy resolution (libproxy) unlocks a mutex across threads during
+# the EModulusLutCatalog manifest fetch at startup; not our code.
+called_from_lib:libproxy.so.1
 called_from_lib:libpxbackend-1.0.so
-called_from_lib:libproxy
 deadlock:CPLAcquireMutex
 race:libglib-2.0.so
-# Qt network proxy resolution (libproxy) unlocks a mutex across threads during
-# EModulusLutCatalog manifest fetch at startup; not our code.
-mutex:libpxbackend-1.0.so
