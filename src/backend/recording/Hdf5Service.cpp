@@ -207,11 +207,44 @@ namespace backend::services
             return false;
         }
 
+        // Ensure the destination directory exists. Users frequently point the
+        // save dialog at a folder that does not exist yet (e.g. a freshly chosen
+        // path on a second/external/network drive). H5Fcreate cannot create
+        // intermediate directories and only reports a generic failure, which is
+        // why a save that works in an existing folder fails on a new one. Create
+        // the parent tree here and surface a specific, actionable error.
+        try
+        {
+            const std::filesystem::path parent =
+                std::filesystem::path(filePath).parent_path();
+            if (!parent.empty() && !std::filesystem::is_directory(parent))
+            {
+                std::error_code ec;
+                std::filesystem::create_directories(parent, ec);
+                if (ec && !std::filesystem::is_directory(parent))
+                {
+                    SPDLOG_ERROR("Cannot create destination folder for HDF5 file "
+                                 "'{}': {} (code {}). Check the drive is connected "
+                                 "and writable.",
+                                 filePath, ec.message(), ec.value());
+                    return false;
+                }
+            }
+        }
+        catch (const std::exception &ex)
+        {
+            SPDLOG_ERROR("Invalid HDF5 destination path '{}': {}", filePath, ex.what());
+            return false;
+        }
+
         // Create file, overwriting if it exists
         impl_->fileId_ = H5Fcreate(filePath.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
         if (impl_->fileId_ < 0)
         {
-            SPDLOG_ERROR("Failed to open HDF5 file: {}", filePath);
+            SPDLOG_ERROR("Failed to create HDF5 file '{}'. Verify the drive is "
+                         "available, the path is writable, the name is valid, and "
+                         "there is enough free space.",
+                         filePath);
             return false;
         }
 

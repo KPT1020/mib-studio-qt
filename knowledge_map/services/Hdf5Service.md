@@ -4,8 +4,8 @@
 > frame-recording mode and review-time scalable (hyperslab) reads.
 > HDF5 headers are hidden behind a PIMPL.
 
-**Source:** `src/backend/services/Hdf5Service.cpp`,
-`include/backend/services/Hdf5Service.h`
+**Source:** `src/backend/recording/Hdf5Service.cpp`,
+`include/backend/recording/Hdf5Service.h`
 **Related:** [[ProcessingService]], [[../data-model/HDF5-Storage]],
 [[../frontend/HdfReviewTab]]
 
@@ -47,6 +47,17 @@ Blocking I/O on whichever thread calls it. In practice:
 
 ## Gotchas
 
+- `openFile(path)` creates the destination's parent directory tree
+  (`std::filesystem::create_directories`) before `H5Fcreate`. HDF5 cannot
+  create intermediate directories, so without this a save to a folder that
+  does not exist yet (e.g. a freshly chosen path on a second/external/network
+  drive) fails — this was the root cause of "can save on one drive but not
+  the other." Open failures now log an actionable message (drive available?
+  writable? valid name? free space?) instead of a generic error. Regression
+  guard: `tests/integration/e2e_storage_destinations_test.cpp`
+  (`integration.e2e_storage_destinations`) saves to fresh/nested/long paths.
+  Note: paths exceeding the Windows `MAX_PATH` (260) limit still fail unless
+  long-path support is enabled at the OS level.
 - `writeConfigJson` must follow `writeExperimentInfo`.
 - `loadFile(path)` now auto-falls back to `path + ".recovery.h5"` if the
   primary file cannot be opened (e.g. interrupted write/corruption).

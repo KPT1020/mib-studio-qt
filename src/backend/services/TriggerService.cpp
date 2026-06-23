@@ -40,7 +40,16 @@ void TriggerService::onTargetGroupResult(const TargetGroupSignal& signal) {
 
     lastTriggerObjectId_.store(signal.objectId, std::memory_order_release);
     lastTriggerTrackId_.store(signal.trackId, std::memory_order_release);
-    triggerRequested_.store(true, std::memory_order_release);
+    // Set the request flag while holding the same mutex the trigger thread uses
+    // for its wait() predicate. Storing it lock-free races with the consumer's
+    // predicate check: if the flag is set after the consumer evaluates the
+    // predicate but before it blocks, the notify is lost and the trigger is
+    // delayed until the next request (or dropped entirely under bursts). Taking
+    // the lock closes that window.
+    {
+        std::lock_guard<std::mutex> lk(triggerMutex_);
+        triggerRequested_.store(true, std::memory_order_release);
+    }
     triggerCV_.notify_one();
 }
 

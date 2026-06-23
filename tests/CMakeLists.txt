@@ -93,6 +93,20 @@ mib_add_backend_test_executable(kin6_mib_app_capture_proof integration/kin6_mib_
 add_test(NAME backend.kin6_mib_app_capture_proof COMMAND $<TARGET_FILE:kin6_mib_app_capture_proof>)
 set_tests_properties(backend.kin6_mib_app_capture_proof PROPERTIES LABELS "backend;integration")
 
+mib_add_backend_test_executable(e2e_storage_destinations_test integration/e2e_storage_destinations_test.cpp)
+add_test(NAME integration.e2e_storage_destinations COMMAND $<TARGET_FILE:e2e_storage_destinations_test>)
+set_tests_properties(integration.e2e_storage_destinations PROPERTIES LABELS "integration;e2e;recording" TIMEOUT 60)
+
+mib_add_backend_test_executable(e2e_trigger_timing_test integration/e2e_trigger_timing_test.cpp)
+target_link_libraries(e2e_trigger_timing_test PRIVATE Threads::Threads)
+add_test(NAME integration.e2e_trigger_timing COMMAND $<TARGET_FILE:e2e_trigger_timing_test>)
+set_tests_properties(integration.e2e_trigger_timing PROPERTIES LABELS "integration;e2e;trigger" TIMEOUT 120)
+
+mib_add_backend_test_executable(e2e_pipeline_stress_test integration/e2e_pipeline_stress_test.cpp)
+target_link_libraries(e2e_pipeline_stress_test PRIVATE Threads::Threads)
+add_test(NAME integration.e2e_pipeline_stress COMMAND $<TARGET_FILE:e2e_pipeline_stress_test>)
+set_tests_properties(integration.e2e_pipeline_stress PROPERTIES LABELS "integration;e2e" TIMEOUT 180)
+
 mib_add_backend_test_executable(mib_processing_multi_object_test processing/processing_multi_object_test.cpp)
 add_test(NAME backend.processing_multi_object COMMAND $<TARGET_FILE:mib_processing_multi_object_test>)
 set_tests_properties(backend.processing_multi_object PROPERTIES LABELS "processing;backend")

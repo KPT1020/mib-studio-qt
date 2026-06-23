@@ -52,8 +52,23 @@ microseconds (default 1 µs).
   so the CV notification is not serialised behind autofocus buffer
   maintenance + sort.
 - The trigger thread is fully decoupled from the Qt event loop: it waits
-  on `triggerCV_`, wakes on `onTargetGroupResult(signal)` (atomic store +
-  `notify_one`), fires a pulse, busy-waits `pulseDurationUs_`, and lowers
-  the line. The UI thread only calls `onTargetGroupResult` for the manual
-  `sortTriggerBtn` / `periodicTriggerBtn` paths — those are non-blocking
-  by construction. No UI mutex is held across a trigger wake-up.
+  on `triggerCV_`, wakes on `onTargetGroupResult(signal)`, fires a pulse,
+  busy-waits `pulseDurationUs_`, and lowers the line. The UI thread only
+  calls `onTargetGroupResult` for the manual `sortTriggerBtn` /
+  `periodicTriggerBtn` paths — those are non-blocking by construction. No
+  UI mutex is held across a trigger wake-up.
+- **Lost-wakeup fix:** `onTargetGroupResult` sets `triggerRequested_` while
+  holding `triggerMutex_` (the same mutex guarding the consumer's
+  `wait()` predicate) before `notify_one()`. Storing the flag lock-free
+  races with the consumer's predicate check — if the flag flips after the
+  predicate is evaluated but before the thread blocks, the notification is
+  lost and the trigger is delayed until the next request (or dropped under
+  bursts). This was the root cause of "variable delay / occasional missed
+  trigger." Regression guard: `tests/integration/e2e_trigger_timing_test.cpp`
+  (`integration.e2e_trigger_timing`) asserts zero missed pulses and reports
+  the request→fire latency distribution under CPU load.
+- **Known limitation:** `triggerRequested_` is a single bool, so multiple
+  target-group results arriving while the thread is mid-pulse coalesce into
+  one fire. Residual latency jitter (tens to ~hundreds of µs under load)
+  is inherent to OS scheduling of the busy-wait thread; sub-10 µs
+  determinism would require real-time thread priority.
