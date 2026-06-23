@@ -1,5 +1,5 @@
 # Default version (fallback if git is not available or no tags exist)
-set(DEFAULT_VERSION "1.0.1")
+set(DEFAULT_VERSION "1.0.2")
 
 # Try to get version from git tags
 set(GIT_VERSION "")
