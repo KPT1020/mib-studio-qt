@@ -12,7 +12,9 @@ concurrency:
 
 jobs:
   validate:
-    runs-on: windows-latest
+    # Pinned to windows-2022 to match the project's VS2022 / msvc-194 toolchain
+    # (windows-latest moved to VS2026). Matches release.yml and build-windows.yml.
+    runs-on: windows-2022
     timeout-minutes: 15
 
     steps:
