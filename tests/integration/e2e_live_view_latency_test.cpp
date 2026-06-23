@@ -227,23 +227,28 @@ int main()
 
     int rc = 0;
 
-    // Confirm the producer actually overran processing in backlog mode;
-    // otherwise the comparison is meaningless (environment too fast/idle).
-    if (backlog.maxLag < 100) {
-        std::cout << "INCONCLUSIVE: processing kept up (maxLag=" << backlog.maxLag
+    // Gate on steady-state (late-window) lag, not maxLag: maxLag is dominated by
+    // warmup transients, and since the FrameStore evicted-index fix the
+    // force-off backlog is bounded to ~ring capacity (the realtime skip-ahead
+    // engages once evicted reads return false) rather than growing unbounded.
+    // Steady-state lag is also the faithful model of the user symptom
+    // ("latency that grows over a session").
+    if (backlog.lateLag < 1000.0) {
+        std::cout << "INCONCLUSIVE: processing kept up (force-off lateLag="
+                  << backlog.lateLag
                   << "); could not establish overload. Treating as pass.\n";
         return 0;
     }
 
-    const uint64_t dropMax = std::max<uint64_t>(dropped.maxLag, 1);
-    const uint64_t defltMax = std::max<uint64_t>(deflt.maxLag, 1);
-    const double ratio = static_cast<double>(backlog.maxLag) / static_cast<double>(dropMax);
-    const double defltRatio = static_cast<double>(backlog.maxLag) / static_cast<double>(defltMax);
+    const double dropLate = std::max(dropped.lateLag, 1.0);
+    const double defltLate = std::max(deflt.lateLag, 1.0);
+    const double ratio = backlog.lateLag / dropLate;
+    const double defltRatio = backlog.lateLag / defltLate;
     std::cout << std::setprecision(2)
-              << "forceOff.maxLag / forceOn.maxLag = " << ratio << "x\n"
-              << "forceOff.maxLag / default.maxLag = " << defltRatio << "x\n";
+              << "forceOff.lateLag / forceOn.lateLag = " << ratio << "x\n"
+              << "forceOff.lateLag / default.lateLag = " << defltRatio << "x\n";
 
-    // The fix: the shipped default must bound the overlay backlog.
+    // The fix: the shipped default must bound the steady-state overlay backlog.
     if (!deflt.dropFramesFlag) {
         std::cout << "FAIL: realtime drop-frames is not ON by default; live view "
                      "will accumulate an overlay backlog.\n";

@@ -28,6 +28,10 @@ target_link_libraries(frame_store_concurrency_test PRIVATE Threads::Threads)
 add_test(NAME backend.frame_store_concurrency COMMAND $<TARGET_FILE:frame_store_concurrency_test>)
 set_tests_properties(backend.frame_store_concurrency PROPERTIES LABELS "backend")
 
+mib_add_backend_test_executable(frame_store_bounds_test backend/frame_store_bounds_test.cpp)
+add_test(NAME backend.frame_store_bounds COMMAND $<TARGET_FILE:frame_store_bounds_test>)
+set_tests_properties(backend.frame_store_bounds PROPERTIES LABELS "backend" TIMEOUT 30)
+
 mib_add_backend_test_executable(pipeline_timing_benchmark performance/pipeline_timing_benchmark.cpp)
 target_link_libraries(pipeline_timing_benchmark PRIVATE Threads::Threads)
 add_test(NAME performance.pipeline_timing COMMAND $<TARGET_FILE:pipeline_timing_benchmark>)

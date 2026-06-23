@@ -118,6 +118,16 @@ this is safe because every hot-path op acquires the shared structural lock
 
 ## Gotchas
 
+- `getByWriteIndex` / `getByWriteIndexROI` reject indices that are too new
+  (`idx >= totalWritten`) **and** indices already evicted from the ring
+  (`idx < totalWritten - capacity`). The eviction check is essential: without
+  it, `idx % capacity` aliases to a live slot holding a *newer* frame and the
+  call would silently return the wrong frame instead of failing. All callers
+  treat `false` as "skip this frame" (`continue`) or clamp to the available
+  range first, so rejecting is safe. Guarded by
+  `tests/backend/frame_store_bounds_test.cpp` (`backend.frame_store_bounds`).
+  Note: a frame right at the eviction boundary can still race (you may get the
+  next frame); that ±1 boundary race is inherent to the lock-light ring.
 - If a consumer holds onto a `getByWriteIndex` copy for longer than
   `capacity / fps` seconds, its data is still valid (copy) but the index
   may fall off the available range.
