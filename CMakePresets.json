@@ -141,11 +141,6 @@
       "name": "linux-backend-only-test",
       "displayName": "Test Linux Backend-only",
       "configurePreset": "linux-backend-only",
-      "filter": {
-        "exclude": {
-          "label": "stress"
-        }
-      },
       "output": {
         "outputOnFailure": true
       },

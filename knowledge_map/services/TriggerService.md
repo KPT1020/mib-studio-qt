@@ -67,6 +67,17 @@ microseconds (default 1 µs).
   trigger." Regression guard: `tests/integration/e2e_trigger_timing_test.cpp`
   (`integration.e2e_trigger_timing`) asserts zero missed pulses and reports
   the request→fire latency distribution under CPU load.
+- **Lost-wakeup fix #2 — `stop()` deadlock (the more serious one):** `stop()`
+  must also clear `running_` while holding `triggerMutex_` before
+  `notify_all()`. `start()`/`stop()` run on every capture start/stop (wired via
+  [[CaptureService]]::CameraReadyCallback). If `stop()` cleared `running_`
+  lock-free and the just-started trigger thread was between its `wait()`
+  predicate check (`running_ == true`) and actually blocking, the notify was
+  lost and the thread blocked forever — so `stop()`'s `join()` deadlocked,
+  which hung `CaptureService::stop()` and therefore the whole app shutdown /
+  camera restart. Intermittent and platform-independent. Found by the
+  `integration.e2e_pipeline_stress` lifecycle test (its watchdog pinpointed
+  `capture.stop`); that test is the regression guard.
 - **Known limitation:** `triggerRequested_` is a single bool, so multiple
   target-group results arriving while the thread is mid-pulse coalesce into
   one fire. Residual latency jitter (tens to ~hundreds of µs under load)

@@ -28,6 +28,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <functional>
 #include <iostream>
@@ -55,6 +57,49 @@ bool waitFor(const std::function<bool()>& pred, std::chrono::milliseconds timeou
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
     return pred();
+}
+
+// --- Hang instrumentation -------------------------------------------------
+// Records the operation currently in flight so a watchdog can report exactly
+// where the pipeline deadlocks instead of leaving an opaque timeout.
+std::atomic<int> g_phase{0};
+std::atomic<int> g_cycle{0};
+std::atomic<const char*> g_step{"init"};
+std::atomic<long long> g_lastMs{0};
+
+long long nowMs()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+void mark(int phase, int cycle, const char* step)
+{
+    g_phase.store(phase);
+    g_cycle.store(cycle);
+    g_step.store(step);
+    g_lastMs.store(nowMs());
+}
+
+void startWatchdog(int stuckSeconds)
+{
+    std::thread([stuckSeconds] {
+        for (;;) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            const long long last = g_lastMs.load();
+            if (last != 0 && nowMs() - last > stuckSeconds * 1000LL) {
+                std::fprintf(stderr,
+                             "\nWATCHDOG: stuck >%ds at phase=%d cycle=%d step=%s\n",
+                             stuckSeconds, g_phase.load(), g_cycle.load(),
+                             g_step.load());
+                std::fflush(stderr);
+                // _Exit, not abort(): the app links a crash handler that
+                // intercepts SIGABRT and can itself hang, masking the report.
+                std::_Exit(99);
+            }
+        }
+    }).detach();
 }
 
 bool generateSyntheticFrames(const fs::path& dir, int count)
@@ -130,32 +175,41 @@ int main(int argc, char* argv[])
               << (synthesized ? " (synthetic)" : " (provided)")
               << "  cycles=" << cycles << "\n\n";
 
+    startWatchdog(20);
+
     // Phase 1: normal start -> record -> stop cycles.
     for (int i = 0; i < cycles; ++i) {
+        mark(1, i, "capture.start");
         if (!backend.capture().start()) {
             std::cerr << "cycle " << i << ": capture start failed\n";
             return 5;
         }
+        mark(1, i, "wait isRunning");
         if (!waitFor([&] { return backend.capture().isRunning(); },
                      std::chrono::seconds(2))) {
             std::cerr << "cycle " << i << ": capture never reported running\n";
             return 6;
         }
         // Let some frames flow into the FrameStore.
+        mark(1, i, "wait framesProcessed");
         waitFor([&] { return backend.capture().stats().framesProcessed.load() > 0; },
                 std::chrono::seconds(2));
 
         const fs::path recPath = recDir / ("rec_" + std::to_string(i) + ".h5");
+        mark(1, i, "startFrameRecording");
         const bool recStarted = backend.startFrameRecording(recPath.string());
         if (recStarted) {
             std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            mark(1, i, "stopFrameRecording");
             backend.stopFrameRecording();
             const uint64_t n = backend.frameRecordingCount();
             totalRecorded += n;
             if (n > 0) ++recordingsWithData;
         }
 
+        mark(1, i, "capture.stop");
         backend.capture().stop();
+        mark(1, i, "wait stopped");
         if (!waitFor([&] { return !backend.capture().isRunning(); },
                      std::chrono::seconds(2))) {
             std::cerr << "cycle " << i << ": capture failed to stop (possible hang)\n";
@@ -167,13 +221,17 @@ int main(int argc, char* argv[])
     // data races in the capture thread and camera-ready callback.
     const int raceCycles = cycles * 3;
     for (int i = 0; i < raceCycles; ++i) {
+        mark(2, i, "capture.start");
         backend.capture().start();
         if (i % 3 == 0) {
             const fs::path recPath = recDir / ("race_" + std::to_string(i) + ".h5");
+            mark(2, i, "startFrameRecording");
             backend.startFrameRecording(recPath.string());
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        mark(2, i, "stopFrameRecording");
         backend.stopFrameRecording();
+        mark(2, i, "capture.stop");
         backend.capture().stop();
     }
     // Must come to rest.

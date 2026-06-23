@@ -108,13 +108,13 @@ set_tests_properties(integration.e2e_trigger_timing PROPERTIES LABELS "integrati
 
 mib_add_backend_test_executable(e2e_pipeline_stress_test integration/e2e_pipeline_stress_test.cpp)
 target_link_libraries(e2e_pipeline_stress_test PRIVATE Threads::Threads)
-# Labeled "stress": a non-deterministic lifecycle start/stop race test. It is
-# excluded from the gating Linux CI preset (linux-backend-only-test) because it
-# can intermittently hang on slower runners — a real concurrency signal worth
-# investigating separately, not a per-commit gate. Run on demand:
-#   ctest -R integration.e2e_pipeline_stress   (or the exe with a [cycles] arg)
+# Lifecycle start/stop race test. Has an in-process watchdog that _Exit(99)s
+# with the stuck phase/cycle/step if a cycle deadlocks, so it fails fast instead
+# of burning the full ctest timeout. Pass a larger [cycles] arg for heavy local
+# stress runs. (The TriggerService lost-wakeup deadlock this used to expose is
+# fixed; see backend.trigger_service_start_stop_race for the focused guard.)
 add_test(NAME integration.e2e_pipeline_stress COMMAND $<TARGET_FILE:e2e_pipeline_stress_test>)
-set_tests_properties(integration.e2e_pipeline_stress PROPERTIES LABELS "integration;e2e;stress" TIMEOUT 180)
+set_tests_properties(integration.e2e_pipeline_stress PROPERTIES LABELS "integration;e2e" TIMEOUT 120)
 
 mib_add_backend_test_executable(e2e_live_view_latency_test integration/e2e_live_view_latency_test.cpp)
 target_link_libraries(e2e_live_view_latency_test PRIVATE Threads::Threads)

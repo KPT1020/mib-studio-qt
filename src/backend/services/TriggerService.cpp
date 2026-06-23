@@ -18,7 +18,18 @@ void TriggerService::start() {
 
 void TriggerService::stop() {
     if (!running_.load()) return;
-    running_.store(false);
+    // Clear running_ while holding triggerMutex_ (the mutex the trigger thread
+    // holds when evaluating its wait predicate) before notifying. Storing it
+    // lock-free races with the loop's wait(): if the thread has just been
+    // started and checks the predicate (running_ == true) but has not yet
+    // blocked, a lock-free store+notify here lands in that gap and is lost, so
+    // the thread blocks forever and this join() deadlocks. Under rapid
+    // start/stop (e.g. capture restart) that hangs capture shutdown. Taking the
+    // lock closes the window.
+    {
+        std::lock_guard<std::mutex> lk(triggerMutex_);
+        running_.store(false);
+    }
     triggerCV_.notify_all();
     if (thread_.joinable()) thread_.join();
     SPDLOG_INFO("TriggerService stopped");
