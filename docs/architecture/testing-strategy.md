@@ -15,6 +15,74 @@ and frontend boundaries documented in this architecture set.
 | Script/tool checks | Script-specific commands under `scripts/` or `tools/` | Standalone post-processing tools, Python helpers, and generated evidence workflows. |
 | Manual/runtime evidence | Screenshots, recordings, sample images, metrics, and logs in a review bundle | UI, CV/image-processing, pipeline, hardware, or workflow changes where command output alone is insufficient. |
 
+## Test Categories (by failure mode)
+
+The layers above describe *where* tests run. Tests are also classified by *what
+failure mode they guard*, because the bugs that break this app (deadlocks, lost
+wakeups, stale frames, save-path failures, latency backlog) are not "levels."
+Each category has a canonical example already in `tests/`.
+
+| Category | Guards against | Example |
+| --- | --- | --- |
+| Unit / behavior | logic regressions | deterministic service tests |
+| Round-trip | silent data loss/corruption | `recording_lifecycle_test` |
+| Fault-injection | save fails on some drives/paths/states | `e2e_storage_destinations_test` |
+| Pipeline e2e | broken experiments / silent frame loss | `kin6_mib_app_capture_proof` |
+| Concurrency / lifecycle stress | deadlocks, races, crashes on start/stop | `e2e_pipeline_stress_test` |
+| Invariant / property | torn / stale / evicted-aliased frames | `frame_store_concurrency_test`, `frame_store_bounds_test` |
+| Performance / latency budget | growing lag, variable/dropped triggers | `e2e_live_view_latency_test`, `e2e_trigger_timing_test` |
+| Soak (nightly) | slow leaks, accumulation, rare races | (nightly job) |
+
+## Capability Coverage Matrix
+
+A change to a core capability must land with its required categories. This is the
+gate, mirrored in [`AGENTS.md`](../../AGENTS.md).
+
+| Capability / area | Required categories |
+| --- | --- |
+| Save data (`Hdf5Service`, export, recording, config) | Round-trip **+** Fault-injection |
+| Run experiments (capture/processing/recording lifecycle) | Pipeline e2e **+** Concurrency stress |
+| Real-time (processing, trigger, display, `FrameStore`) | Latency budget **+** Invariant |
+| Any code touching threads / shared state | Passes the TSan lane and has/extends a stress test |
+
+If a required category does not exist yet for the touched area, creating it is
+part of the change.
+
+## Cross-cutting Rules
+
+- **Regression-first:** a bug fix lands with a test proven to fail before the fix.
+- **No naked `join()`/`wait()` that can hang CI:** thread/pipeline tests install a
+  watchdog that prints the stuck location and `_Exit(99)`s. Use `_Exit`, not
+  `abort()` (the linked crash handler intercepts `abort()` and can itself hang).
+- **Timing tests gate on steady-state or ratios, not absolute milliseconds**, so
+  they are machine-independent. Mark probabilistic tests; give them generous,
+  stable thresholds.
+- **Frame accounting is conserved:** pipeline tests assert captured == processed
+  + explicitly dropped (no silent loss).
+
+## CI Lanes
+
+- **`backend-ci`** (Linux, PRs): configure/build/test the backend-only preset.
+- **Sanitizer lane** (Linux, PRs): backend-only built with `-fsanitize=thread`,
+  plus an `-fsanitize=address,undefined` variant, running unit / invariant /
+  round-trip / stress tests. ThreadSanitizer catches the lost-wakeup / data-race
+  class directly.
+- **Nightly soak** (cron): stress / soak / latency tests at high cycle/Hz
+  counts; non-gating, uploads logs.
+- Windows lanes (`ci.yml`, `build-windows.yml`, `release.yml`) pinned to
+  `windows-2022` to match the VS2022 / msvc-194 toolchain.
+
+## Shared Test-Support Library
+
+`tests/support/` (built incrementally) removes copy-paste across tests:
+`assert.h`, `watchdog.h` (RAII watchdog with `mark()` + `_Exit`), `tempdir.h`,
+`mock_pipeline.h` (AppBackend + mock camera fixture), `hdf5_roundtrip.h`
+(round-trip + fault-injection helpers), `frames.h` (synthetic + real-dir frame
+sources), `stats.h` (latency/percentile collectors).
+
+Design rationale and the prioritized rollout backlog:
+[`../superpowers/specs/2026-06-23-testing-framework-design.md`](../superpowers/specs/2026-06-23-testing-framework-design.md).
+
 ## Current Registered C++ Tests
 
 The root CMake file registers backend tests when `BUILD_TESTING` is enabled.
@@ -111,7 +179,9 @@ integrations:
 
 Use these placement rules:
 
-- Add backend service tests under `src/tests/` and register them with CTest.
+- Add backend service tests under `tests/` (mirroring the source area, e.g.
+  `tests/backend/`, `tests/processing/`, `tests/integration/`) and register them
+  with CTest in `tests/CMakeLists.txt`.
 - Link backend tests to `mib_backend`, not `mib_studio_qt`.
 - Keep integration tests labeled `integration` so fast presets can exclude
   network or dataset-backed work.

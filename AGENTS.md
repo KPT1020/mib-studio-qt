@@ -59,6 +59,37 @@ backend on Linux; [`docs-ci.yml`](.github/workflows/docs-ci.yml) runs the
 knowledge checks; [`ci.yml`](.github/workflows/ci.yml) validates Windows
 packaging scripts.
 
+## Testing framework (safeguards)
+
+Tests are bare `main()` executables linked to `mib_backend` and registered with
+CTest (no test framework). They are organized by failure mode, not just by
+level. Full taxonomy, CI lanes, and the shared support library are in
+[`docs/architecture/testing-strategy.md`](docs/architecture/testing-strategy.md).
+
+**Coverage matrix — a change to a capability lands with its required tests:**
+
+| Capability / area | Required test categories |
+|------|------|
+| Save data (`Hdf5Service`, export, recording, config) | Round-trip **+** Fault-injection |
+| Run experiments (capture/processing/recording **lifecycle**) | Pipeline e2e **+** Concurrency stress |
+| Real-time (processing, trigger, display, `FrameStore`) | Latency budget **+** Invariant |
+| Any code touching threads / shared state | Passes the **TSan lane** and has/extends a stress test |
+
+If a required category does not exist yet for the touched area, creating it is
+part of the change.
+
+**Mandatory rules:**
+
+- **Regression-first:** every bug fix lands with a test proven to fail before
+  the fix and pass after.
+- **No naked `join()`/`wait()` that can hang CI:** thread/pipeline tests install
+  a watchdog that prints the stuck location and `_Exit(99)`s. Use `_Exit`, not
+  `abort()` (the crash handler intercepts `abort()`).
+- **Timing tests gate on steady-state/ratios, not absolute milliseconds** so
+  they are machine-independent; mark probabilistic tests.
+- **Pipeline tests assert frame accounting is conserved** (captured ==
+  processed + explicitly dropped — no silent loss).
+
 ## Hard Conventions
 
 - **spdlog** for logging; never `std::cout` in app code.
