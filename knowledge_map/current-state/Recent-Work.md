@@ -119,7 +119,7 @@
   MindVision runtime DLL when enabled. Backend build/tests and docs/vault notes
   were updated to keep the non-MindVision CI path green.
 
-- **Conan remote health precheck workflow** (2026-06-10) — Added `.github/workflows/conan-remote-health.yml`, a scheduled/manual GitHub Actions health check that verifies ConanCenter and optional team remote (`CONAN_REMOTE_URL`) reachability, detects non-Conan/Cloudflare HTML responses from `/v1/ping`, validates auth when username/password secrets are present, and writes per-remote status to the run summary. Updated `docs/howto/release-workflow.md` to point release operators to this tracker as a release preflight step.
+- **Conan remote health precheck workflow** (2026-06-10, _removed 2026-06-23_) — Added `.github/workflows/conan-remote-health.yml`, a scheduled/manual GitHub Actions health check for ConanCenter/team-remote reachability. Removed on 2026-06-23: it was failing persistently and not providing actionable signal; the release workflow already handles remote fallback (`conan install` retries without the team remote). The release-workflow.md preflight reference was dropped with it.
 - **Cloudflare R2 CI publishing path cleanup** (2026-06-10) — Both
   Windows GitHub Actions release workflows now wire stable/beta publishing
   directly through `python publish-update.py`, map R2 credentials from

@@ -49,11 +49,6 @@ Options:
 
 ## Prerequisites
 
-Before starting release dependency resolution, run the Conan remote health tracker:
-
-- [Conan Remote Health workflow](https://github.com/gavinlouuu-kpt/mib-studio-qt/actions/workflows/conan-remote-health.yml)
-- Status badge: [![Conan Remote Health](https://github.com/gavinlouuu-kpt/mib-studio-qt/actions/workflows/conan-remote-health.yml/badge.svg)](https://github.com/gavinlouuu-kpt/mib-studio-qt/actions/workflows/conan-remote-health.yml)
-
 Before starting a release, ensure you have:
 
 1. Complete development environment:
