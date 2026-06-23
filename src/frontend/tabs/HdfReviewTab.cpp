@@ -1714,8 +1714,8 @@ void HdfReviewTab::exportAllImagesToTiff(const QString& baseDir) {
             return;
         }
     }
-    const int seriesDigits = std::max(2, QString::number(
-        static_cast<qulonglong>(std::max<size_t>(seriesCount, 1))).size());
+    const int seriesDigits = std::max(2, static_cast<int>(QString::number(
+        static_cast<qulonglong>(std::max<size_t>(seriesCount, 1))).size()));
 
     // Export valid frames (in recording mode, these are the only frames)
     const std::string validImgPath = imagesPath(true);
@@ -1841,8 +1841,8 @@ void HdfReviewTab::exportAllData(const QString& baseDir) {
             return;
         }
     }
-    const int seriesDigits = std::max(2, QString::number(
-        static_cast<qulonglong>(std::max<size_t>(seriesCount, 1))).size());
+    const int seriesDigits = std::max(2, static_cast<int>(QString::number(
+        static_cast<qulonglong>(std::max<size_t>(seriesCount, 1))).size()));
 
     // Export CSV metrics (recording files have no per-frame metrics)
     if (!isRecordingMode_) {

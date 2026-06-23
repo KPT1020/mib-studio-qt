@@ -81,6 +81,9 @@ frames. The currently active
   flat `readImageByIndex`.
 - During `Export All`, the series prompt applies one range selection across
   every valid multi-image record so exports stay consistent.
+- Series export filename padding is computed as an `int`; Qt 6 returns
+  `qsizetype` from `QString::size()`, so cast before using `std::max` on
+  MSVC.
 - Chart snapshots stored in the file are 2D/3D — use `readChartSnapshot`
   to display them.
 - See tasks `review_hdf_thumbnail_spacer_crash.md` and
