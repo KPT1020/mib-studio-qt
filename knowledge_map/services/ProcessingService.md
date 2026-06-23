@@ -125,17 +125,23 @@ current/max queue depth, batch size, worker count, and running state. See
 ## Gotchas
 
 - Realtime drop-frames mode is ignored while an experiment is active.
-- **Live-view overlay backlog (drop-frames off):** the inline realtime loop
-  consumes `FrameStore` sequentially via `rtLastProcessed_`. With
-  `rtDropFrames_` off (the default), when capture outpaces processing the
-  processed snapshot (`getLatestSnapshot`, source of the mask/contour overlay
-  and trigger decision) falls progressively behind the live write head — an
-  accumulating backlog that only resets when realtime restarts. The raw preview
-  is unaffected (it reads `FrameStore::getLatest`). `setRealtimeDropFrames(true)`
-  makes the loop jump to the newest index and bounds the lag. Characterized by
-  `tests/integration/e2e_live_view_latency_test.cpp`
+- **Live-view overlay backlog / `rtDropFrames_` defaults ON:** the inline
+  realtime loop consumes `FrameStore` sequentially via `rtLastProcessed_`. If
+  drop-frames is *off* and capture outpaces processing, the processed snapshot
+  (`getLatestSnapshot`, source of the mask/contour overlay and trigger decision)
+  falls progressively behind the live write head — an accumulating backlog that
+  only resets when realtime restarts. The raw preview is unaffected (it reads
+  `FrameStore::getLatest`). Because of this, `rtDropFrames_` now **defaults to
+  ON**, so the live overlay jumps to the newest frame and stays bounded.
+  Experiments are unaffected: the loop gates the flag behind `!experimentActive_`
+  (`rtDropFrames_ && !experimentActive_`), so every frame is still
+  processed/recorded during a run. Users can still disable it via
+  ProcessingSettingsDialog. Verified by
+  `tests/processing/realtime_drop_frames_default_test.cpp` (default value +
+  toggle) and `tests/integration/e2e_live_view_latency_test.cpp`
   (`integration.e2e_live_view_latency`): under sustained overload the default
-  lags tens of thousands of frames vs. a few hundred with drop-frames on.
+  stays a few hundred frames behind, vs. tens of thousands with drop-frames
+  forced off (~30x).
 - When the experiment backlog reaches `maxBufferedFrames_`, sampled invalid
   frames are dropped first. Valid frames can evict old invalid frames; valid
   drops only happen if the backlog is entirely valid and still over cap. This

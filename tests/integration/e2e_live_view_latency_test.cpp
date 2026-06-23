@@ -82,6 +82,8 @@ struct Sample {
     uint64_t lag;
 };
 
+enum class DropMode { ForceOff, ForceOn, UseDefault };
+
 struct PhaseResult {
     uint64_t maxLag{0};
     double earlyLag{0.0};
@@ -89,6 +91,7 @@ struct PhaseResult {
     uint64_t pushed{0};
     uint64_t finalProcessedIndex{0};
     size_t sampleCount{0};
+    bool dropFramesFlag{false};
 };
 
 double avgLagInWindow(const std::vector<Sample>& s, double loMs, double hiMs)
@@ -104,12 +107,15 @@ double avgLagInWindow(const std::vector<Sample>& s, double loMs, double hiMs)
     return n ? sum / static_cast<double>(n) : 0.0;
 }
 
-PhaseResult runOverload(ProcessingService& proc, bool dropFrames, int durationMs)
+PhaseResult runOverload(ProcessingService& proc, DropMode mode, int durationMs)
 {
     auto store = std::make_shared<FrameStore>(kCapacity);
 
     proc.setRealtimeProcessingMode(ProcessingService::RealtimeProcessingMode::Inline);
-    proc.setRealtimeDropFrames(dropFrames);
+    // UseDefault deliberately does NOT call setRealtimeDropFrames, so the phase
+    // exercises whatever the constructor default is — the actual user path.
+    if (mode == DropMode::ForceOff) proc.setRealtimeDropFrames(false);
+    else if (mode == DropMode::ForceOn) proc.setRealtimeDropFrames(true);
     proc.startRealtime(store);
     proc.setRealtimeEnabled(true);
 
@@ -169,6 +175,7 @@ PhaseResult runOverload(ProcessingService& proc, bool dropFrames, int durationMs
     proc.setRealtimeEnabled(false);
     proc.stopRealtime();
 
+    r.dropFramesFlag = proc.getRealtimeDropFrames();
     r.pushed = pushed.load();
     r.sampleCount = samples.size();
     // "early" = first second after warmup; "late" = final ~0.6 s.
@@ -180,12 +187,20 @@ PhaseResult runOverload(ProcessingService& proc, bool dropFrames, int durationMs
 void printPhase(const char* name, const PhaseResult& r)
 {
     std::cout << std::fixed << std::setprecision(1);
-    std::cout << name << ": pushed=" << r.pushed
+    std::cout << name << ": dropFrames=" << (r.dropFramesFlag ? "on" : "off")
+              << " pushed=" << r.pushed
               << " samples=" << r.sampleCount
               << " maxLag=" << r.maxLag
               << " earlyLag=" << r.earlyLag
               << " lateLag=" << r.lateLag
               << " finalProcessedIdx=" << r.finalProcessedIndex << "\n";
+}
+
+PhaseResult runFreshPhase(DropMode mode, int durationMs)
+{
+    ProcessingService proc;
+    proc.setProcessingConfig(makeLenientConfig());
+    return runOverload(proc, mode, durationMs);
 }
 
 } // namespace
@@ -194,19 +209,19 @@ int main()
 {
     constexpr int kDurationMs = 2000;
 
-    ProcessingService proc;
-    proc.setProcessingConfig(makeLenientConfig());
-
     std::cout << "=== e2e live-view (processed overlay) latency ===\n";
     std::cout << "frame=" << kFrameW << "x" << kFrameH
               << " ring=" << kCapacity
               << " duration=" << kDurationMs << "ms per phase\n\n";
 
-    const PhaseResult backlog = runOverload(proc, /*dropFrames=*/false, kDurationMs);
-    printPhase("drop-frames OFF (default)", backlog);
-
-    const PhaseResult dropped = runOverload(proc, /*dropFrames=*/true, kDurationMs);
-    printPhase("drop-frames ON          ", dropped);
+    // Forced-off reproduces the symptom; forced-on is the bounded reference;
+    // default exercises the shipped constructor default (the actual user path).
+    const PhaseResult backlog = runFreshPhase(DropMode::ForceOff, kDurationMs);
+    printPhase("drop-frames FORCE-OFF ", backlog);
+    const PhaseResult dropped = runFreshPhase(DropMode::ForceOn, kDurationMs);
+    printPhase("drop-frames FORCE-ON  ", dropped);
+    const PhaseResult deflt = runFreshPhase(DropMode::UseDefault, kDurationMs);
+    printPhase("drop-frames DEFAULT   ", deflt);
 
     std::cout << "\n";
 
@@ -220,28 +235,35 @@ int main()
         return 0;
     }
 
-    // Primary, machine-independent gate: under identical load the backlog mode
-    // must lag far more than the drop mode.
     const uint64_t dropMax = std::max<uint64_t>(dropped.maxLag, 1);
+    const uint64_t defltMax = std::max<uint64_t>(deflt.maxLag, 1);
     const double ratio = static_cast<double>(backlog.maxLag) / static_cast<double>(dropMax);
-    std::cout << "backlog.maxLag / drop.maxLag = " << std::setprecision(2) << ratio << "x\n";
+    const double defltRatio = static_cast<double>(backlog.maxLag) / static_cast<double>(defltMax);
+    std::cout << std::setprecision(2)
+              << "forceOff.maxLag / forceOn.maxLag = " << ratio << "x\n"
+              << "forceOff.maxLag / default.maxLag = " << defltRatio << "x\n";
 
+    // The fix: the shipped default must bound the overlay backlog.
+    if (!deflt.dropFramesFlag) {
+        std::cout << "FAIL: realtime drop-frames is not ON by default; live view "
+                     "will accumulate an overlay backlog.\n";
+        rc = 1;
+    }
+    if (defltRatio < 4.0) {
+        std::cout << "FAIL: default config did not bound the overlay backlog "
+                     "(expected force-off to lag >= 4x the default).\n";
+        rc = 1;
+    }
+    // Sanity: forced-on must also bound it (guards the mechanism itself).
     if (ratio < 4.0) {
-        std::cout << "FAIL: drop-frames did not bound the overlay backlog "
-                     "(expected backlog mode to lag >= 4x the drop mode).\n";
+        std::cout << "FAIL: drop-frames-on did not bound the overlay backlog.\n";
         rc = 1;
     }
 
-    // Accumulation signature: backlog mode lag grows from early to late.
-    if (backlog.lateLag <= backlog.earlyLag * 1.5 && backlog.earlyLag < 50.0) {
-        std::cout << "NOTE: expected backlog lag to grow over the session "
-                     "(early=" << backlog.earlyLag << " late=" << backlog.lateLag << ").\n";
-    }
-
     if (rc == 0) {
-        std::cout << "\nPASS: drop-frames keeps the processed-overlay lag bounded; "
-                     "the default (off) accumulates a backlog (reproduces the "
-                     "growing live-view latency).\n";
+        std::cout << "\nPASS: with drop-frames ON by default the processed-overlay "
+                     "lag stays bounded; only the explicit force-off path "
+                     "accumulates the growing live-view backlog.\n";
     }
     return rc;
 }

@@ -437,7 +437,14 @@ private:
     std::thread realtimeThread_;
     std::atomic<bool> rtRunning_{false};
     std::atomic<bool> rtEnabled_{true};
-    std::atomic<bool> rtDropFrames_{false};
+    // Default ON so live view processes only the newest frame and the processed
+    // overlay (mask/contours/target-group) cannot accumulate a backlog behind
+    // the capture write head when capture outpaces processing. Experiments are
+    // unaffected: the realtime loop ignores this flag while experimentActive_ is
+    // true (gated by `rtDropFrames_ && !experimentActive_`), so every frame is
+    // still processed/recorded during an experiment. Users can still turn it off
+    // via ProcessingSettingsDialog. See e2e_live_view_latency_test.
+    std::atomic<bool> rtDropFrames_{true};
     std::atomic<int> rtProcessingMode_{static_cast<int>(RealtimeProcessingMode::Inline)};
     mutable std::mutex rtBatchSettingsMutex_;
     RealtimeBatchSettings rtBatchSettings_{};
