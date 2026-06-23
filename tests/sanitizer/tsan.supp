@@ -12,5 +12,7 @@ called_from_lib:libgobject-2.0.so
 # the EModulusLutCatalog manifest fetch at startup; not our code.
 called_from_lib:libproxy.so.1
 called_from_lib:libpxbackend-1.0.so
+called_from_lib:libgio-2.0.so.0
+called_from_lib:libgmodule-2.0.so.0
 deadlock:CPLAcquireMutex
 race:libglib-2.0.so
