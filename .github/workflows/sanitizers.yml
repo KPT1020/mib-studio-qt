@@ -54,8 +54,12 @@ jobs:
       - name: Test under sanitizer
         shell: bash
         env:
+          # Route the e-modulus LUT manifest lookup to a file: URL so startup
+          # does NOT use QNetworkAccessManager (whose glib/libproxy/gio threading
+          # TSan cannot model). The file is absent -> graceful bundled fallback.
+          MIB_STUDIO_EMODULUS_LUT_MANIFEST_URL: "file:///nonexistent/mib-lut-manifest.json"
           # Halt on the first finding in OUR code. Suppressions filter out
-          # uninstrumented third-party library noise (OpenCV/GDAL, Qt, glib).
+          # uninstrumented third-party library noise (OpenCV/GDAL, glib).
           TSAN_OPTIONS: "halt_on_error=1 second_deadlock_stack=1 suppressions=${{ github.workspace }}/tests/sanitizer/tsan.supp"
           ASAN_OPTIONS: "halt_on_error=1 abort_on_error=1 detect_leaks=1"
           LSAN_OPTIONS: "suppressions=${{ github.workspace }}/tests/sanitizer/lsan.supp"

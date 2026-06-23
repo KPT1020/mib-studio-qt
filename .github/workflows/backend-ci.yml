@@ -87,6 +87,10 @@ jobs:
 
       - name: Test backend-only preset
         shell: bash
+        env:
+          # Avoid the network LUT-manifest fetch at AppBackend startup (offline
+          # CI) by pointing at a file: URL; absent file -> graceful fallback.
+          MIB_STUDIO_EMODULUS_LUT_MANIFEST_URL: "file:///nonexistent/mib-lut-manifest.json"
         run: |
           set -o pipefail
           ctest --preset linux-backend-only-test --output-on-failure 2>&1 | tee artifacts/backend-ci/test.log

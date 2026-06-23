@@ -46,6 +46,8 @@ jobs:
 
       - name: Soak lifecycle + timing tests
         shell: bash
+        env:
+          MIB_STUDIO_EMODULUS_LUT_MANIFEST_URL: "file:///nonexistent/mib-lut-manifest.json"
         run: |
           set -o pipefail
           N="${{ github.event.inputs.repeats || '40' }}"

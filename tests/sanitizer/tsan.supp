@@ -1,25 +1,18 @@
 # ThreadSanitizer suppressions for uninstrumented third-party libraries.
-# These are not our code — OpenCV's GDAL image plugin and GLib report internal
-# races / lock-order-inversions during image decode and Qt/glib init. Our code
-# must remain clean; do NOT add suppressions for backend::* here.
+# These are not our code. Our code must remain clean; do NOT add suppressions
+# for backend::* here.
+#
+# Note: the Qt-network LUT manifest fetch (which pulled in glib/libproxy/gio
+# threading noise) is avoided in CI by pointing
+# MIB_STUDIO_EMODULUS_LUT_MANIFEST_URL at a file: URL, so those library
+# suppressions are intentionally NOT needed here.
 
-# called_from_lib must name exactly one library (an ambiguous substring is a
-# fatal error in TSan), so each entry is a specific soname.
+# OpenCV's GDAL image plugin reports an internal lock-order-inversion while
+# decoding TIFF frames (mock camera).
 called_from_lib:libgdal.so
+deadlock:CPLAcquireMutex
+
+# GLib/GObject one-time init races during Qt/OpenCV startup.
 called_from_lib:libglib-2.0.so
 called_from_lib:libgobject-2.0.so
-# Qt network proxy resolution (libproxy) unlocks a mutex across threads during
-# the EModulusLutCatalog manifest fetch at startup; not our code.
-called_from_lib:libproxy.so.1
-called_from_lib:libpxbackend-1.0.so
-called_from_lib:libgio-2.0.so.0
-called_from_lib:libgmodule-2.0.so.0
-deadlock:CPLAcquireMutex
 race:libglib-2.0.so
-# The e-modulus LUT manifest fetch at startup uses Qt QNetworkAccessManager,
-# whose cross-thread object lifetimes and glib/libproxy proxy resolution TSan
-# cannot model (Qt's event-loop synchronization is invisible to it). These are
-# false positives attributed to our frame, so suppress by function.
-race:EModulusLutCatalog::fetchManifest
-deadlock:EModulusLutCatalog::fetchManifest
-mutex:EModulusLutCatalog::fetchManifest
