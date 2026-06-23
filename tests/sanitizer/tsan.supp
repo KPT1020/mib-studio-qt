@@ -6,5 +6,10 @@
 called_from_lib:libgdal.so
 called_from_lib:libglib-2.0.so
 called_from_lib:libgobject-2.0.so
+called_from_lib:libpxbackend-1.0.so
+called_from_lib:libproxy
 deadlock:CPLAcquireMutex
 race:libglib-2.0.so
+# Qt network proxy resolution (libproxy) unlocks a mutex across threads during
+# EModulusLutCatalog manifest fetch at startup; not our code.
+mutex:libpxbackend-1.0.so
