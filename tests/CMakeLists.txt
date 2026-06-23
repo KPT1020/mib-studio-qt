@@ -76,6 +76,10 @@ mib_add_backend_test_executable(crash_recovery_fallback_test recording/crash_rec
 add_test(NAME recording.crash_recovery_fallback COMMAND $<TARGET_FILE:crash_recovery_fallback_test>)
 set_tests_properties(recording.crash_recovery_fallback PROPERTIES LABELS "recording;backend" TIMEOUT 30)
 
+mib_add_backend_test_executable(recovery_checkpoint_created_test recording/recovery_checkpoint_created_test.cpp)
+add_test(NAME recording.recovery_checkpoint_created COMMAND $<TARGET_FILE:recovery_checkpoint_created_test>)
+set_tests_properties(recording.recovery_checkpoint_created PROPERTIES LABELS "recording;backend" TIMEOUT 30)
+
 mib_add_backend_test_executable(kin6_batch_pipeline_evidence integration/kin6_batch_pipeline_evidence.cpp)
 
 mib_add_backend_test_executable(kin10_hf_dataset_pipeline_test integration/kin10_hf_dataset_pipeline_test.cpp)
@@ -135,6 +139,16 @@ mib_add_backend_test_executable(e2e_live_view_latency_test integration/e2e_live_
 target_link_libraries(e2e_live_view_latency_test PRIVATE Threads::Threads)
 add_test(NAME integration.e2e_live_view_latency COMMAND $<TARGET_FILE:e2e_live_view_latency_test>)
 set_tests_properties(integration.e2e_live_view_latency PROPERTIES LABELS "integration;e2e;processing" TIMEOUT 120)
+
+mib_add_backend_test_executable(e2e_realtime_throughput_test integration/e2e_realtime_throughput_test.cpp)
+target_link_libraries(e2e_realtime_throughput_test PRIVATE Threads::Threads)
+add_test(NAME integration.e2e_realtime_throughput COMMAND $<TARGET_FILE:e2e_realtime_throughput_test>)
+set_tests_properties(integration.e2e_realtime_throughput PROPERTIES LABELS "integration;e2e;processing;performance" TIMEOUT 120)
+
+mib_add_backend_test_executable(e2e_batch_backpressure_test integration/e2e_batch_backpressure_test.cpp)
+target_link_libraries(e2e_batch_backpressure_test PRIVATE Threads::Threads)
+add_test(NAME integration.e2e_batch_backpressure COMMAND $<TARGET_FILE:e2e_batch_backpressure_test>)
+set_tests_properties(integration.e2e_batch_backpressure PROPERTIES LABELS "integration;e2e;processing;performance" TIMEOUT 120)
 
 mib_add_backend_test_executable(realtime_drop_frames_default_test processing/realtime_drop_frames_default_test.cpp)
 add_test(NAME processing.realtime_drop_frames_default COMMAND $<TARGET_FILE:realtime_drop_frames_default_test>)

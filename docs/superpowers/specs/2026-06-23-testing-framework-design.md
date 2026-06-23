@@ -206,13 +206,26 @@ Findings surfaced by the new lanes (TSan + ASan/UBSan now both green):
   `MIB_STUDIO_EMODULUS_LUT_MANIFEST_URL` at a `file:` URL so startup avoids the
   network stack entirely. Remaining suppressions in `tests/sanitizer/tsan.supp`
   cover only OpenCV/GDAL image-decode + glib init.
-- **`.recovery.h5` checkpoint broken on Windows (open, not fixed).** The
-  checkpoint is written by `copy_file` of the *open* HDF5 file; on Windows that
-  fails every time ("another process has locked a portion of the file"), so the
-  auto-checkpoint is effectively non-functional on the production platform. The
-  `loadFile` *fallback* works (now tested by `crash_recovery_fallback_test`); the
-  *creation* path needs a fix (flush + OS copy with shared-read, or checkpoint on
-  close). Tracked for a focused follow-up.
+- **`.recovery.h5` checkpoint broken on Windows (FIXED).** The checkpoint is
+  written by `copy_file` of the *open* HDF5 file; HDF5's byte-range file lock
+  made that copy fail on Windows every time, so the auto-checkpoint was never
+  created (crash-recovery non-functional on the production platform). Fixed by
+  disabling HDF5 file locking on the FAPL in `openFile`/`loadFile` (the app owns
+  the file exclusively). Guarded by `recovery_checkpoint_created_test` (asserts
+  the checkpoint is created during append and is loadable) plus the existing
+  `crash_recovery_fallback_test`.
+
+## Performance coverage added (follow-up pass)
+
+- `integration.e2e_realtime_throughput` (labels include `performance`) — drives
+  the inline realtime loop full-frame **and with an ROI** (closes the deferred
+  P1.6), reports processed-fps, and gates (machine-independently) on real
+  progress + bounded steady-state overlay lag.
+- `integration.e2e_batch_backpressure` (`performance`) — floods the async batch
+  pipeline and asserts the queue stays within `maxQueuedFrames` (bounded
+  memory), accounting is conserved (offered == accepted + rejected), and every
+  accepted frame is processed.
+- Both are nightly-soaked via `soak.yml` candidates and run in `backend-ci`.
 
 ## Out of scope (YAGNI)
 

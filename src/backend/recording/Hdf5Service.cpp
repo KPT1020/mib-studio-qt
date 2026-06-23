@@ -50,6 +50,24 @@ namespace backend::services
             return filePath + ".recovery.h5";
         }
 
+        // File-access property list with HDF5's byte-range file locking disabled.
+        // The rolling recovery checkpoint copies the still-open file with
+        // std::filesystem::copy_file; on Windows HDF5's lock otherwise blocks
+        // that read ("another process has locked a portion of the file"), so the
+        // checkpoint was silently never created. This app owns the file
+        // exclusively, so disabling the HDF5 lock is safe. Returns H5P_DEFAULT on
+        // failure (caller must not close H5P_DEFAULT).
+        hid_t makeNoLockFapl()
+        {
+            hid_t fapl = H5Pcreate(H5P_FILE_ACCESS);
+            if (fapl < 0)
+            {
+                return H5P_DEFAULT;
+            }
+            H5Pset_file_locking(fapl, /*use_file_locking=*/0, /*ignore_when_disabled=*/1);
+            return fapl;
+        }
+
         bool writeRecoveryCheckpoint(const std::string &filePath)
         {
             if (filePath.empty())
@@ -237,8 +255,14 @@ namespace backend::services
             return false;
         }
 
-        // Create file, overwriting if it exists
-        impl_->fileId_ = H5Fcreate(filePath.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+        // Create file, overwriting if it exists. File locking is disabled so the
+        // rolling recovery checkpoint (copy_file of the open file) works on
+        // Windows.
+        {
+            hid_t fapl = makeNoLockFapl();
+            impl_->fileId_ = H5Fcreate(filePath.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, fapl);
+            if (fapl != H5P_DEFAULT) H5Pclose(fapl);
+        }
         if (impl_->fileId_ < 0)
         {
             SPDLOG_ERROR("Failed to create HDF5 file '{}'. Verify the drive is "
@@ -1486,15 +1510,16 @@ namespace backend::services
             return false;
         }
 
-        // Open existing file for reading
-        impl_->fileId_ = H5Fopen(filePath.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+        // Open existing file for reading (locking disabled, matching openFile).
+        hid_t fapl = makeNoLockFapl();
+        impl_->fileId_ = H5Fopen(filePath.c_str(), H5F_ACC_RDONLY, fapl);
         std::string openedPath = filePath;
         if (impl_->fileId_ < 0)
         {
             const std::string recoveryPath = recoveryPathFor(filePath);
             if (std::filesystem::exists(recoveryPath))
             {
-                impl_->fileId_ = H5Fopen(recoveryPath.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+                impl_->fileId_ = H5Fopen(recoveryPath.c_str(), H5F_ACC_RDONLY, fapl);
                 if (impl_->fileId_ >= 0)
                 {
                     openedPath = recoveryPath;
@@ -1503,10 +1528,12 @@ namespace backend::services
             }
             if (impl_->fileId_ < 0)
             {
+                if (fapl != H5P_DEFAULT) H5Pclose(fapl);
                 SPDLOG_ERROR("Failed to open HDF5 file for reading: {}", filePath);
                 return false;
             }
         }
+        if (fapl != H5P_DEFAULT) H5Pclose(fapl);
 
         impl_->filePath_ = openedPath;
         impl_->isOpen_ = true;
