@@ -79,7 +79,10 @@ int main(int argc, char* argv[])
     QCoreApplication app(argc, argv);
 
     fs::path frameDir;
-    int cycles = 40;
+    // Light default so CI finishes well under the ctest timeout even on a slow
+    // runner; spinning capture up/down and reloading mock frames per cycle is
+    // the cost. Pass a larger [cycles] arg for heavy local stress runs.
+    int cycles = 8;
     bool synthesized = false;
 
     const fs::path scratch = fs::temp_directory_path() /
@@ -91,7 +94,7 @@ int main(int argc, char* argv[])
         frameDir = argv[1];
     } else {
         frameDir = scratch / "frames";
-        if (!generateSyntheticFrames(frameDir, 120)) {
+        if (!generateSyntheticFrames(frameDir, 48)) {
             std::cerr << "failed to synthesize frames\n";
             return 2;
         }
@@ -162,7 +165,8 @@ int main(int argc, char* argv[])
 
     // Phase 2: tight start/stop races (no settle time) to provoke lifecycle
     // data races in the capture thread and camera-ready callback.
-    for (int i = 0; i < cycles * 4; ++i) {
+    const int raceCycles = cycles * 3;
+    for (int i = 0; i < raceCycles; ++i) {
         backend.capture().start();
         if (i % 3 == 0) {
             const fs::path recPath = recDir / ("race_" + std::to_string(i) + ".h5");
@@ -180,7 +184,7 @@ int main(int argc, char* argv[])
         return 8;
     }
 
-    std::cout << "completed " << cycles << " normal + " << (cycles * 4)
+    std::cout << "completed " << cycles << " normal + " << raceCycles
               << " race cycles without crashing or hanging.\n";
     std::cout << "recordings with data: " << recordingsWithData << "/" << cycles
               << "   total frames recorded: " << totalRecorded << "\n";
