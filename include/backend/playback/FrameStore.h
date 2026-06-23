@@ -70,7 +70,7 @@ namespace backend::playback
         uint64_t totalWritten() const { return totalWritten_.load(); }
 
         // Ring capacity
-        size_t capacity() const { return capacity_; }
+        size_t capacity() const { return capacity_.load(std::memory_order_acquire); }
 
         // Save frames to disk as TIFF images
         // Saves all available frames if range not specified
@@ -136,7 +136,11 @@ namespace backend::playback
         void resetFilteredCount() { totalFiltered_.store(0); }
 
     private:
-        size_t capacity_;
+        // Atomic so the lock-free guard reads (earliest/latest/availableCount and
+        // the top-of-function `capacity_ == 0` checks) cannot data-race with
+        // resize()'s write. resize() holds structureMutex_ exclusively and also
+        // calls those readers, so they cannot take the lock — atomicity is the fix.
+        std::atomic<size_t> capacity_;
         // Structural lock: guards the identity of ring_ / slotMutexes_, capacity_
         // and frameFilter_. Held in SHARED mode by the per-frame hot path
         // (pushFrame / getByWriteIndex / getLatest) so producer and consumers do

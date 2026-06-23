@@ -1,0 +1,10 @@
+# ThreadSanitizer suppressions for uninstrumented third-party libraries.
+# These are not our code — OpenCV's GDAL image plugin and GLib report internal
+# races / lock-order-inversions during image decode and Qt/glib init. Our code
+# must remain clean; do NOT add suppressions for backend::* here.
+
+called_from_lib:libgdal.so
+called_from_lib:libglib-2.0.so
+called_from_lib:libgobject-2.0.so
+deadlock:CPLAcquireMutex
+race:libglib-2.0.so

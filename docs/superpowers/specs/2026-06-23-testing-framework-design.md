@@ -190,14 +190,20 @@ Deferred (low value / high churn — tracked, not done):
 - **P2.10 Refactor existing tests onto the support headers** — new tests use the
   headers; refactoring the older tests is churn without behavior change.
 
-New finding surfaced during this work (not yet fixed):
+Findings surfaced by the new lanes:
 
-- The `.recovery.h5` checkpoint is written by `copy_file` of the *open* HDF5
-  file; on Windows that fails every time ("The process cannot access the file
-  because another process has locked a portion of the file"), so the auto
-  checkpoint is effectively non-functional on the production platform. The
-  `loadFile` *fallback* works (now tested); the *creation* path needs a fix
-  (e.g. flush + OS copy with shared-read, or checkpoint on close).
+- **`FrameStore::resize` data race (FIXED).** The TSan lane (via
+  `frame_store_resize_under_load_test`) flagged a race between `resize()`'s write
+  of `capacity_` and the lock-free guard reads. Fixed by making `capacity_`
+  atomic. Library-level TSan/LSan noise (OpenCV/GDAL, Qt, glib) is filtered via
+  `tests/sanitizer/{tsan,lsan}.supp`.
+- **`.recovery.h5` checkpoint broken on Windows (open, not fixed).** The
+  checkpoint is written by `copy_file` of the *open* HDF5 file; on Windows that
+  fails every time ("another process has locked a portion of the file"), so the
+  auto-checkpoint is effectively non-functional on the production platform. The
+  `loadFile` *fallback* works (now tested by `crash_recovery_fallback_test`); the
+  *creation* path needs a fix (flush + OS copy with shared-read, or checkpoint on
+  close). Tracked for a focused follow-up.
 
 ## Out of scope (YAGNI)
 

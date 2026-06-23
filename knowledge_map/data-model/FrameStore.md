@@ -131,6 +131,12 @@ this is safe because every hot-path op acquires the shared structural lock
 - If a consumer holds onto a `getByWriteIndex` copy for longer than
   `capacity / fps` seconds, its data is still valid (copy) but the index
   may fall off the available range.
+- `capacity_` is `std::atomic<size_t>`. The lock-free guard reads
+  (`earliest/latestAvailableIndex`, `availableCount`, and the top-of-function
+  `capacity_ == 0` checks in `getLatest`/`getByWriteIndex`) cannot take
+  `structureMutex_` because `resize()` calls them while holding it exclusively —
+  so atomicity, not a lock, prevents the data race against `resize()`'s write.
+  Surfaced by the ThreadSanitizer lane via `frame_store_resize_under_load_test`.
 - `pushFrame` copies bytes — if you profile and see allocator pressure,
   investigate here first.
 - `saveFramesToAvi` serialises frames while holding the mutex only long
