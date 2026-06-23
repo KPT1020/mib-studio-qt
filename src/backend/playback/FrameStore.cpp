@@ -116,6 +116,13 @@ bool FrameStore::getLatest(Frame& out) const {
 bool FrameStore::getByWriteIndex(uint64_t writeIndex, Frame& out) const {
     const uint64_t w = totalWritten_.load();
     if (writeIndex >= w || capacity_ == 0) return false;
+    // Reject indices already evicted from the ring. Without this, the slot at
+    // writeIndex % capacity holds a newer frame and we would silently return the
+    // wrong frame instead of failing. Computed from the same `w` snapshot.
+    if (w > static_cast<uint64_t>(capacity_) &&
+        writeIndex < w - static_cast<uint64_t>(capacity_)) {
+        return false;
+    }
     std::shared_lock structLk(structureMutex_);
     const size_t idx = static_cast<size_t>(writeIndex % capacity_);
     std::scoped_lock slotLk(slotMutexes_[idx]);
@@ -126,6 +133,12 @@ bool FrameStore::getByWriteIndex(uint64_t writeIndex, Frame& out) const {
 bool FrameStore::getByWriteIndexROI(uint64_t writeIndex, int roiX, int roiY, int roiW, int roiH, Frame& out) const {
     const uint64_t w = totalWritten_.load();
     if (writeIndex >= w || capacity_ == 0) return false;
+    // Reject indices already evicted from the ring (see getByWriteIndex) so we
+    // never extract an ROI from a newer frame aliased to the same slot.
+    if (w > static_cast<uint64_t>(capacity_) &&
+        writeIndex < w - static_cast<uint64_t>(capacity_)) {
+        return false;
+    }
     std::shared_lock structLk(structureMutex_);
     const size_t idx = static_cast<size_t>(writeIndex % capacity_);
 

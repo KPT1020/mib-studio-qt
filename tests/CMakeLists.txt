@@ -28,6 +28,10 @@ target_link_libraries(frame_store_concurrency_test PRIVATE Threads::Threads)
 add_test(NAME backend.frame_store_concurrency COMMAND $<TARGET_FILE:frame_store_concurrency_test>)
 set_tests_properties(backend.frame_store_concurrency PROPERTIES LABELS "backend")
 
+mib_add_backend_test_executable(frame_store_bounds_test backend/frame_store_bounds_test.cpp)
+add_test(NAME backend.frame_store_bounds COMMAND $<TARGET_FILE:frame_store_bounds_test>)
+set_tests_properties(backend.frame_store_bounds PROPERTIES LABELS "backend" TIMEOUT 30)
+
 mib_add_backend_test_executable(pipeline_timing_benchmark performance/pipeline_timing_benchmark.cpp)
 target_link_libraries(pipeline_timing_benchmark PRIVATE Threads::Threads)
 add_test(NAME performance.pipeline_timing COMMAND $<TARGET_FILE:pipeline_timing_benchmark>)
@@ -92,6 +96,29 @@ endif()
 mib_add_backend_test_executable(kin6_mib_app_capture_proof integration/kin6_mib_app_capture_proof.cpp)
 add_test(NAME backend.kin6_mib_app_capture_proof COMMAND $<TARGET_FILE:kin6_mib_app_capture_proof>)
 set_tests_properties(backend.kin6_mib_app_capture_proof PROPERTIES LABELS "backend;integration")
+
+mib_add_backend_test_executable(e2e_storage_destinations_test integration/e2e_storage_destinations_test.cpp)
+add_test(NAME integration.e2e_storage_destinations COMMAND $<TARGET_FILE:e2e_storage_destinations_test>)
+set_tests_properties(integration.e2e_storage_destinations PROPERTIES LABELS "integration;e2e;recording" TIMEOUT 60)
+
+mib_add_backend_test_executable(e2e_trigger_timing_test integration/e2e_trigger_timing_test.cpp)
+target_link_libraries(e2e_trigger_timing_test PRIVATE Threads::Threads)
+add_test(NAME integration.e2e_trigger_timing COMMAND $<TARGET_FILE:e2e_trigger_timing_test>)
+set_tests_properties(integration.e2e_trigger_timing PROPERTIES LABELS "integration;e2e;trigger" TIMEOUT 120)
+
+mib_add_backend_test_executable(e2e_pipeline_stress_test integration/e2e_pipeline_stress_test.cpp)
+target_link_libraries(e2e_pipeline_stress_test PRIVATE Threads::Threads)
+add_test(NAME integration.e2e_pipeline_stress COMMAND $<TARGET_FILE:e2e_pipeline_stress_test>)
+set_tests_properties(integration.e2e_pipeline_stress PROPERTIES LABELS "integration;e2e" TIMEOUT 180)
+
+mib_add_backend_test_executable(e2e_live_view_latency_test integration/e2e_live_view_latency_test.cpp)
+target_link_libraries(e2e_live_view_latency_test PRIVATE Threads::Threads)
+add_test(NAME integration.e2e_live_view_latency COMMAND $<TARGET_FILE:e2e_live_view_latency_test>)
+set_tests_properties(integration.e2e_live_view_latency PROPERTIES LABELS "integration;e2e;processing" TIMEOUT 120)
+
+mib_add_backend_test_executable(realtime_drop_frames_default_test processing/realtime_drop_frames_default_test.cpp)
+add_test(NAME processing.realtime_drop_frames_default COMMAND $<TARGET_FILE:realtime_drop_frames_default_test>)
+set_tests_properties(processing.realtime_drop_frames_default PROPERTIES LABELS "processing;backend" TIMEOUT 30)
 
 mib_add_backend_test_executable(mib_processing_multi_object_test processing/processing_multi_object_test.cpp)
 add_test(NAME backend.processing_multi_object COMMAND $<TARGET_FILE:mib_processing_multi_object_test>)
