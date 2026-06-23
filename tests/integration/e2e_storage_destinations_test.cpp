@@ -20,6 +20,7 @@
 #include <opencv2/core.hpp>
 
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <random>
 #include <string>
@@ -171,6 +172,28 @@ int main()
             } else {
                 ++reportedFailures;
             }
+        }
+        std::cout << "\n";
+    }
+
+    // Graceful-failure: parent path is a regular file. openFile() must fail
+    // cleanly (return false) and must not crash. Reaching the line after the
+    // call at all proves no crash; an unexpected success would be a bug.
+    {
+        const fs::path blocker = base / "blocker_file";
+        { std::ofstream o(blocker.string(), std::ios::binary); o << "x"; }
+        const fs::path target = blocker / "experiment.h5";  // parent is a file
+        std::string reason;
+        const bool ok = saveRoundTrip(target, reason);
+        std::cout << "[" << (ok ? "FAIL" : "PASS")
+                  << "] parent_is_a_file (must-fail-gracefully)\n"
+                     "        openFile under a file-as-parent must fail cleanly\n";
+        if (ok) {
+            std::cout << "        BUG: saving under a file-as-parent should fail "
+                         "gracefully, not succeed\n";
+            ++gatedFailures;
+        } else {
+            std::cout << "        failed cleanly: " << reason << "\n";
         }
         std::cout << "\n";
     }

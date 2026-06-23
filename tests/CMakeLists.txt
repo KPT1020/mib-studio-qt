@@ -5,6 +5,8 @@ function(mib_add_backend_test_executable target source)
         ${PROJECT_SOURCE_DIR}/tests/${source}
     )
     target_link_libraries(${target} PRIVATE mib_backend)
+    # Allow tests to include the shared support headers as "support/<x>.h".
+    target_include_directories(${target} PRIVATE ${PROJECT_SOURCE_DIR}/tests)
     set_target_properties(${target} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
     )
@@ -31,6 +33,11 @@ set_tests_properties(backend.frame_store_concurrency PROPERTIES LABELS "backend"
 mib_add_backend_test_executable(frame_store_bounds_test backend/frame_store_bounds_test.cpp)
 add_test(NAME backend.frame_store_bounds COMMAND $<TARGET_FILE:frame_store_bounds_test>)
 set_tests_properties(backend.frame_store_bounds PROPERTIES LABELS "backend" TIMEOUT 30)
+
+mib_add_backend_test_executable(frame_store_resize_under_load_test backend/frame_store_resize_under_load_test.cpp)
+target_link_libraries(frame_store_resize_under_load_test PRIVATE Threads::Threads)
+add_test(NAME backend.frame_store_resize_under_load COMMAND $<TARGET_FILE:frame_store_resize_under_load_test>)
+set_tests_properties(backend.frame_store_resize_under_load PROPERTIES LABELS "backend" TIMEOUT 60)
 
 mib_add_backend_test_executable(pipeline_timing_benchmark performance/pipeline_timing_benchmark.cpp)
 target_link_libraries(pipeline_timing_benchmark PRIVATE Threads::Threads)
@@ -60,6 +67,14 @@ set_tests_properties(backend.processing_batch_pipeline PROPERTIES LABELS "proces
 mib_add_backend_test_executable(recording_lifecycle_test recording/recording_lifecycle_test.cpp)
 add_test(NAME recording.lifecycle COMMAND $<TARGET_FILE:recording_lifecycle_test>)
 set_tests_properties(recording.lifecycle PROPERTIES LABELS "recording;backend")
+
+mib_add_backend_test_executable(experiment_roundtrip_test recording/experiment_roundtrip_test.cpp)
+add_test(NAME recording.experiment_roundtrip COMMAND $<TARGET_FILE:experiment_roundtrip_test>)
+set_tests_properties(recording.experiment_roundtrip PROPERTIES LABELS "recording;backend" TIMEOUT 30)
+
+mib_add_backend_test_executable(crash_recovery_fallback_test recording/crash_recovery_fallback_test.cpp)
+add_test(NAME recording.crash_recovery_fallback COMMAND $<TARGET_FILE:crash_recovery_fallback_test>)
+set_tests_properties(recording.crash_recovery_fallback PROPERTIES LABELS "recording;backend" TIMEOUT 30)
 
 mib_add_backend_test_executable(kin6_batch_pipeline_evidence integration/kin6_batch_pipeline_evidence.cpp)
 

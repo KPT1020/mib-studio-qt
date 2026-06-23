@@ -1,0 +1,54 @@
+name: Soak
+
+# Nightly soak: repeat the lifecycle/timing tests many times to surface rare
+# races, slow leaks, and latency accumulation that a single run misses.
+# Non-gating (schedule + manual only).
+on:
+  schedule:
+    - cron: "30 4 * * *"
+  workflow_dispatch:
+    inputs:
+      repeats:
+        description: "Repeat count per test"
+        required: false
+        default: "40"
+
+permissions:
+  contents: read
+
+jobs:
+  soak:
+    name: Lifecycle / timing soak
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Linux system packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake git libgl1-mesa-dev libhdf5-dev libopencv-dev \
+            libspdlog-dev libsqlite3-dev libxkbcommon-dev nlohmann-json3-dev \
+            pkg-config python3-pip qt6-base-dev qt6-serialport-dev
+
+      - name: Configure
+        shell: bash
+        run: cmake --preset linux-backend-only
+
+      - name: Build
+        shell: bash
+        run: cmake --build --preset linux-backend-only-build
+
+      - name: Soak lifecycle + timing tests
+        shell: bash
+        run: |
+          set -o pipefail
+          N="${{ github.event.inputs.repeats || '40' }}"
+          ctest --test-dir build/linux-backend --output-on-failure --timeout 240 \
+            --repeat until-fail:${N} \
+            -R "integration.e2e_pipeline_stress|integration.e2e_trigger_timing|integration.e2e_live_view_latency|backend.frame_store_resize_under_load"

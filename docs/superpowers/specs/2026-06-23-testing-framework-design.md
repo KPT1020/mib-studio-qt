@@ -155,6 +155,50 @@ session and only need to be slotted into the framework.
     tests onto them.
 11. Crash-recovery round-trip (`.recovery.h5` fallback path in `loadFile`).
 
+## Rollout status (2026-06-23)
+
+Landed in this pass:
+
+- **P0.1 Sanitizer lane** — `MIB_SANITIZER` CMake option
+  (`thread|address|undefined|address+undefined`) + `.github/workflows/sanitizers.yml`
+  (TSan and ASan+UBSan matrix). Triggered on PR / nightly / manual (not on push
+  to main) so the new lane is triaged before gating.
+- **P0.2 Support library** — `tests/support/`: `assert.h`, `watchdog.h`,
+  `tempdir.h`, `frames.h`, `stats.h`, `faultinject.h`; tests now include
+  `support/<x>.h`.
+- **P0.3 Storage fault-injection** — `e2e_storage_destinations_test` gains a
+  graceful-failure scenario (parent path is a file → must fail cleanly, no crash).
+- **P0.4 Camera reconnect** — `e2e_pipeline_stress_test` Phase 3 (start → frames
+  → stop → restart).
+- **P1.5 Experiment round-trip** — `experiment_roundtrip_test` (frames, metadata,
+  ROI, config JSON).
+- **P1.7 Resize-under-load invariant** — `frame_store_resize_under_load_test`
+  (resize concurrent with live producer/consumers, watchdog-guarded).
+- **P2.9 Soak** — `.github/workflows/soak.yml` (nightly `--repeat until-fail`).
+- **P2.11 Crash-recovery fallback** — `crash_recovery_fallback_test` (corrupt
+  primary → `loadFile` falls back to `.recovery.h5`).
+
+Already covered (no new test needed):
+
+- **P1.8 Frame accounting** — `kin6_mib_app_capture_proof` already asserts
+  captured == accepted == processed and dropped == 0.
+
+Deferred (low value / high churn — tracked, not done):
+
+- **P1.6 ROI / multi-object latency variant** — full-frame latency is covered by
+  `e2e_live_view_latency_test`; ROI variant adds marginal coverage.
+- **P2.10 Refactor existing tests onto the support headers** — new tests use the
+  headers; refactoring the older tests is churn without behavior change.
+
+New finding surfaced during this work (not yet fixed):
+
+- The `.recovery.h5` checkpoint is written by `copy_file` of the *open* HDF5
+  file; on Windows that fails every time ("The process cannot access the file
+  because another process has locked a portion of the file"), so the auto
+  checkpoint is effectively non-functional on the production platform. The
+  `loadFile` *fallback* works (now tested); the *creation* path needs a fix
+  (e.g. flush + OS copy with shared-read, or checkpoint on close).
+
 ## Out of scope (YAGNI)
 
 - Adopting Catch2/GoogleTest (bespoke harness + support lib is sufficient).

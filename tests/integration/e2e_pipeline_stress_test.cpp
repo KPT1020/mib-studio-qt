@@ -234,16 +234,39 @@ int main(int argc, char* argv[])
         mark(2, i, "capture.stop");
         backend.capture().stop();
     }
+    backend.capture().stop();
+    waitFor([&] { return !backend.capture().isRunning(); }, std::chrono::seconds(3));
+
+    // Phase 3: camera reconnect — start, let frames flow, stop, restart. Each
+    // start/stop drives TriggerService start/stop via the camera-ready callback,
+    // so this exercises the reconnect path (camera disconnect/reconnect) that
+    // previously deadlocked.
+    const int reconnects = cycles;
+    for (int i = 0; i < reconnects; ++i) {
+        mark(3, i, "reconnect.start");
+        backend.capture().start();
+        waitFor([&] { return backend.capture().stats().framesProcessed.load() > 0; },
+                std::chrono::seconds(2));
+        mark(3, i, "reconnect.stop");
+        backend.capture().stop();
+        if (!waitFor([&] { return !backend.capture().isRunning(); },
+                     std::chrono::seconds(2))) {
+            std::cerr << "reconnect " << i << ": capture failed to stop (possible hang)\n";
+            return 8;
+        }
+    }
+
     // Must come to rest.
     backend.capture().stop();
     if (!waitFor([&] { return !backend.capture().isRunning(); },
                  std::chrono::seconds(3))) {
-        std::cerr << "phase 2: pipeline did not come to rest (possible hang)\n";
+        std::cerr << "phase 3: pipeline did not come to rest (possible hang)\n";
         return 8;
     }
 
     std::cout << "completed " << cycles << " normal + " << raceCycles
-              << " race cycles without crashing or hanging.\n";
+              << " race + " << reconnects
+              << " reconnect cycles without crashing or hanging.\n";
     std::cout << "recordings with data: " << recordingsWithData << "/" << cycles
               << "   total frames recorded: " << totalRecorded << "\n";
 
