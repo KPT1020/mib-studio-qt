@@ -16,3 +16,10 @@ called_from_lib:libgio-2.0.so.0
 called_from_lib:libgmodule-2.0.so.0
 deadlock:CPLAcquireMutex
 race:libglib-2.0.so
+# The e-modulus LUT manifest fetch at startup uses Qt QNetworkAccessManager,
+# whose cross-thread object lifetimes and glib/libproxy proxy resolution TSan
+# cannot model (Qt's event-loop synchronization is invisible to it). These are
+# false positives attributed to our frame, so suppress by function.
+race:EModulusLutCatalog::fetchManifest
+deadlock:EModulusLutCatalog::fetchManifest
+mutex:EModulusLutCatalog::fetchManifest
