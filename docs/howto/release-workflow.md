@@ -272,12 +272,14 @@ flowchart TD
 
 ## Legacy Client Compatibility
 
-Released builds compiled before this migration still request `https://s3.yofo.bio/mib-studio-qt-updates/stable/latest.json`. During migration, keep one compatibility path:
+`s3.yofo.bio` is **retired**. All releases publish only to `https://updates.yofo.bio`
+(the compiled default since PR #169) — no release should target the old host.
 
-- Preferred: restore `s3.yofo.bio` as a redirect or compatibility endpoint that serves the migrated R2 manifest and artifacts.
-- Acceptable cutoff plan: publish one final old-host manifest whose `installer_url` points to the R2 update package, then announce that clients must update before the old endpoint is retired.
-
-Do not retire the old URL until release owners explicitly accept the cutoff plan.
+Builds compiled before PR #169 still request
+`https://s3.yofo.bio/mib-studio-qt-updates/stable/latest.json` and will **not**
+auto-update. Upgrade those installs manually (download and run the current full
+installer once); from that point on they track `updates.yofo.bio` like every
+other client. Do not reintroduce an `s3.yofo.bio` manifest or redirect.
 
 ## Rollback
 
@@ -286,7 +288,7 @@ If a bad R2 release is published:
 1. Publish a corrected `stable/latest.json` that points at the last known-good update package.
 2. Run `python verify-update-manifest.py`.
 3. Purge Cloudflare cache for mutable manifest paths if stale content is observed.
-4. Keep the old-host compatibility endpoint or redirect pointing at the corrected manifest until the fixed build is widely installed.
+4. Confirm clients pick up the corrected `updates.yofo.bio` manifest (no legacy `s3.yofo.bio` endpoint is involved).
 
 ## Troubleshooting
 

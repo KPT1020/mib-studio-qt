@@ -211,3 +211,18 @@ set_target_properties(json_flatten_roundtrip_test PROPERTIES
 )
 add_test(NAME frontend.json_flatten_roundtrip COMMAND $<TARGET_FILE:json_flatten_roundtrip_test>)
 set_tests_properties(frontend.json_flatten_roundtrip PROPERTIES LABELS "frontend;utility")
+
+add_executable(json_config_merge_test
+    ${PROJECT_SOURCE_DIR}/tests/frontend/json_config_merge_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/JsonConfigMerge.cpp
+)
+target_include_directories(json_config_merge_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+)
+target_link_libraries(json_config_merge_test PRIVATE Qt6::Core)
+set_target_properties(json_config_merge_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+)
+add_test(NAME frontend.json_config_merge COMMAND $<TARGET_FILE:json_config_merge_test>)
+set_tests_properties(frontend.json_config_merge PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
