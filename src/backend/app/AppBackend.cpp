@@ -148,6 +148,11 @@ namespace backend
         hdf5Service_ = std::make_unique<services::Hdf5Service>();
         captureService_ = std::make_unique<services::CaptureService>();
         processingService_ = std::make_unique<services::ProcessingService>();
+        // Funnel experiment flush-write failures through the same fatal-save-error
+        // sink as recording, so the UI surfaces them and stops the experiment.
+        processingService_->setFlushErrorCallback([this](const std::string& msg) {
+            reportFatalSaveError(msg);
+        });
         playbackService_ = std::make_unique<services::PlaybackService>();
         cameraControlService_ = std::make_unique<services::CameraControlService>();
         autofocusService_ = std::make_unique<services::AutofocusService>();

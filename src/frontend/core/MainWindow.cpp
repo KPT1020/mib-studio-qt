@@ -300,6 +300,20 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         }
     });
 
+    // Fatal save errors (recording or experiment flush) fire on a writer thread.
+    // Marshal to the UI thread: stop the active operation and show a dialog so
+    // the failure is never silent.
+    backend_.setFatalSaveErrorCallback([this](const std::string& msg) {
+        const QString q = QString::fromStdString(msg);
+        QMetaObject::invokeMethod(this, [this, q]() {
+            if (backend_.isFrameRecording()) backend_.stopFrameRecording();
+            if (experimentActive_) onStopExperiment();
+            statusBar()->showMessage(tr("Save error: %1").arg(q));
+            QMessageBox::critical(this, tr("Save Error"),
+                tr("Data could not be saved and the operation was stopped:\n\n%1").arg(q));
+        }, Qt::QueuedConnection);
+    });
+
     // Camera buttons will be added to main tab bar corner widget, not toolbar
     auto *startCaptureAct = new QAction("Start Camera", this);
     auto *stopCaptureAct = new QAction("Stop Camera", this);
