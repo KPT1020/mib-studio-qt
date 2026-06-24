@@ -127,6 +127,11 @@ no contour processing.
   longer stalls FrameStore reads. The written count advances only on a confirmed
   write; a failed write or queue overflow stops recording and fires the fatal
   save-error sink. This fixed the old silent count-and-drop-on-failure bug.
+- Each frame is **cropped to the preview ROI** (`getRealtimeRoi`, set by
+  [[../frontend/PreviewPage]]'s PlaybackPanel) before storage, via the pure
+  `backend::recording::clampRoiToFrame` (`include/backend/recording/RoiCrop.h`,
+  tested by `tests/backend/roi_crop_test.cpp`) — full frame when no ROI is set.
+  Recorded frame metadata width/height reflect the crop.
 
 ### Fatal save-error sink
 
