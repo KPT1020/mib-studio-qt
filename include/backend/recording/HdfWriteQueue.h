@@ -22,8 +22,10 @@ public:
     using WriteFn = std::function<bool(const Batch&)>;
     using ErrorFn = std::function<void(const std::string&)>;
 
-    HdfWriteQueue(size_t slots, WriteFn writeFn, ErrorFn onError)
-        : slots_(slots == 0 ? 1 : slots),
+    // slotCount: max batches in flight (not named `slots` — Qt defines that as a
+    // macro, which would break this header when included from Qt translation units).
+    HdfWriteQueue(size_t slotCount, WriteFn writeFn, ErrorFn onError)
+        : slots_(slotCount == 0 ? 1 : slotCount),
           writeFn_(std::move(writeFn)),
           onError_(std::move(onError)) {
         worker_ = std::thread([this] { run(); });

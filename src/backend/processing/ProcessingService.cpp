@@ -374,6 +374,12 @@ bool ProcessingService::getLatestSnapshot(RealtimeSnapshot& out) {
 }
 
 void ProcessingService::startExperiment() {
+    {
+        // Tear down any prior flush queue (dtor drains + joins) so a new
+        // experiment starts with a clean, non-errored writer.
+        std::scoped_lock qlk(flushQueueMutex_);
+        flushQueue_.reset();
+    }
     std::scoped_lock lk(framesMutex_);
     validFrames_.clear();
     invalidFrames_.clear();
@@ -1083,73 +1089,56 @@ bool ProcessingService::appendExperimentFrame(ProcessedFrame&& frame, bool isVal
 }
 
 size_t ProcessingService::flushBufferedFrames(class Hdf5Service& hdf5) {
-    std::vector<ProcessedFrame> validToFlush;
-    std::vector<ProcessedFrame> invalidToFlush;
-    const double memBeforeMB = backend::Tools::getProcessMemoryMB();
-    
+    // Move the accumulated frames out (brief lock) so capture/processing never
+    // blocks on the HDF5 write, then hand them to the write queue. The queue's
+    // dedicated writer thread performs the slow append; capture keeps filling a
+    // fresh buffer. Overflow or a write failure is fatal (stop + surface) rather
+    // than a silent trim-and-drop.
+    ExperimentBatch batch;
     {
         std::scoped_lock lk(framesMutex_);
-        if (validFrames_.empty() && invalidFrames_.empty()) {
-            return 0;
-        }
-        
-        // Move frames to flush (clears the buffers)
-        validToFlush = std::move(validFrames_);
-        invalidToFlush = std::move(invalidFrames_);
+        if (validFrames_.empty() && invalidFrames_.empty()) return 0;
+        batch.valid = std::move(validFrames_);
+        batch.invalid = std::move(invalidFrames_);
         validFrames_.clear();
         invalidFrames_.clear();
+        framesSinceLastFlush_.store(0, std::memory_order_relaxed);
     }
-    
-    // Append to HDF5 file
-    if (!validToFlush.empty() || !invalidToFlush.empty()) {
-        using clock = std::chrono::steady_clock;
-        const size_t validCount = validToFlush.size();
-        const size_t invalidCount = invalidToFlush.size();
-        SPDLOG_INFO("HDF5 flush start: valid={}, invalid={}, mem_mb_before={:.1f}", validCount, invalidCount, memBeforeMB);
-        const auto t0 = clock::now();
-        const bool ok = hdf5.appendFrames(validToFlush, invalidToFlush);
-        const auto t1 = clock::now();
-        const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-        const double memAfterMB = backend::Tools::getProcessMemoryMB();
+    const size_t n = batch.valid.size() + batch.invalid.size();
 
-        if (ok) {
-            size_t flushed = validCount + invalidCount;
-            if (validCount > 0) {
-                totalValidFlushed_.fetch_add(static_cast<uint64_t>(validCount), std::memory_order_relaxed);
+    std::scoped_lock qlk(flushQueueMutex_);
+    if (!flushQueue_) {
+        Hdf5Service* h = &hdf5;
+        auto writeFn = [this, h](const ExperimentBatch& b) -> bool {
+            if (!h->appendFrames(b.valid, b.invalid)) return false;
+            if (!b.valid.empty()) {
+                totalValidFlushed_.fetch_add(static_cast<uint64_t>(b.valid.size()), std::memory_order_relaxed);
             }
-            {
-                std::scoped_lock lk(framesMutex_);
-                framesSinceLastFlush_.store(validFrames_.size() + invalidFrames_.size(), std::memory_order_relaxed);
-            }
-            SPDLOG_INFO("HDF5 flush end: flushed={} (valid={}, invalid={}) duration_ms={:.3f} mem_mb_after={:.1f}",
-                        flushed, validCount, invalidCount, ms, memAfterMB);
-            return flushed;
-        } else {
-            DroppedFrameCounts dropped{};
-            size_t bufferedTotal = 0;
-            const size_t maxBufferedFrames = std::max<size_t>(1, maxBufferedFrames_.load(std::memory_order_relaxed));
-            {
-                // Restore failed frames ahead of frames accumulated during the write,
-                // then re-apply the backlog cap so a persistent HDF5 failure cannot
-                // retry itself into unbounded RAM growth.
-                std::scoped_lock lk(framesMutex_);
-                validFrames_.insert(validFrames_.begin(),
-                                    std::make_move_iterator(validToFlush.begin()),
-                                    std::make_move_iterator(validToFlush.end()));
-                invalidFrames_.insert(invalidFrames_.begin(),
-                                      std::make_move_iterator(invalidToFlush.begin()),
-                                      std::make_move_iterator(invalidToFlush.end()));
-                dropped = trimExperimentBuffersLocked(maxBufferedFrames);
-                bufferedTotal = validFrames_.size() + invalidFrames_.size();
-            }
-            logDroppedExperimentFrames(dropped, bufferedTotal, maxBufferedFrames);
-            SPDLOG_ERROR("HDF5 flush failed after {:.3f} ms; frames restored (valid={}, invalid={}), mem_mb_after_fail={:.1f}",
-                         ms, validCount, invalidCount, memAfterMB);
-            return 0;
-        }
+            return true;
+        };
+        auto onError = [this](const std::string& msg) {
+            if (flushErrorCb_) flushErrorCb_("Experiment save failed: " + msg);
+        };
+        flushQueue_ = std::make_unique<backend::recording::HdfWriteQueue<ExperimentBatch>>(3, writeFn, onError);
     }
-    
-    return 0;
+    if (!flushQueue_->submit(std::move(batch))) {
+        return 0; // fatal error already surfaced via onError
+    }
+    return n;
+}
+
+bool ProcessingService::finishFlush() {
+    std::unique_ptr<backend::recording::HdfWriteQueue<ExperimentBatch>> q;
+    {
+        std::scoped_lock qlk(flushQueueMutex_);
+        q = std::move(flushQueue_);
+    }
+    if (!q) return true;
+    return q->flushAndStop(); // drains remaining batches, then joins
+}
+
+void ProcessingService::setFlushErrorCallback(std::function<void(const std::string&)> cb) {
+    flushErrorCb_ = std::move(cb);
 }
 
 void ProcessingService::setFlushInterval(size_t frames) {

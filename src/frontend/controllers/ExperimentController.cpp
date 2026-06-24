@@ -109,7 +109,15 @@ namespace frontend
             size_t flushed = processing.flushBufferedFrames(hdf5);
             if (flushed > 0)
             {
-                SPDLOG_INFO("Final flush: {} frames written to HDF5", flushed);
+                SPDLOG_INFO("Final flush: {} frames submitted to HDF5 write queue", flushed);
+            }
+
+            // Drain the async write queue so every submitted batch is on disk and
+            // the writer thread has stopped before any direct HDF5 writes below
+            // (avoids two threads writing the shared file concurrently).
+            if (!processing.finishFlush())
+            {
+                SPDLOG_WARN("Experiment flush queue reported a save error during final drain");
             }
 
             // Get final frame counts (should be empty after flush, but check anyway)

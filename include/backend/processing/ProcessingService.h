@@ -13,6 +13,7 @@
 #include <deque>
 #include <cmath>
 #include "backend/processing/EModulusLut.h"
+#include "backend/recording/HdfWriteQueue.h"
 
 namespace backend { namespace playback { class FrameStore; struct Frame; } }
 
@@ -126,6 +127,12 @@ struct BufferedFrameCounts {
     size_t total() const { return valid + invalid; }
 };
 
+// One unit of work handed to the experiment flush write queue.
+struct ExperimentBatch {
+    std::vector<ProcessedFrame> valid;
+    std::vector<ProcessedFrame> invalid;
+};
+
 class ProcessingService {
 public:
     using Job = std::function<void()>;
@@ -197,9 +204,17 @@ public:
     void clearMonitoringFrames();
     
     // Round-robin buffer flush (for crash resilience)
-    // Returns number of frames flushed
+    // Returns number of frames flushed (submitted to the write queue)
     size_t flushBufferedFrames(class Hdf5Service& hdf5);
-    
+
+    // Drain and tear down the experiment write queue (call at experiment stop,
+    // before writing experiment info). Returns false if a write error occurred.
+    bool finishFlush();
+
+    // Fatal flush-error sink: invoked (on the writer thread) when an experiment
+    // flush write fails or the queue overflows. The experiment should stop.
+    void setFlushErrorCallback(std::function<void(const std::string&)> cb);
+
     // Configuration for round-robin buffer
     void setFlushInterval(size_t frames); // Flush every N frames (default: 1000)
     size_t getFlushInterval() const;
@@ -462,6 +477,12 @@ private:
     mutable std::mutex framesMutex_;
     std::vector<ProcessedFrame> validFrames_;
     std::vector<ProcessedFrame> invalidFrames_;
+
+    // Experiment flush write queue (decouples HDF5 writes from frame
+    // accumulation). Created lazily on the first flush, drained by finishFlush.
+    std::mutex flushQueueMutex_;
+    std::unique_ptr<backend::recording::HdfWriteQueue<ExperimentBatch>> flushQueue_;
+    std::function<void(const std::string&)> flushErrorCb_;
     std::atomic<bool> experimentActive_{false};
     
     // Monitoring frames (always accumulated, separate from experiment)

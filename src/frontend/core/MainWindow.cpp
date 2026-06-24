@@ -783,7 +783,14 @@ void MainWindow::onStopExperiment()
                     sinceMs(t0), flushed);
         if (flushed > 0)
         {
-            SPDLOG_INFO("Final flush: {} frames written to HDF5", flushed);
+            SPDLOG_INFO("Final flush: {} frames submitted to HDF5 write queue", flushed);
+        }
+        // Drain the async write queue so the writer thread has stopped before the
+        // direct appendFrames below (no two threads writing the shared file).
+        if (!processing.finishFlush())
+        {
+            QMessageBox::warning(this, tr("Save Error"),
+                                 tr("A save error occurred while flushing experiment data to disk."));
         }
     }
 
