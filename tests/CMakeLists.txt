@@ -38,6 +38,10 @@ mib_add_backend_test_executable(modbus_rtu_test backend/modbus_rtu_test.cpp)
 add_test(NAME backend.modbus_rtu COMMAND $<TARGET_FILE:modbus_rtu_test>)
 set_tests_properties(backend.modbus_rtu PROPERTIES LABELS "backend" TIMEOUT 30)
 
+mib_add_backend_test_executable(autofocus_math_test backend/autofocus_math_test.cpp)
+add_test(NAME backend.autofocus_math COMMAND $<TARGET_FILE:autofocus_math_test>)
+set_tests_properties(backend.autofocus_math PROPERTIES LABELS "backend" TIMEOUT 30)
+
 mib_add_backend_test_executable(camera_script_apply_test backend/camera_script_apply_test.cpp)
 add_test(NAME backend.camera_script_apply COMMAND $<TARGET_FILE:camera_script_apply_test>)
 set_tests_properties(backend.camera_script_apply PROPERTIES LABELS "backend;camera" TIMEOUT 30)

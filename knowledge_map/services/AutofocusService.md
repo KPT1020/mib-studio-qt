@@ -5,7 +5,9 @@
 
 **Source:** `src/backend/services/AutofocusService.cpp`,
 `src/backend/services/AutofocusService.stub.cpp`,
-`include/backend/services/AutofocusService.h`
+`include/backend/services/AutofocusService.h`,
+`include/backend/services/AutofocusMath.h` (pure control math)
+**Tests:** `tests/backend/autofocus_math_test.cpp`
 **Related:** [[ProcessingService]], [[../frontend/NanopositionerTab]],
 [[../domain/Glossary]] (ring ratio)
 
@@ -53,6 +55,25 @@ After a voltage step the control loop clears **both** `pendingSamples_`
 and `ringRatioBuffer_` (`std::scoped_lock` over both mutexes atomically)
 so pre-step samples sitting in the inbox don't leak into post-step
 statistics. Same pattern on `disconnect()`.
+
+## Control math (`AutofocusMath.h`)
+
+The voltage decision is extracted into pure, device-free functions in
+`backend::services::autofocus` so it can be unit tested without a CoreMOR:
+
+- `computeFocusVoltage(medianRingRatio, currentVoltage, FocusParams)` — given
+  `deviation = median - setpoint`: a **coarse** `voltageStep` outside the
+  acceptable range (`|deviation| > range`), a **fine** `fineVoltageStep` inside
+  the range but beyond half the band (`|deviation| > range/2`), otherwise
+  **hold**. `focusDirection` flips the sign. The result is always clamped to
+  `[minVoltage, maxVoltage]`.
+- `clampVoltage(v, lo, hi)` — clamps, but passes the value through untouched if
+  the limits are inverted (`hi < lo`) rather than fabricating a bound.
+
+`controlLoop()` delegates to `computeFocusVoltage`; `connect()` runs the
+configured `initialVoltage` through `clampVoltage` before the first
+`XMT_COMMAND_SinglePoint`, so a stale/misconfigured value can never drive the
+probe past its safe range.
 
 ## Gotchas
 
