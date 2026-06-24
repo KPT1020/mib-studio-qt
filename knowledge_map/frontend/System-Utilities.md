@@ -21,8 +21,19 @@
   **preserving all existing user values**. This stops an updated install from
   drifting away from a fresh install when new config keys are introduced. An
   external user-chosen config path is never rewritten.
-- **`AutoUpdater`** — periodic update check; see
+- **`AutoUpdater`** — update check + channel/version selection; see
   `docs/howto/auto-update-r2.md` and `docs/howto/release-workflow.md`.
+  - Channel persisted in `QSettings` (`Update/Channel`, `stable`|`beta`,
+    default `stable`); `MIB_STUDIO_UPDATE_MANIFEST_URL` env override still wins.
+    `defaultManifestUrl` is channel-aware (`{channel}/latest.json`).
+  - `fetchVersionIndex()` GETs `{channel}/index.json` and emits
+    `versionIndexReady`/`versionIndexFailed`, parsed by `UpdateCatalog`.
+  - `installVersion(entry)` maps a catalog `VersionEntry` onto the existing
+    download → SHA-256 verify → elevated-install path. The silent startup
+    auto-check (latest.json) is unchanged.
+  - Driven by **`SoftwareUpdatesDialog`** (`dialogs/`), opened from **Help ▸
+    Software Updates…**: channel dropdown + version list with rollback (a
+    downgrade is confirmed via `UpdateCatalog::isDowngrade`).
 - **`ProfileManager`** — profile catalog/metadata helper for
   `ConfigTabs`. Scans local profiles, lazily generates `profile.meta.json`,
   parses public R2 catalogs, computes SHA-256, stages/installs updates, and
@@ -46,8 +57,10 @@
 `BackgroundPreviewWidget`, `ConfigPathManager`, `EgrabberConfigParser`,
 `FileIOUtils`, `JsonFlatten`, `JsonConfigMerge` (pure deep-merge of bundled
 defaults into an existing `config.json`; tested by
-`tests/frontend/json_config_merge_test.cpp`), `OverlayRenderer`, `RoiManager`,
-`SidebarWidget`, `SimpleImageCanvas`, `StatisticsPanel`,
+`tests/frontend/json_config_merge_test.cpp`), `UpdateCatalog` (pure parse/sort
+of a channel `index.json` into a newest-first version list + downgrade check;
+tested by `tests/frontend/update_catalog_test.cpp`), `OverlayRenderer`,
+`RoiManager`, `SidebarWidget`, `SimpleImageCanvas`, `StatisticsPanel`,
 `StatsDisplayManager`.
 
 ## Widgets (`src/frontend/widgets/`)

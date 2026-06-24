@@ -44,6 +44,19 @@
   config-change signal after persistence so Preview and Monitoring refresh
   without waiting for a filesystem watcher round-trip.
 
+## Menu bar
+
+- **File:** Open Data Folder (`Documents/MIB_Studio_Qt`), Open Logs Folder
+  (`%LOCALAPPDATA%/MIB_Studio_Qt/logs`), Exit.
+- **Settings:** Processing / Monitoring / Pixel-to-Micron / Syringe Pump
+  settings, Boot Service Toggles (added in code), and **Profiles…** (navigates
+  to Experiment ▸ Preview, which hosts the config/profiles editor).
+- **Help:** About, **Software Updates…** (opens [[System-Utilities]]'s
+  `SoftwareUpdatesDialog` — channel + version selection; replaced the old
+  "Check for Updates…"), Documentation and Report a Problem (open the GitHub
+  repo/issues). The Software Updates action is disabled when `auto_update` is
+  disabled at boot.
+
 ## Boot disable GUI
 
 - Settings menu includes **Boot Service Toggles...** for selecting services to
