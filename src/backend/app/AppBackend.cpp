@@ -5,6 +5,7 @@
 #include "backend/diagnostics/CrashStateMirror.h"
 #include "backend/database/SqliteService.h"
 #include "backend/recording/Hdf5Service.h"
+#include "backend/recording/HdfWriteQueue.h"
 #include "backend/services/CaptureService.h"
 #include "backend/processing/ProcessingService.h"
 #include "backend/playback/PlaybackService.h"
@@ -875,6 +876,26 @@ namespace backend
             batchImages.reserve(FLUSH_BATCH);
             batchMeta.reserve(FLUSH_BATCH);
 
+            // Decouple HDF5 writes from FrameStore reads via a bounded 3-slot
+            // queue. The written count advances only on a confirmed successful
+            // write; any failure or overflow stops recording and surfaces a
+            // fatal error (no silent data loss).
+            struct RecordingBatch {
+                std::vector<cv::Mat> images;
+                std::vector<services::Hdf5Service::RecordingFrameMeta> meta;
+            };
+            backend::recording::HdfWriteQueue<RecordingBatch> writeQueue(
+                3,
+                [this](const RecordingBatch& b) -> bool {
+                    if (!hdf5Service_->appendRecordingFrames(b.images, b.meta)) return false;
+                    frameRecordingWritten_.fetch_add(b.images.size(), std::memory_order_relaxed);
+                    return true;
+                },
+                [this](const std::string& msg) {
+                    frameRecordingRunning_.store(false);
+                    reportFatalSaveError("Recording save failed: " + msg);
+                });
+
             while (frameRecordingRunning_.load()) {
                 // Get latest available index from FrameStore
                 const uint64_t totalWritten = frameStore_->totalWritten();
@@ -931,21 +952,23 @@ namespace backend
 
                     // Flush batch when full
                     if (batchImages.size() >= FLUSH_BATCH) {
-                        if (!hdf5Service_->appendRecordingFrames(batchImages, batchMeta)) {
-                            SPDLOG_ERROR("Frame recording: failed to flush batch");
+                        if (!writeQueue.submit(RecordingBatch{std::move(batchImages), std::move(batchMeta)})) {
+                            break; // fatal error already surfaced via onError
                         }
-                        frameRecordingWritten_.fetch_add(batchImages.size(), std::memory_order_relaxed);
                         batchImages.clear();
                         batchMeta.clear();
+                        batchImages.reserve(FLUSH_BATCH);
+                        batchMeta.reserve(FLUSH_BATCH);
                     }
                 }
             }
 
-            // Flush remaining frames
+            // Submit any remaining frames, then drain the writer thread.
             if (!batchImages.empty()) {
-                if (hdf5Service_->appendRecordingFrames(batchImages, batchMeta)) {
-                    frameRecordingWritten_.fetch_add(batchImages.size(), std::memory_order_relaxed);
-                }
+                writeQueue.submit(RecordingBatch{std::move(batchImages), std::move(batchMeta)});
+            }
+            if (!writeQueue.flushAndStop()) {
+                reportFatalSaveError("Recording final flush failed: " + writeQueue.error());
             }
 
             // Write recording info
@@ -1001,6 +1024,15 @@ namespace backend
     void AppBackend::setBackgroundCaptureCallback(BackgroundCaptureCallback callback) {
         std::scoped_lock lk(backgroundCaptureCallbackMutex_);
         backgroundCaptureCallback_ = std::move(callback);
+    }
+
+    void AppBackend::setFatalSaveErrorCallback(FatalSaveErrorCallback callback) {
+        fatalSaveErrorCb_ = std::move(callback);
+    }
+
+    void AppBackend::reportFatalSaveError(const std::string& msg) {
+        SPDLOG_ERROR("Fatal save error: {}", msg);
+        if (fatalSaveErrorCb_) fatalSaveErrorCb_(msg);
     }
 
     void AppBackend::setLastConfigJson(const std::string& json) {

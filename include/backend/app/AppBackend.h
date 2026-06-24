@@ -101,7 +101,18 @@ namespace backend
         using BackgroundCaptureCallback = std::function<void(const BackgroundCaptureEvent& event)>;
         void setBackgroundCaptureCallback(BackgroundCaptureCallback callback);
 
+        // Fatal save-error sink: invoked (possibly on a writer thread) when an
+        // experiment flush or recording write fails, or the write queue
+        // overflows. The active operation is stopped; the UI should surface the
+        // message. Funnels both recording and experiment flush failures.
+        using FatalSaveErrorCallback = std::function<void(const std::string&)>;
+        void setFatalSaveErrorCallback(FatalSaveErrorCallback callback);
+
     private:
+        void reportFatalSaveError(const std::string& msg);
+
+        FatalSaveErrorCallback fatalSaveErrorCb_;
+
         std::unique_ptr<services::SqliteService> sqliteService_;
         std::unique_ptr<services::Hdf5Service> hdf5Service_;
         std::unique_ptr<services::CaptureService> captureService_;
