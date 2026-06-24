@@ -38,6 +38,10 @@ mib_add_backend_test_executable(modbus_rtu_test backend/modbus_rtu_test.cpp)
 add_test(NAME backend.modbus_rtu COMMAND $<TARGET_FILE:modbus_rtu_test>)
 set_tests_properties(backend.modbus_rtu PROPERTIES LABELS "backend" TIMEOUT 30)
 
+mib_add_backend_test_executable(camera_script_apply_test backend/camera_script_apply_test.cpp)
+add_test(NAME backend.camera_script_apply COMMAND $<TARGET_FILE:camera_script_apply_test>)
+set_tests_properties(backend.camera_script_apply PROPERTIES LABELS "backend;camera" TIMEOUT 30)
+
 mib_add_backend_test_executable(frame_store_resize_under_load_test backend/frame_store_resize_under_load_test.cpp)
 target_link_libraries(frame_store_resize_under_load_test PRIVATE Threads::Threads)
 add_test(NAME backend.frame_store_resize_under_load COMMAND $<TARGET_FILE:frame_store_resize_under_load_test>)
@@ -182,6 +186,10 @@ set_tests_properties(hardware.nanopositioner PROPERTIES LABELS "hardware" SKIP_R
 mib_add_backend_test_executable(hw_camera_test hardware/hw_camera_test.cpp)
 add_test(NAME hardware.camera COMMAND $<TARGET_FILE:hw_camera_test>)
 set_tests_properties(hardware.camera PROPERTIES LABELS "hardware" SKIP_RETURN_CODE 77 TIMEOUT 60)
+
+mib_add_backend_test_executable(hw_egrabber_script_test hardware/hw_egrabber_script_test.cpp)
+add_test(NAME hardware.egrabber_script COMMAND $<TARGET_FILE:hw_egrabber_script_test>)
+set_tests_properties(hardware.egrabber_script PROPERTIES LABELS "hardware;camera" SKIP_RETURN_CODE 77 TIMEOUT 60)
 
 add_executable(json_flatten_roundtrip_test
     ${PROJECT_SOURCE_DIR}/tests/frontend/json_flatten_roundtrip_test.cpp

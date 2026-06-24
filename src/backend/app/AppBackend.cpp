@@ -727,6 +727,19 @@ namespace backend
                 *errorOut = "No hardware camera selected";
             return false;
         }
+        // Validate the script file before touching the device: a bogus path
+        // should fail with a clear message instead of opening the camera (and
+        // possibly disrupting acquisition) only to throw a cryptic SDK error.
+        {
+            std::error_code ec;
+            if (!std::filesystem::is_regular_file(std::filesystem::path(path), ec))
+            {
+                if (errorOut)
+                    *errorOut = "Camera script file not found: " + path;
+                SPDLOG_ERROR("Camera script file not found: {}", path);
+                return false;
+            }
+        }
         // Ensure capture thread is stopped
         if (captureService_ && captureService_->isRunning())
         {

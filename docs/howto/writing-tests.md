@@ -183,8 +183,12 @@ ctest --preset windows-hardware-test --output-on-failure   # only label "hardwar
 
 Device env vars: `MIB_TEST_PUMP_PORT` (+ `_BAUD`, `_ADDR`),
 `MIB_TEST_NANOPOSITIONER_PORT` (+ `_BAUD`, `_ADDR`), `MIB_TEST_CAMERA` (the
-operator also sets `MIB_CAMERA_MODE` + selection envs as the app does). Existing:
-`tests/hardware/hw_{syringe_pump,nanopositioner,camera}_test.cpp`.
+operator also sets `MIB_CAMERA_MODE` + selection envs as the app does), and
+`MIB_TEST_EGRABBER_SCRIPT` (+ `MIB_TEST_EGRABBER_IF`/`_DEV`) — the EGrabber LED /
+strobe is driven by a camera script via `applyCameraScriptFromFile`. Existing:
+`tests/hardware/hw_{syringe_pump,nanopositioner,camera,egrabber_script}_test.cpp`.
+The hardware-independent guards of that script path are covered off-device by
+`backend.camera_script_apply`.
 
 Keep device-independent protocol/logic in a plain unit test instead (e.g. the
 Modbus framing lives in `backend::services::modbus` and is covered by
