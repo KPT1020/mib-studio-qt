@@ -239,9 +239,9 @@ Publish the optional full installer:
 python publish-update.py --installer "build/dist/MIB_Studio_Qt_Setup_v0.2.0.exe"
 ```
 
-`publish-update.py` uploads to `s3://mib-studio-qt-updates/<channel>/...`, generates `<channel>/latest.json`, **updates `<channel>/index.json`** (fetches the current index, inserts the new version via `merge_index` — dedupe by version, newest-first — and re-uploads; an empty index self-seeds with the prior `latest.json` so it isn't just the version being published), and prints final public URLs under `https://updates.yofo.bio`. It uses S3/boto3 when `MIB_STUDIO_R2_ENDPOINT` is set, otherwise Wrangler. `publish-update.ps1` is a Windows compatibility wrapper around the Python command.
+`publish-update.py` uploads to `s3://mib-studio-qt-updates/<channel>/...`, generates `<channel>/latest.json`, **updates `<channel>/index.json`** (reads the current index, inserts the new version via `merge_index` — dedupe by version, newest-first — and re-uploads), and prints final public URLs under `https://updates.yofo.bio`. It uses S3/boto3 when `MIB_STUDIO_R2_ENDPOINT` is set, otherwise Wrangler. `publish-update.ps1` is a Windows compatibility wrapper around the Python command.
 
-The `index.json` accumulates from each publish onward; to seed deeper history, re-publish older update packages (idempotent — `merge_index` dedupes) or hand-edit `index.json` and re-upload.
+**Reading the existing index** uses the **S3 API** (same endpoint/credentials as the upload), not the public `updates.yofo.bio` URL — the public CDN can block/cache reads from CI runners (Cloudflare challenges the default `Python-urllib` user agent), which previously caused every release to *replace* the index with a single entry instead of growing it. If the existing index cannot be read (a genuine read error, distinct from "no index yet"), the publish **skips** the index update rather than clobber a good catalog. The `index.json` accumulates from each publish onward; older releases predating index maintenance need a one-time backfill (re-publish their update packages — `merge_index` dedupes — or build the index and upload it via the S3 API).
 
 For legacy S3-compatible targets that require object ACLs, pass `--acl public-read`. R2 public access is configured at the bucket/custom-domain layer, so ACLs are not sent by default.
 
