@@ -11,6 +11,12 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QMessageBox>
+#include <QDesktopServices>
+#include <QDir>
+#include <QStandardPaths>
+#include <QUrl>
+
+#include "frontend/dialogs/SoftwareUpdatesDialog.h"
 #include <QSizePolicy>
 #include <QWidget>
 #include <QVBoxLayout>
@@ -249,7 +255,9 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     {
         updater_ = new frontend::AutoUpdater(this, this);
         connect(ui->checkUpdatesAct, &QAction::triggered, this, [this]() {
-            if (updater_) updater_->checkForUpdates(true);
+            if (!updater_) return;
+            frontend::SoftwareUpdatesDialog dlg(updater_, this);
+            dlg.exec();
         });
     }
     else
@@ -257,6 +265,40 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         ui->checkUpdatesAct->setEnabled(false);
         SPDLOG_INFO("MainWindow: auto update disabled by MIB_DISABLED_SERVICES");
     }
+
+    // Folder shortcuts, docs, and issue reporting (always available).
+    auto openFolder = [](const QString& path) {
+        QDir().mkpath(path);
+        QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+    };
+    connect(ui->openDataFolderAct, &QAction::triggered, this, [openFolder]() {
+        openFolder(QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation))
+                       .absoluteFilePath(QStringLiteral("MIB_Studio_Qt")));
+    });
+    connect(ui->openLogsFolderAct, &QAction::triggered, this, [openFolder]() {
+#ifdef _WIN32
+        const QString localAppData = qEnvironmentVariable("LOCALAPPDATA");
+        const QString base = localAppData.isEmpty()
+            ? QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
+            : localAppData;
+#else
+        const QString base = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+#endif
+        openFolder(QDir(base).absoluteFilePath(QStringLiteral("MIB_Studio_Qt/logs")));
+    });
+    connect(ui->documentationAct, &QAction::triggered, this, []() {
+        QDesktopServices::openUrl(QUrl(QStringLiteral("https://github.com/KPT1020/mib-studio-qt")));
+    });
+    connect(ui->reportProblemAct, &QAction::triggered, this, []() {
+        QDesktopServices::openUrl(QUrl(QStringLiteral("https://github.com/KPT1020/mib-studio-qt/issues/new")));
+    });
+    connect(ui->profilesAct, &QAction::triggered, this, [this]() {
+        // The config/profiles editor lives in the Experiment > Preview page.
+        if (ui->tabs && experimentTabs_) {
+            ui->tabs->setCurrentWidget(experimentTabs_);
+            experimentTabs_->setCurrentIndex(0);
+        }
+    });
 
     // Camera buttons will be added to main tab bar corner widget, not toolbar
     auto *startCaptureAct = new QAction("Start Camera", this);
