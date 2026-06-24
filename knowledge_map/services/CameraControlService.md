@@ -16,7 +16,10 @@
 - `discoverMindVisionCameras()` / `discoverAllCameras()` — enumerate
   MindVision devices and merge them with the EGrabber list for the connect UI.
 - `applyMindVisionConfig(cameraIndex, configPath, errorOut)` — apply a JSON
-  config to a selected MindVision device before capture starts.
+  config to a selected MindVision device before capture starts. The parse +
+  bounds validation is the shared pure `parseConfig` documented in
+  [[../camera/MindVisionCamera]] (`MindVisionConfig.h`); this service applies
+  only its historical field subset (resolution/exposure/trigger/gain).
 - `applyScriptToDevice(ifIdx, devIdx, scriptPath, errorOut)` — push a
   GenICam JS file to a specific device.
 - `deviceReset(ifIdx, devIdx, errorOut)` — issue SFNC `DeviceReset`;
