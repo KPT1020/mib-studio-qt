@@ -92,9 +92,10 @@ namespace frontend
         connect(toggleButton_, &QToolButton::clicked, this, &SidebarWidget::toggleCollapse);
         mainLayout->addWidget(toggleButton_);
 
-        // Set size policy - let parent splitter control width
-        setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
-        setMinimumWidth(collapsed_ ? collapsedWidth_ : expandedWidth_);
+        // Let the splitter shrink this pane on small displays; use the
+        // expanded width as an initial target, not a hard minimum.
+        setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+        setMinimumWidth(collapsedWidth_);
         setMaximumWidth(collapsed_ ? collapsedWidth_ : 1000);
     }
 
@@ -124,8 +125,8 @@ namespace frontend
         scrollArea_->setVisible(!collapsed_);
 
         // Update size constraints
-        int targetWidth = collapsed_ ? collapsedWidth_ : expandedWidth_;
-        setMinimumWidth(targetWidth);
+        const int targetWidth = collapsed_ ? collapsedWidth_ : expandedWidth_;
+        setMinimumWidth(collapsedWidth_);
         setMaximumWidth(collapsed_ ? collapsedWidth_ : 1000);
         
         // Resize to target width (splitter will handle the actual resize)
@@ -142,7 +143,7 @@ namespace frontend
         expandedWidth_ = width;
         if (!collapsed_)
         {
-            setMinimumWidth(expandedWidth_);
+            setMinimumWidth(collapsedWidth_);
             resize(expandedWidth_, height());
         }
         saveCollapseState();

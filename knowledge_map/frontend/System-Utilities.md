@@ -50,6 +50,10 @@ defaults into an existing `config.json`; tested by
 `SidebarWidget`, `SimpleImageCanvas`, `StatisticsPanel`,
 `StatsDisplayManager`.
 
+- `SidebarWidget` treats `expandedWidth` as a preferred width only; its hard
+  minimum width now stays at collapsed width so smaller displays can shrink the
+  main window without forcing overflow.
+
 ## Widgets (`src/frontend/widgets/`)
 
 - **`ZoomableChartView`** — subclass of `QChartView` with scroll/zoom.

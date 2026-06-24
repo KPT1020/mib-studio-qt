@@ -1,7 +1,10 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDir>
+#include <QGuiApplication>
 #include <QMessageBox>
+#include <QRect>
+#include <QScreen>
 #include <QSettings>
 #include <QString>
 #include <QStringList>
@@ -26,6 +29,44 @@
 #endif
 
 namespace {
+    QRect computeStartupWindowGeometry(const QSize& preferredSize, const QRect& availableGeometry)
+    {
+        if (!availableGeometry.isValid())
+        {
+            return QRect(QPoint(0, 0), preferredSize);
+        }
+
+        const int width = std::max(1, std::min(preferredSize.width(), availableGeometry.width()));
+        const int height = std::max(1, std::min(preferredSize.height(), availableGeometry.height()));
+        QRect boundedGeometry(QPoint(0, 0), QSize(width, height));
+        boundedGeometry.moveCenter(availableGeometry.center());
+
+        const int maxLeft = availableGeometry.right() - boundedGeometry.width() + 1;
+        const int maxTop = availableGeometry.bottom() - boundedGeometry.height() + 1;
+        boundedGeometry.moveLeft(std::clamp(boundedGeometry.left(), availableGeometry.left(), maxLeft));
+        boundedGeometry.moveTop(std::clamp(boundedGeometry.top(), availableGeometry.top(), maxTop));
+        return boundedGeometry;
+    }
+
+    void applyStartupWindowGeometry(QMainWindow& window)
+    {
+        QScreen* targetScreen = window.screen();
+        if (!targetScreen)
+        {
+            targetScreen = QGuiApplication::primaryScreen();
+        }
+
+        const QSize preferredSize(960, 600);
+        if (!targetScreen)
+        {
+            window.resize(preferredSize);
+            return;
+        }
+
+        const QRect availableGeometry = targetScreen->availableGeometry();
+        window.setGeometry(computeStartupWindowGeometry(preferredSize, availableGeometry));
+    }
+
     QString normalizeDisabledServicesCsv(const QString &raw)
     {
         const QStringList parts = raw.split(',', Qt::SkipEmptyParts);
@@ -228,7 +269,7 @@ int main(int argc, char* argv[]) {
         
         // Create and show main window
         MainWindow w(backend);
-        w.resize(960, 600);
+        applyStartupWindowGeometry(w);
         w.show();
         
         std::cout << "Application started successfully." << std::endl;
