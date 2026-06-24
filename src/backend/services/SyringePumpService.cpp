@@ -1,4 +1,5 @@
 #include "backend/services/SyringePumpService.h"
+#include "backend/services/ModbusRtu.h"
 
 #include <QSerialPort>
 #include <QByteArray>
@@ -49,99 +50,33 @@ namespace {
 // CRC16 — standard Modbus polynomial (0xA001 reflected)
 // ---------------------------------------------------------------------------
 uint16_t SyringePumpService::crc16(const uint8_t* data, size_t len) {
-    uint16_t crc = 0xFFFF;
-    for (size_t i = 0; i < len; ++i) {
-        crc ^= static_cast<uint16_t>(data[i]);
-        for (int j = 0; j < 8; ++j) {
-            if (crc & 0x0001) {
-                crc = (crc >> 1) ^ 0xA001;
-            } else {
-                crc >>= 1;
-            }
-        }
-    }
-    return crc;
+    return modbus::crc16(data, len);
 }
 
 // ---------------------------------------------------------------------------
 // Float32 <-> Modbus register conversion (big-endian ABCD word order)
 // ---------------------------------------------------------------------------
 QByteArray SyringePumpService::floatToRegisters(float value) {
-    QByteArray result(4, 0);
-    uint8_t bytes[4];
-    std::memcpy(bytes, &value, 4);
-    // ABCD word order: high word first, then low word
-    // IEEE 754 float on little-endian CPU: bytes[3]=MSB .. bytes[0]=LSB
-    // Register 1 (high word): bytes[3] bytes[2]
-    // Register 2 (low word):  bytes[1] bytes[0]
-    result[0] = static_cast<char>(bytes[3]);
-    result[1] = static_cast<char>(bytes[2]);
-    result[2] = static_cast<char>(bytes[1]);
-    result[3] = static_cast<char>(bytes[0]);
-    return result;
+    return modbus::floatToRegisters(value);
 }
 
 float SyringePumpService::registersToFloat(const uint8_t* data) {
-    // data[0..1] = high word (big-endian), data[2..3] = low word (big-endian)
-    // Reconstruct IEEE 754 little-endian bytes
-    uint8_t bytes[4];
-    bytes[3] = data[0]; // MSB
-    bytes[2] = data[1];
-    bytes[1] = data[2];
-    bytes[0] = data[3]; // LSB
-    float value;
-    std::memcpy(&value, bytes, 4);
-    return value;
+    return modbus::registersToFloat(data);
 }
 
 // ---------------------------------------------------------------------------
 // Modbus RTU frame builders
 // ---------------------------------------------------------------------------
 QByteArray SyringePumpService::buildReadRequest(uint8_t addr, uint16_t startReg, uint16_t count) {
-    QByteArray frame(6, 0);
-    frame[0] = static_cast<char>(addr);
-    frame[1] = static_cast<char>(FUNC_READ_HOLDING);
-    frame[2] = static_cast<char>((startReg >> 8) & 0xFF);
-    frame[3] = static_cast<char>(startReg & 0xFF);
-    frame[4] = static_cast<char>((count >> 8) & 0xFF);
-    frame[5] = static_cast<char>(count & 0xFF);
-    uint16_t crc = crc16(reinterpret_cast<const uint8_t*>(frame.constData()), 6);
-    frame.append(static_cast<char>(crc & 0xFF));        // CRC low byte first
-    frame.append(static_cast<char>((crc >> 8) & 0xFF)); // CRC high byte
-    return frame;
+    return modbus::buildReadRequest(addr, startReg, count);
 }
 
 QByteArray SyringePumpService::buildWriteSingleRequest(uint8_t addr, uint16_t reg, uint16_t value) {
-    QByteArray frame(6, 0);
-    frame[0] = static_cast<char>(addr);
-    frame[1] = static_cast<char>(FUNC_WRITE_SINGLE);
-    frame[2] = static_cast<char>((reg >> 8) & 0xFF);
-    frame[3] = static_cast<char>(reg & 0xFF);
-    frame[4] = static_cast<char>((value >> 8) & 0xFF);
-    frame[5] = static_cast<char>(value & 0xFF);
-    uint16_t crc = crc16(reinterpret_cast<const uint8_t*>(frame.constData()), 6);
-    frame.append(static_cast<char>(crc & 0xFF));
-    frame.append(static_cast<char>((crc >> 8) & 0xFF));
-    return frame;
+    return modbus::buildWriteSingleRequest(addr, reg, value);
 }
 
 QByteArray SyringePumpService::buildWriteMultipleRequest(uint8_t addr, uint16_t startReg, const QByteArray& regData) {
-    uint16_t regCount = static_cast<uint16_t>(regData.size() / 2);
-    uint8_t byteCount = static_cast<uint8_t>(regData.size());
-    QByteArray frame;
-    frame.reserve(7 + regData.size() + 2);
-    frame.append(static_cast<char>(addr));
-    frame.append(static_cast<char>(FUNC_WRITE_MULTIPLE));
-    frame.append(static_cast<char>((startReg >> 8) & 0xFF));
-    frame.append(static_cast<char>(startReg & 0xFF));
-    frame.append(static_cast<char>((regCount >> 8) & 0xFF));
-    frame.append(static_cast<char>(regCount & 0xFF));
-    frame.append(static_cast<char>(byteCount));
-    frame.append(regData);
-    uint16_t crc = crc16(reinterpret_cast<const uint8_t*>(frame.constData()), static_cast<size_t>(frame.size()));
-    frame.append(static_cast<char>(crc & 0xFF));
-    frame.append(static_cast<char>((crc >> 8) & 0xFF));
-    return frame;
+    return modbus::buildWriteMultipleRequest(addr, startReg, regData);
 }
 
 // ---------------------------------------------------------------------------

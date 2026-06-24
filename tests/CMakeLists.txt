@@ -34,6 +34,10 @@ mib_add_backend_test_executable(frame_store_bounds_test backend/frame_store_boun
 add_test(NAME backend.frame_store_bounds COMMAND $<TARGET_FILE:frame_store_bounds_test>)
 set_tests_properties(backend.frame_store_bounds PROPERTIES LABELS "backend" TIMEOUT 30)
 
+mib_add_backend_test_executable(modbus_rtu_test backend/modbus_rtu_test.cpp)
+add_test(NAME backend.modbus_rtu COMMAND $<TARGET_FILE:modbus_rtu_test>)
+set_tests_properties(backend.modbus_rtu PROPERTIES LABELS "backend" TIMEOUT 30)
+
 mib_add_backend_test_executable(frame_store_resize_under_load_test backend/frame_store_resize_under_load_test.cpp)
 target_link_libraries(frame_store_resize_under_load_test PRIVATE Threads::Threads)
 add_test(NAME backend.frame_store_resize_under_load COMMAND $<TARGET_FILE:frame_store_resize_under_load_test>)
@@ -161,6 +165,23 @@ set_tests_properties(backend.processing_multi_object PROPERTIES LABELS "processi
 mib_add_backend_test_executable(mib_processing_object_tracking_test processing/processing_object_tracking_test.cpp)
 add_test(NAME backend.processing_object_tracking COMMAND $<TARGET_FILE:mib_processing_object_tracking_test>)
 set_tests_properties(backend.processing_object_tracking PROPERTIES LABELS "processing;backend")
+
+# --- Hardware-present tests (LABEL "hardware") -----------------------------
+# Excluded from the default presets; run via the hardware preset or
+# `ctest -L hardware`. Each self-skips (exit 77 -> CTest "Skipped") when its
+# device env var is absent, so a normal run on a dev box without hardware is
+# clean.
+mib_add_backend_test_executable(hw_syringe_pump_test hardware/hw_syringe_pump_test.cpp)
+add_test(NAME hardware.syringe_pump COMMAND $<TARGET_FILE:hw_syringe_pump_test>)
+set_tests_properties(hardware.syringe_pump PROPERTIES LABELS "hardware" SKIP_RETURN_CODE 77 TIMEOUT 60)
+
+mib_add_backend_test_executable(hw_nanopositioner_test hardware/hw_nanopositioner_test.cpp)
+add_test(NAME hardware.nanopositioner COMMAND $<TARGET_FILE:hw_nanopositioner_test>)
+set_tests_properties(hardware.nanopositioner PROPERTIES LABELS "hardware" SKIP_RETURN_CODE 77 TIMEOUT 60)
+
+mib_add_backend_test_executable(hw_camera_test hardware/hw_camera_test.cpp)
+add_test(NAME hardware.camera COMMAND $<TARGET_FILE:hw_camera_test>)
+set_tests_properties(hardware.camera PROPERTIES LABELS "hardware" SKIP_RETURN_CODE 77 TIMEOUT 60)
 
 add_executable(json_flatten_roundtrip_test
     ${PROJECT_SOURCE_DIR}/tests/frontend/json_flatten_roundtrip_test.cpp

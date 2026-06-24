@@ -155,7 +155,7 @@
       "configuration": "Debug",
       "filter": {
         "exclude": {
-          "label": "integration"
+          "label": "integration|hardware"
         }
       },
       "output": {
@@ -189,7 +189,7 @@
       "configuration": "Release",
       "filter": {
         "exclude": {
-          "label": "integration"
+          "label": "integration|hardware"
         }
       },
       "output": {
@@ -197,6 +197,23 @@
       },
       "execution": {
         "timeout": 30
+      }
+    },
+    {
+      "name": "windows-hardware-test",
+      "displayName": "Test Windows hardware (real devices only)",
+      "configurePreset": "windows-default",
+      "configuration": "Release",
+      "filter": {
+        "include": {
+          "label": "hardware"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "timeout": 120
       }
     }
   ]

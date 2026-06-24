@@ -154,6 +154,42 @@ MIB_EXPECT(stats.maxQueueDepth <= maxQueued, "queue bounded");
 See `integration/e2e_realtime_throughput_test.cpp`,
 `e2e_live_view_latency_test.cpp`, `e2e_batch_backpressure_test.cpp`.
 
+### 7. Hardware-present tests
+
+Tests that need a real device (camera, syringe pump, nanopositioner) are labeled
+`hardware`, **excluded from every default preset**, and **self-skip** (CTest
+`SKIP_RETURN_CODE 77`) when their device env var is absent — so a normal run on a
+dev box without hardware is clean. Use `tests/support/hardware.h`:
+
+```cpp
+#include "support/hardware.h"
+const int port = std::atoi(mib::test::requireDeviceEnv("MIB_TEST_PUMP_PORT")); // skips if unset
+const int baud = mib::test::envInt("MIB_TEST_PUMP_BAUD", 115200);
+// ... drive the real service, MIB_REQUIRE/MIB_EXPECT on results ...
+```
+
+Register with the `hardware` label and the skip code:
+```cmake
+add_test(NAME hardware.syringe_pump COMMAND $<TARGET_FILE:hw_syringe_pump_test>)
+set_tests_properties(hardware.syringe_pump PROPERTIES LABELS "hardware" SKIP_RETURN_CODE 77 TIMEOUT 60)
+```
+
+Run the hardware suite (with devices attached + env set):
+```powershell
+$env:MIB_TEST_PUMP_PORT="6"; $env:MIB_TEST_NANOPOSITIONER_PORT="7"; $env:MIB_TEST_CAMERA="1"
+ctest --preset windows-hardware-test --output-on-failure   # only label "hardware"
+# or: ctest --test-dir build -C Debug -L hardware
+```
+
+Device env vars: `MIB_TEST_PUMP_PORT` (+ `_BAUD`, `_ADDR`),
+`MIB_TEST_NANOPOSITIONER_PORT` (+ `_BAUD`, `_ADDR`), `MIB_TEST_CAMERA` (the
+operator also sets `MIB_CAMERA_MODE` + selection envs as the app does). Existing:
+`tests/hardware/hw_{syringe_pump,nanopositioner,camera}_test.cpp`.
+
+Keep device-independent protocol/logic in a plain unit test instead (e.g. the
+Modbus framing lives in `backend::services::modbus` and is covered by
+`backend.modbus_rtu` with zero hardware).
+
 ## Mandatory rules
 
 - **Watchdog, never a naked `join()`/`wait()`.** A deadlocked test must fail
