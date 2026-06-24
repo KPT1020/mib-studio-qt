@@ -18,11 +18,42 @@ Do not commit R2 credentials or account IDs that are intended to remain private.
 Keep objects at the root of the public custom domain:
 
 - `stable/latest.json`
+- `stable/index.json` — full version history for the channel (see below)
 - `stable/MIB_Studio_Qt_Update_v<version>.exe`
 - `stable/MIB_Studio_Qt_Setup_v<version>.exe` (optional, full installer for manual downloads)
 - `stable/tools/tools-latest.json`
 - `stable/tools/MIB_Studio_Tools_v<version>_windows.zip`
 - `beta/...` for beta/pre-release equivalents
+
+#### `index.json` (version catalog)
+
+`{channel}/index.json` lists every published version so the in-app **Help ▸
+Software Updates…** dialog can offer channel + specific-version selection
+(including rollback). `latest.json` is unchanged and still drives the silent
+auto-check; `index.json` is additive.
+
+```json
+{
+  "schema_version": 1,
+  "channel": "beta",
+  "versions": [
+    {
+      "version": "1.0.4-beta.1",
+      "installer_url": "https://updates.yofo.bio/beta/MIB_Studio_Qt_Update_v1.0.4-beta.1.exe",
+      "installer_sha256": "…",
+      "installer_size_bytes": 12345678,
+      "release_notes_url": "https://github.com/KPT1020/mib-studio-qt/releases/tag/v1.0.4-beta.1",
+      "published_utc": "2026-06-24T04:54:58Z"
+    }
+  ]
+}
+```
+
+Newest-first; a release sorts above its own betas. `publish-update.py` maintains
+it automatically on every publish (see *Publishing a New App Version*). The app
+parses it with `UpdateCatalog`; entries missing `version`/`installer_url`/
+`installer_sha256` are skipped, and a missing/invalid `index.json` degrades to
+"use Check for Latest" without affecting the auto-check.
 
 ### Profile Catalogs
 
@@ -208,7 +239,9 @@ Publish the optional full installer:
 python publish-update.py --installer "build/dist/MIB_Studio_Qt_Setup_v0.2.0.exe"
 ```
 
-`publish-update.py` uploads to `s3://mib-studio-qt-updates/<channel>/...`, generates `<channel>/latest.json`, and prints final public URLs under `https://updates.yofo.bio`. It uses S3/boto3 when `MIB_STUDIO_R2_ENDPOINT` is set, otherwise Wrangler. `publish-update.ps1` is a Windows compatibility wrapper around the Python command.
+`publish-update.py` uploads to `s3://mib-studio-qt-updates/<channel>/...`, generates `<channel>/latest.json`, **updates `<channel>/index.json`** (fetches the current index, inserts the new version via `merge_index` — dedupe by version, newest-first — and re-uploads; an empty index self-seeds with the prior `latest.json` so it isn't just the version being published), and prints final public URLs under `https://updates.yofo.bio`. It uses S3/boto3 when `MIB_STUDIO_R2_ENDPOINT` is set, otherwise Wrangler. `publish-update.ps1` is a Windows compatibility wrapper around the Python command.
+
+The `index.json` accumulates from each publish onward; to seed deeper history, re-publish older update packages (idempotent — `merge_index` dedupes) or hand-edit `index.json` and re-upload.
 
 For legacy S3-compatible targets that require object ACLs, pass `--acl public-read`. R2 public access is configured at the bucket/custom-domain layer, so ACLs are not sent by default.
 

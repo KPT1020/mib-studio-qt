@@ -177,6 +177,9 @@ python publish-update.py --installer "build/dist/MIB_Studio_Qt_Setup_v0.2.0.exe"
 - Computes SHA-256 and file size.
 - Generates `<channel>/latest.json`.
 - Uploads the installer and manifest to `s3://mib-studio-qt-updates/<channel>/...`.
+- Updates `<channel>/index.json` (the version catalog the in-app **Software
+  Updates** dialog reads — inserts the new version, dedupe by version,
+  newest-first; an empty index self-seeds with the prior `latest.json`).
 - Prints final public URLs under `https://updates.yofo.bio`.
 
 Important parameters:

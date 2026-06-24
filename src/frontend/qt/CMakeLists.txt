@@ -58,6 +58,8 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/src/frontend/dialogs/SyringePumpSettingsDialog.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/dialogs/SyringePumpSettingsDialog.h
     ${PROJECT_SOURCE_DIR}/resources/ui/SyringePumpSettingsDialog.ui
+    ${PROJECT_SOURCE_DIR}/src/frontend/dialogs/SoftwareUpdatesDialog.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/dialogs/SoftwareUpdatesDialog.h
     # Controllers
     ${PROJECT_SOURCE_DIR}/src/frontend/controllers/CameraController.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/controllers/CameraController.h
@@ -76,6 +78,8 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/JsonFlatten.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/JsonConfigMerge.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/JsonConfigMerge.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/UpdateCatalog.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/utils/UpdateCatalog.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/RoiManager.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/RoiManager.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/RoiDrawCanvas.cpp
