@@ -38,4 +38,9 @@ int indexOfVersion(const QVector<VersionEntry>& versions, const QString& current
 // beta of an already-installed release). Equal versions are not a downgrade.
 bool isDowngrade(const QString& candidate, const QString& current);
 
+// The update channel a version string belongs to: "beta" if it carries a
+// "-beta." pre-release suffix, otherwise "stable". Used so a build knows its own
+// channel (the build version must retain its suffix for this to work).
+QString channelForVersion(const QString& version);
+
 } // namespace frontend::updatecatalog

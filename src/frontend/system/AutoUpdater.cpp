@@ -87,7 +87,11 @@ QString AutoUpdater::sanitizeChannel(const QString& c) {
 
 QString AutoUpdater::channel() const {
     QSettings s;
-    return sanitizeChannel(s.value(QStringLiteral("Update/Channel"), QStringLiteral("stable")).toString());
+    // Default to the channel this build belongs to (derived from its own full
+    // version), so a beta build opens on the beta channel and marks its own
+    // release "current"; an explicit user choice (persisted) still wins.
+    const QString buildChannel = updatecatalog::channelForVersion(currentVersion());
+    return sanitizeChannel(s.value(QStringLiteral("Update/Channel"), buildChannel).toString());
 }
 
 void AutoUpdater::setChannel(const QString& c) {

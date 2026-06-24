@@ -71,6 +71,15 @@ int main()
         MIB_EXPECT(uc::isDowngrade("1.0.4-beta.1", "1.0.4"), "beta of installed release is a downgrade");
     }
 
+    // channelForVersion: a build must know its channel from its own version
+    // string (the bug: stripped versions made stable and beta indistinguishable).
+    {
+        MIB_EXPECT(uc::channelForVersion("1.0.4") == "stable", "release -> stable");
+        MIB_EXPECT(uc::channelForVersion("1.0.4-beta.1") == "beta", "beta suffix -> beta");
+        MIB_EXPECT(uc::channelForVersion("1.0.4-beta.12") == "beta", "multi-digit beta -> beta");
+        MIB_EXPECT(uc::channelForVersion("") == "stable", "empty -> stable");
+    }
+
     // Boundary test: parse a fixture produced by publish-update.py's real
     // transform (_index_entry_from_manifest + merge_index). This proves the
     // JSON the publisher emits is exactly what the app reads — guards against

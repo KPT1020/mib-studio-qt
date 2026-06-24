@@ -23,9 +23,20 @@
   external user-chosen config path is never rewritten.
 - **`AutoUpdater`** — update check + channel/version selection; see
   `docs/howto/auto-update-r2.md` and `docs/howto/release-workflow.md`.
-  - Channel persisted in `QSettings` (`Update/Channel`, `stable`|`beta`,
-    default `stable`); `MIB_STUDIO_UPDATE_MANIFEST_URL` env override still wins.
-    `defaultManifestUrl` is channel-aware (`{channel}/latest.json`).
+  - Channel persisted in `QSettings` (`Update/Channel`, `stable`|`beta`); the
+    default is the **build's own channel**, derived from its full version via
+    `UpdateCatalog::channelForVersion` (a `-beta.` suffix → beta), so a beta
+    build opens on the beta channel and marks its own release "current". An
+    explicit user choice still wins; `MIB_STUDIO_UPDATE_MANIFEST_URL` env
+    override still wins over everything. `defaultManifestUrl` is channel-aware
+    (`{channel}/latest.json`).
+  - **Build version identity:** `applicationVersion` is set from
+    `MIB_STUDIO_QT_VERSION_FULL` (the git tag *with* its `-beta.N` suffix), not
+    the stripped `MIB_STUDIO_QT_VERSION`. Without the suffix a stable and a beta
+    build were byte-identical in version, so the app could not tell which channel
+    it was on (both showed the same "current version"). `MIBVersion.cmake`
+    exposes both: `PROJECT_VERSION` (numeric, for `project()`/installers) and
+    `PROJECT_VERSION_FULL` (with suffix, for runtime identity + Sentry release).
   - `fetchVersionIndex()` GETs `{channel}/index.json` and emits
     `versionIndexReady`/`versionIndexFailed`, parsed by `UpdateCatalog`.
   - `installVersion(entry)` maps a catalog `VersionEntry` onto the existing
