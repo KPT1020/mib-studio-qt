@@ -7,7 +7,26 @@
 **Source:** `src/backend/recording/Hdf5Service.cpp`,
 `include/backend/recording/Hdf5Service.h`
 **Related:** [[ProcessingService]], [[../data-model/HDF5-Storage]],
-[[../frontend/HdfReviewTab]]
+[[../frontend/HdfReviewTab]], [[../architecture/AppBackend]]
+
+## Async write decoupling — `HdfWriteQueue`
+
+`include/backend/recording/HdfWriteQueue.h` is a header-only, bounded (3-slot)
+single-writer queue used by **both** experiment flush ([[ProcessingService]]
+`flushBufferedFrames`) and frame recording ([[../architecture/AppBackend]]
+`startFrameRecording`) so slow HDF5 writes never stall the producer
+(capture/collection). A dedicated writer thread drains the FIFO and calls an
+injected `writeFn` (`appendFrames` / `appendRecordingFrames`). A failed write
+**or** a `submit` when all 3 slots are in flight (disk too slow) is a fatal,
+latched error: the writer stops, a one-shot `onError` fires, and further
+`submit`s are rejected. The written/flushed counters advance only on a confirmed
+successful write. `flushAndStop()` drains + joins for a clean stop. `Hdf5Service`
+has no internal lock, so callers must ensure only one writer touches the open
+file at a time — the queue's single writer thread provides that, and stop paths
+drain the queue before any direct write.
+
+`HdfWriteQueue`'s ctor parameter is `slotCount` (not `slots`, which Qt defines as
+a macro). Unit-tested by `tests/backend/hdf_write_queue_test.cpp`.
 
 ## Responsibility
 

@@ -60,11 +60,16 @@ All gates in one struct. Notable fields:
 - **Monitoring rings** — `monitoringValidFrames_` / `monitoringInvalidFrames_`,
   fixed 1000-frame capacity. Always on when realtime is running.
 - **Experiment accumulation** — bounded vectors populated while
-  `experimentActive_` is true. `flushBufferedFrames(Hdf5Service&)` drains them
-  periodically (default every 100 frames). `maxBufferedFrames_` is derived from
-  the flush interval (at least the interval; normally capped to a 1000-5000
-  frame backlog) so a slow or failing HDF5 append cannot grow RAM without
-  bound.
+  `experimentActive_` is true. `flushBufferedFrames(Hdf5Service&)` moves them out
+  under a brief lock and submits them to a 3-slot
+  [[Hdf5Service]] `HdfWriteQueue` whose writer thread does the slow append, so
+  capture/processing never blocks on disk. The write queue is created lazily on
+  first flush and torn down by `finishFlush()` at experiment stop (drains +
+  joins before any direct HDF5 write, so the file is never written by two
+  threads at once). A write failure or queue overflow (disk too slow) is fatal:
+  it fires `setFlushErrorCallback` (→ [[../architecture/AppBackend]] →
+  UI stop + dialog) instead of the old silent trim-and-drop. `totalValidFlushed_`
+  advances only on a confirmed write.
 - Invalid frame sampling rate defaults to 1-in-100 to bound HDF5 size.
 
 ## Metrics exposed

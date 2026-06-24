@@ -112,6 +112,12 @@ namespace backend::playback
         // Returns true on success, false on failure
         bool resize(size_t newCapacity);
 
+        // Pre-reserve each ring slot's data buffer to at least frameBytes so the
+        // per-frame pushFrame hot path performs no heap allocation for frames of
+        // that size or smaller. Call at capture start once the frame geometry is
+        // known. Idempotent: only grows slots whose capacity is below frameBytes.
+        void reserveFrameBytes(size_t frameBytes);
+
         // Get available index range
         IndexRange getAvailableRange() const;
 

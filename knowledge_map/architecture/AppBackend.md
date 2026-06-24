@@ -122,6 +122,24 @@ no contour processing.
 - Counters: `frameRecordingCount()`, `frameRecordingFiltered()`
 - Uses a dedicated `frameRecordingThread_` and leverages
   [[../data-model/FrameStore]]'s `setFrameFilter` to drop empty frames.
+- The collector thread hands batches to a 3-slot [[../services/Hdf5Service]]
+  `HdfWriteQueue` (writer thread does `appendRecordingFrames`), so slow disk no
+  longer stalls FrameStore reads. The written count advances only on a confirmed
+  write; a failed write or queue overflow stops recording and fires the fatal
+  save-error sink. This fixed the old silent count-and-drop-on-failure bug.
+- Each frame is **cropped to the preview ROI** (`getRealtimeRoi`, set by
+  [[../frontend/PreviewPage]]'s PlaybackPanel) before storage, via the pure
+  `backend::recording::clampRoiToFrame` (`include/backend/recording/RoiCrop.h`,
+  tested by `tests/backend/roi_crop_test.cpp`) — full frame when no ROI is set.
+  Recorded frame metadata width/height reflect the crop.
+
+### Fatal save-error sink
+
+`setFatalSaveErrorCallback(cb)` / `reportFatalSaveError(msg)` funnel both
+recording **and** experiment-flush ([[../services/ProcessingService]]) write
+failures to one callback. `MainWindow` marshals it to the UI thread, stops the
+active operation, and shows a modal Save Error dialog — failed saves are never
+silent.
 
 ## Config JSON storage
 

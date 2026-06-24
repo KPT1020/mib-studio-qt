@@ -20,6 +20,15 @@ FrameStore::FrameStore(size_t capacity)
     backend::diagnostics::CrashStateMirror::instance().frameStore.capacity.store(capacity_.load());
 }
 
+void FrameStore::reserveFrameBytes(size_t frameBytes) {
+    if (frameBytes == 0) return;
+    std::unique_lock structLk(structureMutex_);
+    for (auto& f : ring_) {
+        if (f.data.capacity() < frameBytes) f.data.reserve(frameBytes);
+    }
+    SPDLOG_INFO("FrameStore: reserved {} bytes per slot across {} slots", frameBytes, ring_.size());
+}
+
 void FrameStore::pushFrame(const uint8_t* src,
                            size_t size,
                            uint64_t width,
@@ -33,8 +42,9 @@ void FrameStore::pushFrame(const uint8_t* src,
     {
         std::shared_lock structLk(structureMutex_);
         if (frameFilter_) {
-            // Build a temporary Frame for the filter to inspect
-            Frame tmp;
+            // Reuse a per-thread scratch Frame so filter inspection does not
+            // allocate on every frame (assign reuses the existing capacity).
+            thread_local Frame tmp;
             tmp.width = width;
             tmp.height = height;
             tmp.pixelFormat = pixelFormat;

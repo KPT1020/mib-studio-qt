@@ -300,6 +300,20 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         }
     });
 
+    // Fatal save errors (recording or experiment flush) fire on a writer thread.
+    // Marshal to the UI thread: stop the active operation and show a dialog so
+    // the failure is never silent.
+    backend_.setFatalSaveErrorCallback([this](const std::string& msg) {
+        const QString q = QString::fromStdString(msg);
+        QMetaObject::invokeMethod(this, [this, q]() {
+            if (backend_.isFrameRecording()) backend_.stopFrameRecording();
+            if (experimentActive_) onStopExperiment();
+            statusBar()->showMessage(tr("Save error: %1").arg(q));
+            QMessageBox::critical(this, tr("Save Error"),
+                tr("Data could not be saved and the operation was stopped:\n\n%1").arg(q));
+        }, Qt::QueuedConnection);
+    });
+
     // Camera buttons will be added to main tab bar corner widget, not toolbar
     auto *startCaptureAct = new QAction("Start Camera", this);
     auto *stopCaptureAct = new QAction("Stop Camera", this);
@@ -783,7 +797,14 @@ void MainWindow::onStopExperiment()
                     sinceMs(t0), flushed);
         if (flushed > 0)
         {
-            SPDLOG_INFO("Final flush: {} frames written to HDF5", flushed);
+            SPDLOG_INFO("Final flush: {} frames submitted to HDF5 write queue", flushed);
+        }
+        // Drain the async write queue so the writer thread has stopped before the
+        // direct appendFrames below (no two threads writing the shared file).
+        if (!processing.finishFlush())
+        {
+            QMessageBox::warning(this, tr("Save Error"),
+                                 tr("A save error occurred while flushing experiment data to disk."));
         }
     }
 

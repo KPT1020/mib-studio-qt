@@ -125,6 +125,11 @@ void CaptureService::run() {
         uint64_t nextStatsPoll = Tools::getTimestamp() + kStatsInterval;
         uint64_t nextHealthCheck = Tools::getTimestamp() + kHealthCheckInterval;
 
+        // Largest frame size reserved in the FIFO so far this session. Drives a
+        // one-time (per geometry) pre-reservation so the high-speed push hot path
+        // never allocates.
+        size_t reservedFrameBytes = 0;
+
         while (running_.load()) {
             // Periodic health check
             const uint64_t now = Tools::getTimestamp();
@@ -157,6 +162,14 @@ void CaptureService::run() {
                           frame.timestamp);
             }
             if (frameStore_) {
+                // Pre-reserve FIFO slots to the live frame size so the
+                // high-speed hot path never allocates. First reservation happens
+                // on frame 1; re-reserve only if the geometry grows.
+                const size_t frameBytes = frame.data.size();
+                if (frameBytes > reservedFrameBytes) {
+                    frameStore_->reserveFrameBytes(frameBytes);
+                    reservedFrameBytes = frameBytes;
+                }
                 frameStore_->pushFrame(frame.data.data(),
                                        frame.data.size(),
                                        frame.width,

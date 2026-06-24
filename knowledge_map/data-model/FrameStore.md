@@ -137,8 +137,12 @@ this is safe because every hot-path op acquires the shared structural lock
   `structureMutex_` because `resize()` calls them while holding it exclusively —
   so atomicity, not a lock, prevents the data race against `resize()`'s write.
   Surfaced by the ThreadSanitizer lane via `frame_store_resize_under_load_test`.
-- `pushFrame` copies bytes — if you profile and see allocator pressure,
-  investigate here first.
+- `pushFrame` copies bytes. For high-speed capture, call
+  `reserveFrameBytes(frameBytes)` at capture start ([[../services/CaptureService]]
+  does this on the first frame / on geometry growth) so the first pass through
+  the ring does not allocate — without it the first `capacity` pushes each
+  allocate a slot buffer mid-stream. The empty-frame filter path reuses a
+  `thread_local` scratch `Frame` rather than allocating a temp per frame.
 - `saveFramesToAvi` serialises frames while holding the mutex only long
   enough to snapshot the range; the VideoWriter loop runs outside the
   lock. Same pattern as `saveFramesToDisk`.

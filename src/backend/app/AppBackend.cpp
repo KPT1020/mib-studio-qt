@@ -5,6 +5,8 @@
 #include "backend/diagnostics/CrashStateMirror.h"
 #include "backend/database/SqliteService.h"
 #include "backend/recording/Hdf5Service.h"
+#include "backend/recording/HdfWriteQueue.h"
+#include "backend/recording/RoiCrop.h"
 #include "backend/services/CaptureService.h"
 #include "backend/processing/ProcessingService.h"
 #include "backend/playback/PlaybackService.h"
@@ -147,6 +149,11 @@ namespace backend
         hdf5Service_ = std::make_unique<services::Hdf5Service>();
         captureService_ = std::make_unique<services::CaptureService>();
         processingService_ = std::make_unique<services::ProcessingService>();
+        // Funnel experiment flush-write failures through the same fatal-save-error
+        // sink as recording, so the UI surfaces them and stops the experiment.
+        processingService_->setFlushErrorCallback([this](const std::string& msg) {
+            reportFatalSaveError(msg);
+        });
         playbackService_ = std::make_unique<services::PlaybackService>();
         cameraControlService_ = std::make_unique<services::CameraControlService>();
         autofocusService_ = std::make_unique<services::AutofocusService>();
@@ -875,6 +882,26 @@ namespace backend
             batchImages.reserve(FLUSH_BATCH);
             batchMeta.reserve(FLUSH_BATCH);
 
+            // Decouple HDF5 writes from FrameStore reads via a bounded 3-slot
+            // queue. The written count advances only on a confirmed successful
+            // write; any failure or overflow stops recording and surfaces a
+            // fatal error (no silent data loss).
+            struct RecordingBatch {
+                std::vector<cv::Mat> images;
+                std::vector<services::Hdf5Service::RecordingFrameMeta> meta;
+            };
+            backend::recording::HdfWriteQueue<RecordingBatch> writeQueue(
+                3,
+                [this](const RecordingBatch& b) -> bool {
+                    if (!hdf5Service_->appendRecordingFrames(b.images, b.meta)) return false;
+                    frameRecordingWritten_.fetch_add(b.images.size(), std::memory_order_relaxed);
+                    return true;
+                },
+                [this](const std::string& msg) {
+                    frameRecordingRunning_.store(false);
+                    reportFatalSaveError("Recording save failed: " + msg);
+                });
+
             while (frameRecordingRunning_.load()) {
                 // Get latest available index from FrameStore
                 const uint64_t totalWritten = frameStore_->totalWritten();
@@ -913,39 +940,46 @@ namespace backend
                         continue;
                     }
 
-                    // Convert to cv::Mat
+                    // Convert to cv::Mat, then crop to the preview ROI so the
+                    // recording captures exactly the region the user selected
+                    // (full frame when no ROI is set). Mirrors the clamp the
+                    // processing path applies.
                     const int w = static_cast<int>(f.width);
                     const int h = static_cast<int>(f.height);
                     const size_t step = (f.linePitch == 0 ? static_cast<size_t>(f.width) : f.linePitch);
                     cv::Mat view(h, w, CV_8UC1, f.data.data(), step);
-                    batchImages.push_back(view.clone());
+                    const auto crop = backend::recording::clampRoiToFrame(w, h, roi.x, roi.y, roi.w, roi.h);
+                    cv::Mat region = view(cv::Rect(crop.x, crop.y, crop.w, crop.h));
+                    batchImages.push_back(region.clone());
 
                     services::Hdf5Service::RecordingFrameMeta meta;
                     meta.index = idx;
                     meta.timestampNs = f.timestamp;
-                    meta.width = f.width;
-                    meta.height = f.height;
+                    meta.width = static_cast<uint64_t>(crop.w);
+                    meta.height = static_cast<uint64_t>(crop.h);
                     batchMeta.push_back(meta);
 
                     lastProcessedIdx = idx;
 
                     // Flush batch when full
                     if (batchImages.size() >= FLUSH_BATCH) {
-                        if (!hdf5Service_->appendRecordingFrames(batchImages, batchMeta)) {
-                            SPDLOG_ERROR("Frame recording: failed to flush batch");
+                        if (!writeQueue.submit(RecordingBatch{std::move(batchImages), std::move(batchMeta)})) {
+                            break; // fatal error already surfaced via onError
                         }
-                        frameRecordingWritten_.fetch_add(batchImages.size(), std::memory_order_relaxed);
                         batchImages.clear();
                         batchMeta.clear();
+                        batchImages.reserve(FLUSH_BATCH);
+                        batchMeta.reserve(FLUSH_BATCH);
                     }
                 }
             }
 
-            // Flush remaining frames
+            // Submit any remaining frames, then drain the writer thread.
             if (!batchImages.empty()) {
-                if (hdf5Service_->appendRecordingFrames(batchImages, batchMeta)) {
-                    frameRecordingWritten_.fetch_add(batchImages.size(), std::memory_order_relaxed);
-                }
+                writeQueue.submit(RecordingBatch{std::move(batchImages), std::move(batchMeta)});
+            }
+            if (!writeQueue.flushAndStop()) {
+                reportFatalSaveError("Recording final flush failed: " + writeQueue.error());
             }
 
             // Write recording info
@@ -1001,6 +1035,15 @@ namespace backend
     void AppBackend::setBackgroundCaptureCallback(BackgroundCaptureCallback callback) {
         std::scoped_lock lk(backgroundCaptureCallbackMutex_);
         backgroundCaptureCallback_ = std::move(callback);
+    }
+
+    void AppBackend::setFatalSaveErrorCallback(FatalSaveErrorCallback callback) {
+        fatalSaveErrorCb_ = std::move(callback);
+    }
+
+    void AppBackend::reportFatalSaveError(const std::string& msg) {
+        SPDLOG_ERROR("Fatal save error: {}", msg);
+        if (fatalSaveErrorCb_) fatalSaveErrorCb_(msg);
     }
 
     void AppBackend::setLastConfigJson(const std::string& json) {
