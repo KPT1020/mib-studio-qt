@@ -14,6 +14,13 @@
   config file and emits `configFileChanged` immediately so Preview and
   Monitoring refresh without waiting for watcher feedback. See
   `docs/howto/live-config-reload.md`.
+  On startup, when the app-managed `config.json` already exists,
+  `mergeNewDefaultsIntoConfig` deep-merges any keys added to the bundled
+  `:/defaults/config.json` by a newer build into the existing file
+  (`frontend::jsonutil::mergeMissingDefaults`, in `JsonConfigMerge`),
+  **preserving all existing user values**. This stops an updated install from
+  drifting away from a fresh install when new config keys are introduced. An
+  external user-chosen config path is never rewritten.
 - **`AutoUpdater`** — periodic update check; see
   `docs/howto/auto-update-r2.md` and `docs/howto/release-workflow.md`.
 - **`ProfileManager`** — profile catalog/metadata helper for
@@ -37,7 +44,9 @@
 ## Utils (`src/frontend/utils/`)
 
 `BackgroundPreviewWidget`, `ConfigPathManager`, `EgrabberConfigParser`,
-`FileIOUtils`, `JsonFlatten`, `OverlayRenderer`, `RoiManager`,
+`FileIOUtils`, `JsonFlatten`, `JsonConfigMerge` (pure deep-merge of bundled
+defaults into an existing `config.json`; tested by
+`tests/frontend/json_config_merge_test.cpp`), `OverlayRenderer`, `RoiManager`,
 `SidebarWidget`, `SimpleImageCanvas`, `StatisticsPanel`,
 `StatsDisplayManager`.
 

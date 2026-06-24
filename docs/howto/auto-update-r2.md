@@ -252,12 +252,14 @@ Then launch the app and use Help -> Check for Updates.
 
 ### Legacy Client Compatibility
 
-Existing released clients still request `https://s3.yofo.bio/mib-studio-qt-updates/stable/latest.json` until users install a build with the new compiled default. Keep one of these compatibility paths during migration:
+`s3.yofo.bio` is **retired** — releases publish only to `https://updates.yofo.bio`
+(the compiled default since PR #169). Do not reintroduce an `s3.yofo.bio`
+manifest or redirect.
 
-- Preferred: restore `s3.yofo.bio` as a redirect or compatibility endpoint that serves the migrated R2 manifest and artifacts.
-- Acceptable cutoff plan: publish one final RustFS manifest whose `installer_url` points at the R2-hosted update package, then announce that older clients must update before the RustFS compatibility endpoint is retired.
-
-Do not retire the old URL until the cutoff plan is explicitly accepted by release owners.
+Clients built before PR #169 still request
+`https://s3.yofo.bio/mib-studio-qt-updates/stable/latest.json` and will **not**
+auto-update. Upgrade them manually by running the current full installer once;
+afterwards they track `updates.yofo.bio` like every other client.
 
 ### Rollback
 
@@ -266,7 +268,7 @@ If a bad R2 release is published:
 1. Generate and publish a corrected `stable/latest.json` that points to the last known-good update package.
 2. Verify with `python verify-update-manifest.py`.
 3. If R2 public access is unhealthy, set `MIB_STUDIO_UPDATE_MANIFEST_URL` for smoke tests or publish a temporary manifest on a known-good HTTPS endpoint.
-4. For already-released clients, keep the RustFS compatibility endpoint or redirect pointing at the corrected manifest until the fixed build is widely installed.
+4. Confirm clients pick up the corrected `updates.yofo.bio` manifest (no legacy `s3.yofo.bio` endpoint is involved).
 
 ### Troubleshooting
 
