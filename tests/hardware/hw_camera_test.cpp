@@ -3,7 +3,8 @@
 // Requires a hardware build (EGrabber or MindVision SDK) and an attached
 // camera. The operator selects the camera the same way the app does, via env:
 //   MIB_CAMERA_MODE=mindvision|hardware  (+ MIB_MINDVISION_CAMERA_INDEX /
-//   MIB_MINDVISION_CONFIG, or the hardware selection envs).
+//   MIB_MINDVISION_CONFIG for MindVision, or MIB_TEST_EGRABBER_IF /
+//   MIB_TEST_EGRABBER_DEV for the EGrabber device, default 0/0).
 // Set MIB_TEST_CAMERA=1 to enable this test; it skips otherwise. It starts
 // capture and asserts real frames flow within a few seconds.
 
@@ -28,8 +29,19 @@ int main(int argc, char* argv[])
     mib::test::TempDir td("mib_hw_camera");
     backend::AppBackend backend;
     MIB_REQUIRE(backend.initialize((td / "data").string()), "AppBackend initialize");
+
+    // EGrabber/hardware mode installs the camera factory at boot but leaves the
+    // device selection to the connect flow (so ConnectTab can still run
+    // discovery), whereas MindVision mode records its selection at boot. Mirror
+    // the connect flow here for the EGrabber path so a device is actually
+    // selected before we assert configured + start capture.
+    if (!backend.isCameraConfigured()) {
+        const int ifIdx = mib::test::envInt("MIB_TEST_EGRABBER_IF", 0);
+        const int devIdx = mib::test::envInt("MIB_TEST_EGRABBER_DEV", 0);
+        backend.setHardwareCameraSelection(ifIdx, devIdx, "egrabber");
+    }
     MIB_REQUIRE(backend.isCameraConfigured(),
-                "a camera is configured (set MIB_CAMERA_MODE + selection envs)");
+                "a camera is configured (hardware selection, or MIB_CAMERA_MODE=mindvision)");
 
     MIB_REQUIRE(backend.capture().start(), "capture start");
 

@@ -308,6 +308,20 @@
 
 ## Recent fixes
 
+- **2026-06-24** — Fixed `hardware.camera` test (`tests/hardware/hw_camera_test.cpp`)
+  which asserted `isCameraConfigured()` immediately after `initialize()` with
+  `MIB_CAMERA_MODE=hardware`. The EGrabber boot path (`AppBackend.cpp` ~545)
+  installs the camera factory but intentionally leaves the device *selection* to
+  the connect flow (so `ConnectTab` can still run discovery and pick a device),
+  so `isCameraConfigured()` was `false` and the test failed before any capture.
+  The test now mirrors the connect flow — when not already configured it calls
+  `setHardwareCameraSelection(MIB_TEST_EGRABBER_IF, MIB_TEST_EGRABBER_DEV,
+  "egrabber")` (default 0/0), matching the sibling `hardware.egrabber_script`
+  test. MindVision mode is unaffected (it records its selection at boot).
+  Verified on-device: captured 61 frames from an SVS-VISTEK EoSens2.0MCX12.
+  Backend behaviour was deliberately left unchanged to avoid making boot-time
+  hardware mode skip `ConnectTab` discovery on multi-camera rigs.
+
 - **2026-05-05** — Made `scripts/hdf5_export.spec` and
   `scripts/build_mac.sh` portable for Unix packaging of the HDF5 Export GUI.
   `hdf5_export.spec` now resolves its script directory robustly across
