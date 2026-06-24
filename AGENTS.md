@@ -63,7 +63,9 @@ packaging scripts.
 
 Tests are bare `main()` executables linked to `mib_backend` and registered with
 CTest (no test framework). They are organized by failure mode, not just by
-level. Full taxonomy, CI lanes, and the shared support library are in
+level. How to write tests (recipes, support library, templates, checklist):
+[`docs/howto/writing-tests.md`](docs/howto/writing-tests.md). Full taxonomy, CI
+lanes, and rationale:
 [`docs/architecture/testing-strategy.md`](docs/architecture/testing-strategy.md).
 
 **Coverage matrix — a change to a capability lands with its required tests:**

@@ -1,7 +1,9 @@
 # Testing Strategy
 
 This document describes how to validate changes while preserving the backend
-and frontend boundaries documented in this architecture set.
+and frontend boundaries documented in this architecture set. For the
+developer-facing recipe book (how to actually write each kind of test, with
+templates and a PR checklist) see [`../howto/writing-tests.md`](../howto/writing-tests.md).
 
 ## Test Layers
 
