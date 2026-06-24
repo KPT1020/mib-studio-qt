@@ -154,8 +154,11 @@ target_link_libraries(mib_studio_qt PRIVATE
 )
 
 # App version exported from CMake (used for update checks, About dialogs, etc.).
+# _FULL retains any pre-release suffix (e.g. 1.0.4-beta.1) so the app knows its
+# channel; the plain one stays numeric for anything needing strict X.Y.Z.
 target_compile_definitions(mib_studio_qt PRIVATE
     MIB_STUDIO_QT_VERSION="${PROJECT_VERSION}"
+    MIB_STUDIO_QT_VERSION_FULL="${PROJECT_VERSION_FULL}"
 )
 
 mib_link_opencv(mib_studio_qt PRIVATE)

@@ -109,7 +109,7 @@ namespace {
         backend::services::CrashReporter::Config cfg;
         cfg.crashDir = resolveCrashDir(exeDir);
         cfg.databaseDir = cfg.crashDir / "sentry-db";
-        cfg.release = std::string("mib_studio_qt@") + MIB_STUDIO_QT_VERSION;
+        cfg.release = std::string("mib_studio_qt@") + MIB_STUDIO_QT_VERSION_FULL;
         cfg.environment =
 #ifdef NDEBUG
             "production";
@@ -176,7 +176,9 @@ int main(int argc, char* argv[]) {
 
         // Application identity/version (used by the updater and About dialogs)
         QCoreApplication::setApplicationName(QStringLiteral("MIB Studio Qt"));
-        QCoreApplication::setApplicationVersion(QStringLiteral(MIB_STUDIO_QT_VERSION));
+        // Full version retains any pre-release suffix (e.g. 1.0.4-beta.1) so the
+        // updater/About know the build's channel and can mark the right release.
+        QCoreApplication::setApplicationVersion(QStringLiteral(MIB_STUDIO_QT_VERSION_FULL));
 
         // Apply GUI-persisted startup disable list unless env already specifies it.
         applyBootDisabledServicesFromSettings();

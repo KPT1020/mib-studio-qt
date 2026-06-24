@@ -93,4 +93,11 @@ bool isDowngrade(const QString& candidate, const QString& current)
     return !isNewer(candidate, current);
 }
 
+QString channelForVersion(const QString& version)
+{
+    return version.contains(QStringLiteral("-beta."))
+               ? QStringLiteral("beta")
+               : QStringLiteral("stable");
+}
+
 } // namespace frontend::updatecatalog
