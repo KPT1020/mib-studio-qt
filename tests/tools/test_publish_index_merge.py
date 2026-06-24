@@ -53,9 +53,32 @@ def test_replace_keeps_latest_fields():
     assert idx["versions"][0]["installer_sha256"] == "newhash"
 
 
+def test_resolve_index_update_grows_from_existing():
+    # The bug: each release replaced the index instead of growing it. With the
+    # existing index readable, the new version must be ADDED, keeping the old one.
+    existing = {"schema_version": 1, "channel": "stable", "versions": [entry("1.0.4")]}
+    out = pub.resolve_index_update(existing, True, entry("1.0.5"), "stable")
+    assert out is not None
+    assert [v["version"] for v in out["versions"]] == ["1.0.5", "1.0.4"], out
+
+
+def test_resolve_index_update_first_time():
+    out = pub.resolve_index_update({}, True, entry("1.0.5"), "stable")
+    assert [v["version"] for v in out["versions"]] == ["1.0.5"]
+
+
+def test_resolve_index_update_skips_on_read_failure():
+    # read_ok=False -> return None so the caller does NOT overwrite a good index.
+    out = pub.resolve_index_update(None, False, entry("1.0.5"), "stable")
+    assert out is None
+
+
 if __name__ == "__main__":
     test_insert_into_empty()
     test_dedupe_and_order()
     test_beta_orders_below_its_release()
     test_replace_keeps_latest_fields()
+    test_resolve_index_update_grows_from_existing()
+    test_resolve_index_update_first_time()
+    test_resolve_index_update_skips_on_read_failure()
     print("ok")
