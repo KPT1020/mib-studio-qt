@@ -47,6 +47,10 @@ target_link_libraries(hdf_write_queue_test PRIVATE Threads::Threads)
 add_test(NAME backend.hdf_write_queue COMMAND $<TARGET_FILE:hdf_write_queue_test>)
 set_tests_properties(backend.hdf_write_queue PROPERTIES LABELS "backend" TIMEOUT 60)
 
+mib_add_backend_test_executable(frame_store_reserve_test backend/frame_store_reserve_test.cpp)
+add_test(NAME backend.frame_store_reserve COMMAND $<TARGET_FILE:frame_store_reserve_test>)
+set_tests_properties(backend.frame_store_reserve PROPERTIES LABELS "backend" TIMEOUT 30)
+
 mib_add_backend_test_executable(mindvision_config_test backend/mindvision_config_test.cpp)
 add_test(NAME backend.mindvision_config COMMAND $<TARGET_FILE:mindvision_config_test>)
 set_tests_properties(backend.mindvision_config PROPERTIES LABELS "backend;camera" TIMEOUT 30)
