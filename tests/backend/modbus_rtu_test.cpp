@@ -30,6 +30,17 @@ void expectTrailingCrc(const QByteArray& frame, int bodyLen, const char* what)
     MIB_EXPECT(at(frame, bodyLen + 1) == ((crc >> 8) & 0xFF),
                std::string("CRC high byte second: ") + what);
 }
+// Build a well-formed read-holding response with a correct trailing CRC.
+QByteArray makeReadResponse(uint8_t addr, uint8_t func, const QByteArray& data)
+{
+    QByteArray f;
+    f.append(static_cast<char>(addr));
+    f.append(static_cast<char>(func));
+    f.append(static_cast<char>(data.size())); // byteCount
+    f.append(data);
+    m::appendCrc(f);
+    return f;
+}
 } // namespace
 
 int main()
@@ -92,8 +103,56 @@ int main()
         }
     }
 
+    // 6) Response parsing: CRC validation, exception detection, and bounds-safe
+    //    register extraction. The extraction guards against the short/garbled
+    //    frame that previously caused an out-of-bounds read in pollStatus.
+    {
+        QByteArray data(4, 0);
+        data[0] = 0xAA; data[1] = 0xBB; data[2] = 0xCC; data[3] = 0xDD;
+        const QByteArray good = makeReadResponse(0x01, 0x03, data); // count=2
+
+        MIB_EXPECT(m::responseCrcValid(good), "valid response passes CRC");
+        MIB_EXPECT(!m::isExceptionFrame(good), "normal response is not an exception");
+
+        QByteArray out;
+        MIB_EXPECT(m::extractReadData(good, 2, out) && out.size() == 4 &&
+                       static_cast<uint8_t>(out.at(0)) == 0xAA &&
+                       static_cast<uint8_t>(out.at(3)) == 0xDD,
+                   "extractReadData returns the 2 registers");
+
+        // Corrupted CRC -> rejected.
+        QByteArray badCrc = good;
+        badCrc[badCrc.size() - 1] = static_cast<char>(badCrc.at(badCrc.size() - 1) ^ 0xFF);
+        MIB_EXPECT(!m::responseCrcValid(badCrc), "corrupted CRC is rejected");
+
+        // Too-short frame (e.g. exception-length) for a count=2 read -> rejected,
+        // out cleared (this is the case the old mid() path mishandled).
+        QByteArray shortFrame = makeReadResponse(0x01, 0x03, QByteArray(2, 0)); // claims 1 reg
+        MIB_EXPECT(!m::extractReadData(shortFrame, 2, out) && out.isEmpty(),
+                   "short/mismatched-length read response is rejected");
+
+        // byteCount field that disagrees with the actual payload -> rejected.
+        QByteArray wrongByteCount = good;
+        wrongByteCount[2] = 0x02; // says 2 data bytes but carries 4
+        MIB_EXPECT(!m::extractReadData(wrongByteCount, 2, out),
+                   "byteCount/length mismatch is rejected");
+
+        // Exception frame: addr|func|0x80|code|crc.
+        QByteArray exc;
+        exc.append(static_cast<char>(0x01));
+        exc.append(static_cast<char>(0x83)); // 0x03 | 0x80
+        exc.append(static_cast<char>(0x02)); // illegal data address
+        m::appendCrc(exc);
+        MIB_EXPECT(m::responseCrcValid(exc), "exception frame CRC is valid");
+        MIB_EXPECT(m::isExceptionFrame(exc), "exception frame detected");
+
+        // Runt frames never index out of bounds.
+        MIB_EXPECT(!m::responseCrcValid(QByteArray(1, 0)), "1-byte frame rejected");
+        MIB_EXPECT(!m::extractReadData(QByteArray(), 2, out), "empty frame rejected");
+    }
+
     if (mib::test::exitCode() == 0) {
-        std::printf("Modbus RTU framing/CRC/float packing verified\n");
+        std::printf("Modbus RTU framing/CRC/float/response-parse verified\n");
     }
     return mib::test::exitCode();
 }

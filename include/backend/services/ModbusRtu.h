@@ -117,4 +117,39 @@ inline QByteArray buildWriteMultipleRequest(uint8_t addr, uint16_t startReg,
     return frame;
 }
 
+// --- Response parsing (pure; testable without a serial port) ---------------
+
+// True if the trailing little-endian CRC matches the body. False for frames
+// shorter than 4 bytes (addr+func+crc minimum).
+inline bool responseCrcValid(const QByteArray& resp)
+{
+    if (resp.size() < 4) return false;
+    const size_t bodyLen = static_cast<size_t>(resp.size()) - 2;
+    const uint16_t received = static_cast<uint16_t>(
+        (static_cast<uint8_t>(resp[resp.size() - 1]) << 8) |
+        static_cast<uint8_t>(resp[resp.size() - 2]));
+    return received == crc16(reinterpret_cast<const uint8_t*>(resp.constData()), bodyLen);
+}
+
+// True if the function-code high bit is set (Modbus exception response).
+inline bool isExceptionFrame(const QByteArray& resp)
+{
+    return resp.size() >= 2 && (static_cast<uint8_t>(resp[1]) & 0x80) != 0;
+}
+
+// Validates a read-holding response and extracts the `count` registers' bytes.
+// Returns false (out cleared) unless the frame is exactly
+// addr+func+byteCount+data+crc long AND the device's byteCount field equals
+// count*2 — so callers never index past a short/truncated/garbled frame.
+inline bool extractReadData(const QByteArray& resp, uint16_t count, QByteArray& out)
+{
+    out.clear();
+    const int dataBytes = static_cast<int>(count) * 2;
+    const int expected = 3 + dataBytes + 2; // addr+func+byteCount + data + crc
+    if (resp.size() != expected) return false;
+    if (static_cast<uint8_t>(resp[2]) != static_cast<uint8_t>(dataBytes)) return false;
+    out = resp.mid(3, dataBytes);
+    return out.size() == dataBytes;
+}
+
 } // namespace backend::services::modbus

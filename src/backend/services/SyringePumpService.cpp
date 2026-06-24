@@ -132,27 +132,17 @@ bool SyringePumpService::sendRequest(int pumpIdx, const QByteArray& request, QBy
     SPDLOG_DEBUG("SyringePumpService: RX pump {} [{}]: {}",
                 pumpIdx, response.size(), response.toHex(' ').constData());
 
-    // Verify CRC
-    if (response.size() < 4) {
-        SPDLOG_ERROR("SyringePumpService: Response too short ({} bytes) from pump {}", response.size(), pumpIdx);
-        return false;
-    }
-    size_t dataLen = static_cast<size_t>(response.size()) - 2;
-    uint16_t receivedCrc = static_cast<uint16_t>(
-        (static_cast<uint8_t>(response[response.size() - 1]) << 8) |
-         static_cast<uint8_t>(response[response.size() - 2]));
-    uint16_t calculatedCrc = crc16(reinterpret_cast<const uint8_t*>(response.constData()), dataLen);
-    if (receivedCrc != calculatedCrc) {
-        SPDLOG_ERROR("SyringePumpService: CRC mismatch for pump {} (received 0x{:04X}, calculated 0x{:04X})",
-                    pumpIdx, receivedCrc, calculatedCrc);
+    // Verify CRC (also rejects frames shorter than 4 bytes).
+    if (!modbus::responseCrcValid(response)) {
+        SPDLOG_ERROR("SyringePumpService: bad/short response ({} bytes) from pump {}: {}",
+                    response.size(), pumpIdx, response.toHex(' ').constData());
         return false;
     }
 
-    // Check for Modbus exception response
-    if (static_cast<uint8_t>(response[1]) & 0x80) {
-        uint8_t exceptionCode = static_cast<uint8_t>(response[2]);
+    // Check for Modbus exception response (CRC already validated -> >=4 bytes).
+    if (modbus::isExceptionFrame(response)) {
         SPDLOG_ERROR("SyringePumpService: Modbus exception 0x{:02X} from pump {} (func=0x{:02X})",
-                    exceptionCode, pumpIdx, static_cast<uint8_t>(response[1]) & 0x7F);
+                    static_cast<uint8_t>(response[2]), pumpIdx, static_cast<uint8_t>(response[1]) & 0x7F);
         return false;
     }
 
@@ -171,8 +161,14 @@ bool SyringePumpService::readHoldingRegisters(int pumpIdx, uint16_t startReg, ui
     if (!sendRequest(pumpIdx, request, response, expectedBytes)) {
         return false;
     }
-    // Extract data bytes (skip addr + func + byteCount)
-    data = response.mid(3, count * 2);
+    // Extract data with bounds + byteCount validation so a short/garbled frame
+    // can't yield fewer bytes than the caller indexes.
+    if (!modbus::extractReadData(response, count, data)) {
+        SPDLOG_ERROR("SyringePumpService: malformed read response from pump {} "
+                     "(expected {} registers, got {} bytes)",
+                     pumpIdx, count, response.size());
+        return false;
+    }
     return true;
 }
 
