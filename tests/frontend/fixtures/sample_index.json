@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "channel": "beta",
+  "versions": [
+    {
+      "version": "1.0.4",
+      "installer_url": "https://updates.yofo.bio/beta/MIB_Studio_Qt_Update_v1.0.4.exe",
+      "installer_sha256": "e1dedb826f03d81bece2083da7ee00f9a103881af9cc84c56f06d896f9f15d5d",
+      "installer_size_bytes": 43600452,
+      "release_notes_url": "https://github.com/KPT1020/mib-studio-qt/releases/tag/v1.0.4",
+      "published_utc": "2026-06-24T04:54:50.176743Z"
+    },
+    {
+      "version": "1.0.4-beta.1",
+      "installer_url": "https://updates.yofo.bio/beta/MIB_Studio_Qt_Update_v1.0.4-beta.1.exe",
+      "installer_sha256": "e1dedb826f03d81bece2083da7ee00f9a103881af9cc84c56f06d896f9f15d5d",
+      "installer_size_bytes": 43600452,
+      "release_notes_url": "https://github.com/KPT1020/mib-studio-qt/releases/tag/v1.0.4-beta.1",
+      "published_utc": "2026-06-24T04:54:50.176743Z"
+    },
+    {
+      "version": "1.0.3",
+      "installer_url": "https://updates.yofo.bio/beta/MIB_Studio_Qt_Update_v1.0.3.exe",
+      "installer_sha256": "e1dedb826f03d81bece2083da7ee00f9a103881af9cc84c56f06d896f9f15d5d",
+      "installer_size_bytes": 43600452,
+      "release_notes_url": "https://github.com/KPT1020/mib-studio-qt/releases/tag/v1.0.3",
+      "published_utc": "2026-06-24T04:54:50.176743Z"
+    }
+  ]
+}

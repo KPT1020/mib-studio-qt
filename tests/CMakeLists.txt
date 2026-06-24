@@ -239,6 +239,9 @@ target_include_directories(update_catalog_test PRIVATE
     ${PROJECT_SOURCE_DIR}/include
     ${PROJECT_SOURCE_DIR}/tests
 )
+target_compile_definitions(update_catalog_test PRIVATE
+    MIB_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+)
 target_link_libraries(update_catalog_test PRIVATE Qt6::Core)
 set_target_properties(update_catalog_test PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"

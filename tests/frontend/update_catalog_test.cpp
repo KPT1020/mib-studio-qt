@@ -9,6 +9,8 @@
 #include "support/assert.h"
 
 #include <QByteArray>
+#include <QFile>
+#include <QString>
 
 namespace uc = frontend::updatecatalog;
 
@@ -69,8 +71,29 @@ int main()
         MIB_EXPECT(uc::isDowngrade("1.0.4-beta.1", "1.0.4"), "beta of installed release is a downgrade");
     }
 
+    // Boundary test: parse a fixture produced by publish-update.py's real
+    // transform (_index_entry_from_manifest + merge_index). This proves the
+    // JSON the publisher emits is exactly what the app reads — guards against
+    // field-name drift across the Python/C++ boundary.
+    {
+        QFile f(QStringLiteral("%1/tests/frontend/fixtures/sample_index.json")
+                    .arg(QStringLiteral(MIB_PROJECT_SOURCE_DIR)));
+        MIB_REQUIRE(f.open(QIODevice::ReadOnly), "fixture sample_index.json opens");
+        const auto r = uc::parseIndex(f.readAll());
+        MIB_REQUIRE(r.ok, "publish-produced index parses");
+        MIB_REQUIRE(r.versions.size() == 3, "three versions in fixture");
+        MIB_EXPECT(r.versions[0].version == "1.0.4", "release first");
+        MIB_EXPECT(r.versions[1].version == "1.0.4-beta.1", "beta second");
+        MIB_EXPECT(r.versions[2].version == "1.0.3", "older last");
+        MIB_EXPECT(r.versions[0].installerSizeBytes == 43600452, "size field read");
+        MIB_EXPECT(!r.versions[0].installerSha256Hex.isEmpty(), "sha field read");
+        MIB_EXPECT(!r.versions[0].publishedUtc.isEmpty(), "published_utc field read");
+        MIB_EXPECT(r.versions[0].installerUrl.startsWith("https://updates.yofo.bio/"),
+                   "installer_url field read");
+    }
+
     if (mib::test::exitCode() == 0) {
-        std::printf("UpdateCatalog parse/sort/downgrade verified\n");
+        std::printf("UpdateCatalog parse/sort/downgrade + publish-fixture round-trip verified\n");
     }
     return mib::test::exitCode();
 }
