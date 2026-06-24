@@ -23,6 +23,8 @@
 #error "MindVision CameraApiLoad.h not found"
 #endif
 
+#include "backend/camera/mindvision/MindVisionConfig.h"
+
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -71,35 +73,40 @@ bool MindVisionCamera::applyJsonConfig(int hCamera)
         return false;
     }
 
-    QJsonParseError parseErr{};
-    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &parseErr);
+    const QByteArray bytes = file.readAll();
     file.close();
-    if (doc.isNull())
+
+    const auto parsed = backend::camera::mindvision::parseConfig(bytes);
+    if (!parsed.ok)
     {
-        SPDLOG_WARN("MindVisionCamera: JSON parse error in {}: {}", configPath_, parseErr.errorString().toStdString());
+        SPDLOG_WARN("MindVisionCamera: {} in {}", parsed.error, configPath_);
         return false;
     }
+    for (const auto& warning : parsed.warnings)
+    {
+        SPDLOG_WARN("{} (in {})", warning, configPath_);
+    }
 
-    const QJsonObject obj = doc.object();
-    const int width = obj.value("width").toInt(512);
-    const int height = obj.value("height").toInt(96);
-    const int offsetX = obj.value("offset_x").toInt(0);
-    const int offsetY = obj.value("offset_y").toInt(0);
-    const double exposureUs = obj.value("exposure_time_us").toDouble(3000.0);
-    const int triggerMode = obj.value("trigger_mode").toInt(0);
-    const int analogGain = obj.value("analog_gain").toInt(1);
-    const bool aeEnabled = obj.value("auto_exposure_enabled").toBool(false);
-    const int aeTarget = obj.value("ae_target_brightness").toInt(100);
-    const int gamma = obj.value("gamma").toInt(100);
-    const int contrast = obj.value("contrast").toInt(100);
-    const int sharpness = obj.value("sharpness").toInt(0);
-    const int frameSpeed = obj.value("frame_speed").toInt(2);
-    const bool flipHorizontal = obj.value("flip_horizontal").toBool(false);
-    const bool flipVertical = obj.value("flip_vertical").toBool(false);
-    const int strobeMode = obj.value("strobe_mode").toInt(0);
-    const int strobePulseUs = obj.value("strobe_pulse_width_us").toInt(500);
-    const int strobeDelayUs = obj.value("strobe_delay_us").toInt(0);
-    const int strobePolarity = obj.value("strobe_polarity").toInt(1);
+    const auto& cfg = parsed.config;
+    const int width = cfg.width;
+    const int height = cfg.height;
+    const int offsetX = cfg.offsetX;
+    const int offsetY = cfg.offsetY;
+    const double exposureUs = cfg.exposureUs;
+    const int triggerMode = cfg.triggerMode;
+    const int analogGain = cfg.analogGain;
+    const bool aeEnabled = cfg.aeEnabled;
+    const int aeTarget = cfg.aeTarget;
+    const int gamma = cfg.gamma;
+    const int contrast = cfg.contrast;
+    const int sharpness = cfg.sharpness;
+    const int frameSpeed = cfg.frameSpeed;
+    const bool flipHorizontal = cfg.flipHorizontal;
+    const bool flipVertical = cfg.flipVertical;
+    const int strobeMode = cfg.strobeMode;
+    const int strobePulseUs = cfg.strobePulseUs;
+    const int strobeDelayUs = cfg.strobeDelayUs;
+    const int strobePolarity = cfg.strobePolarity;
 
     SPDLOG_INFO("MindVisionCamera: applying config w={} h={} ox={} oy={} exp={} trig={} gain={}",
                 width, height, offsetX, offsetY, exposureUs, triggerMode, analogGain);
