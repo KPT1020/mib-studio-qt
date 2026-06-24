@@ -19,6 +19,53 @@ DEFAULT_BUCKET = "mib-studio-qt-updates"
 DEFAULT_PUBLIC_BASE_URL = "https://updates.yofo.bio"
 ARTIFACT_CACHE_CONTROL = "public, max-age=31536000, immutable"
 MANIFEST_CACHE_CONTROL = "public, max-age=60, must-revalidate"
+INDEX_SCHEMA_VERSION = 1
+
+
+def _version_sort_key(version: str) -> tuple:
+    """Sort key for a version string. A release sorts AFTER its betas; betas
+    ascend by number. e.g. 1.0.4-beta.1 < 1.0.4-beta.2 < 1.0.4."""
+    core, _, suffix = str(version).partition("-")
+    parts = [int(x) if x.isdigit() else 0 for x in core.split(".")]
+    parts += [0] * (3 - len(parts))  # pad so 1.0 and 1.0.0 compare equal-ish
+    if suffix.startswith("beta."):
+        rest = suffix[len("beta."):]
+        beta = int(rest) if rest.isdigit() else 0
+    else:
+        beta = float("inf")  # a release sorts after all of its betas
+    return (tuple(parts[:3]), beta)
+
+
+def merge_index(existing: dict, entry: dict, channel: str) -> dict:
+    """Insert/replace `entry` (keyed by 'version') into a per-channel index,
+    returning a newest-first {schema_version, channel, versions} dict. Pure."""
+    versions = [v for v in (existing.get("versions") or []) if v.get("version") != entry.get("version")]
+    versions.append(entry)
+    versions.sort(key=lambda v: _version_sort_key(v.get("version", "")), reverse=True)
+    return {"schema_version": INDEX_SCHEMA_VERSION, "channel": channel, "versions": versions}
+
+
+def _index_entry_from_manifest(manifest: dict) -> dict:
+    """Map a latest.json-style manifest to an index.json version entry. The
+    app's UpdateCatalog reads published_utc (manifests carry published_at)."""
+    return {
+        "version": manifest.get("version", ""),
+        "installer_url": manifest.get("installer_url", ""),
+        "installer_sha256": manifest.get("installer_sha256", ""),
+        "installer_size_bytes": manifest.get("installer_size_bytes", -1),
+        "release_notes_url": manifest.get("release_notes_url", ""),
+        "published_utc": manifest.get("published_utc") or manifest.get("published_at", ""),
+    }
+
+
+def fetch_json_url(url: str) -> dict | None:
+    """GET a public JSON document; return None on any error (e.g. 404)."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:  # noqa: S310 (trusted host)
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
 
 
 def join_public_object_url(base_url: str, key: str) -> str:
@@ -186,6 +233,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Installer URL: {installer_url}")
         return 0
 
+    index_key = f"{args.channel}/index.json"
+    index_url = join_public_object_url(args.public_base_url, index_key)
+    # Read the channel's current state BEFORE we overwrite latest.json, so a
+    # first-time index can self-seed with the previously-published version.
+    prev_latest = fetch_json_url(manifest_url)
+
     try:
         print("\n3. Uploading installer...")
         upload_object(
@@ -206,6 +259,26 @@ def main(argv: list[str] | None = None) -> int:
             cache_control=MANIFEST_CACHE_CONTROL,
         )
         print("   Manifest uploaded successfully")
+
+        print("\n5. Updating version index...")
+        index = fetch_json_url(index_url) or {}
+        # Seed an empty index with the prior latest so the list isn't just the
+        # version we're publishing right now.
+        if not index.get("versions") and prev_latest and prev_latest.get("version"):
+            index = merge_index(index, _index_entry_from_manifest(prev_latest), args.channel)
+        index = merge_index(index, _index_entry_from_manifest(manifest), args.channel)
+        index_path = write_manifest_file(index, None)
+        try:
+            upload_object(
+                args=args,
+                key=index_key,
+                file_path=index_path,
+                content_type="application/json",
+                cache_control=MANIFEST_CACHE_CONTROL,
+            )
+        finally:
+            index_path.unlink(missing_ok=True)
+        print(f"   Version index updated ({len(index['versions'])} version(s))")
     except Exception as exc:
         print(f"ERROR: upload failed: {exc}", file=sys.stderr)
         return 1
