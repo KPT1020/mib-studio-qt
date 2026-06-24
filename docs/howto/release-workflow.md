@@ -38,6 +38,25 @@ Calibration and lookup-table updates can be published independently with `publis
 7. Creates a GitHub Release with installers and SHA-256 checksums.
 8. Publishes the update package to Cloudflare R2 via `publish-update.py`.
 
+### Crash reporting (Sentry) in the tagged release
+
+The tag-triggered CI release (`.github/workflows/release.yml`) also wires up
+Sentry so crashes from shipped builds are actually useful:
+
+- **DSN injection** — the Configure step passes `-DMIB_SENTRY_DSN` from the
+  `SENTRY_DSN` secret, so the installed app sends events (without it, releases
+  run in local-only mode and nothing reaches Sentry).
+- **Debug symbol upload** — after the build it runs
+  `sentry-cli debug-files upload` on `build\Release` and creates/finalizes the
+  `mib_studio_qt@<version>` release. Without uploaded PDBs, captured minidumps
+  are unsymbolicated (= useless stacks). Gated on `SENTRY_AUTH_TOKEN` /
+  `SENTRY_ORG` / `SENTRY_PROJECT` (skips cleanly if absent).
+
+Required release secrets for symbolicated Sentry crashes: `SENTRY_DSN`,
+`SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT` (and `SENTRY_URL` for
+self-hosted). `crashpad_handler.exe` must ship next to the app (the installer
+copies it); verify it is present in the build output.
+
 Options:
 
 - `--patch|--minor|--major`: version bump type (required)
