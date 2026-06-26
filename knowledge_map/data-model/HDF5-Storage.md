@@ -3,7 +3,7 @@
 > Schema and patterns for experiment files. Implementation is behind a
 > PIMPL in [[../services/Hdf5Service]].
 
-**Source:** `src/backend/services/Hdf5Service.cpp`
+**Source:** `src/backend/recording/Hdf5Service.cpp`
 **Related:** [[../services/Hdf5Service]], [[../services/ProcessingService]]
 (`ProcessedFrame`, `ProcessingConfig`), [[../frontend/HdfReviewTab]]
 
@@ -32,12 +32,20 @@
   `writeExperimentInfo(...)` →
   optional `writeConfigJson(...)`.
   Called from `ProcessingService::flushBufferedFrames`.
-  Each write step flushes and updates a rolling sidecar checkpoint at
-  `<experiment>.recovery.h5`.
+  Append steps flush on a time interval (`maybeIntervalFlush`); one-shot
+  finalization writes (`writeExperimentInfo`, `writeConfigJson`) flush
+  unconditionally.
 - **Recording mode**: `initializeRecordingDatasets()` →
   `appendRecordingFrames(images, metadata)` →
   `writeRecordingInfo(...)`.
-  Recording writes also update `<recording>.recovery.h5` after each append.
+  Recording appends also flush on the same time interval — no per-append
+  full-file copy. Finalization performs a global HDF5 flush and strong
+  `H5Fclose`, so the superblock EOA is updated before `stopFrameRecording()`
+  returns.
+- **Interval flush**: append paths call `H5Fflush` at most once per
+  `MIB_HDF5_FLUSH_INTERVAL_MS` (default 5000 ms) so the recorder thread stays
+  off synchronous I/O on every batch. A crash loses at most one interval's
+  worth of buffered frames; there is no recovery sidecar.
 
 ## Read paths (scalable)
 
@@ -60,8 +68,15 @@
 
 - `writeConfigJson` **must** be called after `writeExperimentInfo` — see
   header docstring.
-- If opening the primary file fails, `Hdf5Service::loadFile` attempts
-  `<path>.recovery.h5` automatically.
+- There is no recovery sidecar: if the primary file fails to open,
+  `Hdf5Service::loadFile` fails directly. A crash/power-loss mid-recording can
+  lose up to one flush interval and may leave the primary `.h5` needing
+  `h5clear --increment` (or unrecoverable) — the accepted tradeoff for
+  real-time recorder throughput.
+- A stale EOA/superblock that can be repaired with `h5clear --increment`
+  points at an interrupted or failed final flush/close. Recorder logs include
+  final flush status, close timing, and the HDF5 object count before close to
+  make that diagnosable.
 - Don't use `readValidFrames` (full load) on files > 1 GB; prefer the
   scalable hyperslab APIs. See task
   `knowledge_map/task/review_2gb_scalability.md`.

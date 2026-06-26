@@ -97,17 +97,17 @@ mib_add_backend_test_executable(recording_lifecycle_test recording/recording_lif
 add_test(NAME recording.lifecycle COMMAND $<TARGET_FILE:recording_lifecycle_test>)
 set_tests_properties(recording.lifecycle PROPERTIES LABELS "recording;backend")
 
+mib_add_backend_test_executable(hdf5_resilience_test recording/hdf5_resilience_test.cpp)
+add_test(NAME recording.hdf5_resilience COMMAND $<TARGET_FILE:hdf5_resilience_test>)
+set_tests_properties(recording.hdf5_resilience PROPERTIES LABELS "recording;backend;hdf5")
+
+mib_add_backend_test_executable(hdf5_save_performance_test recording/hdf5_save_performance_test.cpp)
+add_test(NAME recording.hdf5_save_performance COMMAND $<TARGET_FILE:hdf5_save_performance_test>)
+set_tests_properties(recording.hdf5_save_performance PROPERTIES LABELS "recording;backend;hdf5;performance")
+
 mib_add_backend_test_executable(experiment_roundtrip_test recording/experiment_roundtrip_test.cpp)
 add_test(NAME recording.experiment_roundtrip COMMAND $<TARGET_FILE:experiment_roundtrip_test>)
 set_tests_properties(recording.experiment_roundtrip PROPERTIES LABELS "recording;backend" TIMEOUT 30)
-
-mib_add_backend_test_executable(crash_recovery_fallback_test recording/crash_recovery_fallback_test.cpp)
-add_test(NAME recording.crash_recovery_fallback COMMAND $<TARGET_FILE:crash_recovery_fallback_test>)
-set_tests_properties(recording.crash_recovery_fallback PROPERTIES LABELS "recording;backend" TIMEOUT 30)
-
-mib_add_backend_test_executable(recovery_checkpoint_created_test recording/recovery_checkpoint_created_test.cpp)
-add_test(NAME recording.recovery_checkpoint_created COMMAND $<TARGET_FILE:recovery_checkpoint_created_test>)
-set_tests_properties(recording.recovery_checkpoint_created PROPERTIES LABELS "recording;backend" TIMEOUT 30)
 
 mib_add_backend_test_executable(kin6_batch_pipeline_evidence integration/kin6_batch_pipeline_evidence.cpp)
 

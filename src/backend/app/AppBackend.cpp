@@ -987,11 +987,13 @@ namespace backend
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
                     std::chrono::system_clock::now().time_since_epoch()).count());
 
-            hdf5Service_->writeRecordingInfo(startTimeNs, endTimeNs,
-                                             frameRecordingWritten_.load(),
-                                             frameRecordingFiltered_.load(),
-                                             recordingMultiImageEnabled,
-                                             recordingMultiImageCount);
+            if (!hdf5Service_->writeRecordingInfo(startTimeNs, endTimeNs,
+                                                  frameRecordingWritten_.load(),
+                                                  frameRecordingFiltered_.load(),
+                                                  recordingMultiImageEnabled,
+                                                  recordingMultiImageCount)) {
+                SPDLOG_ERROR("Frame recording: failed to write recording_info metadata");
+            }
             hdf5Service_->closeFile();
 
             SPDLOG_INFO("Frame recording stopped: {} frames recorded, {} empty filtered, file: {}",

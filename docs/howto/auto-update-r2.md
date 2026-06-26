@@ -23,6 +23,11 @@ Keep objects at the root of the public custom domain:
 - `stable/MIB_Studio_Qt_Setup_v<version>.exe` (optional, full installer for manual downloads)
 - `stable/tools/tools-latest.json`
 - `stable/tools/MIB_Studio_Tools_v<version>_windows.zip`
+- `profiles/stable/catalog.json`
+- `profiles/stable/<profile-id>/profile.meta.json`
+- `profiles/stable/<profile-id>/config.json`
+- `profiles/stable/<profile-id>/egrabberConfig.js` (optional)
+- `profiles/stable/<profile-id>/CHANGELOG.md` (optional)
 - `beta/...` for beta/pre-release equivalents
 
 #### `index.json` (version catalog)
@@ -187,6 +192,8 @@ Configure these outside the repo:
 3. Configure public read access through Cloudflare for update artifacts.
 4. Configure cache behavior:
    - `stable/latest.json`, `beta/latest.json`, and `*/tools/tools-latest.json`: short TTL or bypass cache because manifests are mutable.
+   - `profiles/*/catalog.json`: short TTL or bypass cache because profile catalogs are mutable.
+   - `profiles/*/<profile-id>/{profile.meta.json,config.json,egrabberConfig.js,CHANGELOG.md}`: moderate TTL because current profile revisions are mutable.
    - Versioned `.exe` and `.zip` artifacts: long TTL because filenames are immutable.
 5. Create least-privilege write credentials for release publishing. Credentials need object write access to the updater bucket only.
 6. Store credentials in a local AWS profile such as `mib-studio-r2`, environment variables, or CI secrets.
@@ -252,6 +259,93 @@ python publish-tools.py --zip "tools/dist/MIB_Studio_Tools_v0.1.7_windows.zip"
 ```
 
 The tools manifest is published to `https://updates.yofo.bio/stable/tools/tools-latest.json`.
+
+### Profile Catalog Hosting
+
+Profile catalogs use the same public R2 bucket and custom domain as app
+updates, but live under a separate `profiles/<channel>/` namespace:
+
+```text
+profiles/
+  stable/
+    catalog.json
+    lab-default/
+      profile.meta.json
+      config.json
+      egrabberConfig.js
+      CHANGELOG.md
+  beta/
+    catalog.json
+```
+
+The production catalog URL is:
+
+```text
+https://updates.yofo.bio/profiles/stable/catalog.json
+```
+
+Profile downloads are public HTTPS reads. Do not add authentication to the app
+download path. Publishing credentials stay out-of-band through Wrangler,
+`MIB_STUDIO_R2_ENDPOINT` plus AWS-compatible credentials, or CI secrets.
+
+Each profile directory prepared for publishing must contain:
+
+- `config.json` with top-level `config_schema_version: 1`
+- optional `profile.meta.json` with display metadata
+- optional `egrabberConfig.js`
+- optional `CHANGELOG.md`
+
+The publisher derives checksums, generates `profile.meta.json` for upload, and
+writes `profiles/<channel>/catalog.json`:
+
+```bash
+python publish-profiles.py --profiles-root "./profile-catalog/stable"
+```
+
+Use dry-run first when preparing a new catalog:
+
+```bash
+python publish-profiles.py \
+  --profiles-root "./profile-catalog/stable" \
+  --catalog-out "build/profile-catalog/catalog.json" \
+  --dry-run
+```
+
+If importing legacy config files during catalog setup, this option generates an
+upload copy with `config_schema_version: 1` before checksums are calculated:
+
+```bash
+python publish-profiles.py \
+  --profiles-root "./profile-catalog/stable" \
+  --add-missing-config-schema \
+  --dry-run
+```
+
+For a real publish, the script uses Wrangler automatically when
+`MIB_STUDIO_R2_ENDPOINT` is not set. With S3-compatible R2 credentials, export
+the same variables used by app update publishing:
+
+```bash
+export MIB_STUDIO_R2_ENDPOINT="https://<account-id>.r2.cloudflarestorage.com"
+export MIB_STUDIO_R2_PROFILE="mib-studio-r2"
+python publish-profiles.py --profiles-root "./profile-catalog/stable"
+```
+
+After publishing, verify public reads:
+
+```bash
+python -m json.tool <(curl -fsSL "https://updates.yofo.bio/profiles/stable/catalog.json")
+curl -fsI "https://updates.yofo.bio/profiles/stable/lab-default/config.json"
+```
+
+Cloudflare setup required for KIN-47:
+
+1. Keep `updates.yofo.bio` attached to the `mib-studio-qt-updates` R2 bucket.
+2. Ensure public read access covers `profiles/*` object keys.
+3. Add or confirm cache rules for mutable profile catalog/config paths.
+4. Grant write credentials only to operators or CI jobs that publish profiles.
+5. Do not expose account IDs, access keys, or secret keys in catalog JSON,
+   profile metadata, app config, docs examples, or committed scripts.
 
 ### Verification
 

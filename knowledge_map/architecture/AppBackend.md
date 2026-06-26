@@ -122,11 +122,17 @@ no contour processing.
 - Counters: `frameRecordingCount()`, `frameRecordingFiltered()`
 - Uses a dedicated `frameRecordingThread_` and leverages
   [[../data-model/FrameStore]]'s `setFrameFilter` to drop empty frames.
+- `stopFrameRecording()` joins the recording thread; the thread drains the write
+  queue, writes `/recording_info`, and closes the HDF5 file before the stop call
+  returns.
 - The collector thread hands batches to a 3-slot [[../services/Hdf5Service]]
   `HdfWriteQueue` (writer thread does `appendRecordingFrames`), so slow disk no
   longer stalls FrameStore reads. The written count advances only on a confirmed
   write; a failed write or queue overflow stops recording and fires the fatal
   save-error sink. This fixed the old silent count-and-drop-on-failure bug.
+- The queue's writer thread must not block on synchronous I/O or it backs up and
+  trips the fatal overflow, so [[../services/Hdf5Service]] flushes on a time
+  interval (no per-append full-file copy); see `MIB_HDF5_FLUSH_INTERVAL_MS`.
 - Each frame is **cropped to the preview ROI** (`getRealtimeRoi`, set by
   [[../frontend/PreviewPage]]'s PlaybackPanel) before storage, via the pure
   `backend::recording::clampRoiToFrame` (`include/backend/recording/RoiCrop.h`,

@@ -25,6 +25,10 @@
 - Manage profiles, lazy `profile.meta.json` generation, manual catalog
   checks, checksum-verified updates, and field-level diffing through
   [[../frontend/System-Utilities]] `ProfileManager`.
+- Profile catalogs for manual remote updates are published outside the app via
+  `publish-profiles.py` to
+  `https://updates.yofo.bio/profiles/<channel>/catalog.json`; see
+  `docs/howto/auto-update-r2.md`.
 
 ## Gotchas
 
@@ -46,3 +50,6 @@
   classification.
 - See task `knowledge_map/task/2025-11-25-config-profiles.md` for the
   profile management history and current implementation notes.
+- Bundled defaults now include top-level `config_schema_version`. Remote
+  profile support should treat missing schema as legacy local config rather
+  than rejecting existing user profiles at startup.

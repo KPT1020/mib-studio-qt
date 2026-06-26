@@ -5,6 +5,33 @@
 
 ## Features shipped
 
+- **HDF5 recording finalization hardening** (2026-06-26) - `Hdf5Service`
+  now creates writable HDF5 files with strong-close semantics and performs an
+  explicit final global flush before `H5Fclose`, logging final flush status,
+  close timing, and open-object count. `AppBackend::startFrameRecording`
+  only increments the recorded-frame counter after successful HDF5 appends,
+  so `/recording_info` matches persisted batches. This targets stale
+  superblock/EOA failures observed in recording-mode `.h5` files that required
+  `h5clear --increment` repair. The per-append `.recovery.h5` full-file copy
+  was **removed** (it copied the whole growing file every batch and made the
+  recorder thread fall behind on NAS, dropping frames); append paths now flush
+  on a time interval via `maybeIntervalFlush()` (`MIB_HDF5_FLUSH_INTERVAL_MS`,
+  default 5000 ms) and there is no recovery sidecar. A mid-recording crash can
+  lose up to one flush interval — the accepted tradeoff for real-time
+  throughput. `recording.hdf5_resilience` covers destructor-driven
+  finalization, clean-fail on a corrupted primary, and data preservation for
+  recording-mode and experiment files; `recording.hdf5_save_performance` guards
+  repeated-append save time.
+
+- **Cloudflare R2 profile catalog publishing setup** (2026-06-11) — Added
+  `publish-profiles.py` for KIN-47 profile catalog hosting under
+  `https://updates.yofo.bio/profiles/<channel>/catalog.json`. The publisher
+  validates `config_schema_version`, computes config/script SHA-256 values,
+  generates upload-time `profile.meta.json`, writes `catalog.json`, and reuses
+  the existing Wrangler/S3-compatible R2 credential flow. `docs/howto/auto-update-r2.md`
+  now documents the required Cloudflare public bucket, cache, verification,
+  and no-credential-in-repo setup for remote profile catalogs.
+
 - **Pipeline timing benchmark** (2026-06-17) — `tests/performance/pipeline_timing_benchmark.cpp`
   (ctest `performance.pipeline_timing`) quantifies the two throttling fixes
   below. (A) Runs the shipped per-slot `FrameStore` against an in-test
@@ -145,13 +172,15 @@
   notes accordingly.
 
 - **Crash-resilient HDF5 checkpoints for experiment/recording writes**
-  (2026-06-01) - `Hdf5Service` now flushes after each append/metadata write and
-  copies a rolling recovery snapshot to `<file>.recovery.h5`. `loadFile()`
-  falls back to this checkpoint if opening the primary `.h5` fails, allowing
-  post-crash retrieval of the latest persisted data. Recording metadata writes
-  were also hardened to open/create existing groups/attributes instead of
-  failing on reruns. `MainWindow::onStopExperiment` now flushes before writing
-  final experiment metadata.
+  (2026-06-01, **superseded 2026-06-26**) - `Hdf5Service` originally flushed
+  after each append/metadata write and copied a rolling recovery snapshot to
+  `<file>.recovery.h5`, with `loadFile()` falling back to it. The `.recovery.h5`
+  copy was removed in the 2026-06-26 finalization hardening above (it dominated
+  NAS save time and starved the recorder thread); flushing is now time-interval
+  based with no sidecar. Still current from this change: recording metadata
+  writes open/create existing groups/attributes instead of failing on reruns,
+  and `MainWindow::onStopExperiment` flushes before writing final experiment
+  metadata.
 
 - **GUI-configurable boot disable list** (2026-05-22) - Added a Settings menu
   action (**Boot Service Toggles...**) that persists disabled startup services
