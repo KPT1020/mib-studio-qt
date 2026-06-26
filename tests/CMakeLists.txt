@@ -38,6 +38,14 @@ mib_add_backend_test_executable(recording_lifecycle_test recording/recording_lif
 add_test(NAME recording.lifecycle COMMAND $<TARGET_FILE:recording_lifecycle_test>)
 set_tests_properties(recording.lifecycle PROPERTIES LABELS "recording;backend")
 
+mib_add_backend_test_executable(hdf5_resilience_test recording/hdf5_resilience_test.cpp)
+add_test(NAME recording.hdf5_resilience COMMAND $<TARGET_FILE:hdf5_resilience_test>)
+set_tests_properties(recording.hdf5_resilience PROPERTIES LABELS "recording;backend;hdf5")
+
+mib_add_backend_test_executable(hdf5_save_performance_test recording/hdf5_save_performance_test.cpp)
+add_test(NAME recording.hdf5_save_performance COMMAND $<TARGET_FILE:hdf5_save_performance_test>)
+set_tests_properties(recording.hdf5_save_performance PROPERTIES LABELS "recording;backend;hdf5;performance")
+
 mib_add_backend_test_executable(kin6_batch_pipeline_evidence integration/kin6_batch_pipeline_evidence.cpp)
 
 mib_add_backend_test_executable(kin10_hf_dataset_pipeline_test integration/kin10_hf_dataset_pipeline_test.cpp)

@@ -132,6 +132,11 @@ public:
                            uint64_t& totalFrames, uint64_t& filteredFrames);
 
 private:
+    // Flush at most once per configured interval (env MIB_HDF5_FLUSH_INTERVAL_MS,
+    // default 5 s). Used by append hot paths so the recorder thread avoids
+    // synchronous I/O on every batch; closeFile() still does a final flush.
+    bool maybeIntervalFlush();
+
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

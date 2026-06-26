@@ -736,10 +736,11 @@ namespace backend
 
                     // Flush batch when full
                     if (batchImages.size() >= FLUSH_BATCH) {
-                        if (!hdf5Service_->appendRecordingFrames(batchImages, batchMeta)) {
+                        if (hdf5Service_->appendRecordingFrames(batchImages, batchMeta)) {
+                            frameRecordingWritten_.fetch_add(batchImages.size(), std::memory_order_relaxed);
+                        } else {
                             SPDLOG_ERROR("Frame recording: failed to flush batch");
                         }
-                        frameRecordingWritten_.fetch_add(batchImages.size(), std::memory_order_relaxed);
                         batchImages.clear();
                         batchMeta.clear();
                     }
@@ -758,9 +759,11 @@ namespace backend
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
                     std::chrono::system_clock::now().time_since_epoch()).count());
 
-            hdf5Service_->writeRecordingInfo(startTimeNs, endTimeNs,
-                                             frameRecordingWritten_.load(),
-                                             frameRecordingFiltered_.load());
+            if (!hdf5Service_->writeRecordingInfo(startTimeNs, endTimeNs,
+                                                  frameRecordingWritten_.load(),
+                                                  frameRecordingFiltered_.load())) {
+                SPDLOG_ERROR("Frame recording: failed to write recording_info metadata");
+            }
             hdf5Service_->closeFile();
 
             SPDLOG_INFO("Frame recording stopped: {} frames recorded, {} empty filtered, file: {}",

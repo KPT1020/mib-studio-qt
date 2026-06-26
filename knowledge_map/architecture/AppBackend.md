@@ -97,6 +97,14 @@ no contour processing.
 - Counters: `frameRecordingCount()`, `frameRecordingFiltered()`
 - Uses a dedicated `frameRecordingThread_` and leverages
   [[../data-model/FrameStore]]'s `setFrameFilter` to drop empty frames.
+- `stopFrameRecording()` joins the recording thread; the thread flushes the
+  final batch, writes `/recording_info`, and closes the HDF5 file before the
+  stop call returns. The written-frame counter advances only after a batch
+  append succeeds, so recording metadata reflects persisted frames.
+- The recorder thread polls [[../data-model/FrameStore]] (a finite ring) at its
+  own pace, so it must not block on synchronous I/O or it falls behind and
+  drops frames. [[../services/Hdf5Service]] therefore flushes on a time interval
+  (no per-append full-file copy); see `MIB_HDF5_FLUSH_INTERVAL_MS`.
 
 ## Config JSON storage
 

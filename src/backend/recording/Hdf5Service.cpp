@@ -13,11 +13,11 @@
 #include <hdf5_hl.h>
 
 #include <vector>
+#include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <chrono>
 #include <sstream>
-#include <filesystem>
 
 namespace backend::services
 {
@@ -27,15 +27,25 @@ namespace backend::services
         hid_t fileId_{H5I_INVALID_HID};
         std::string filePath_;
         bool isOpen_{false};
+        bool writable_{false};
         bool datasetsInitialized_{false};
         hsize_t validFramesWritten_{0};
         hsize_t invalidFramesWritten_{0};
         hsize_t seriesImagesWritten_{0}; // tracks /valid_frames/series_images row count
 
+        // Time-interval flush state: append paths flush at most once per
+        // flushInterval_ instead of every batch, so hot-path I/O stays cheap.
+        std::chrono::steady_clock::time_point lastIntervalFlush_{};
+        std::chrono::milliseconds flushInterval_{5000};
+
         ~Impl()
         {
             if (fileId_ != H5I_INVALID_HID)
             {
+                if (writable_)
+                {
+                    H5Fflush(fileId_, H5F_SCOPE_GLOBAL);
+                }
                 H5Fclose(fileId_);
                 fileId_ = H5I_INVALID_HID;
             }
@@ -44,28 +54,31 @@ namespace backend::services
 
     namespace
     {
-        std::string recoveryPathFor(const std::string &filePath)
+        hid_t createFileAccessPropertyList()
         {
-            return filePath + ".recovery.h5";
+            hid_t fileAccessId = H5Pcreate(H5P_FILE_ACCESS);
+            if (fileAccessId < 0)
+            {
+                SPDLOG_WARN("Failed to create HDF5 file access property list; using defaults");
+                return H5P_DEFAULT;
+            }
+
+            if (H5Pset_fclose_degree(fileAccessId, H5F_CLOSE_STRONG) < 0)
+            {
+                SPDLOG_WARN("Failed to set HDF5 strong close degree; using default close behavior");
+                H5Pclose(fileAccessId);
+                return H5P_DEFAULT;
+            }
+
+            return fileAccessId;
         }
 
-        bool writeRecoveryCheckpoint(const std::string &filePath)
+        void closePropertyList(hid_t propertyListId)
         {
-            if (filePath.empty())
+            if (propertyListId != H5P_DEFAULT && propertyListId != H5I_INVALID_HID)
             {
-                return false;
+                H5Pclose(propertyListId);
             }
-
-            std::error_code ec;
-            std::filesystem::copy_file(filePath, recoveryPathFor(filePath),
-                                       std::filesystem::copy_options::overwrite_existing, ec);
-            if (ec)
-            {
-                SPDLOG_WARN("Failed to write HDF5 recovery checkpoint for {}: {}",
-                            filePath, ec.message());
-                return false;
-            }
-            return true;
         }
 
         struct ProcessedFrameMetadataRecord
@@ -206,8 +219,11 @@ namespace backend::services
             return false;
         }
 
-        // Create file, overwriting if it exists
-        impl_->fileId_ = H5Fcreate(filePath.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+        // Create file, overwriting if it exists. Strong close ensures the file
+        // is finalized even if a future write path accidentally leaks an HDF5 ID.
+        const hid_t fileAccessId = createFileAccessPropertyList();
+        impl_->fileId_ = H5Fcreate(filePath.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, fileAccessId);
+        closePropertyList(fileAccessId);
         if (impl_->fileId_ < 0)
         {
             SPDLOG_ERROR("Failed to open HDF5 file: {}", filePath);
@@ -216,16 +232,21 @@ namespace backend::services
 
         impl_->filePath_ = filePath;
         impl_->isOpen_ = true;
+        impl_->writable_ = true;
         impl_->datasetsInitialized_ = false;
+        // Configure interval flush (env override, default 5 s). Measure the
+        // first interval from open so the first batch does not flush.
+        impl_->flushInterval_ = std::chrono::milliseconds(5000);
+        if (const char* env = std::getenv("MIB_HDF5_FLUSH_INTERVAL_MS"))
         {
-            std::error_code ec;
-            std::filesystem::remove(recoveryPathFor(filePath), ec);
-            if (ec)
+            char* end = nullptr;
+            const long parsed = std::strtol(env, &end, 10);
+            if (end != env && parsed >= 0)
             {
-                SPDLOG_WARN("Failed to clear stale recovery checkpoint for {}: {}",
-                            filePath, ec.message());
+                impl_->flushInterval_ = std::chrono::milliseconds(parsed);
             }
         }
+        impl_->lastIntervalFlush_ = std::chrono::steady_clock::now();
         impl_->validFramesWritten_ = 0;
         impl_->invalidFramesWritten_ = 0;
         impl_->seriesImagesWritten_ = 0;
@@ -244,6 +265,34 @@ namespace backend::services
     {
         if (impl_->fileId_ != H5I_INVALID_HID && impl_->isOpen_)
         {
+            bool flushOk = true;
+            if (impl_->writable_)
+            {
+                const auto flushStart = std::chrono::steady_clock::now();
+                const herr_t flushStatus = H5Fflush(impl_->fileId_, H5F_SCOPE_GLOBAL);
+                const double flushMs = std::chrono::duration<double, std::milli>(
+                                           std::chrono::steady_clock::now() - flushStart)
+                                           .count();
+                flushOk = flushStatus >= 0;
+                if (flushOk)
+                {
+                    SPDLOG_INFO("HDF5 final flush completed: {} ({:.3f} ms)",
+                                impl_->filePath_, flushMs);
+                }
+                else
+                {
+                    SPDLOG_ERROR("HDF5 final flush failed for {} after {:.3f} ms",
+                                 impl_->filePath_, flushMs);
+                }
+            }
+
+            const auto openObjects = H5Fget_obj_count(impl_->fileId_, H5F_OBJ_ALL);
+            if (openObjects > 1)
+            {
+                SPDLOG_WARN("HDF5 file {} has {} open objects before close; strong close will finalize them",
+                            impl_->filePath_, static_cast<long long>(openObjects));
+            }
+
             // stop-lag diagnostic: H5Fclose implicitly flushes dirty buffers,
             // which on large multi-image payloads can dominate the shutdown
             // time. Time it explicitly so it shows up in the log.
@@ -263,12 +312,15 @@ namespace backend::services
             }
             {
                 std::ostringstream data;
-                data << "{\"status\":" << status << "}";
+                data << "{\"status\":" << status
+                     << ",\"final_flush_ok\":" << (flushOk ? "true" : "false")
+                     << ",\"open_objects_before_close\":" << openObjects << "}";
                 CrashReporter::capturePerformanceTransaction(
                     "hdf5.close_file", "hdf5.close", ms, data.str());
             }
             impl_->fileId_ = H5I_INVALID_HID;
             impl_->isOpen_ = false;
+            impl_->writable_ = false;
             {
                 auto& m = backend::diagnostics::CrashStateMirror::instance();
                 m.hdf5.fileOpen.store(false);
@@ -289,6 +341,22 @@ namespace backend::services
         }
         SPDLOG_DEBUG("H5Fflush completed for {}", impl_->filePath_);
         return true;
+    }
+
+    // Flush at most once per impl_->flushInterval_ so per-batch append paths
+    // keep the recorder thread off synchronous I/O most of the time. A crash
+    // loses at most one interval's worth of buffered frames; clean stop still
+    // gets a final flush + strong close in closeFile(). An interval of 0 forces
+    // a flush on every call (used by tests).
+    bool Hdf5Service::maybeIntervalFlush()
+    {
+        if (!isFileOpen())
+            return false;
+        const auto now = std::chrono::steady_clock::now();
+        if (now - impl_->lastIntervalFlush_ < impl_->flushInterval_)
+            return true; // skip: within interval
+        impl_->lastIntervalFlush_ = now;
+        return flush();
     }
 
     bool Hdf5Service::isFileOpen() const
@@ -1095,11 +1163,10 @@ namespace backend::services
 
         if (!validFrames.empty() || !invalidFrames.empty())
         {
-            if (!flush())
+            if (!maybeIntervalFlush())
             {
                 SPDLOG_WARN("appendFrames: post-write flush failed");
             }
-            writeRecoveryCheckpoint(impl_->filePath_);
         }
 
         return true;
@@ -1375,7 +1442,6 @@ namespace backend::services
         {
             SPDLOG_WARN("writeExperimentInfo: post-write flush failed");
         }
-        writeRecoveryCheckpoint(impl_->filePath_);
 
         SPDLOG_DEBUG("Wrote experiment info, processing config, and ROI to HDF5");
         return true;
@@ -1434,7 +1500,6 @@ namespace backend::services
             {
                 SPDLOG_WARN("writeConfigJson: post-write flush failed");
             }
-            writeRecoveryCheckpoint(impl_->filePath_);
             SPDLOG_DEBUG("Wrote config JSON ({} bytes) to HDF5 metadata", jsonContent.size());
         }
         else
@@ -1452,31 +1517,21 @@ namespace backend::services
             return false;
         }
 
-        // Open existing file for reading
-        impl_->fileId_ = H5Fopen(filePath.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
-        std::string openedPath = filePath;
+        // Open existing file for reading. Use the same strong close property so
+        // review-time handles cannot keep the file half-open inside HDF5.
+        const hid_t fileAccessId = createFileAccessPropertyList();
+        impl_->fileId_ = H5Fopen(filePath.c_str(), H5F_ACC_RDONLY, fileAccessId);
+        closePropertyList(fileAccessId);
         if (impl_->fileId_ < 0)
         {
-            const std::string recoveryPath = recoveryPathFor(filePath);
-            if (std::filesystem::exists(recoveryPath))
-            {
-                impl_->fileId_ = H5Fopen(recoveryPath.c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
-                if (impl_->fileId_ >= 0)
-                {
-                    openedPath = recoveryPath;
-                    SPDLOG_WARN("Primary HDF5 open failed; loaded recovery checkpoint instead: {}", recoveryPath);
-                }
-            }
-            if (impl_->fileId_ < 0)
-            {
-                SPDLOG_ERROR("Failed to open HDF5 file for reading: {}", filePath);
-                return false;
-            }
+            SPDLOG_ERROR("Failed to open HDF5 file for reading: {}", filePath);
+            return false;
         }
 
-        impl_->filePath_ = openedPath;
+        impl_->filePath_ = filePath;
         impl_->isOpen_ = true;
-        SPDLOG_INFO("HDF5 file opened for reading: {}", openedPath);
+        impl_->writable_ = false;
+        SPDLOG_INFO("HDF5 file opened for reading: {}", filePath);
         return true;
     }
 
@@ -2931,11 +2986,10 @@ namespace backend::services {
 
         if (alreadyWritten == 0)
             impl_->validFramesWritten_ = images.size();
-        if (!flush())
+        if (!maybeIntervalFlush())
         {
             SPDLOG_WARN("appendRecordingFrames: post-write flush failed");
         }
-        writeRecoveryCheckpoint(impl_->filePath_);
         SPDLOG_DEBUG("Recording: appended {} frames (total: {})", images.size(), impl_->validFramesWritten_);
         return true;
     }
@@ -3002,7 +3056,6 @@ namespace backend::services {
         {
             SPDLOG_WARN("writeRecordingInfo: post-write flush failed");
         }
-        writeRecoveryCheckpoint(impl_->filePath_);
         SPDLOG_INFO("Recording info written: recorded={}, filtered={}", totalFrames, filteredFrames);
         return true;
     }

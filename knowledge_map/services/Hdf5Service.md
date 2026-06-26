@@ -4,8 +4,8 @@
 > frame-recording mode and review-time scalable (hyperslab) reads.
 > HDF5 headers are hidden behind a PIMPL.
 
-**Source:** `src/backend/services/Hdf5Service.cpp`,
-`include/backend/services/Hdf5Service.h`
+**Source:** `src/backend/recording/Hdf5Service.cpp`,
+`include/backend/recording/Hdf5Service.h`
 **Related:** [[ProcessingService]], [[../data-model/HDF5-Storage]],
 [[../frontend/HdfReviewTab]]
 
@@ -16,9 +16,18 @@
   (`initializeDatasets` + `appendFrames`).
 - Stores experiment metadata: start/end time (ns), totals, `ProcessingConfig`,
   ROI, optional background image; plus raw config JSON via `writeConfigJson`.
-- After each successful append/metadata write, forces an HDF5 flush and writes
-  a rolling checkpoint copy to `<file>.recovery.h5` so abrupt crashes leave a
-  recoverable snapshot.
+- Append hot paths (`appendFrames`, `appendRecordingFrames`) flush via
+  `maybeIntervalFlush()`: an `H5Fflush(H5F_SCOPE_GLOBAL)` at most once per
+  `MIB_HDF5_FLUSH_INTERVAL_MS` (default 5000 ms). This keeps the recorder
+  thread off synchronous I/O on every batch, so it cannot fall behind the
+  `frameStore_` ring buffer and drop frames. One-shot finalization writes
+  (`writeExperimentInfo`, `writeConfigJson`, `writeRecordingInfo`) flush
+  unconditionally. There is **no** `.recovery.h5` sidecar copy.
+- Writable files are created with HDF5 strong-close semantics and
+  `closeFile()` performs an explicit final global flush before `H5Fclose`.
+  This protects the superblock/EOA state after recording stop and logs final
+  flush status, close timing, and the open-object count. A crash mid-recording
+  can lose up to one flush interval — the accepted tradeoff for throughput.
 - Review reads: `readValidFrames`, `readInvalidFrames`, plus scalable
   `readImageByIndex` / `readImagesRange` using hyperslabs.
 - Metadata-only reads (`readValidMetadata` / `readInvalidMetadata`) skip
@@ -45,11 +54,17 @@ Blocking I/O on whichever thread calls it. In practice:
 ## Gotchas
 
 - `writeConfigJson` must follow `writeExperimentInfo`.
-- `loadFile(path)` now auto-falls back to `path + ".recovery.h5"` if the
-  primary file cannot be opened (e.g. interrupted write/corruption).
+- `loadFile(path)` opens the primary file only — there is no recovery-sidecar
+  fallback. A corrupt/unfinalized primary fails to load (try
+  `h5clear --increment`).
 - Scalable reads (`readImageByIndex`, `readImagesRange`) support both 3D
   `(N,H,W)` and 4D `(N,H,W,C)` datasets — use them for large files instead
   of `readValidFrames` to avoid OOM. See task
   `knowledge_map/task/review_2gb_scalability.md`.
 - PIMPL means you can't see HDF5 types in headers — look at
-  `src/backend/services/Hdf5Service.cpp` for dataset paths and dtypes.
+  `src/backend/recording/Hdf5Service.cpp` for dataset paths and dtypes.
+- If a primary `.h5` opens only after `h5clear --increment`, check recorder
+  logs for final flush/close errors and whether the app or host was killed
+  before `stopFrameRecording()` returned. With interval flushing, a kill
+  between flushes can leave up to `MIB_HDF5_FLUSH_INTERVAL_MS` of frames
+  unflushed.
