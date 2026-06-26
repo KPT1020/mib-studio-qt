@@ -1,8 +1,13 @@
 #pragma once
 
 #include <QWidget>
+#include <QMap>
+#include <QVector>
 
 #include <string>
+#include <optional>
+
+#include "frontend/system/ProfileManager.h"
 
 namespace backend { class AppBackend; }
 
@@ -18,6 +23,8 @@ class QComboBox;
 class QCheckBox;
 class QScrollArea;
 class QGridLayout;
+class QDialog;
+class QTableWidget;
 
 namespace frontend { class JsonTableModel; }
 
@@ -57,13 +64,18 @@ private slots:
 	void onSaveProfile();
 	void onDeleteProfile();
 	void onRenameProfile();
-	void onIncludeJsToggled(bool checked);
+    void onCheckProfileUpdates();
+    void onUpdateSelectedProfile();
+    void onShowProfileDiff();
+    void onDuplicateProfileAsLocal();
+    void onIncludeJsToggled(bool checked);
 
 private:
     QString appDirIncludePath(const QString& fileName) const;
     QString defaultJsonPath() const { return appDirIncludePath("config.json"); }
     QString defaultJsPath() const { return appDirIncludePath("egrabberConfig.js"); }
     QString currentJsonPath() const;
+    void clearJsonSyncIndicators();
     bool loadFileToEditor(const QString& path, QPlainTextEdit* editor, QString* err);
     bool saveEditorToFile(QPlainTextEdit* editor, const QString& path, QString* err);
     void refreshJsonTableModel();
@@ -79,8 +91,16 @@ private:
 	QString profileJsonPath(const QString& profileName) const;
 	QString profileJsPath(const QString& profileName) const;
 	void loadSelectedProfileInternal(const QString& profileName);
+    QString selectedProfileName() const;
+    QString profileLabelForSummary(const frontend::ProfileManager::LocalProfile& summary) const;
+    void refreshProfileStatusLabel();
+    void showDiffDialog(const QString& title, const QVector<frontend::ProfileManager::DiffRow>& rows);
+    std::optional<frontend::ProfileManager::LocalProfile> selectedProfileSummary() const;
+    std::optional<frontend::ProfileManager::CatalogEntry> selectedRemoteCatalogEntry() const;
 
     backend::AppBackend& backend_;
+    frontend::ProfileManager profileManager_;
+    std::optional<frontend::ProfileManager::Catalog> remoteCatalog_;
 
     QTabWidget* tabs_ = nullptr;
 
@@ -101,10 +121,16 @@ private:
     QPushButton* jsonClearBtn_ = nullptr;
     QLabel* jsonPathLabel_ = nullptr;
 	QLabel* jsonUnsavedLabel_ = nullptr;
+	QLabel* jsonConflictLabel_ = nullptr;
 	QComboBox* profileSelect_ = nullptr;
 	QPushButton* saveProfileBtn_ = nullptr;
 	QPushButton* deleteProfileBtn_ = nullptr;
 	QPushButton* renameProfileBtn_ = nullptr;
+	QPushButton* checkUpdatesBtn_ = nullptr;
+	QPushButton* updateSelectedBtn_ = nullptr;
+	QPushButton* showDiffBtn_ = nullptr;
+	QPushButton* duplicateAsLocalBtn_ = nullptr;
+	QLabel* profileStatusLabel_ = nullptr;
     QTimer* jsonDebounceTimer_ = nullptr;
 
     // JS tab
@@ -121,6 +147,3 @@ private:
 };
 
 } // namespace frontend
-
-
-

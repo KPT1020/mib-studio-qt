@@ -1,0 +1,74 @@
+name: Sanitizers
+
+# Runs the backend tests under ThreadSanitizer and Address+UndefinedSanitizer.
+# TSan catches the lost-wakeup / data-race class (TriggerService, FrameStore);
+# ASan+UBSan catch memory errors / UB. Runs on PRs, nightly, and on demand --
+# intentionally NOT on push to main, so this new lane can be triaged without
+# gating main while suppressions are tuned.
+on:
+  pull_request:
+    branches: [main, master]
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sanitize:
+    name: ${{ matrix.sanitizer }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [thread, address+undefined]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Linux system packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake git libgl1-mesa-dev libhdf5-dev libopencv-dev \
+            libspdlog-dev libsqlite3-dev libxkbcommon-dev nlohmann-json3-dev \
+            pkg-config python3-pip qt6-base-dev qt6-serialport-dev
+
+      - name: Configure (backend-only + sanitizer)
+        shell: bash
+        run: cmake --preset linux-backend-only -DMIB_SANITIZER=${{ matrix.sanitizer }}
+
+      - name: Build
+        shell: bash
+        run: cmake --build --preset linux-backend-only-build
+
+      - name: Test under sanitizer
+        shell: bash
+        env:
+          # Route the e-modulus LUT manifest lookup to a file: URL so startup
+          # does NOT use QNetworkAccessManager (whose glib/libproxy/gio threading
+          # TSan cannot model). The file is absent -> graceful bundled fallback.
+          MIB_STUDIO_EMODULUS_LUT_MANIFEST_URL: "file:///nonexistent/mib-lut-manifest.json"
+          # Halt on the first finding in OUR code. Suppressions filter out
+          # uninstrumented third-party library noise (OpenCV/GDAL, glib).
+          TSAN_OPTIONS: "halt_on_error=1 second_deadlock_stack=1 suppressions=${{ github.workspace }}/tests/sanitizer/tsan.supp"
+          ASAN_OPTIONS: "halt_on_error=1 abort_on_error=1 detect_leaks=1"
+          LSAN_OPTIONS: "suppressions=${{ github.workspace }}/tests/sanitizer/lsan.supp"
+          UBSAN_OPTIONS: "halt_on_error=1 print_stacktrace=1"
+        run: |
+          set -o pipefail
+          # Memory/concurrency-relevant tests; exclude timing-sensitive
+          # performance/integration tests (sanitizer slowdown skews budgets) and
+          # network-backed tests.
+          ctest --test-dir build/linux-backend --output-on-failure --timeout 600 \
+            -L "backend|recording|processing|camera" \
+            -LE "integration|performance"

@@ -4,7 +4,7 @@
 
 | Package | Version | Shared? | Notes |
 |---|---|---|---|
-| qt | 6.7.3 | ✓ | Widgets + Charts + SerialPort + ImageFormats |
+| qt | 6.7.3 | ✓ | Core + Gui + SerialPort + Network + Widgets + Charts + ImageFormats |
 | spdlog | 1.17.0 | | Logging ([[../conventions/Logging]]) |
 | sqlite3 | 3.51.0 | | [[../services/SqliteService]] |
 | hdf5 | 1.14.6 | ✓ | C++ API enabled — [[../services/Hdf5Service]] |
@@ -17,6 +17,10 @@
 - **Euresys EGrabber SDK** — `egrabber-sample-programs/` (reference source
   tree); actual SDK is assumed installed system-side. See
   `docs/integration/egrabber.md`.
+- **MindVision SDK** — not vendored. Configure with
+  `MIB_ENABLE_MINDVISION=ON` on Windows and point CMake at the SDK root via
+  `MIB_MINDVISION_SDK_ROOT` or `MIB_MINDVISION_SDK_DIR`. The build expects
+  the MindVision include tree plus `MVCAMSDK.dll` or `MVCAMSDK_X64.dll`.
 - **Coremor XMT DLL** — `include/Coremor/` (`.h`, `.lib`, `.dll`). Used by
   [[../services/AutofocusService]].
 
@@ -24,9 +28,9 @@
 
 - `CMakeLists.txt` calls `find_package(Qt6 ...)` and so on; Conan
   generates the toolchain (`build/conan_toolchain.cmake`).
-- Backend-only builds (`MIB_BUILD_BACKEND_ONLY=ON`) require only Qt
-  `Core+Gui+SerialPort` components (frontend-only modules `Widgets`, `Charts`,
-  `Network`, `Concurrent` are not required).
+- Backend-only builds (`MIB_BUILD_BACKEND_ONLY=ON`) require Qt
+  `Core+Gui+SerialPort+Network` components. Frontend-only modules
+  `Widgets`, `Charts`, and `Concurrent` are still not required.
 - Qt shared DLLs + plugins are deployed next to the exe via
   `windeployqt.exe` in a post-build step.
 - OpenCV and HDF5 DLLs are also copied next to the exe (see
@@ -35,6 +39,14 @@
   (`WIN32` => `ON`, otherwise `OFF`):
   - EGrabber headers/system path are only added when `MIB_HAS_EGRABBER=1`.
   - Coremor include/lib wiring is only added when `MIB_HAS_EGRABBER=1`.
+- MindVision SDK linkage is gated separately by `MIB_ENABLE_MINDVISION` /
+  `MIB_HAS_MINDVISION`:
+  - CMake locates the MindVision SDK include tree and runtime DLL only when
+    `MIB_ENABLE_MINDVISION=ON` on Windows.
+- Default builds keep MindVision disabled so Linux/cloud CI does not require
+  proprietary SDK files.
+- `QtNetwork` is linked by the backend library so `AppBackend` can manage the
+  Young's modulus LUT manifest/cache directly during startup.
 
 ## Linux cloud build notes
 

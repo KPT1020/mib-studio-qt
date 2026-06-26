@@ -24,6 +24,7 @@
 #include "backend/processing/ProcessingService.h"
 #include "backend/services/AutofocusService.h"
 #include "frontend/system/PlaybackPanel.h"
+#include "frontend/utils/JsonConfigMerge.h"
 
 namespace frontend
 {
@@ -167,6 +168,67 @@ namespace frontend
 				SPDLOG_WARN("AppConfigWatcher: failed to open resource defaults/config.json");
 			}
 		}
+		else
+		{
+			mergeNewDefaultsIntoConfig(path);
+		}
+	}
+
+	void AppConfigWatcher::mergeNewDefaultsIntoConfig(const QString &path) const
+	{
+		// On an update, a newer build may add keys to the bundled defaults that
+		// the user's existing config.json predates. Merge those missing keys in
+		// (preserving every existing user value) so an updated install does not
+		// drift away from a fresh install. Only the app-managed config location
+		// reaches here; an external user-chosen file is never rewritten.
+		QFile res(":/defaults/config.json");
+		if (!res.open(QIODevice::ReadOnly))
+		{
+			return;
+		}
+		const QJsonDocument defaultsDoc = QJsonDocument::fromJson(res.readAll());
+		if (!defaultsDoc.isObject())
+		{
+			return;
+		}
+
+		QFile in(path);
+		if (!in.open(QIODevice::ReadOnly))
+		{
+			SPDLOG_WARN("AppConfigWatcher: failed to read config.json for default merge: {}", path.toStdString());
+			return;
+		}
+		const QByteArray existing = in.readAll();
+		in.close();
+
+		QJsonParseError parseError{};
+		const QJsonDocument userDoc = QJsonDocument::fromJson(existing, &parseError);
+		if (parseError.error != QJsonParseError::NoError || !userDoc.isObject())
+		{
+			// Leave a malformed/unexpected file alone rather than risk clobbering it.
+			SPDLOG_WARN("AppConfigWatcher: skipping default merge, config.json is not a valid object");
+			return;
+		}
+
+		QJsonObject merged = userDoc.object();
+		if (!jsonutil::mergeMissingDefaults(merged, defaultsDoc.object()))
+		{
+			return; // Already has every default key; nothing to do.
+		}
+
+		QFile out(path);
+		if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
+		{
+			SPDLOG_WARN("AppConfigWatcher: failed to open config.json to write merged defaults: {}", path.toStdString());
+			return;
+		}
+		const QByteArray serialized = QJsonDocument(merged).toJson(QJsonDocument::Indented);
+		if (out.write(serialized) != serialized.size())
+		{
+			SPDLOG_WARN("AppConfigWatcher: failed to write merged config.json to {}", path.toStdString());
+			return;
+		}
+		SPDLOG_INFO("AppConfigWatcher: merged new default keys into existing config.json at {}", path.toStdString());
 	}
 
 	int AppConfigWatcher::toOddKernelSize(int v)
@@ -537,6 +599,10 @@ namespace frontend
 
 		// Update image_processing section
 		QJsonObject ip = root.value("image_processing").toObject();
+		ip.insert("gaussian_blur_size", pcfg.gaussian_blur_size);
+		ip.insert("bg_subtract_threshold", pcfg.bg_subtract_threshold);
+		ip.insert("morph_kernel_size", pcfg.morph_kernel_size);
+		ip.insert("morph_iterations", pcfg.morph_iterations);
 		ip.insert("area_threshold_min", pcfg.area_threshold_min);
 		ip.insert("area_threshold_max", pcfg.area_threshold_max);
 		ip.insert("deformability_threshold_min", pcfg.deformability_threshold_min);
@@ -544,6 +610,10 @@ namespace frontend
 		ip.insert("area_ratio_threshold_max", pcfg.area_ratio_threshold_max);
 		ip.insert("ring_ratio_min", pcfg.ring_ratio_min);
 		ip.insert("ring_ratio_max", pcfg.ring_ratio_max);
+		ip.insert("empty_frame_pixel_threshold", pcfg.empty_frame_pixel_threshold);
+		ip.insert("auto_background_enabled", pcfg.auto_background_enabled);
+		ip.insert("auto_background_empty_frames", pcfg.auto_background_empty_frames);
+		ip.insert("auto_background_cooldown_frames", pcfg.auto_background_cooldown_frames);
 
 		// Update filters sub-object
 		QJsonObject fl = ip.value("filters").toObject();
@@ -562,7 +632,16 @@ namespace frontend
 		tg.insert("area_max", pcfg.target_group_area_max);
 		tg.insert("deformability_min", pcfg.target_group_deformability_min);
 		tg.insert("deformability_max", pcfg.target_group_deformability_max);
+		tg.insert("emodulus_enabled", pcfg.enable_target_group_emodulus);
+		tg.insert("emodulus_min", pcfg.target_group_emodulus_min);
+		tg.insert("emodulus_max", pcfg.target_group_emodulus_max);
 		ip.insert("target_group", tg);
+
+		// Update multi-image settings
+		QJsonObject mi = ip.value("multi_image").toObject();
+		mi.insert("enabled", pcfg.multi_image_enabled);
+		mi.insert("count", pcfg.multi_image_count);
+		ip.insert("multi_image", mi);
 
 		root.insert("image_processing", ip);
 		doc.setObject(root);
@@ -570,10 +649,14 @@ namespace frontend
 		file.resize(0);
 		file.seek(0);
 		QTextStream out(&file);
-		out << doc.toJson(QJsonDocument::Indented);
+		const QByteArray serialized = doc.toJson(QJsonDocument::Indented);
+		out << serialized;
 		file.close();
 
+		backend_.setLastConfigJson(serialized.toStdString());
+
 		SPDLOG_INFO("AppConfigWatcher: wrote back processing config to {}", watchedPath_.toStdString());
+		emit configFileChanged(watchedPath_);
 	}
 
 } // namespace frontend

@@ -58,6 +58,8 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/src/frontend/dialogs/SyringePumpSettingsDialog.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/dialogs/SyringePumpSettingsDialog.h
     ${PROJECT_SOURCE_DIR}/resources/ui/SyringePumpSettingsDialog.ui
+    ${PROJECT_SOURCE_DIR}/src/frontend/dialogs/SoftwareUpdatesDialog.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/dialogs/SoftwareUpdatesDialog.h
     # Controllers
     ${PROJECT_SOURCE_DIR}/src/frontend/controllers/CameraController.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/controllers/CameraController.h
@@ -74,6 +76,10 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/FileIOUtils.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/JsonFlatten.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/JsonFlatten.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/JsonConfigMerge.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/utils/JsonConfigMerge.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/UpdateCatalog.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/utils/UpdateCatalog.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/RoiManager.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/RoiManager.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/RoiDrawCanvas.cpp
@@ -100,6 +106,8 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/include/frontend/system/AutoUpdater.h
     ${PROJECT_SOURCE_DIR}/src/frontend/system/DeviceInitManager.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/system/DeviceInitManager.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/system/ProfileManager.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/system/ProfileManager.h
     ${PROJECT_SOURCE_DIR}/src/frontend/system/PlaybackPanel.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/system/PlaybackPanel.h
     # Resources
@@ -146,8 +154,11 @@ target_link_libraries(mib_studio_qt PRIVATE
 )
 
 # App version exported from CMake (used for update checks, About dialogs, etc.).
+# _FULL retains any pre-release suffix (e.g. 1.0.4-beta.1) so the app knows its
+# channel; the plain one stays numeric for anything needing strict X.Y.Z.
 target_compile_definitions(mib_studio_qt PRIVATE
     MIB_STUDIO_QT_VERSION="${PROJECT_VERSION}"
+    MIB_STUDIO_QT_VERSION_FULL="${PROJECT_VERSION_FULL}"
 )
 
 mib_link_opencv(mib_studio_qt PRIVATE)

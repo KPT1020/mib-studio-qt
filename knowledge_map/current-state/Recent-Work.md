@@ -32,6 +32,121 @@
   now documents the required Cloudflare public bucket, cache, verification,
   and no-credential-in-repo setup for remote profile catalogs.
 
+- **Pipeline timing benchmark** (2026-06-17) — `tests/performance/pipeline_timing_benchmark.cpp`
+  (ctest `performance.pipeline_timing`) quantifies the two throttling fixes
+  below. (A) Runs the shipped per-slot `FrameStore` against an in-test
+  `LegacyRing` (single global mutex held across the full-frame copy) under
+  1 producer + N consumers — measured ~1.6–1.8× higher full-frame-copy
+  throughput on a 4-core box, and ~1.8× faster producer pushes (capture no
+  longer blocked behind consumers). (B) A/Bs the new bbox/row-pointer
+  brightness scan vs the old full-ROI `cv::Mat::at<>` scan, asserting the
+  quantiles are **identical** across 4000 cases (~1.6× faster). Gates are
+  loose (throughput ≥ 0.5× legacy; brightness identical) so CI does not flake.
+
+- **Per-frame detection allocator/CPU cost reduction** (2026-06-17) —
+  follow-up to the FrameStore fix targeting single-thread algo time in
+  [[../services/ProcessingService]]. (1) `FilterResult::allContours` is now a
+  `shared_ptr<const ...>` assigned once per frame instead of deep-copying the
+  whole contour set into every object's result (and again into each monitoring
+  / experiment copy); the write-only `hierarchy` field was deleted. (2)
+  `calculateBrightnessQuantiles` now scans only the object's bounding box via
+  row pointers and drops the needless `clone()` for gray input. Both costs
+  previously scaled linearly with objects-per-frame — the busy/triggering case.
+  Behaviour is bit-identical; covered by the existing multi-object / tracking /
+  integration tests.
+
+- **FrameStore lock-contention throttling fix** (2026-06-17) — the realtime
+  image-processing and triggering pipeline was throttling because
+  [[../data-model/FrameStore]] used a single `std::mutex` held *across the
+  full-frame `memcpy`* on both `pushFrame` (capture) and every `get*`
+  consumer (realtime loop, UI preview, raw-frame recorder). Producer and
+  consumers serialised on that one lock, defeating the ring buffer's
+  decoupling and stalling capture/processing/triggering. Replaced with a
+  two-tier scheme: a `std::shared_mutex structureMutex_` (shared on the hot
+  path, exclusive for `resize` / save / estimate) plus a per-slot
+  `std::mutex` array so the copy in/out holds only that slot's lock. Also
+  removed a redundant second `getByWriteIndex` of the same index in the
+  realtime snapshot path (`ProcessingService::realtimeInlineLoop`) — it now
+  reuses the already-fetched frame. See [[../data-model/FrameStore]]
+  "Threading".
+
+- **Experiment multi-image capture mode guard** (2026-06-16) —
+  `MainWindow::onStartExperiment` now auto-switches realtime processing from
+  `async_batch` to `inline` when multi-image capture is enabled, so experiment
+  runs actually collect series frames that can be viewed in Review. The
+  previous realtime mode is restored in `onStopExperiment`.
+
+- **Recording review multi-image window support** (2026-06-16) —
+  `writeRecordingInfo` now persists `multi_image_enabled` and
+  `multi_image_count` in `/recording_info`; `HdfReviewTab` reads those
+  attributes and, for recording files, loads a bounded series window from
+  `/recorded_frames/images` into `FrameViewerDialog` so series navigation is
+  available during review.
+
+- **Multi-image export range selector in Review tab** (2026-06-16) —
+  `HdfReviewTab` `Export All` now detects `series_images` datasets and prompts
+  users to export all series frames, a custom 1-based range (for example
+  `9-15`), or skip series images entirely. The export summary and logs now
+  report selected series range + counts.
+
+- **OpenAI Symphony workflow setup** (2026-06-11) - Added the repo-owned
+  `WORKFLOW.md` contract for the existing Linear `mib-studio` project, plus
+  `scripts/start-symphony.ps1` to bootstrap the OpenAI Symphony Elixir
+  reference implementation and run it against Codex app-server. Documented the
+  trusted-environment assumptions, Linear project slug, workspace location, and
+  startup path in `docs/howto/symphony.md`.
+
+- **MindVision local SDK build enablement** (2026-06-11) - Reconfigured the
+  Windows Debug build for `MIB_ENABLE_MINDVISION=ON` against the installed
+  MindVision SDK layout, and fixed the SDK include handling so both
+  `MindVision/CameraApiLoad.h` and flat `CameraApiLoad.h` installs compile.
+  The SDK dynamic-loader symbols are now owned by `MindVisionCamera.cpp`, the
+  Windows `max` macro no longer breaks the boot-time
+  `MIB_CAMERA_MODE=mindvision` path, and hosted Windows GitHub workflows
+  explicitly keep MindVision disabled because runners do not install the
+  proprietary SDK. The release workflow now builds the default target set
+  before `ctest` so test executables exist when release tests run; backend
+  lifecycle tests now clean temporary directories only after backend teardown.
+  The Overview/Experiment tab switch path now skips EGrabber JS script
+  application when a MindVision camera is selected.
+- **Remote-managed Young's modulus LUT** (2026-06-11) — Added a new
+  `EModulusLutCatalog` backend helper that checks a public R2 manifest,
+  downloads the LUT into a user-writable app-local cache, verifies the
+  SHA-256 before activation, and preserves the bundled LUT as an automatic
+  fallback when offline or incompatible. `AppBackend` now logs the active LUT
+  source, revision, path, and checksum status at startup, the backend-only
+  build links `QtNetwork`, and the repo gained `publish-emodulus-lut.py`,
+  `verify-emodulus-lut-manifest.py`, and a backend smoke test covering remote
+  update + fallback behavior. Docs were updated for the LUT R2 object layout
+  and cache/rollback flow.
+
+- **Public R2-backed profile catalog + manual updates** (2026-06-11) —
+  `ConfigTabs` now uses a dedicated `ProfileManager` helper to scan local
+  profiles, lazily create `profile.meta.json`, fetch public catalogs on
+  demand, verify SHA-256 for staged downloads, back up the previous local
+  profile files, install profile updates, and surface field-level config
+  diffs plus local/remote/update state in the profile row. Bundled defaults
+  gained `config_schema_version` so migrated configs stay self-describing.
+- **Experiment config sync hardening** (2026-06-11) — `AppConfigWatcher`
+  now writes back the full supported `image_processing` config section,
+  including blur, background, auto-background, target-group emodulus, and
+  `multi_image` fields, then emits `configFileChanged` immediately so the
+  Preview JSON editor/table and Monitoring Tune Params refresh without
+  waiting for filesystem-watcher timing. `ExperimentMonitoringTab` now
+  updates the histogram ring-ratio defaults through the chart-range setter,
+  and the shared `JsonFlatten` utility gained round-trip helpers plus tests
+  covering nested objects, arrays of objects, arrays of scalars, root
+  scalar tables, and the bundled `resources/defaults/config.json`.
+- **MindVision camera SDK compatibility** (2026-06-11) - Added a separate
+  MindVision camera backend and discovery path alongside the existing
+  EGrabber and mock workflows. CMake now exposes `MIB_ENABLE_MINDVISION`
+  and fails clearly when the SDK headers/runtime DLL are missing on Windows.
+  The Connect tab has a dedicated MindVision selection path, `AppBackend`
+  understands `MIB_CAMERA_MODE=mindvision`, and Windows packaging copies the
+  MindVision runtime DLL when enabled. Backend build/tests and docs/vault notes
+  were updated to keep the non-MindVision CI path green.
+
+- **Conan remote health precheck workflow** (2026-06-10, _removed 2026-06-23_) — Added `.github/workflows/conan-remote-health.yml`, a scheduled/manual GitHub Actions health check for ConanCenter/team-remote reachability. Removed on 2026-06-23: it was failing persistently and not providing actionable signal; the release workflow already handles remote fallback (`conan install` retries without the team remote). The release-workflow.md preflight reference was dropped with it.
 - **Cloudflare R2 CI publishing path cleanup** (2026-06-10) — Both
   Windows GitHub Actions release workflows now wire stable/beta publishing
   directly through `python publish-update.py`, map R2 credentials from
@@ -221,6 +336,20 @@
   handles cleanly; see [[../frontend/HdfReviewTab]].
 
 ## Recent fixes
+
+- **2026-06-24** — Fixed `hardware.camera` test (`tests/hardware/hw_camera_test.cpp`)
+  which asserted `isCameraConfigured()` immediately after `initialize()` with
+  `MIB_CAMERA_MODE=hardware`. The EGrabber boot path (`AppBackend.cpp` ~545)
+  installs the camera factory but intentionally leaves the device *selection* to
+  the connect flow (so `ConnectTab` can still run discovery and pick a device),
+  so `isCameraConfigured()` was `false` and the test failed before any capture.
+  The test now mirrors the connect flow — when not already configured it calls
+  `setHardwareCameraSelection(MIB_TEST_EGRABBER_IF, MIB_TEST_EGRABBER_DEV,
+  "egrabber")` (default 0/0), matching the sibling `hardware.egrabber_script`
+  test. MindVision mode is unaffected (it records its selection at boot).
+  Verified on-device: captured 61 frames from an SVS-VISTEK EoSens2.0MCX12.
+  Backend behaviour was deliberately left unchanged to avoid making boot-time
+  hardware mode skip `ConnectTab` discovery on multi-camera rigs.
 
 - **2026-05-05** — Made `scripts/hdf5_export.spec` and
   `scripts/build_mac.sh` portable for Unix packaging of the HDF5 Export GUI.

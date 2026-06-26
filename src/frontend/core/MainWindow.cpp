@@ -11,6 +11,12 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QMessageBox>
+#include <QDesktopServices>
+#include <QDir>
+#include <QStandardPaths>
+#include <QUrl>
+
+#include "frontend/dialogs/SoftwareUpdatesDialog.h"
 #include <QSizePolicy>
 #include <QWidget>
 #include <QVBoxLayout>
@@ -249,7 +255,9 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     {
         updater_ = new frontend::AutoUpdater(this, this);
         connect(ui->checkUpdatesAct, &QAction::triggered, this, [this]() {
-            if (updater_) updater_->checkForUpdates(true);
+            if (!updater_) return;
+            frontend::SoftwareUpdatesDialog dlg(updater_, this);
+            dlg.exec();
         });
     }
     else
@@ -257,6 +265,54 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         ui->checkUpdatesAct->setEnabled(false);
         SPDLOG_INFO("MainWindow: auto update disabled by MIB_DISABLED_SERVICES");
     }
+
+    // Folder shortcuts, docs, and issue reporting (always available).
+    auto openFolder = [](const QString& path) {
+        QDir().mkpath(path);
+        QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+    };
+    connect(ui->openDataFolderAct, &QAction::triggered, this, [openFolder]() {
+        openFolder(QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation))
+                       .absoluteFilePath(QStringLiteral("MIB_Studio_Qt")));
+    });
+    connect(ui->openLogsFolderAct, &QAction::triggered, this, [openFolder]() {
+#ifdef _WIN32
+        const QString localAppData = qEnvironmentVariable("LOCALAPPDATA");
+        const QString base = localAppData.isEmpty()
+            ? QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation)
+            : localAppData;
+#else
+        const QString base = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+#endif
+        openFolder(QDir(base).absoluteFilePath(QStringLiteral("MIB_Studio_Qt/logs")));
+    });
+    connect(ui->documentationAct, &QAction::triggered, this, []() {
+        QDesktopServices::openUrl(QUrl(QStringLiteral("https://github.com/KPT1020/mib-studio-qt")));
+    });
+    connect(ui->reportProblemAct, &QAction::triggered, this, []() {
+        QDesktopServices::openUrl(QUrl(QStringLiteral("https://github.com/KPT1020/mib-studio-qt/issues/new")));
+    });
+    connect(ui->profilesAct, &QAction::triggered, this, [this]() {
+        // The config/profiles editor lives in the Experiment > Preview page.
+        if (ui->tabs && experimentTabs_) {
+            ui->tabs->setCurrentWidget(experimentTabs_);
+            experimentTabs_->setCurrentIndex(0);
+        }
+    });
+
+    // Fatal save errors (recording or experiment flush) fire on a writer thread.
+    // Marshal to the UI thread: stop the active operation and show a dialog so
+    // the failure is never silent.
+    backend_.setFatalSaveErrorCallback([this](const std::string& msg) {
+        const QString q = QString::fromStdString(msg);
+        QMetaObject::invokeMethod(this, [this, q]() {
+            if (backend_.isFrameRecording()) backend_.stopFrameRecording();
+            if (experimentActive_) onStopExperiment();
+            statusBar()->showMessage(tr("Save error: %1").arg(q));
+            QMessageBox::critical(this, tr("Save Error"),
+                tr("Data could not be saved and the operation was stopped:\n\n%1").arg(q));
+        }, Qt::QueuedConnection);
+    });
 
     // Camera buttons will be added to main tab bar corner widget, not toolbar
     auto *startCaptureAct = new QAction("Start Camera", this);
@@ -663,6 +719,27 @@ void MainWindow::onStartExperiment()
 
     // Start experiment (clear frame buffers)
     auto &processing = backend_.processing();
+    restoreRealtimeModeAfterExperiment_ = false;
+    realtimeModeBeforeExperiment_ =
+        static_cast<int>(processing.getRealtimeProcessingMode());
+    const auto processingConfig = processing.getProcessingConfig();
+    const bool multiImageSeriesEnabled =
+        processingConfig.multi_image_enabled && processingConfig.multi_image_count > 1;
+    if (multiImageSeriesEnabled &&
+        processing.getRealtimeProcessingMode() ==
+            backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch)
+    {
+        processing.setRealtimeProcessingMode(
+            backend::services::ProcessingService::RealtimeProcessingMode::Inline);
+        restoreRealtimeModeAfterExperiment_ = true;
+        QMessageBox::information(
+            this,
+            tr("Start Experiment"),
+            tr("Multi-image series capture requires inline realtime processing.\n"
+               "This experiment will run in inline mode so series images remain reviewable.\n"
+               "Your previous realtime mode will be restored when the experiment stops."));
+        SPDLOG_INFO("MainWindow: switched realtime mode async_batch -> inline for multi-image experiment");
+    }
     processing.startExperiment();
 
     // Record experiment start time
@@ -720,7 +797,14 @@ void MainWindow::onStopExperiment()
                     sinceMs(t0), flushed);
         if (flushed > 0)
         {
-            SPDLOG_INFO("Final flush: {} frames written to HDF5", flushed);
+            SPDLOG_INFO("Final flush: {} frames submitted to HDF5 write queue", flushed);
+        }
+        // Drain the async write queue so the writer thread has stopped before the
+        // direct appendFrames below (no two threads writing the shared file).
+        if (!processing.finishFlush())
+        {
+            QMessageBox::warning(this, tr("Save Error"),
+                                 tr("A save error occurred while flushing experiment data to disk."));
         }
     }
 
@@ -808,6 +892,21 @@ void MainWindow::onStopExperiment()
     }
 
     experimentActive_ = false;
+    if (restoreRealtimeModeAfterExperiment_)
+    {
+        const auto restoreMode =
+            realtimeModeBeforeExperiment_ ==
+                    static_cast<int>(backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch)
+                ? backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch
+                : backend::services::ProcessingService::RealtimeProcessingMode::Inline;
+        processing.setRealtimeProcessingMode(restoreMode);
+        restoreRealtimeModeAfterExperiment_ = false;
+        SPDLOG_INFO("MainWindow: restored realtime mode after experiment stop to {}",
+                    restoreMode ==
+                            backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch
+                        ? "async_batch"
+                        : "inline");
+    }
     updateExperimentButtonStates(); // This will also call updateTabStates() to enable Overview and Review tabs
 
     const auto cfgAtStop = processing.getProcessingConfig();
@@ -1106,6 +1205,11 @@ void MainWindow::onTabChanged(int index)
     // Skip script application if experiment is active
     if (experimentActive_) {
         SPDLOG_WARN("MainWindow::onTabChanged: Skipping script application during active experiment");
+        return;
+    }
+
+    if (backend_.isMindVisionCameraSelected()) {
+        SPDLOG_DEBUG("MainWindow::onTabChanged: Skipping EGrabber script application for MindVision camera");
         return;
     }
 

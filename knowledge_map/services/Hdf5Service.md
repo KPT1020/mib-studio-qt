@@ -7,7 +7,26 @@
 **Source:** `src/backend/recording/Hdf5Service.cpp`,
 `include/backend/recording/Hdf5Service.h`
 **Related:** [[ProcessingService]], [[../data-model/HDF5-Storage]],
-[[../frontend/HdfReviewTab]]
+[[../frontend/HdfReviewTab]], [[../architecture/AppBackend]]
+
+## Async write decoupling — `HdfWriteQueue`
+
+`include/backend/recording/HdfWriteQueue.h` is a header-only, bounded (3-slot)
+single-writer queue used by **both** experiment flush ([[ProcessingService]]
+`flushBufferedFrames`) and frame recording ([[../architecture/AppBackend]]
+`startFrameRecording`) so slow HDF5 writes never stall the producer
+(capture/collection). A dedicated writer thread drains the FIFO and calls an
+injected `writeFn` (`appendFrames` / `appendRecordingFrames`). A failed write
+**or** a `submit` when all 3 slots are in flight (disk too slow) is a fatal,
+latched error: the writer stops, a one-shot `onError` fires, and further
+`submit`s are rejected. The written/flushed counters advance only on a confirmed
+successful write. `flushAndStop()` drains + joins for a clean stop. `Hdf5Service`
+has no internal lock, so callers must ensure only one writer touches the open
+file at a time — the queue's single writer thread provides that, and stop paths
+drain the queue before any direct write.
+
+`HdfWriteQueue`'s ctor parameter is `slotCount` (not `slots`, which Qt defines as
+a macro). Unit-tested by `tests/backend/hdf_write_queue_test.cpp`.
 
 ## Responsibility
 
@@ -41,7 +60,10 @@
   with `RecordingFrameMeta` (index, timestampNs, width, height).
   Matching readers: `isRecordingFile()` (probes `/recording_info`),
   `readRecordingMetadata(frames)` (fills only index + timestampNs on each
-  `ProcessedFrame`), `readRecordingInfo(start, end, total, filtered)`.
+  `ProcessedFrame`), `readRecordingInfo(start, end, total, filtered, ...)`.
+  Recording info now persists `multi_image_enabled` (`uint8`) and
+  `multi_image_count` (`uint64`) alongside start/end/totals so review mode can
+  reconstruct multi-image windows from `/recorded_frames/images`.
   Used by [[../frontend/HdfReviewTab]] to present recording files.
 
 ## Threading
@@ -53,6 +75,17 @@ Blocking I/O on whichever thread calls it. In practice:
 
 ## Gotchas
 
+- `openFile(path)` creates the destination's parent directory tree
+  (`std::filesystem::create_directories`) before `H5Fcreate`. HDF5 cannot
+  create intermediate directories, so without this a save to a folder that
+  does not exist yet (e.g. a freshly chosen path on a second/external/network
+  drive) fails — this was the root cause of "can save on one drive but not
+  the other." Open failures now log an actionable message (drive available?
+  writable? valid name? free space?) instead of a generic error. Regression
+  guard: `tests/integration/e2e_storage_destinations_test.cpp`
+  (`integration.e2e_storage_destinations`) saves to fresh/nested/long paths.
+  Note: paths exceeding the Windows `MAX_PATH` (260) limit still fail unless
+  long-path support is enabled at the OS level.
 - `writeConfigJson` must follow `writeExperimentInfo`.
 - `loadFile(path)` opens the primary file only — there is no recovery-sidecar
   fallback. A corrupt/unfinalized primary fails to load (try

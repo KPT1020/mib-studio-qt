@@ -205,7 +205,9 @@ jobs:
           # public identifier on the Sentry side, but we still treat it as a
           # secret because anyone who knows it can submit events that count
           # against quota.
-          $args = @('--preset', 'windows-default')
+          # Hosted GitHub runners do not have the proprietary MindVision SDK.
+          # Keep this explicit so CI continues to exercise the portable stub.
+          $args = @('--preset', 'windows-default', '-DMIB_ENABLE_MINDVISION=OFF')
           if ($env:MIB_SENTRY_DSN) {
             $args += "-DMIB_SENTRY_DSN=$env:MIB_SENTRY_DSN"
             $args += "-DMIB_SENTRY_ENVIRONMENT=$env:MIB_SENTRY_ENV"

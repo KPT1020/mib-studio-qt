@@ -13,5 +13,7 @@ Implementation
 Notes
 - Logging only via spdlog.
 - Invalid names sanitized; overwrite confirmations; guard missing files.
-
+- 2026-06-11 update: profile support now includes lazy `profile.meta.json`
+  generation, public R2 catalog checks, checksum-verified manual updates,
+  backup-on-install, and field-level config diffing.
 

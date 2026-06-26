@@ -3,7 +3,7 @@
 > Composition root. Owns every backend service and the shared `FrameStore`.
 > Frontend code holds a single `backend::AppBackend&` and calls getters.
 
-**Source:** `src/backend/AppBackend.cpp`, `include/backend/AppBackend.h`
+**Source:** `src/backend/app/AppBackend.cpp`, `include/backend/app/AppBackend.h`
 **Related:** [[Overview]], [[Data-Flow]], [[Threading-Model]],
 [[../data-model/FrameStore]]
 
@@ -31,8 +31,10 @@ See `src/backend/AppBackend.cpp` around lines 79–200.
 3. `sqliteService_->initialize(dataDir/app.sqlite3)`,
    `hdf5Service_->initialize(dataDir)`.
 4. Loads optional YOLO model from `resources/models/yolo11n-seg.onnx`.
-5. Loads Young's modulus LUT from
-   `resources/isoelastic_curve/scaled_isoelastic_data_LUT_6.16-4.24.txt`.
+5. Resolves the Young's modulus LUT through the managed R2/cache helper,
+   preferring the user-writable copy under the app-local data tree and
+   falling back to the bundled `resources/isoelastic_curve/...` file on
+   first run, offline launches, or update failures.
 6. Starts the processing worker pool (`processingService_->start()`).
    Realtime loop is **not** started here — it starts when the Experiment tab
    becomes active.
@@ -44,10 +46,24 @@ See `src/backend/AppBackend.cpp` around lines 79–200.
    - `ProcessingService::BackgroundCaptureCallback` → emits Qt signal via
      [[../frontend/System-Utilities]] `BackgroundCaptureNotifier`
 8. Seeds the [[../diagnostics/CrashStateMirror]] with initial app context
-   (camera label, data dir, mock vs hardware, FrameStore capacity) and sets
-   the Sentry tags (`camera_mode`, `data_dir`) on [[../services/CrashReporter]].
-   The reporter itself is initialized earlier in `main()`, before AppBackend
-   exists.
+   (camera label, data dir, mock vs hardware vs MindVision, FrameStore
+  capacity) and sets the Sentry tags (`camera_mode`, `data_dir`) on
+  [[../services/CrashReporter]].
+  The reporter itself is initialized earlier in `main()`, before AppBackend
+  exists.
+
+### LUT management
+
+The Young's modulus LUT now follows the same managed-asset model as the
+profile catalog:
+
+- `EModulusLutCatalog` checks `https://updates.yofo.bio/stable/emodulus-lut/latest.json`
+  by default, with `MIB_STUDIO_EMODULUS_LUT_MANIFEST_URL` as an override.
+- Remote payloads are verified with SHA-256 before replacing the local cache.
+- The active LUT path is logged with source, revision, checksum status, and
+  remote update outcome.
+- `MIB_STUDIO_EMODULUS_LUT_CACHE_DIR` can redirect the cache path for tests
+  or local validation.
 
 ### Boot-time service toggles (`MIB_DISABLED_SERVICES`)
 
@@ -75,18 +91,27 @@ Notes:
 ## Camera selection
 
 - `setHardwareCameraSelection(ifIdx, devIdx, label)` — choose device (no start)
+- `setMindVisionCameraSelection(cameraIndex, label)` — choose a MindVision
+  device (no start)
 - `configureMockCamera(options)` — choose mock folder instead
 - `applyCameraScriptFromFile(path)` — push a GenICam JS config to the selected
   device (stops capture first, does not restart)
 - `resetSelectedHardwareCamera()` — issue GenICam `DeviceReset`
+- `applyMindVisionConfigFromFile(path)` — apply the selected MindVision JSON
+  config and refresh the capture factory path
 
 ### Platform behavior
 
-- On non-Windows builds (`MIB_HAS_EGRABBER=0`), initialization forces
-  `cameraMode` to mock and logs a warning when hardware mode is requested.
+- On non-Windows builds, hardware camera initialization is forced to mock and
+  logs a warning when a hardware mode is requested.
+- On Windows, `MIB_CAMERA_MODE=mindvision` configures the MindVision capture
+  factory when the build was configured with `MIB_ENABLE_MINDVISION=ON`; the
+  startup parser clamps `MIB_MINDVISION_CAMERA_INDEX` to a non-negative index.
 - `setHardwareCameraSelection()` becomes a guarded fallback on non-Windows:
   it logs a warning, switches the capture factory to `MockCamera`, clears
   selected hardware indices, and keeps `mockCameraConfigured_ = true`.
+- `setMindVisionCameraSelection()` preserves the selected camera state even
+  when the SDK is unavailable so the UI/backend selection remains explicit.
 
 ## Frame recording mode
 
@@ -97,14 +122,30 @@ no contour processing.
 - Counters: `frameRecordingCount()`, `frameRecordingFiltered()`
 - Uses a dedicated `frameRecordingThread_` and leverages
   [[../data-model/FrameStore]]'s `setFrameFilter` to drop empty frames.
-- `stopFrameRecording()` joins the recording thread; the thread flushes the
-  final batch, writes `/recording_info`, and closes the HDF5 file before the
-  stop call returns. The written-frame counter advances only after a batch
-  append succeeds, so recording metadata reflects persisted frames.
-- The recorder thread polls [[../data-model/FrameStore]] (a finite ring) at its
-  own pace, so it must not block on synchronous I/O or it falls behind and
-  drops frames. [[../services/Hdf5Service]] therefore flushes on a time interval
-  (no per-append full-file copy); see `MIB_HDF5_FLUSH_INTERVAL_MS`.
+- `stopFrameRecording()` joins the recording thread; the thread drains the write
+  queue, writes `/recording_info`, and closes the HDF5 file before the stop call
+  returns.
+- The collector thread hands batches to a 3-slot [[../services/Hdf5Service]]
+  `HdfWriteQueue` (writer thread does `appendRecordingFrames`), so slow disk no
+  longer stalls FrameStore reads. The written count advances only on a confirmed
+  write; a failed write or queue overflow stops recording and fires the fatal
+  save-error sink. This fixed the old silent count-and-drop-on-failure bug.
+- The queue's writer thread must not block on synchronous I/O or it backs up and
+  trips the fatal overflow, so [[../services/Hdf5Service]] flushes on a time
+  interval (no per-append full-file copy); see `MIB_HDF5_FLUSH_INTERVAL_MS`.
+- Each frame is **cropped to the preview ROI** (`getRealtimeRoi`, set by
+  [[../frontend/PreviewPage]]'s PlaybackPanel) before storage, via the pure
+  `backend::recording::clampRoiToFrame` (`include/backend/recording/RoiCrop.h`,
+  tested by `tests/backend/roi_crop_test.cpp`) — full frame when no ROI is set.
+  Recorded frame metadata width/height reflect the crop.
+
+### Fatal save-error sink
+
+`setFatalSaveErrorCallback(cb)` / `reportFatalSaveError(msg)` funnel both
+recording **and** experiment-flush ([[../services/ProcessingService]]) write
+failures to one callback. `MainWindow` marshals it to the UI thread, stops the
+active operation, and shows a modal Save Error dialog — failed saves are never
+silent.
 
 ## Config JSON storage
 

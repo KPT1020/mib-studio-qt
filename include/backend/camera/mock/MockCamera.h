@@ -2,6 +2,7 @@
 
 #include "backend/camera/common/ICamera.h"
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <vector>
@@ -22,7 +23,7 @@ public:
     void applyConfig(const camera::common::CameraConfig& config) override;
     bool start() override;
     void stop() override;
-    bool isRunning() const override { return running_; }
+    bool isRunning() const override { return running_.load(std::memory_order_acquire); }
 
     bool grabFrame(camera::common::Frame& out) override;
     bool pollStats(camera::common::CameraStats& out) const override;
@@ -41,7 +42,7 @@ private:
     std::vector<camera::common::Frame> preloadedFrames_;
     size_t nextIndex_{0};
 
-    bool running_{false};
+    std::atomic<bool> running_{false};
     std::chrono::steady_clock::time_point lastFrameTime_{};
     mutable camera::common::CameraStats stats_{};
 };

@@ -120,7 +120,9 @@ public:
 
     // Write recording info attributes
     bool writeRecordingInfo(uint64_t startTimeNs, uint64_t endTimeNs,
-                            uint64_t totalFrames, uint64_t filteredFrames);
+                            uint64_t totalFrames, uint64_t filteredFrames,
+                            bool multiImageEnabled = false,
+                            uint64_t multiImageCount = 1);
 
     // Recording-mode readers (counterparts to the write* functions above).
     // isRecordingFile() detects a recording-mode file via the presence of
@@ -129,7 +131,9 @@ public:
     bool isRecordingFile() const;
     bool readRecordingMetadata(std::vector<ProcessedFrame>& frames);
     bool readRecordingInfo(uint64_t& startTimeNs, uint64_t& endTimeNs,
-                           uint64_t& totalFrames, uint64_t& filteredFrames);
+                           uint64_t& totalFrames, uint64_t& filteredFrames,
+                           bool* multiImageEnabled = nullptr,
+                           uint64_t* multiImageCount = nullptr);
 
 private:
     // Flush at most once per configured interval (env MIB_HDF5_FLUSH_INTERVAL_MS,

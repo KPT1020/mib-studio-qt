@@ -16,6 +16,7 @@
 #include <QNetworkRequest>
 #include <QProgressDialog>
 #include <QPushButton>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QUrl>
 #include <QVersionNumber>
@@ -30,8 +31,8 @@
 namespace {
 constexpr int kDefaultTimeoutMs = 6000;
 
-QUrl defaultManifestUrl() {
-    return QUrl(QStringLiteral("https://updates.yofo.bio/stable/latest.json"));
+QUrl latestUrlForChannel(const QString& channel) {
+    return QUrl(QStringLiteral("https://updates.yofo.bio/%1/latest.json").arg(channel));
 }
 
 QVersionNumber currentAppVersion() {
@@ -77,7 +78,65 @@ QUrl AutoUpdater::manifestUrlFromEnvOrDefault() const {
         }
         SPDLOG_WARN("AutoUpdater: ignoring invalid MIB_STUDIO_UPDATE_MANIFEST_URL='{}'", override.toStdString());
     }
-    return defaultManifestUrl();
+    return latestUrlForChannel(channel());
+}
+
+QString AutoUpdater::sanitizeChannel(const QString& c) {
+    return (c.trimmed().toLower() == "beta") ? QStringLiteral("beta") : QStringLiteral("stable");
+}
+
+QString AutoUpdater::channel() const {
+    QSettings s;
+    // Default to the channel this build belongs to (derived from its own full
+    // version), so a beta build opens on the beta channel and marks its own
+    // release "current"; an explicit user choice (persisted) still wins.
+    const QString buildChannel = updatecatalog::channelForVersion(currentVersion());
+    return sanitizeChannel(s.value(QStringLiteral("Update/Channel"), buildChannel).toString());
+}
+
+void AutoUpdater::setChannel(const QString& c) {
+    QSettings s;
+    s.setValue(QStringLiteral("Update/Channel"), sanitizeChannel(c));
+}
+
+QString AutoUpdater::currentVersion() const {
+    return QCoreApplication::applicationVersion();
+}
+
+QUrl AutoUpdater::indexUrlForChannel(const QString& c) const {
+    return QUrl(QStringLiteral("https://updates.yofo.bio/%1/index.json").arg(sanitizeChannel(c)));
+}
+
+void AutoUpdater::fetchVersionIndex() {
+    const QUrl url = indexUrlForChannel(channel());
+    SPDLOG_INFO("AutoUpdater: fetching version index from {}", url.toString().toStdString());
+    QNetworkRequest req(url);
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                     QNetworkRequest::NoLessSafeRedirectPolicy);
+    QNetworkReply* reply = net_->get(req);
+    QObject::connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            emit versionIndexFailed(reply->errorString());
+            return;
+        }
+        const auto res = updatecatalog::parseIndex(reply->readAll());
+        if (!res.ok) {
+            emit versionIndexFailed(res.error);
+            return;
+        }
+        emit versionIndexReady(res.versions);
+    });
+}
+
+void AutoUpdater::installVersion(const updatecatalog::VersionEntry& e) {
+    Manifest m;
+    m.versionString = e.version;
+    m.installerUrl = QUrl(e.installerUrl);
+    m.installerSha256Hex = e.installerSha256Hex.toUtf8();
+    m.installerSizeBytes = e.installerSizeBytes;
+    m.releaseNotesUrl = QUrl(e.releaseNotesUrl);
+    startInstallerDownload(m, /*interactive=*/true);
 }
 
 void AutoUpdater::infoBox(const QString& title, const QString& msg, bool interactive) const {

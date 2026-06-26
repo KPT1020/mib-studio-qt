@@ -38,6 +38,7 @@ private slots:
 private:
 	QString resolveActiveConfigPath() const;
 	void ensureDefaultConfigExists(const QString& path) const;
+	void mergeNewDefaultsIntoConfig(const QString& path) const;
 	void loadAndApplyFromPath(const QString& path);
 	static int toOddKernelSize(int v);
 

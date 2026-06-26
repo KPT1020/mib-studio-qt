@@ -374,6 +374,12 @@ bool ProcessingService::getLatestSnapshot(RealtimeSnapshot& out) {
 }
 
 void ProcessingService::startExperiment() {
+    {
+        // Tear down any prior flush queue (dtor drains + joins) so a new
+        // experiment starts with a clean, non-errored writer.
+        std::scoped_lock qlk(flushQueueMutex_);
+        flushQueue_.reset();
+    }
     std::scoped_lock lk(framesMutex_);
     validFrames_.clear();
     invalidFrames_.clear();
@@ -1083,73 +1089,56 @@ bool ProcessingService::appendExperimentFrame(ProcessedFrame&& frame, bool isVal
 }
 
 size_t ProcessingService::flushBufferedFrames(class Hdf5Service& hdf5) {
-    std::vector<ProcessedFrame> validToFlush;
-    std::vector<ProcessedFrame> invalidToFlush;
-    const double memBeforeMB = backend::Tools::getProcessMemoryMB();
-    
+    // Move the accumulated frames out (brief lock) so capture/processing never
+    // blocks on the HDF5 write, then hand them to the write queue. The queue's
+    // dedicated writer thread performs the slow append; capture keeps filling a
+    // fresh buffer. Overflow or a write failure is fatal (stop + surface) rather
+    // than a silent trim-and-drop.
+    ExperimentBatch batch;
     {
         std::scoped_lock lk(framesMutex_);
-        if (validFrames_.empty() && invalidFrames_.empty()) {
-            return 0;
-        }
-        
-        // Move frames to flush (clears the buffers)
-        validToFlush = std::move(validFrames_);
-        invalidToFlush = std::move(invalidFrames_);
+        if (validFrames_.empty() && invalidFrames_.empty()) return 0;
+        batch.valid = std::move(validFrames_);
+        batch.invalid = std::move(invalidFrames_);
         validFrames_.clear();
         invalidFrames_.clear();
+        framesSinceLastFlush_.store(0, std::memory_order_relaxed);
     }
-    
-    // Append to HDF5 file
-    if (!validToFlush.empty() || !invalidToFlush.empty()) {
-        using clock = std::chrono::steady_clock;
-        const size_t validCount = validToFlush.size();
-        const size_t invalidCount = invalidToFlush.size();
-        SPDLOG_INFO("HDF5 flush start: valid={}, invalid={}, mem_mb_before={:.1f}", validCount, invalidCount, memBeforeMB);
-        const auto t0 = clock::now();
-        const bool ok = hdf5.appendFrames(validToFlush, invalidToFlush);
-        const auto t1 = clock::now();
-        const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-        const double memAfterMB = backend::Tools::getProcessMemoryMB();
+    const size_t n = batch.valid.size() + batch.invalid.size();
 
-        if (ok) {
-            size_t flushed = validCount + invalidCount;
-            if (validCount > 0) {
-                totalValidFlushed_.fetch_add(static_cast<uint64_t>(validCount), std::memory_order_relaxed);
+    std::scoped_lock qlk(flushQueueMutex_);
+    if (!flushQueue_) {
+        Hdf5Service* h = &hdf5;
+        auto writeFn = [this, h](const ExperimentBatch& b) -> bool {
+            if (!h->appendFrames(b.valid, b.invalid)) return false;
+            if (!b.valid.empty()) {
+                totalValidFlushed_.fetch_add(static_cast<uint64_t>(b.valid.size()), std::memory_order_relaxed);
             }
-            {
-                std::scoped_lock lk(framesMutex_);
-                framesSinceLastFlush_.store(validFrames_.size() + invalidFrames_.size(), std::memory_order_relaxed);
-            }
-            SPDLOG_INFO("HDF5 flush end: flushed={} (valid={}, invalid={}) duration_ms={:.3f} mem_mb_after={:.1f}",
-                        flushed, validCount, invalidCount, ms, memAfterMB);
-            return flushed;
-        } else {
-            DroppedFrameCounts dropped{};
-            size_t bufferedTotal = 0;
-            const size_t maxBufferedFrames = std::max<size_t>(1, maxBufferedFrames_.load(std::memory_order_relaxed));
-            {
-                // Restore failed frames ahead of frames accumulated during the write,
-                // then re-apply the backlog cap so a persistent HDF5 failure cannot
-                // retry itself into unbounded RAM growth.
-                std::scoped_lock lk(framesMutex_);
-                validFrames_.insert(validFrames_.begin(),
-                                    std::make_move_iterator(validToFlush.begin()),
-                                    std::make_move_iterator(validToFlush.end()));
-                invalidFrames_.insert(invalidFrames_.begin(),
-                                      std::make_move_iterator(invalidToFlush.begin()),
-                                      std::make_move_iterator(invalidToFlush.end()));
-                dropped = trimExperimentBuffersLocked(maxBufferedFrames);
-                bufferedTotal = validFrames_.size() + invalidFrames_.size();
-            }
-            logDroppedExperimentFrames(dropped, bufferedTotal, maxBufferedFrames);
-            SPDLOG_ERROR("HDF5 flush failed after {:.3f} ms; frames restored (valid={}, invalid={}), mem_mb_after_fail={:.1f}",
-                         ms, validCount, invalidCount, memAfterMB);
-            return 0;
-        }
+            return true;
+        };
+        auto onError = [this](const std::string& msg) {
+            if (flushErrorCb_) flushErrorCb_("Experiment save failed: " + msg);
+        };
+        flushQueue_ = std::make_unique<backend::recording::HdfWriteQueue<ExperimentBatch>>(3, writeFn, onError);
     }
-    
-    return 0;
+    if (!flushQueue_->submit(std::move(batch))) {
+        return 0; // fatal error already surfaced via onError
+    }
+    return n;
+}
+
+bool ProcessingService::finishFlush() {
+    std::unique_ptr<backend::recording::HdfWriteQueue<ExperimentBatch>> q;
+    {
+        std::scoped_lock qlk(flushQueueMutex_);
+        q = std::move(flushQueue_);
+    }
+    if (!q) return true;
+    return q->flushAndStop(); // drains remaining batches, then joins
+}
+
+void ProcessingService::setFlushErrorCallback(std::function<void(const std::string&)> cb) {
+    flushErrorCb_ = std::move(cb);
 }
 
 void ProcessingService::setFlushInterval(size_t frames) {
@@ -1219,22 +1208,42 @@ ProcessingService::ContourAnalysis ProcessingService::findContours(const cv::Mat
     return analysis;
 }
 
-BrightnessQuantiles ProcessingService::calculateBrightnessQuantiles(const cv::Mat& originalImage, const cv::Mat& mask) {
+BrightnessQuantiles ProcessingService::calculateBrightnessQuantiles(const cv::Mat& originalImage, const cv::Mat& mask,
+                                                                    const cv::Rect& region) {
     BrightnessQuantiles result;
-    cv::Mat grayImage;
+    if (originalImage.empty() || mask.empty()) {
+        return result;
+    }
+
+    // Avoid cloning when the input is already single-channel (the common case).
+    cv::Mat converted;
+    const cv::Mat* grayPtr = &originalImage;
     if (originalImage.channels() == 3) {
-        cv::cvtColor(originalImage, grayImage, cv::COLOR_BGR2GRAY);
-    } else {
-        grayImage = originalImage.clone();
+        cv::cvtColor(originalImage, converted, cv::COLOR_BGR2GRAY);
+        grayPtr = &converted;
+    }
+    const cv::Mat& grayImage = *grayPtr;
+
+    // Scan the whole image by default, or just the requested sub-rectangle,
+    // clamped to the bounds shared by both images.
+    cv::Rect scan(0, 0, std::min(grayImage.cols, mask.cols), std::min(grayImage.rows, mask.rows));
+    if (region.width > 0 && region.height > 0) {
+        scan &= region;
+    }
+    if (scan.width <= 0 || scan.height <= 0) {
+        return result;
     }
 
     std::vector<uchar> brightness;
-    brightness.reserve(grayImage.rows * grayImage.cols / 4);
+    brightness.reserve(static_cast<size_t>(scan.width) * static_cast<size_t>(scan.height) / 4 + 1);
 
-    for (int y = 0; y < grayImage.rows; y++) {
-        for (int x = 0; x < grayImage.cols; x++) {
-            if (mask.at<uchar>(y, x) > 0) {
-                brightness.push_back(grayImage.at<uchar>(y, x));
+    // Row-pointer access avoids the per-pixel bounds checks of cv::Mat::at<>.
+    for (int y = scan.y; y < scan.y + scan.height; ++y) {
+        const uchar* maskRow = mask.ptr<uchar>(y);
+        const uchar* grayRow = grayImage.ptr<uchar>(y);
+        for (int x = scan.x; x < scan.x + scan.width; ++x) {
+            if (maskRow[x] > 0) {
+                brightness.push_back(grayRow[x]);
             }
         }
     }
@@ -1294,8 +1303,8 @@ FilterResult ProcessingService::evaluateInnerContourObject(const ContourAnalysis
                                                            const ProcessingConfig& config,
                                                            const cv::Mat& originalImage) {
     FilterResult result{};
-    result.allContours = analysis.allContours;
-    result.hierarchy = analysis.hierarchy;
+    // allContours is assigned once (shared) by filterProcessedObjects after all
+    // objects are evaluated; hierarchy is no longer retained on the result.
     result.innerContourCount = static_cast<int>(analysis.innerContours.size());
     result.hasSingleInnerContour = (analysis.innerContours.size() == 1);
     result.objectId = objectId;
@@ -1317,7 +1326,9 @@ FilterResult ProcessingService::evaluateInnerContourObject(const ContourAnalysis
             : innerContour;
     populateGeometry(result, geometryContour);
     if (!originalImage.empty()) {
-        result.brightness = calculateBrightnessQuantiles(originalImage, objectMask);
+        const cv::Rect bbox(static_cast<int>(result.bboxX), static_cast<int>(result.bboxY),
+                            static_cast<int>(result.bboxWidth), static_cast<int>(result.bboxHeight));
+        result.brightness = calculateBrightnessQuantiles(originalImage, objectMask, bbox);
     }
 
     if (config.enable_border_check && contourTouchesRoiBorder(innerContour, roi)) {
@@ -1388,8 +1399,8 @@ FilterResult ProcessingService::evaluateOuterContourObject(const ContourAnalysis
                                                            const ProcessingConfig& config,
                                                            const cv::Mat& originalImage) {
     FilterResult result{};
-    result.allContours = analysis.allContours;
-    result.hierarchy = analysis.hierarchy;
+    // allContours is assigned once (shared) by filterProcessedObjects after all
+    // objects are evaluated; hierarchy is no longer retained on the result.
     result.innerContourCount = static_cast<int>(analysis.innerContours.size());
     result.hasSingleInnerContour = (analysis.innerContours.size() == 1);
     result.objectId = objectId;
@@ -1404,7 +1415,9 @@ FilterResult ProcessingService::evaluateOuterContourObject(const ContourAnalysis
                                               static_cast<int>(contourIdx), -1, false);
     populateGeometry(result, contour);
     if (!originalImage.empty()) {
-        result.brightness = calculateBrightnessQuantiles(originalImage, objectMask);
+        const cv::Rect bbox(static_cast<int>(result.bboxX), static_cast<int>(result.bboxY),
+                            static_cast<int>(result.bboxWidth), static_cast<int>(result.bboxHeight));
+        result.brightness = calculateBrightnessQuantiles(originalImage, objectMask, bbox);
     }
 
     if (config.enable_border_check && contourTouchesRoiBorder(contour, roi)) {
@@ -1465,9 +1478,14 @@ std::vector<FilterResult> ProcessingService::filterProcessedObjects(const cv::Ma
                                                                     const cv::Mat& originalImage) {
     const ContourAnalysis analysis = findContours(processedImage);
 
+    // One shared copy of the frame's contours, referenced by every result (and
+    // by the downstream monitoring / experiment copies) instead of deep-copying
+    // all contour points per object.
+    auto sharedContours =
+        std::make_shared<const std::vector<std::vector<cv::Point>>>(analysis.allContours);
+
     FilterResult emptyResult{};
-    emptyResult.allContours = analysis.allContours;
-    emptyResult.hierarchy = analysis.hierarchy;
+    emptyResult.allContours = sharedContours;
     emptyResult.innerContourCount = static_cast<int>(analysis.innerContours.size());
     emptyResult.hasSingleInnerContour = (analysis.innerContours.size() == 1);
     if (!originalImage.empty()) {
@@ -1496,6 +1514,9 @@ std::vector<FilterResult> ProcessingService::filterProcessedObjects(const cv::Ma
         for (size_t i = 0; i < objectOrder.size(); ++i) {
             results.push_back(evaluateInnerContourObject(analysis, objectOrder[i], static_cast<int>(i + 1), objectCount,
                                                          processedImage, roi, config, originalImage));
+        }
+        for (auto& result : results) {
+            result.allContours = sharedContours;
         }
         return results;
     }
@@ -1526,6 +1547,9 @@ std::vector<FilterResult> ProcessingService::filterProcessedObjects(const cv::Ma
         for (size_t i = 0; i < topLevelContours.size(); ++i) {
             results.push_back(evaluateOuterContourObject(analysis, topLevelContours[i], static_cast<int>(i + 1),
                                                          objectCount, processedImage, roi, config, originalImage));
+        }
+        for (auto& result : results) {
+            result.allContours = sharedContours;
         }
         return results;
     }
@@ -1654,7 +1678,9 @@ void ProcessingService::publishRealtimeBatchFrame(ProcessedFrame&& frame) {
         std::scoped_lock snapshotLk(snapshotMutex_);
         latestSnapshot_.index = frameIndex;
         latestSnapshot_.mask = frame.processedImage.clone();
-        latestSnapshot_.contours = validation.allContours;
+        latestSnapshot_.contours = validation.allContours
+                                       ? *validation.allContours
+                                       : std::vector<std::vector<cv::Point>>{};
         latestSnapshot_.validation = validation;
     }
 
@@ -2098,7 +2124,9 @@ void ProcessingService::realtimeInlineLoop() {
 
                 // Extract contours from validation result and adjust coordinates for full-frame snapshot
                 // Contours from filterProcessedImage are in ROI coordinates, need to adjust for full frame
-                std::vector<std::vector<cv::Point>> contours = validation.allContours;
+                std::vector<std::vector<cv::Point>> contours =
+                    validation.allContours ? *validation.allContours
+                                           : std::vector<std::vector<cv::Point>>{};
                 for (auto& contour : contours) {
                     for (auto& pt : contour) {
                         pt.x += roi.x;
@@ -2260,15 +2288,15 @@ void ProcessingService::realtimeInlineLoop() {
                     // Create full-size mask for snapshot display
                     cv::Mat fullMaskSnapshot;
                     if (useROI) {
-                        // Reuse existing full frame if already created for experiment storage
+                        // Reuse the frame we already fetched for this index. The
+                        // experiment path may have built grayFull already; otherwise
+                        // derive the snapshot from f directly instead of taking the
+                        // contended FrameStore lock a second time for the same idx.
                         cv::Mat grayFullSnap;
                         if (!grayFull.empty()) {
                             grayFullSnap = grayFull;
-                        } else {
-                            backend::playback::Frame fFull{};
-                            if (rtStore_->getByWriteIndex(idx, fFull)) {
-                                grayFullSnap = makeGrayCopy(fFull.width, fFull.height, fFull.linePitch, fFull.data.data());
-                            }
+                        } else if (!f.data.empty()) {
+                            grayFullSnap = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
                         }
                         if (!grayFullSnap.empty()) {
                             fullMaskSnapshot = cv::Mat(grayFullSnap.rows, grayFullSnap.cols, CV_8UC1, cv::Scalar(0));
@@ -2436,7 +2464,9 @@ void ProcessingService::realtimeInlineLoop() {
                 const FilterResult& validation = validations.front();
                 
                 // Extract contours from validation result for snapshot
-                std::vector<std::vector<cv::Point>> contours = validation.allContours;
+                std::vector<std::vector<cv::Point>> contours =
+                    validation.allContours ? *validation.allContours
+                                           : std::vector<std::vector<cv::Point>>{};
                 const auto algoEnd = clock::now();
                 const double algoMs = std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
                 algoMsSinceSummary += algoMs;
@@ -2765,7 +2795,9 @@ void ProcessingService::realtimeInlineLoop() {
 
                 // Extract contours from validation result for snapshot
                 // Contours are in ROI-relative coordinates — adjust to full-frame for snapshot/storage
-                std::vector<std::vector<cv::Point>> contours = validation.allContours;
+                std::vector<std::vector<cv::Point>> contours =
+                    validation.allContours ? *validation.allContours
+                                           : std::vector<std::vector<cv::Point>>{};
                 for (auto& contour : contours) {
                     for (auto& pt : contour) {
                         pt.x += roi.x;

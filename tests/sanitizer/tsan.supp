@@ -1,0 +1,18 @@
+# ThreadSanitizer suppressions for uninstrumented third-party libraries.
+# These are not our code. Our code must remain clean; do NOT add suppressions
+# for backend::* here.
+#
+# Note: the Qt-network LUT manifest fetch (which pulled in glib/libproxy/gio
+# threading noise) is avoided in CI by pointing
+# MIB_STUDIO_EMODULUS_LUT_MANIFEST_URL at a file: URL, so those library
+# suppressions are intentionally NOT needed here.
+
+# OpenCV's GDAL image plugin reports an internal lock-order-inversion while
+# decoding TIFF frames (mock camera).
+called_from_lib:libgdal.so
+deadlock:CPLAcquireMutex
+
+# GLib/GObject one-time init races during Qt/OpenCV startup.
+called_from_lib:libglib-2.0.so
+called_from_lib:libgobject-2.0.so
+race:libglib-2.0.so

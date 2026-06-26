@@ -15,7 +15,11 @@ permissions:
 
 jobs:
   build-and-release:
-    runs-on: windows-latest
+    # Pinned to windows-2022: the project's Conan profile and toolchain target
+    # msvc 194 / toolset v143 (VS2022) and the CMake preset uses the
+    # "Visual Studio 17 2022" generator. windows-latest moved to VS2026, which
+    # has no v143 instance, breaking configure. Matches build-windows.yml.
+    runs-on: windows-2022
     timeout-minutes: 90
 
     steps:
@@ -144,10 +148,51 @@ jobs:
           CONAN_REMOTE_URL: ${{ secrets.CONAN_REMOTE_URL }}
 
       - name: Configure CMake
-        run: cmake --preset windows-default
+        shell: pwsh
+        env:
+          MIB_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: |
+          $cmakeArgs = @("--preset", "windows-default", "-DMIB_ENABLE_MINDVISION=OFF")
+          if ($env:MIB_SENTRY_DSN) {
+            $cmakeArgs += "-DMIB_SENTRY_DSN=$env:MIB_SENTRY_DSN"
+            Write-Host "Sentry DSN injected into release build."
+          } else {
+            Write-Host "SENTRY_DSN not set; released build runs in local-only crash mode (no events sent)." -ForegroundColor Yellow
+          }
+          cmake @cmakeArgs
 
       - name: Build Release
-        run: cmake --build build --config Release --target mib_studio_qt
+        run: cmake --build build --config Release
+
+      # Without uploaded debug symbols a captured minidump is unsymbolicated
+      # (= "not useful"). This was missing from the release path, so shipped
+      # releases produced no usable Sentry stacks. Gated on secrets so forks
+      # without access skip cleanly.
+      - name: Upload debug symbols + create Sentry release
+        shell: pwsh
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_URL: ${{ secrets.SENTRY_URL }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+        run: |
+          if (-not $env:SENTRY_AUTH_TOKEN) {
+            Write-Host "Skipping Sentry symbol upload: SENTRY_AUTH_TOKEN not set" -ForegroundColor Yellow
+            exit 0
+          }
+          if (-not $env:SENTRY_ORG -or -not $env:SENTRY_PROJECT) {
+            Write-Host "ERROR: SENTRY_AUTH_TOKEN is set but SENTRY_ORG / SENTRY_PROJECT are missing." -ForegroundColor Red
+            exit 1
+          }
+          npm install -g @sentry/cli
+          sentry-cli --version
+          $release = "mib_studio_qt@${{ steps.version.outputs.version }}"
+          # Uploads every PDB/EXE under build\Release; --include-sources embeds
+          # source paths for readable frames.
+          sentry-cli debug-files upload --include-sources build\Release
+          sentry-cli releases new $release
+          sentry-cli releases set-commits $release --auto --ignore-missing
+          sentry-cli releases finalize $release
 
       - name: Run tests
         run: ctest --test-dir build --build-config Release --output-on-failure --timeout 30

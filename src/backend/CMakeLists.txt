@@ -7,6 +7,7 @@ add_library(mib_backend STATIC
     ${PROJECT_SOURCE_DIR}/include/backend/app/BackgroundFrame.h
     ${PROJECT_SOURCE_DIR}/src/backend/app/Tools.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/processing/EModulusLut.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/processing/EModulusLutCatalog.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/services/Logger.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/services/CrashReporter.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/diagnostics/CrashStateMirror.cpp
@@ -22,6 +23,7 @@ add_library(mib_backend STATIC
     ${PROJECT_SOURCE_DIR}/src/backend/services/TriggerService.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/playback/FrameStore.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/camera/egrabber/EGrabberCamera.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/camera/mindvision/MindVisionCamera.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/camera/mock/MockCamera.cpp
 )
 
@@ -61,6 +63,12 @@ else()
     target_compile_definitions(mib_backend PUBLIC MIB_HAS_EGRABBER=0)
 endif()
 
+if(MIB_HAS_MINDVISION)
+    target_compile_definitions(mib_backend PUBLIC MIB_HAS_MINDVISION=1)
+else()
+    target_compile_definitions(mib_backend PUBLIC MIB_HAS_MINDVISION=0)
+endif()
+
 if(MIB_HAS_ONNXRUNTIME)
     target_compile_definitions(mib_backend PUBLIC MIB_HAS_ONNXRUNTIME=1)
 else()
@@ -76,11 +84,17 @@ if(MIB_HAS_EGRABBER)
         "C:/Program Files/Euresys/eGrabber/include"
     )
 endif()
+if(MIB_HAS_MINDVISION)
+    target_include_directories(mib_backend PUBLIC
+        ${MIB_MINDVISION_INCLUDE_DIR}
+    )
+endif()
 
 target_link_libraries(mib_backend PUBLIC
     spdlog::spdlog
     Qt6::Core
     Qt6::Gui
+    Qt6::Network
     Qt6::SerialPort
 )
 

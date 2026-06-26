@@ -1,0 +1,11 @@
+# LeakSanitizer suppressions for one-time allocations inside third-party
+# libraries (Qt plugin/registry init, OpenCV/GDAL, HDF5, glib, fontconfig).
+# These are not leaks in our code.
+
+leak:libQt6
+leak:libopencv
+leak:libgdal
+leak:libhdf5
+leak:libglib
+leak:libgobject
+leak:libfontconfig

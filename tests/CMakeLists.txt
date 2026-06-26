@@ -5,6 +5,8 @@ function(mib_add_backend_test_executable target source)
         ${PROJECT_SOURCE_DIR}/tests/${source}
     )
     target_link_libraries(${target} PRIVATE mib_backend)
+    # Allow tests to include the shared support headers as "support/<x>.h".
+    target_include_directories(${target} PRIVATE ${PROJECT_SOURCE_DIR}/tests)
     set_target_properties(${target} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
     )
@@ -14,13 +16,70 @@ mib_add_backend_test_executable(mib_backend_smoke_test backend/backend_smoke_tes
 add_test(NAME backend.smoke COMMAND $<TARGET_FILE:mib_backend_smoke_test>)
 set_tests_properties(backend.smoke PROPERTIES LABELS "backend")
 
+mib_add_backend_test_executable(emodulus_lut_catalog_test backend/emodulus_lut_catalog_test.cpp)
+add_test(NAME backend.emodulus_lut_catalog COMMAND $<TARGET_FILE:emodulus_lut_catalog_test>)
+set_tests_properties(backend.emodulus_lut_catalog PROPERTIES LABELS "backend;processing")
+
 mib_add_backend_test_executable(backend_lifecycle_smoke_test backend/backend_lifecycle_smoke_test.cpp)
 add_test(NAME backend.lifecycle_smoke COMMAND $<TARGET_FILE:backend_lifecycle_smoke_test>)
 set_tests_properties(backend.lifecycle_smoke PROPERTIES LABELS "backend")
 
+mib_add_backend_test_executable(frame_store_concurrency_test backend/frame_store_concurrency_test.cpp)
+find_package(Threads REQUIRED)
+target_link_libraries(frame_store_concurrency_test PRIVATE Threads::Threads)
+add_test(NAME backend.frame_store_concurrency COMMAND $<TARGET_FILE:frame_store_concurrency_test>)
+set_tests_properties(backend.frame_store_concurrency PROPERTIES LABELS "backend")
+
+mib_add_backend_test_executable(frame_store_bounds_test backend/frame_store_bounds_test.cpp)
+add_test(NAME backend.frame_store_bounds COMMAND $<TARGET_FILE:frame_store_bounds_test>)
+set_tests_properties(backend.frame_store_bounds PROPERTIES LABELS "backend" TIMEOUT 30)
+
+mib_add_backend_test_executable(modbus_rtu_test backend/modbus_rtu_test.cpp)
+add_test(NAME backend.modbus_rtu COMMAND $<TARGET_FILE:modbus_rtu_test>)
+set_tests_properties(backend.modbus_rtu PROPERTIES LABELS "backend" TIMEOUT 30)
+
+mib_add_backend_test_executable(autofocus_math_test backend/autofocus_math_test.cpp)
+add_test(NAME backend.autofocus_math COMMAND $<TARGET_FILE:autofocus_math_test>)
+set_tests_properties(backend.autofocus_math PROPERTIES LABELS "backend" TIMEOUT 30)
+
+mib_add_backend_test_executable(hdf_write_queue_test backend/hdf_write_queue_test.cpp)
+target_link_libraries(hdf_write_queue_test PRIVATE Threads::Threads)
+add_test(NAME backend.hdf_write_queue COMMAND $<TARGET_FILE:hdf_write_queue_test>)
+set_tests_properties(backend.hdf_write_queue PROPERTIES LABELS "backend" TIMEOUT 60)
+
+mib_add_backend_test_executable(frame_store_reserve_test backend/frame_store_reserve_test.cpp)
+add_test(NAME backend.frame_store_reserve COMMAND $<TARGET_FILE:frame_store_reserve_test>)
+set_tests_properties(backend.frame_store_reserve PROPERTIES LABELS "backend" TIMEOUT 30)
+
+mib_add_backend_test_executable(roi_crop_test backend/roi_crop_test.cpp)
+add_test(NAME backend.roi_crop COMMAND $<TARGET_FILE:roi_crop_test>)
+set_tests_properties(backend.roi_crop PROPERTIES LABELS "backend" TIMEOUT 30)
+
+mib_add_backend_test_executable(mindvision_config_test backend/mindvision_config_test.cpp)
+add_test(NAME backend.mindvision_config COMMAND $<TARGET_FILE:mindvision_config_test>)
+set_tests_properties(backend.mindvision_config PROPERTIES LABELS "backend;camera" TIMEOUT 30)
+
+mib_add_backend_test_executable(camera_script_apply_test backend/camera_script_apply_test.cpp)
+add_test(NAME backend.camera_script_apply COMMAND $<TARGET_FILE:camera_script_apply_test>)
+set_tests_properties(backend.camera_script_apply PROPERTIES LABELS "backend;camera" TIMEOUT 30)
+
+mib_add_backend_test_executable(frame_store_resize_under_load_test backend/frame_store_resize_under_load_test.cpp)
+target_link_libraries(frame_store_resize_under_load_test PRIVATE Threads::Threads)
+add_test(NAME backend.frame_store_resize_under_load COMMAND $<TARGET_FILE:frame_store_resize_under_load_test>)
+set_tests_properties(backend.frame_store_resize_under_load PROPERTIES LABELS "backend" TIMEOUT 60)
+
+mib_add_backend_test_executable(pipeline_timing_benchmark performance/pipeline_timing_benchmark.cpp)
+target_link_libraries(pipeline_timing_benchmark PRIVATE Threads::Threads)
+add_test(NAME performance.pipeline_timing COMMAND $<TARGET_FILE:pipeline_timing_benchmark>)
+set_tests_properties(performance.pipeline_timing PROPERTIES LABELS "performance" TIMEOUT 180)
+
 mib_add_backend_test_executable(backend_facade_boundary_test backend/backend_facade_boundary_test.cpp)
 add_test(NAME backend.facade_boundary COMMAND $<TARGET_FILE:backend_facade_boundary_test>)
 set_tests_properties(backend.facade_boundary PROPERTIES LABELS "backend;bridge")
+
+mib_add_backend_test_executable(mindvision_selection_state_test backend/mindvision_selection_state_test.cpp)
+add_test(NAME backend.mindvision_selection_state COMMAND $<TARGET_FILE:mindvision_selection_state_test>)
+set_tests_properties(backend.mindvision_selection_state PROPERTIES LABELS "backend;camera")
 
 mib_add_backend_test_executable(mock_camera_smoke_test camera/mock_camera_smoke_test.cpp)
 add_test(NAME camera.mock_smoke COMMAND $<TARGET_FILE:mock_camera_smoke_test>)
@@ -45,6 +104,10 @@ set_tests_properties(recording.hdf5_resilience PROPERTIES LABELS "recording;back
 mib_add_backend_test_executable(hdf5_save_performance_test recording/hdf5_save_performance_test.cpp)
 add_test(NAME recording.hdf5_save_performance COMMAND $<TARGET_FILE:hdf5_save_performance_test>)
 set_tests_properties(recording.hdf5_save_performance PROPERTIES LABELS "recording;backend;hdf5;performance")
+
+mib_add_backend_test_executable(experiment_roundtrip_test recording/experiment_roundtrip_test.cpp)
+add_test(NAME recording.experiment_roundtrip COMMAND $<TARGET_FILE:experiment_roundtrip_test>)
+set_tests_properties(recording.experiment_roundtrip PROPERTIES LABELS "recording;backend" TIMEOUT 30)
 
 mib_add_backend_test_executable(kin6_batch_pipeline_evidence integration/kin6_batch_pipeline_evidence.cpp)
 
@@ -82,6 +145,44 @@ mib_add_backend_test_executable(kin6_mib_app_capture_proof integration/kin6_mib_
 add_test(NAME backend.kin6_mib_app_capture_proof COMMAND $<TARGET_FILE:kin6_mib_app_capture_proof>)
 set_tests_properties(backend.kin6_mib_app_capture_proof PROPERTIES LABELS "backend;integration")
 
+mib_add_backend_test_executable(e2e_storage_destinations_test integration/e2e_storage_destinations_test.cpp)
+add_test(NAME integration.e2e_storage_destinations COMMAND $<TARGET_FILE:e2e_storage_destinations_test>)
+set_tests_properties(integration.e2e_storage_destinations PROPERTIES LABELS "integration;e2e;recording" TIMEOUT 60)
+
+mib_add_backend_test_executable(e2e_trigger_timing_test integration/e2e_trigger_timing_test.cpp)
+target_link_libraries(e2e_trigger_timing_test PRIVATE Threads::Threads)
+add_test(NAME integration.e2e_trigger_timing COMMAND $<TARGET_FILE:e2e_trigger_timing_test>)
+set_tests_properties(integration.e2e_trigger_timing PROPERTIES LABELS "integration;e2e;trigger" TIMEOUT 120)
+
+mib_add_backend_test_executable(e2e_pipeline_stress_test integration/e2e_pipeline_stress_test.cpp)
+target_link_libraries(e2e_pipeline_stress_test PRIVATE Threads::Threads)
+# Lifecycle start/stop race test. Has an in-process watchdog that _Exit(99)s
+# with the stuck phase/cycle/step if a cycle deadlocks, so it fails fast instead
+# of burning the full ctest timeout. Pass a larger [cycles] arg for heavy local
+# stress runs. (The TriggerService lost-wakeup deadlock this used to expose is
+# fixed; see backend.trigger_service_start_stop_race for the focused guard.)
+add_test(NAME integration.e2e_pipeline_stress COMMAND $<TARGET_FILE:e2e_pipeline_stress_test>)
+set_tests_properties(integration.e2e_pipeline_stress PROPERTIES LABELS "integration;e2e" TIMEOUT 120)
+
+mib_add_backend_test_executable(e2e_live_view_latency_test integration/e2e_live_view_latency_test.cpp)
+target_link_libraries(e2e_live_view_latency_test PRIVATE Threads::Threads)
+add_test(NAME integration.e2e_live_view_latency COMMAND $<TARGET_FILE:e2e_live_view_latency_test>)
+set_tests_properties(integration.e2e_live_view_latency PROPERTIES LABELS "integration;e2e;processing" TIMEOUT 120)
+
+mib_add_backend_test_executable(e2e_realtime_throughput_test integration/e2e_realtime_throughput_test.cpp)
+target_link_libraries(e2e_realtime_throughput_test PRIVATE Threads::Threads)
+add_test(NAME integration.e2e_realtime_throughput COMMAND $<TARGET_FILE:e2e_realtime_throughput_test>)
+set_tests_properties(integration.e2e_realtime_throughput PROPERTIES LABELS "integration;e2e;processing;performance" TIMEOUT 120)
+
+mib_add_backend_test_executable(e2e_batch_backpressure_test integration/e2e_batch_backpressure_test.cpp)
+target_link_libraries(e2e_batch_backpressure_test PRIVATE Threads::Threads)
+add_test(NAME integration.e2e_batch_backpressure COMMAND $<TARGET_FILE:e2e_batch_backpressure_test>)
+set_tests_properties(integration.e2e_batch_backpressure PROPERTIES LABELS "integration;e2e;processing;performance" TIMEOUT 120)
+
+mib_add_backend_test_executable(realtime_drop_frames_default_test processing/realtime_drop_frames_default_test.cpp)
+add_test(NAME processing.realtime_drop_frames_default COMMAND $<TARGET_FILE:realtime_drop_frames_default_test>)
+set_tests_properties(processing.realtime_drop_frames_default PROPERTIES LABELS "processing;backend" TIMEOUT 30)
+
 mib_add_backend_test_executable(mib_processing_multi_object_test processing/processing_multi_object_test.cpp)
 add_test(NAME backend.processing_multi_object COMMAND $<TARGET_FILE:mib_processing_multi_object_test>)
 set_tests_properties(backend.processing_multi_object PROPERTIES LABELS "processing;backend")
@@ -89,3 +190,74 @@ set_tests_properties(backend.processing_multi_object PROPERTIES LABELS "processi
 mib_add_backend_test_executable(mib_processing_object_tracking_test processing/processing_object_tracking_test.cpp)
 add_test(NAME backend.processing_object_tracking COMMAND $<TARGET_FILE:mib_processing_object_tracking_test>)
 set_tests_properties(backend.processing_object_tracking PROPERTIES LABELS "processing;backend")
+
+# --- Hardware-present tests (LABEL "hardware") -----------------------------
+# Excluded from the default presets; run via the hardware preset or
+# `ctest -L hardware`. Each self-skips (exit 77 -> CTest "Skipped") when its
+# device env var is absent, so a normal run on a dev box without hardware is
+# clean.
+mib_add_backend_test_executable(hw_syringe_pump_test hardware/hw_syringe_pump_test.cpp)
+add_test(NAME hardware.syringe_pump COMMAND $<TARGET_FILE:hw_syringe_pump_test>)
+set_tests_properties(hardware.syringe_pump PROPERTIES LABELS "hardware" SKIP_RETURN_CODE 77 TIMEOUT 60)
+
+mib_add_backend_test_executable(hw_nanopositioner_test hardware/hw_nanopositioner_test.cpp)
+add_test(NAME hardware.nanopositioner COMMAND $<TARGET_FILE:hw_nanopositioner_test>)
+set_tests_properties(hardware.nanopositioner PROPERTIES LABELS "hardware" SKIP_RETURN_CODE 77 TIMEOUT 60)
+
+mib_add_backend_test_executable(hw_camera_test hardware/hw_camera_test.cpp)
+add_test(NAME hardware.camera COMMAND $<TARGET_FILE:hw_camera_test>)
+set_tests_properties(hardware.camera PROPERTIES LABELS "hardware" SKIP_RETURN_CODE 77 TIMEOUT 60)
+
+mib_add_backend_test_executable(hw_egrabber_script_test hardware/hw_egrabber_script_test.cpp)
+add_test(NAME hardware.egrabber_script COMMAND $<TARGET_FILE:hw_egrabber_script_test>)
+set_tests_properties(hardware.egrabber_script PROPERTIES LABELS "hardware;camera" SKIP_RETURN_CODE 77 TIMEOUT 60)
+
+add_executable(json_flatten_roundtrip_test
+    ${PROJECT_SOURCE_DIR}/tests/frontend/json_flatten_roundtrip_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/JsonFlatten.cpp
+)
+target_include_directories(json_flatten_roundtrip_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+)
+target_compile_definitions(json_flatten_roundtrip_test PRIVATE
+    MIB_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+)
+target_link_libraries(json_flatten_roundtrip_test PRIVATE Qt6::Core)
+set_target_properties(json_flatten_roundtrip_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+)
+add_test(NAME frontend.json_flatten_roundtrip COMMAND $<TARGET_FILE:json_flatten_roundtrip_test>)
+set_tests_properties(frontend.json_flatten_roundtrip PROPERTIES LABELS "frontend;utility")
+
+add_executable(json_config_merge_test
+    ${PROJECT_SOURCE_DIR}/tests/frontend/json_config_merge_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/JsonConfigMerge.cpp
+)
+target_include_directories(json_config_merge_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+)
+target_link_libraries(json_config_merge_test PRIVATE Qt6::Core)
+set_target_properties(json_config_merge_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+)
+add_test(NAME frontend.json_config_merge COMMAND $<TARGET_FILE:json_config_merge_test>)
+set_tests_properties(frontend.json_config_merge PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
+
+add_executable(update_catalog_test
+    ${PROJECT_SOURCE_DIR}/tests/frontend/update_catalog_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/UpdateCatalog.cpp
+)
+target_include_directories(update_catalog_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+)
+target_compile_definitions(update_catalog_test PRIVATE
+    MIB_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+)
+target_link_libraries(update_catalog_test PRIVATE Qt6::Core)
+set_target_properties(update_catalog_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+)
+add_test(NAME frontend.update_catalog COMMAND $<TARGET_FILE:update_catalog_test>)
+set_tests_properties(frontend.update_catalog PROPERTIES LABELS "frontend;utility" TIMEOUT 30)

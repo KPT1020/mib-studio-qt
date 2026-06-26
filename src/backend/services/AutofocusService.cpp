@@ -1,4 +1,5 @@
 #include "backend/services/AutofocusService.h"
+#include "backend/services/AutofocusMath.h"
 #include "backend/app/Tools.h"
 #include "backend/diagnostics/CrashStateMirror.h"
 
@@ -115,7 +116,10 @@ bool AutofocusService::connect(int comPort, int baudRate, unsigned char deviceAd
         // Initialize voltage
         {
             std::scoped_lock cfgLock(configMutex_);
-            double initialVoltage = config_.initialVoltage;
+            // Clamp to the configured safe range so a stale/misconfigured
+            // initialVoltage can never drive the probe past its limits.
+            const double initialVoltage = autofocus::clampVoltage(
+                config_.initialVoltage, config_.minVoltage, config_.maxVoltage);
             XMT_COMMAND_SinglePoint(deviceAddress_, 0, 0, 0, initialVoltage);
             currentVoltage_.store(initialVoltage);
             backend::diagnostics::CrashStateMirror::instance().autofocus.voltage.store(initialVoltage);
@@ -435,31 +439,12 @@ void AutofocusService::controlLoop() {
             if (medianRingRatio > 0.0 && freshTimestamp && 
                 (!cfg.requireNewSamplePerStep || hasNewSample) && hasEnoughSamples) {
                 
-                double deviation = medianRingRatio - cfg.focusSetpoint;
-                bool inAcceptableRange = std::abs(deviation) <= cfg.focusRange;
-
-                double newVoltage = currentVoltage_.load();
-
-                if (!inAcceptableRange) {
-                    // Outside acceptable range, make larger adjustments
-                    if ((deviation < 0 && cfg.focusDirection) || (deviation > 0 && !cfg.focusDirection)) {
-                        // Need to increase voltage
-                        newVoltage = std::min(newVoltage + cfg.voltageStep, cfg.maxVoltage);
-                    } else {
-                        // Need to decrease voltage
-                        newVoltage = std::max(newVoltage - cfg.voltageStep, cfg.minVoltage);
-                    }
-                } else {
-                    // Within acceptable range, make fine adjustments
-                    if (std::abs(deviation) > cfg.focusRange / 2.0) {
-                        // Fine adjustment to get closer to exact setpoint
-                        if ((deviation < 0 && cfg.focusDirection) || (deviation > 0 && !cfg.focusDirection)) {
-                            newVoltage = std::min(newVoltage + cfg.fineVoltageStep, cfg.maxVoltage);
-                        } else {
-                            newVoltage = std::max(newVoltage - cfg.fineVoltageStep, cfg.minVoltage);
-                        }
-                    }
-                }
+                const double newVoltage = autofocus::computeFocusVoltage(
+                    medianRingRatio, currentVoltage_.load(),
+                    autofocus::FocusParams{cfg.focusSetpoint, cfg.focusRange,
+                                           cfg.voltageStep, cfg.fineVoltageStep,
+                                           cfg.minVoltage, cfg.maxVoltage,
+                                           cfg.focusDirection});
 
                 // Apply the new voltage if it changed
                 if (std::abs(newVoltage - currentVoltage_.load()) > 0.01) {
@@ -485,7 +470,7 @@ void AutofocusService::controlLoop() {
                     }
 
                     SPDLOG_DEBUG("AutofocusService: Adjusted voltage to {}V (ring width: {:.3f}, deviation: {:.3f})",
-                                newVoltage, medianRingRatio, deviation);
+                                newVoltage, medianRingRatio, medianRingRatio - cfg.focusSetpoint);
                     if (statusCallback_) {
                         statusCallback_("Voltage: " + std::to_string(newVoltage) + "V (ring width: " + 
                                       std::to_string(medianRingRatio) + ")");

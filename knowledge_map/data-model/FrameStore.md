@@ -95,16 +95,54 @@ hit the ring.
 
 ## Threading
 
-Single `std::mutex` serialises `pushFrame` / `get*` / `resize`. Not lock-
-free, but per-frame work is a `std::vector<uint8_t>` move.
+Two-tier locking so the producer and consumers don't serialise on one lock
+(the previous single-`std::mutex` design forced capture and every reader to
+take turns *while holding the lock across the full-frame `memcpy`*, which
+throttled both capture and the realtime pipeline — see
+[[../current-state/Recent-Work]]):
+
+- **`structureMutex_`** (`std::shared_mutex`) guards the *identity* of the
+  ring (`ring_` / `slotMutexes_` / `capacity_`) and `frameFilter_`. The hot
+  path (`pushFrame` / `getLatest` / `getByWriteIndex` / `getByWriteIndexROI`)
+  takes it in **shared** mode; only whole-ring ops (`resize`, `saveFrames*`,
+  `estimateMemoryBytesForCapacity`, `setFrameFilter`) take it **exclusive**.
+- **`slotMutexes_`** — one `std::mutex` per ring slot. The actual frame copy
+  in/out is done holding only that slot's lock, so the producer writing slot
+  A never blocks a consumer reading slot B. Producer vs. consumer on the
+  *same* slot (a wrap-around overwrite of the frame being read) is still
+  serialised — correctness preserved.
+
+`resize` rebuilds `slotMutexes_` alongside `ring_` under the exclusive lock;
+this is safe because every hot-path op acquires the shared structural lock
+*before* any slot lock, so no slot lock is held when `resize` runs.
 
 ## Gotchas
 
+- `getByWriteIndex` / `getByWriteIndexROI` reject indices that are too new
+  (`idx >= totalWritten`) **and** indices already evicted from the ring
+  (`idx < totalWritten - capacity`). The eviction check is essential: without
+  it, `idx % capacity` aliases to a live slot holding a *newer* frame and the
+  call would silently return the wrong frame instead of failing. All callers
+  treat `false` as "skip this frame" (`continue`) or clamp to the available
+  range first, so rejecting is safe. Guarded by
+  `tests/backend/frame_store_bounds_test.cpp` (`backend.frame_store_bounds`).
+  Note: a frame right at the eviction boundary can still race (you may get the
+  next frame); that ±1 boundary race is inherent to the lock-light ring.
 - If a consumer holds onto a `getByWriteIndex` copy for longer than
   `capacity / fps` seconds, its data is still valid (copy) but the index
   may fall off the available range.
-- `pushFrame` copies bytes — if you profile and see allocator pressure,
-  investigate here first.
+- `capacity_` is `std::atomic<size_t>`. The lock-free guard reads
+  (`earliest/latestAvailableIndex`, `availableCount`, and the top-of-function
+  `capacity_ == 0` checks in `getLatest`/`getByWriteIndex`) cannot take
+  `structureMutex_` because `resize()` calls them while holding it exclusively —
+  so atomicity, not a lock, prevents the data race against `resize()`'s write.
+  Surfaced by the ThreadSanitizer lane via `frame_store_resize_under_load_test`.
+- `pushFrame` copies bytes. For high-speed capture, call
+  `reserveFrameBytes(frameBytes)` at capture start ([[../services/CaptureService]]
+  does this on the first frame / on geometry growth) so the first pass through
+  the ring does not allocate — without it the first `capacity` pushes each
+  allocate a slot buffer mid-stream. The empty-frame filter path reuses a
+  `thread_local` scratch `Frame` rather than allocating a temp per frame.
 - `saveFramesToAvi` serialises frames while holding the mutex only long
   enough to snapshot the range; the VideoWriter loop runs outside the
   lock. Same pattern as `saveFramesToDisk`.

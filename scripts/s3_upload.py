@@ -87,6 +87,46 @@ def upload_file_to_s3(
         s3.put_object(**put_args)
 
 
+def download_bytes_from_s3(
+    *,
+    endpoint: str,
+    bucket: str,
+    key: str,
+    profile: str | None = None,
+) -> bytes | None:
+    """GetObject -> bytes, or None if the key does not exist.
+
+    Raises on any error other than a missing key, so callers can distinguish
+    "no object yet" (safe to treat as empty) from "read failed" (must NOT
+    overwrite, to avoid clobbering existing data). Reading via the S3 API uses
+    the same endpoint/credentials as uploads, bypassing the public CDN (which
+    can block or cache reads from CI runners)."""
+    try:
+        import boto3
+        from botocore.config import Config
+        from botocore.exceptions import ClientError
+    except ImportError as exc:
+        raise RuntimeError(
+            "boto3 is required for S3/R2 reads. Install it with: python -m pip install boto3"
+        ) from exc
+
+    session = boto3.Session(profile_name=profile) if profile else boto3.Session()
+    s3 = session.client(
+        "s3",
+        endpoint_url=endpoint,
+        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+    )
+    try:
+        resp = s3.get_object(Bucket=bucket, Key=key)
+        return resp["Body"].read()
+    except ClientError as exc:
+        code = str(exc.response.get("Error", {}).get("Code", ""))
+        status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        if code in ("NoSuchKey", "NoSuchBucket", "404") or status == 404:
+            return None
+        raise
+
+
 def upload_file_with_wrangler(
     *,
     bucket: str,

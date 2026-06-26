@@ -87,13 +87,17 @@ namespace camera::mock
 
     void MockCamera::stop()
     {
-        running_ = false;
-        nextIndex_ = 0;
+        // Only flip the (atomic) running_ flag. The capture thread observes it in
+        // grabFrame()/isRunning() and then stops touching the other members;
+        // start() resets nextIndex_ before the next capture thread runs.
+        // Resetting nextIndex_ here would race with the still-draining capture
+        // thread (flagged by ThreadSanitizer).
+        running_.store(false, std::memory_order_release);
     }
 
     bool MockCamera::grabFrame(camera::common::Frame &out)
     {
-        if (!running_)
+        if (!running_.load(std::memory_order_acquire))
         {
             return false;
         }
@@ -181,7 +185,7 @@ namespace camera::mock
 
     bool MockCamera::pollStats(camera::common::CameraStats &out) const
     {
-        if (!running_)
+        if (!running_.load(std::memory_order_acquire))
         {
             return false;
         }

@@ -65,9 +65,19 @@ namespace backend
         // Select a specific hardware device (does not start capture)
         void setHardwareCameraSelection(int interfaceIndex, int deviceIndex, const std::string &label);
 
+        // Select a MindVision camera by enumeration index (does not start capture)
+        void setMindVisionCameraSelection(int cameraIndex, const std::string &label);
+
         // Apply a JS camera script to currently selected hardware device.
         // If capture is running, it will be stopped first. Capture remains stopped.
         bool applyCameraScriptFromFile(const std::string &path, std::string *errorOut = nullptr);
+
+        // Apply a JSON config file to the currently selected MindVision camera.
+        // If capture is running, it will be stopped first. Capture remains stopped.
+        bool applyMindVisionConfigFromFile(const std::string &path, std::string *errorOut = nullptr);
+
+        // Returns true if a MindVision camera is currently selected.
+        bool isMindVisionCameraSelected() const;
 
         // Issue GenICam DeviceReset to the selected hardware camera.
         // If capture is running, it will be stopped first. Capture remains stopped.
@@ -91,7 +101,18 @@ namespace backend
         using BackgroundCaptureCallback = std::function<void(const BackgroundCaptureEvent& event)>;
         void setBackgroundCaptureCallback(BackgroundCaptureCallback callback);
 
+        // Fatal save-error sink: invoked (possibly on a writer thread) when an
+        // experiment flush or recording write fails, or the write queue
+        // overflows. The active operation is stopped; the UI should surface the
+        // message. Funnels both recording and experiment flush failures.
+        using FatalSaveErrorCallback = std::function<void(const std::string&)>;
+        void setFatalSaveErrorCallback(FatalSaveErrorCallback callback);
+
     private:
+        void reportFatalSaveError(const std::string& msg);
+
+        FatalSaveErrorCallback fatalSaveErrorCb_;
+
         std::unique_ptr<services::SqliteService> sqliteService_;
         std::unique_ptr<services::Hdf5Service> hdf5Service_;
         std::unique_ptr<services::CaptureService> captureService_;
@@ -108,6 +129,8 @@ namespace backend
         int selectedIfIndex_{-1};
         int selectedDevIndex_{-1};
         std::string selectedLabel_;
+        int selectedMvCameraIndex_{-1};
+        std::string lastMindVisionConfigPath_;
         bool mockCameraConfigured_{false};
 
         // Frame recording state

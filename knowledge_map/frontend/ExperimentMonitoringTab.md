@@ -36,6 +36,9 @@
 
 - Histograms are computed client-side from the monitoring rings — not
   persisted.
+- `loadCurrentConfig()` now refreshes the histogram ring-ratio defaults as
+  well as the Tune Params widgets, so config reloads keep the visible chart
+  range aligned with the saved thresholds.
 - Chart snapshots to HDF5 use
   [[../services/Hdf5Service]]::`saveChartSnapshot` (used by experiment-save
   to preserve the final view).

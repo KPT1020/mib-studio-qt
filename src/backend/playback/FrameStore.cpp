@@ -16,8 +16,17 @@
 namespace backend::playback {
 
 FrameStore::FrameStore(size_t capacity)
-    : capacity_(capacity), ring_(capacity) {
-    backend::diagnostics::CrashStateMirror::instance().frameStore.capacity.store(capacity_);
+    : capacity_(capacity), slotMutexes_(capacity), ring_(capacity) {
+    backend::diagnostics::CrashStateMirror::instance().frameStore.capacity.store(capacity_.load());
+}
+
+void FrameStore::reserveFrameBytes(size_t frameBytes) {
+    if (frameBytes == 0) return;
+    std::unique_lock structLk(structureMutex_);
+    for (auto& f : ring_) {
+        if (f.data.capacity() < frameBytes) f.data.reserve(frameBytes);
+    }
+    SPDLOG_INFO("FrameStore: reserved {} bytes per slot across {} slots", frameBytes, ring_.size());
 }
 
 void FrameStore::pushFrame(const uint8_t* src,
@@ -27,14 +36,15 @@ void FrameStore::pushFrame(const uint8_t* src,
                            size_t linePitch,
                            uint64_t pixelFormat,
                            uint64_t timestamp) {
-    if (capacity_ == 0 || src == nullptr || size == 0) return;
+    if (capacity_.load(std::memory_order_acquire) == 0 || src == nullptr || size == 0) return;
 
     // Apply frame filter if set (check before acquiring write slot)
     {
-        std::scoped_lock lk(mutex_);
+        std::shared_lock structLk(structureMutex_);
         if (frameFilter_) {
-            // Build a temporary Frame for the filter to inspect
-            Frame tmp;
+            // Reuse a per-thread scratch Frame so filter inspection does not
+            // allocate on every frame (assign reuses the existing capacity).
+            thread_local Frame tmp;
             tmp.width = width;
             tmp.height = height;
             tmp.pixelFormat = pixelFormat;
@@ -56,70 +66,93 @@ void FrameStore::pushFrame(const uint8_t* src,
         auto& fs = backend::diagnostics::CrashStateMirror::instance().frameStore;
         fs.totalWritten.store(w, std::memory_order_relaxed);
         fs.latestIndex.store(w - 1, std::memory_order_relaxed);
-        fs.earliestIndex.store(w > capacity_ ? w - capacity_ : 0,
+        fs.earliestIndex.store(w > capacity_.load(std::memory_order_acquire) ? w - capacity_.load(std::memory_order_acquire) : 0,
                                std::memory_order_relaxed);
     }
-    const size_t idx = static_cast<size_t>((w - 1) % capacity_);
-    std::scoped_lock lk(mutex_);
-    Frame& f = ring_[idx];
-    f.width = width;
-    f.height = height;
-    f.pixelFormat = pixelFormat;
-    f.linePitch = linePitch;
-    f.timestamp = timestamp;
-    f.data.resize(size);
-    std::copy_n(src, size, f.data.begin());
+    // Copy into the ring under the structural SHARED lock (so a concurrent
+    // resize cannot swap the buffers) plus this slot's own lock (so only a
+    // reader of this exact slot can contend). The large memcpy below therefore
+    // does not block consumers reading any other slot.
+    {
+        std::shared_lock structLk(structureMutex_);
+        const size_t idx = static_cast<size_t>((w - 1) % capacity_.load(std::memory_order_acquire));
+        std::scoped_lock slotLk(slotMutexes_[idx]);
+        Frame& f = ring_[idx];
+        f.width = width;
+        f.height = height;
+        f.pixelFormat = pixelFormat;
+        f.linePitch = linePitch;
+        f.timestamp = timestamp;
+        f.data.resize(size);
+        std::copy_n(src, size, f.data.begin());
+    }
 
     // Periodic stats
     if ((w % 5000ULL) == 0ULL) {
         const size_t avail = availableCount();
         const uint64_t filtered = totalFiltered_.load(std::memory_order_relaxed);
         SPDLOG_DEBUG("FrameStore: totalWritten={} available={} capacity={} filtered={}",
-                     static_cast<unsigned long long>(w), avail, capacity_, filtered);
+                     static_cast<unsigned long long>(w), avail, capacity_.load(std::memory_order_acquire), filtered);
     }
 }
 
 void FrameStore::setFrameFilter(FrameFilter filter) {
-    std::scoped_lock lk(mutex_);
+    std::unique_lock structLk(structureMutex_);
     frameFilter_ = std::move(filter);
     SPDLOG_INFO("FrameStore: Frame filter {}", frameFilter_ ? "enabled" : "cleared");
 }
 
 void FrameStore::clearFrameFilter() {
-    std::scoped_lock lk(mutex_);
+    std::unique_lock structLk(structureMutex_);
     frameFilter_ = nullptr;
     SPDLOG_INFO("FrameStore: Frame filter cleared");
 }
 
 bool FrameStore::hasFrameFilter() const {
-    std::scoped_lock lk(mutex_);
+    std::shared_lock structLk(structureMutex_);
     return frameFilter_ != nullptr;
 }
 
 bool FrameStore::getLatest(Frame& out) const {
     const uint64_t w = totalWritten_.load();
-    if (w == 0 || capacity_ == 0) return false;
-    const size_t idx = static_cast<size_t>((w - 1) % capacity_);
-    std::scoped_lock lk(mutex_);
+    if (w == 0 || capacity_.load(std::memory_order_acquire) == 0) return false;
+    std::shared_lock structLk(structureMutex_);
+    const size_t idx = static_cast<size_t>((w - 1) % capacity_.load(std::memory_order_acquire));
+    std::scoped_lock slotLk(slotMutexes_[idx]);
     out = ring_[idx];
     return !out.data.empty();
 }
 
 bool FrameStore::getByWriteIndex(uint64_t writeIndex, Frame& out) const {
     const uint64_t w = totalWritten_.load();
-    if (writeIndex >= w || capacity_ == 0) return false;
-    const size_t idx = static_cast<size_t>(writeIndex % capacity_);
-    std::scoped_lock lk(mutex_);
+    if (writeIndex >= w || capacity_.load(std::memory_order_acquire) == 0) return false;
+    // Reject indices already evicted from the ring. Without this, the slot at
+    // writeIndex % capacity holds a newer frame and we would silently return the
+    // wrong frame instead of failing. Computed from the same `w` snapshot.
+    if (w > static_cast<uint64_t>(capacity_.load(std::memory_order_acquire)) &&
+        writeIndex < w - static_cast<uint64_t>(capacity_.load(std::memory_order_acquire))) {
+        return false;
+    }
+    std::shared_lock structLk(structureMutex_);
+    const size_t idx = static_cast<size_t>(writeIndex % capacity_.load(std::memory_order_acquire));
+    std::scoped_lock slotLk(slotMutexes_[idx]);
     out = ring_[idx];
     return !out.data.empty();
 }
 
 bool FrameStore::getByWriteIndexROI(uint64_t writeIndex, int roiX, int roiY, int roiW, int roiH, Frame& out) const {
     const uint64_t w = totalWritten_.load();
-    if (writeIndex >= w || capacity_ == 0) return false;
-    const size_t idx = static_cast<size_t>(writeIndex % capacity_);
-    
-    std::scoped_lock lk(mutex_);
+    if (writeIndex >= w || capacity_.load(std::memory_order_acquire) == 0) return false;
+    // Reject indices already evicted from the ring (see getByWriteIndex) so we
+    // never extract an ROI from a newer frame aliased to the same slot.
+    if (w > static_cast<uint64_t>(capacity_.load(std::memory_order_acquire)) &&
+        writeIndex < w - static_cast<uint64_t>(capacity_.load(std::memory_order_acquire))) {
+        return false;
+    }
+    std::shared_lock structLk(structureMutex_);
+    const size_t idx = static_cast<size_t>(writeIndex % capacity_.load(std::memory_order_acquire));
+
+    std::scoped_lock slotLk(slotMutexes_[idx]);
     const Frame& src = ring_[idx];
     if (src.data.empty() || src.width == 0 || src.height == 0) return false;
     
@@ -155,9 +188,9 @@ bool FrameStore::getByWriteIndexROI(uint64_t writeIndex, int roiX, int roiY, int
 
 uint64_t FrameStore::earliestAvailableIndex() const {
     const uint64_t w = totalWritten_.load();
-    if (capacity_ == 0 || w == 0) return 0;
-    if (w <= capacity_) return 0;
-    return w - static_cast<uint64_t>(capacity_);
+    if (capacity_.load(std::memory_order_acquire) == 0 || w == 0) return 0;
+    if (w <= capacity_.load(std::memory_order_acquire)) return 0;
+    return w - static_cast<uint64_t>(capacity_.load(std::memory_order_acquire));
 }
 
 uint64_t FrameStore::latestAvailableIndex() const {
@@ -168,8 +201,8 @@ uint64_t FrameStore::latestAvailableIndex() const {
 
 size_t FrameStore::availableCount() const {
     const uint64_t w = totalWritten_.load();
-    if (capacity_ == 0) return 0;
-    return static_cast<size_t>(std::min<uint64_t>(w, static_cast<uint64_t>(capacity_)));
+    if (capacity_.load(std::memory_order_acquire) == 0) return 0;
+    return static_cast<size_t>(std::min<uint64_t>(w, static_cast<uint64_t>(capacity_.load(std::memory_order_acquire))));
 }
 
 bool FrameStore::saveFramesToDisk(const std::string& outputDir, std::function<bool(const Frame&)> filterFn) const {
@@ -184,13 +217,13 @@ bool FrameStore::saveFramesToDisk(const std::string& outputDir, std::function<bo
 
 bool FrameStore::saveFramesToDisk(const std::string& outputDir, uint64_t startIndex, uint64_t endIndex,
                                   std::function<bool(const Frame&)> filterFn) const {
-    std::unique_lock<std::mutex> lk(mutex_);
+    std::unique_lock<std::shared_mutex> lk(structureMutex_);
 
     const uint64_t earliest = earliestAvailableIndex();
     const uint64_t latest = latestAvailableIndex();
     const uint64_t w = totalWritten_.load();
 
-    if (w == 0 || capacity_ == 0) {
+    if (w == 0 || capacity_.load(std::memory_order_acquire) == 0) {
         SPDLOG_WARN("FrameStore: No frames available to save");
         return false;
     }
@@ -219,7 +252,7 @@ bool FrameStore::saveFramesToDisk(const std::string& outputDir, uint64_t startIn
         Frame frame;
         // Access ring buffer directly since we hold the lock
         if (idx >= w) continue;
-        const size_t ringIdx = static_cast<size_t>(idx % capacity_);
+        const size_t ringIdx = static_cast<size_t>(idx % capacity_.load(std::memory_order_acquire));
         if (ringIdx < ring_.size() && !ring_[ringIdx].data.empty()) {
             frame = ring_[ringIdx];  // Copy frame while holding lock
             framesToSave.emplace_back(idx, std::move(frame));
@@ -313,13 +346,13 @@ bool FrameStore::saveFramesToAvi(const std::string& outputPath,
                                  uint64_t startIndex, uint64_t endIndex,
                                  double fps,
                                  std::function<bool(const Frame&)> filterFn) const {
-    std::unique_lock<std::mutex> lk(mutex_);
+    std::unique_lock<std::shared_mutex> lk(structureMutex_);
 
     const uint64_t earliest = earliestAvailableIndex();
     const uint64_t latest = latestAvailableIndex();
     const uint64_t w = totalWritten_.load();
 
-    if (w == 0 || capacity_ == 0) {
+    if (w == 0 || capacity_.load(std::memory_order_acquire) == 0) {
         SPDLOG_WARN("FrameStore: No frames available to save to AVI");
         return false;
     }
@@ -344,7 +377,7 @@ bool FrameStore::saveFramesToAvi(const std::string& outputPath,
 
     for (uint64_t idx = clampedStart; idx <= clampedEnd; ++idx) {
         if (idx >= w) continue;
-        const size_t ringIdx = static_cast<size_t>(idx % capacity_);
+        const size_t ringIdx = static_cast<size_t>(idx % capacity_.load(std::memory_order_acquire));
         if (ringIdx < ring_.size() && !ring_[ringIdx].data.empty()) {
             framesToSave.emplace_back(idx, ring_[ringIdx]);
         } else {
@@ -526,7 +559,7 @@ bool FrameStore::resize(size_t newCapacity) {
         return false;
     }
 
-    std::scoped_lock lk(mutex_);
+    std::unique_lock<std::shared_mutex> lk(structureMutex_);
 
     const uint64_t w = totalWritten_.load();
     const size_t currentAvailable = availableCount();
@@ -540,7 +573,7 @@ bool FrameStore::resize(size_t newCapacity) {
         size_t preservedCount = 0;
         for (uint64_t idx = earliest; idx < earliest + currentAvailable && preservedCount < newCapacity; ++idx) {
             if (idx >= w) break;
-            const size_t ringIdx = static_cast<size_t>(idx % capacity_);
+            const size_t ringIdx = static_cast<size_t>(idx % capacity_.load(std::memory_order_acquire));
             if (ringIdx < ring_.size() && !ring_[ringIdx].data.empty()) {
                 newRing[preservedCount] = ring_[ringIdx];
                 ++preservedCount;
@@ -552,17 +585,23 @@ bool FrameStore::resize(size_t newCapacity) {
         totalWritten_.store(static_cast<uint64_t>(preservedCount));
 
         SPDLOG_INFO("FrameStore: Resized from {} to {} capacity, preserved {}/{} frames", 
-                    capacity_, newCapacity, preservedCount, currentAvailable);
+                    capacity_.load(std::memory_order_acquire), newCapacity, preservedCount, currentAvailable);
     } else {
         // New capacity is smaller than available frames, clear buffer
         totalWritten_.store(0);
         SPDLOG_INFO("FrameStore: Resized from {} to {} capacity, cleared buffer (new size < available frames)", 
-                    capacity_, newCapacity);
+                    capacity_.load(std::memory_order_acquire), newCapacity);
     }
 
+    // Rebuild the per-slot lock array to match the new ring. Safe under the
+    // exclusive structural lock: no hot-path op can hold a slot lock here
+    // because each acquires the structural lock in shared mode first.
+    std::vector<std::mutex> newMutexes(newCapacity);
+    slotMutexes_.swap(newMutexes);
+
     ring_ = std::move(newRing);
-    capacity_ = newCapacity;
-    backend::diagnostics::CrashStateMirror::instance().frameStore.capacity.store(capacity_);
+    capacity_.store(newCapacity, std::memory_order_release);
+    backend::diagnostics::CrashStateMirror::instance().frameStore.capacity.store(capacity_.load());
 
     return true;
 }
@@ -579,7 +618,7 @@ bool FrameStore::getAvailableTimestampRange(TimestampRange& out) const {
     const uint64_t latest = latestAvailableIndex();
     const uint64_t w = totalWritten_.load();
 
-    if (w == 0 || capacity_ == 0) {
+    if (w == 0 || capacity_.load(std::memory_order_acquire) == 0) {
         return false;
     }
 
@@ -603,7 +642,9 @@ size_t FrameStore::estimateMemoryBytesForCapacity(size_t capacity) const {
     size_t sampleCount = 0;
     const size_t maxSamples = 10; // Sample up to 10 frames for average
 
-    std::scoped_lock lk(mutex_);
+    // Exclusive: samples slot data directly, so it must exclude a concurrent
+    // producer overwriting those slots (same guarantee the old global mutex gave).
+    std::unique_lock<std::shared_mutex> structLk(structureMutex_);
     const uint64_t w = totalWritten_.load();
     const size_t available = availableCount();
 
@@ -615,7 +656,7 @@ size_t FrameStore::estimateMemoryBytesForCapacity(size_t capacity) const {
         size_t totalSize = 0;
         for (uint64_t idx = earliest; idx <= latest && sampleCount < maxSamples; idx += sampleStep) {
             if (idx >= w) break;
-            const size_t ringIdx = static_cast<size_t>(idx % capacity_);
+            const size_t ringIdx = static_cast<size_t>(idx % capacity_.load(std::memory_order_acquire));
             if (ringIdx < ring_.size() && !ring_[ringIdx].data.empty()) {
                 // Frame size = data size + overhead (Frame struct + vector overhead)
                 // Frame struct: ~48 bytes (width, height, pixelFormat, linePitch, timestamp)
@@ -734,7 +775,7 @@ bool FrameStore::findIndicesByTimestampRange(uint64_t startTimestamp, uint64_t e
     const uint64_t latest = latestAvailableIndex();
     const uint64_t w = totalWritten_.load();
 
-    if (w == 0 || capacity_ == 0) {
+    if (w == 0 || capacity_.load(std::memory_order_acquire) == 0) {
         return false;
     }
 

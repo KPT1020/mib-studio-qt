@@ -249,7 +249,7 @@ bool writeSampleArtifacts(const std::filesystem::path& outputDir,
         for (const auto candidate : candidates) {
             const auto& frame = results[candidate];
             const bool hasMask = !frame.processedImage.empty() && cv::countNonZero(frame.processedImage) > 0;
-            const bool hasContour = !frame.validation.allContours.empty();
+            const bool hasContour = frame.validation.allContours && !frame.validation.allContours->empty();
             if (frame.validation.isValid && hasMask && hasContour) {
                 selected = candidate;
                 break;
@@ -273,7 +273,7 @@ bool writeSampleArtifacts(const std::filesystem::path& outputDir,
         sample.width = frame.originalImage.cols;
         sample.height = frame.originalImage.rows;
         sample.maskPixels = cv::countNonZero(frame.processedImage);
-        sample.contourCount = frame.validation.allContours.size();
+        sample.contourCount = frame.validation.allContours ? frame.validation.allContours->size() : 0;
         sample.area = frame.validation.area;
         sample.deformability = frame.validation.deformability;
         sample.ringRatio = frame.validation.ringRatio;
@@ -295,7 +295,9 @@ bool writeSampleArtifacts(const std::filesystem::path& outputDir,
 
         cv::Mat overlay;
         cv::cvtColor(frame.originalImage, overlay, cv::COLOR_GRAY2BGR);
-        cv::drawContours(overlay, frame.validation.allContours, -1, cv::Scalar(0, 255, 0), 1);
+        if (frame.validation.allContours) {
+            cv::drawContours(overlay, *frame.validation.allContours, -1, cv::Scalar(0, 255, 0), 1);
+        }
         cv::putText(overlay,
                     sample.sampleId,
                     cv::Point(8, 18),

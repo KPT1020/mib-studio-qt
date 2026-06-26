@@ -1,4 +1,5 @@
 #include "backend/services/SyringePumpService.h"
+#include "backend/services/ModbusRtu.h"
 
 #include <QSerialPort>
 #include <QByteArray>
@@ -49,99 +50,33 @@ namespace {
 // CRC16 — standard Modbus polynomial (0xA001 reflected)
 // ---------------------------------------------------------------------------
 uint16_t SyringePumpService::crc16(const uint8_t* data, size_t len) {
-    uint16_t crc = 0xFFFF;
-    for (size_t i = 0; i < len; ++i) {
-        crc ^= static_cast<uint16_t>(data[i]);
-        for (int j = 0; j < 8; ++j) {
-            if (crc & 0x0001) {
-                crc = (crc >> 1) ^ 0xA001;
-            } else {
-                crc >>= 1;
-            }
-        }
-    }
-    return crc;
+    return modbus::crc16(data, len);
 }
 
 // ---------------------------------------------------------------------------
 // Float32 <-> Modbus register conversion (big-endian ABCD word order)
 // ---------------------------------------------------------------------------
 QByteArray SyringePumpService::floatToRegisters(float value) {
-    QByteArray result(4, 0);
-    uint8_t bytes[4];
-    std::memcpy(bytes, &value, 4);
-    // ABCD word order: high word first, then low word
-    // IEEE 754 float on little-endian CPU: bytes[3]=MSB .. bytes[0]=LSB
-    // Register 1 (high word): bytes[3] bytes[2]
-    // Register 2 (low word):  bytes[1] bytes[0]
-    result[0] = static_cast<char>(bytes[3]);
-    result[1] = static_cast<char>(bytes[2]);
-    result[2] = static_cast<char>(bytes[1]);
-    result[3] = static_cast<char>(bytes[0]);
-    return result;
+    return modbus::floatToRegisters(value);
 }
 
 float SyringePumpService::registersToFloat(const uint8_t* data) {
-    // data[0..1] = high word (big-endian), data[2..3] = low word (big-endian)
-    // Reconstruct IEEE 754 little-endian bytes
-    uint8_t bytes[4];
-    bytes[3] = data[0]; // MSB
-    bytes[2] = data[1];
-    bytes[1] = data[2];
-    bytes[0] = data[3]; // LSB
-    float value;
-    std::memcpy(&value, bytes, 4);
-    return value;
+    return modbus::registersToFloat(data);
 }
 
 // ---------------------------------------------------------------------------
 // Modbus RTU frame builders
 // ---------------------------------------------------------------------------
 QByteArray SyringePumpService::buildReadRequest(uint8_t addr, uint16_t startReg, uint16_t count) {
-    QByteArray frame(6, 0);
-    frame[0] = static_cast<char>(addr);
-    frame[1] = static_cast<char>(FUNC_READ_HOLDING);
-    frame[2] = static_cast<char>((startReg >> 8) & 0xFF);
-    frame[3] = static_cast<char>(startReg & 0xFF);
-    frame[4] = static_cast<char>((count >> 8) & 0xFF);
-    frame[5] = static_cast<char>(count & 0xFF);
-    uint16_t crc = crc16(reinterpret_cast<const uint8_t*>(frame.constData()), 6);
-    frame.append(static_cast<char>(crc & 0xFF));        // CRC low byte first
-    frame.append(static_cast<char>((crc >> 8) & 0xFF)); // CRC high byte
-    return frame;
+    return modbus::buildReadRequest(addr, startReg, count);
 }
 
 QByteArray SyringePumpService::buildWriteSingleRequest(uint8_t addr, uint16_t reg, uint16_t value) {
-    QByteArray frame(6, 0);
-    frame[0] = static_cast<char>(addr);
-    frame[1] = static_cast<char>(FUNC_WRITE_SINGLE);
-    frame[2] = static_cast<char>((reg >> 8) & 0xFF);
-    frame[3] = static_cast<char>(reg & 0xFF);
-    frame[4] = static_cast<char>((value >> 8) & 0xFF);
-    frame[5] = static_cast<char>(value & 0xFF);
-    uint16_t crc = crc16(reinterpret_cast<const uint8_t*>(frame.constData()), 6);
-    frame.append(static_cast<char>(crc & 0xFF));
-    frame.append(static_cast<char>((crc >> 8) & 0xFF));
-    return frame;
+    return modbus::buildWriteSingleRequest(addr, reg, value);
 }
 
 QByteArray SyringePumpService::buildWriteMultipleRequest(uint8_t addr, uint16_t startReg, const QByteArray& regData) {
-    uint16_t regCount = static_cast<uint16_t>(regData.size() / 2);
-    uint8_t byteCount = static_cast<uint8_t>(regData.size());
-    QByteArray frame;
-    frame.reserve(7 + regData.size() + 2);
-    frame.append(static_cast<char>(addr));
-    frame.append(static_cast<char>(FUNC_WRITE_MULTIPLE));
-    frame.append(static_cast<char>((startReg >> 8) & 0xFF));
-    frame.append(static_cast<char>(startReg & 0xFF));
-    frame.append(static_cast<char>((regCount >> 8) & 0xFF));
-    frame.append(static_cast<char>(regCount & 0xFF));
-    frame.append(static_cast<char>(byteCount));
-    frame.append(regData);
-    uint16_t crc = crc16(reinterpret_cast<const uint8_t*>(frame.constData()), static_cast<size_t>(frame.size()));
-    frame.append(static_cast<char>(crc & 0xFF));
-    frame.append(static_cast<char>((crc >> 8) & 0xFF));
-    return frame;
+    return modbus::buildWriteMultipleRequest(addr, startReg, regData);
 }
 
 // ---------------------------------------------------------------------------
@@ -197,27 +132,17 @@ bool SyringePumpService::sendRequest(int pumpIdx, const QByteArray& request, QBy
     SPDLOG_DEBUG("SyringePumpService: RX pump {} [{}]: {}",
                 pumpIdx, response.size(), response.toHex(' ').constData());
 
-    // Verify CRC
-    if (response.size() < 4) {
-        SPDLOG_ERROR("SyringePumpService: Response too short ({} bytes) from pump {}", response.size(), pumpIdx);
-        return false;
-    }
-    size_t dataLen = static_cast<size_t>(response.size()) - 2;
-    uint16_t receivedCrc = static_cast<uint16_t>(
-        (static_cast<uint8_t>(response[response.size() - 1]) << 8) |
-         static_cast<uint8_t>(response[response.size() - 2]));
-    uint16_t calculatedCrc = crc16(reinterpret_cast<const uint8_t*>(response.constData()), dataLen);
-    if (receivedCrc != calculatedCrc) {
-        SPDLOG_ERROR("SyringePumpService: CRC mismatch for pump {} (received 0x{:04X}, calculated 0x{:04X})",
-                    pumpIdx, receivedCrc, calculatedCrc);
+    // Verify CRC (also rejects frames shorter than 4 bytes).
+    if (!modbus::responseCrcValid(response)) {
+        SPDLOG_ERROR("SyringePumpService: bad/short response ({} bytes) from pump {}: {}",
+                    response.size(), pumpIdx, response.toHex(' ').constData());
         return false;
     }
 
-    // Check for Modbus exception response
-    if (static_cast<uint8_t>(response[1]) & 0x80) {
-        uint8_t exceptionCode = static_cast<uint8_t>(response[2]);
+    // Check for Modbus exception response (CRC already validated -> >=4 bytes).
+    if (modbus::isExceptionFrame(response)) {
         SPDLOG_ERROR("SyringePumpService: Modbus exception 0x{:02X} from pump {} (func=0x{:02X})",
-                    exceptionCode, pumpIdx, static_cast<uint8_t>(response[1]) & 0x7F);
+                    static_cast<uint8_t>(response[2]), pumpIdx, static_cast<uint8_t>(response[1]) & 0x7F);
         return false;
     }
 
@@ -236,8 +161,14 @@ bool SyringePumpService::readHoldingRegisters(int pumpIdx, uint16_t startReg, ui
     if (!sendRequest(pumpIdx, request, response, expectedBytes)) {
         return false;
     }
-    // Extract data bytes (skip addr + func + byteCount)
-    data = response.mid(3, count * 2);
+    // Extract data with bounds + byteCount validation so a short/garbled frame
+    // can't yield fewer bytes than the caller indexes.
+    if (!modbus::extractReadData(response, count, data)) {
+        SPDLOG_ERROR("SyringePumpService: malformed read response from pump {} "
+                     "(expected {} registers, got {} bytes)",
+                     pumpIdx, count, response.size());
+        return false;
+    }
     return true;
 }
 

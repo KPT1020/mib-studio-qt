@@ -51,7 +51,8 @@ All gates in one struct. Notable fields:
   `auto_background_cooldown_frames`
 - Target-group gate: `target_group_area_*`, `target_group_deformability_*`,
   `enable_target_group_emodulus` + `target_group_emodulus_*` (uses
-  `EModulusLut`)
+  `EModulusLut`, which is now fed from the managed LUT cache prepared by
+  `AppBackend` at startup)
 - Multi-image mode: `multi_image_enabled`, `multi_image_count`
 
 ## Accumulation modes
@@ -59,11 +60,16 @@ All gates in one struct. Notable fields:
 - **Monitoring rings** — `monitoringValidFrames_` / `monitoringInvalidFrames_`,
   fixed 1000-frame capacity. Always on when realtime is running.
 - **Experiment accumulation** — bounded vectors populated while
-  `experimentActive_` is true. `flushBufferedFrames(Hdf5Service&)` drains them
-  periodically (default every 100 frames). `maxBufferedFrames_` is derived from
-  the flush interval (at least the interval; normally capped to a 1000-5000
-  frame backlog) so a slow or failing HDF5 append cannot grow RAM without
-  bound.
+  `experimentActive_` is true. `flushBufferedFrames(Hdf5Service&)` moves them out
+  under a brief lock and submits them to a 3-slot
+  [[Hdf5Service]] `HdfWriteQueue` whose writer thread does the slow append, so
+  capture/processing never blocks on disk. The write queue is created lazily on
+  first flush and torn down by `finishFlush()` at experiment stop (drains +
+  joins before any direct HDF5 write, so the file is never written by two
+  threads at once). A write failure or queue overflow (disk too slow) is fatal:
+  it fires `setFlushErrorCallback` (→ [[../architecture/AppBackend]] →
+  UI stop + dialog) instead of the old silent trim-and-drop. `totalValidFlushed_`
+  advances only on a confirmed write.
 - Invalid frame sampling rate defaults to 1-in-100 to bound HDF5 size.
 
 ## Metrics exposed
@@ -124,6 +130,23 @@ current/max queue depth, batch size, worker count, and running state. See
 ## Gotchas
 
 - Realtime drop-frames mode is ignored while an experiment is active.
+- **Live-view overlay backlog / `rtDropFrames_` defaults ON:** the inline
+  realtime loop consumes `FrameStore` sequentially via `rtLastProcessed_`. If
+  drop-frames is *off* and capture outpaces processing, the processed snapshot
+  (`getLatestSnapshot`, source of the mask/contour overlay and trigger decision)
+  falls progressively behind the live write head — an accumulating backlog that
+  only resets when realtime restarts. The raw preview is unaffected (it reads
+  `FrameStore::getLatest`). Because of this, `rtDropFrames_` now **defaults to
+  ON**, so the live overlay jumps to the newest frame and stays bounded.
+  Experiments are unaffected: the loop gates the flag behind `!experimentActive_`
+  (`rtDropFrames_ && !experimentActive_`), so every frame is still
+  processed/recorded during a run. Users can still disable it via
+  ProcessingSettingsDialog. Verified by
+  `tests/processing/realtime_drop_frames_default_test.cpp` (default value +
+  toggle) and `tests/integration/e2e_live_view_latency_test.cpp`
+  (`integration.e2e_live_view_latency`): under sustained overload the default
+  stays a few hundred frames behind, vs. tens of thousands with drop-frames
+  forced off (~30x).
 - When the experiment backlog reaches `maxBufferedFrames_`, sampled invalid
   frames are dropped first. Valid frames can evict old invalid frames; valid
   drops only happen if the backlog is entirely valid and still over cap. This
@@ -157,3 +180,18 @@ current/max queue depth, batch size, worker count, and running state. See
 - `computeProcessedFrame` intentionally omits the auto-background /
   previous-frame-diff path used in `realtimeLoop()`. Callers needing that
   should continue to drive frames through `FrameStore` + `startRealtime`.
+- Young's modulus gating still depends on the LUT path loaded during backend
+  startup; if the managed cache cannot be updated, the pipeline keeps using
+  the last known-good local copy or the bundled fallback.
+- `FilterResult::allContours` is a `shared_ptr<const ...>`, **not** a value.
+  All per-object `FilterResult`s of a frame share one allocation (assigned
+  once by `filterProcessedObjects` after evaluation), so the monitoring /
+  experiment copies are refcount bumps rather than deep copies of every
+  contour point. Consumers must deref (`*validation.allContours`) and
+  null-check. The write-only `hierarchy` field was removed — nothing read it.
+- `calculateBrightnessQuantiles` takes an optional bbox `region`: the per-
+  object evaluators pass the object's bounding box so the scan only covers
+  pixels that can be non-zero in that object's mask (identical sample set,
+  not the whole ROI). It also uses row pointers instead of `cv::Mat::at<>`
+  and skips the `clone()` for already-single-channel input. These were
+  per-object allocator/CPU costs that scaled with objects-per-frame.

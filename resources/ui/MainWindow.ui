@@ -49,6 +49,9 @@
     <property name="title">
      <string>File</string>
     </property>
+    <addaction name="openDataFolderAct"/>
+    <addaction name="openLogsFolderAct"/>
+    <addaction name="separator"/>
     <addaction name="exitAct"/>
    </widget>
    <widget class="QMenu" name="settingsMenu">
@@ -59,6 +62,8 @@
     <addaction name="monitoringSettingsAct"/>
     <addaction name="conversionFactorAct"/>
     <addaction name="syringePumpSettingsAct"/>
+    <addaction name="separator"/>
+    <addaction name="profilesAct"/>
    </widget>
    <widget class="QMenu" name="helpMenu">
     <property name="title">
@@ -66,6 +71,9 @@
     </property>
     <addaction name="aboutAct"/>
     <addaction name="checkUpdatesAct"/>
+    <addaction name="separator"/>
+    <addaction name="documentationAct"/>
+    <addaction name="reportProblemAct"/>
    </widget>
    <addaction name="fileMenu"/>
    <addaction name="settingsMenu"/>
@@ -104,7 +112,32 @@
   </action>
   <action name="checkUpdatesAct">
    <property name="text">
-    <string>Check for Updates...</string>
+    <string>Software Updates...</string>
+   </property>
+  </action>
+  <action name="openDataFolderAct">
+   <property name="text">
+    <string>Open Data Folder</string>
+   </property>
+  </action>
+  <action name="openLogsFolderAct">
+   <property name="text">
+    <string>Open Logs Folder</string>
+   </property>
+  </action>
+  <action name="profilesAct">
+   <property name="text">
+    <string>Profiles...</string>
+   </property>
+  </action>
+  <action name="documentationAct">
+   <property name="text">
+    <string>Documentation</string>
+   </property>
+  </action>
+  <action name="reportProblemAct">
+   <property name="text">
+    <string>Report a Problem...</string>
    </property>
   </action>
  </widget>

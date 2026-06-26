@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <vector>
 #include <mutex>
+#include <shared_mutex>
 #include <atomic>
 #include <string>
 #include <functional>
@@ -69,7 +70,7 @@ namespace backend::playback
         uint64_t totalWritten() const { return totalWritten_.load(); }
 
         // Ring capacity
-        size_t capacity() const { return capacity_; }
+        size_t capacity() const { return capacity_.load(std::memory_order_acquire); }
 
         // Save frames to disk as TIFF images
         // Saves all available frames if range not specified
@@ -111,6 +112,12 @@ namespace backend::playback
         // Returns true on success, false on failure
         bool resize(size_t newCapacity);
 
+        // Pre-reserve each ring slot's data buffer to at least frameBytes so the
+        // per-frame pushFrame hot path performs no heap allocation for frames of
+        // that size or smaller. Call at capture start once the frame geometry is
+        // known. Idempotent: only grows slots whose capacity is below frameBytes.
+        void reserveFrameBytes(size_t frameBytes);
+
         // Get available index range
         IndexRange getAvailableRange() const;
 
@@ -135,13 +142,28 @@ namespace backend::playback
         void resetFilteredCount() { totalFiltered_.store(0); }
 
     private:
-        size_t capacity_;
-        mutable std::mutex mutex_;
+        // Atomic so the lock-free guard reads (earliest/latest/availableCount and
+        // the top-of-function `capacity_ == 0` checks) cannot data-race with
+        // resize()'s write. resize() holds structureMutex_ exclusively and also
+        // calls those readers, so they cannot take the lock — atomicity is the fix.
+        std::atomic<size_t> capacity_;
+        // Structural lock: guards the identity of ring_ / slotMutexes_, capacity_
+        // and frameFilter_. Held in SHARED mode by the per-frame hot path
+        // (pushFrame / getByWriteIndex / getLatest) so producer and consumers do
+        // not serialize against each other, and in EXCLUSIVE mode only by rare
+        // whole-ring operations (resize / save / estimate) that replace the ring
+        // or touch many slots at once.
+        mutable std::shared_mutex structureMutex_;
+        // Per-slot locks (parallel to ring_): a single slot lock is held only
+        // while copying one frame in/out, so the large memcpy no longer happens
+        // under a global mutex. The producer writing slot A never blocks a
+        // consumer reading slot B.
+        mutable std::vector<std::mutex> slotMutexes_;
         std::vector<Frame> ring_;
         std::atomic<uint64_t> totalWritten_{0};
         std::atomic<uint64_t> totalFiltered_{0};
 
-        // Frame filter (protected by mutex_)
+        // Frame filter (protected by structureMutex_)
         FrameFilter frameFilter_;
 
         // Internal helper to save a single frame as TIFF

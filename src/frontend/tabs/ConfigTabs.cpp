@@ -32,6 +32,11 @@
 #include <QScrollArea>
 #include <QGridLayout>
 #include <QGroupBox>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QTableWidget>
+#include <QHeaderView>
+#include <QLineEdit>
 
 #include <spdlog/spdlog.h>
 #ifdef _WIN32
@@ -41,6 +46,7 @@
 #endif
 
 #include "backend/app/AppBackend.h"
+#include "frontend/system/ProfileManager.h"
 #include "frontend/models/JsonTableModel.h"
 #include "frontend/utils/JsonFlatten.h"
 
@@ -69,43 +75,6 @@ static QString getUserConfigDir() {
 #endif
     // Development: use ../include/ relative to executable
     return QDir(appDir).absoluteFilePath("../include");
-}
-
-static QJsonValue parseValueFromString(const QString& text) {
-	const QString t = text.trimmed();
-	if (t == "true") return QJsonValue(true);
-	if (t == "false") return QJsonValue(false);
-	if (t == "null" || t == "undefined") return QJsonValue();
-	// Try number
-	bool ok = false;
-	double d = t.toDouble(&ok);
-	if (ok && !t.isEmpty()) return QJsonValue(d);
-	// Try array/object JSON
-	if ((!t.isEmpty() && (t.front() == '{' || t.front() == '['))) {
-		QJsonParseError err;
-		const QJsonDocument doc = QJsonDocument::fromJson(t.toUtf8(), &err);
-		if (err.error == QJsonParseError::NoError) {
-			if (doc.isObject()) return QJsonValue(doc.object());
-			if (doc.isArray()) return QJsonValue(doc.array());
-		}
-	}
-	return QJsonValue(t);
-}
-
-static void setObjectValueByPath(QJsonObject& obj, const QString& path, const QJsonValue& value) {
-	const QStringList parts = path.split('.', Qt::SkipEmptyParts);
-	std::function<void(QJsonObject&, int)> setByIndex = [&](QJsonObject& node, int idx) {
-		if (idx >= parts.size()) return;
-		const QString& key = parts.at(idx);
-		if (idx == parts.size() - 1) {
-			node.insert(key, value);
-			return;
-		}
-		QJsonObject child = node.value(key).toObject();
-		setByIndex(child, idx + 1);
-		node.insert(key, child);
-	};
-	setByIndex(obj, 0);
 }
 
 } // namespace
@@ -144,10 +113,24 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         jsonUnsavedLabel_->setVisible(false);
         jsonUnsavedLabel_->setStyleSheet("color: #d17a00;");
         jsonUnsavedLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+        jsonConflictLabel_ = new QLabel(page);
+        jsonConflictLabel_->setText(tr("Config changed elsewhere; reload before saving if you want the latest file."));
+        jsonConflictLabel_->setVisible(false);
+        jsonConflictLabel_->setStyleSheet("color: #b00020;");
+        jsonConflictLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
         profileSelect_ = new QComboBox(page);
         saveProfileBtn_ = new QPushButton(tr("Save Profile"), page);
         deleteProfileBtn_ = new QPushButton(tr("Delete"), page);
         renameProfileBtn_ = new QPushButton(tr("Rename"), page);
+        checkUpdatesBtn_ = new QPushButton(tr("Check Updates"), page);
+        updateSelectedBtn_ = new QPushButton(tr("Update Selected"), page);
+        showDiffBtn_ = new QPushButton(tr("Show Diff"), page);
+        duplicateAsLocalBtn_ = new QPushButton(tr("Duplicate as Local"), page);
+        profileStatusLabel_ = new QLabel(page);
+        profileStatusLabel_->setText(tr("No profile selected"));
+        profileStatusLabel_->setTextFormat(Qt::PlainText);
+        profileStatusLabel_->setWordWrap(false);
+        profileStatusLabel_->setMinimumWidth(220);
         row->addWidget(jsonReloadBtn_);
         row->addWidget(jsonSaveBtn_);
         row->addWidget(jsonBrowseBtn_);
@@ -157,11 +140,18 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         row->addSpacing(8);
         row->addWidget(jsonUnsavedLabel_);
         row->addSpacing(8);
+        row->addWidget(jsonConflictLabel_);
+        row->addSpacing(8);
         row->addWidget(new QLabel(tr("Profile:"), page));
         row->addWidget(profileSelect_);
         row->addWidget(saveProfileBtn_);
         row->addWidget(renameProfileBtn_);
         row->addWidget(deleteProfileBtn_);
+        row->addWidget(checkUpdatesBtn_);
+        row->addWidget(updateSelectedBtn_);
+        row->addWidget(showDiffBtn_);
+        row->addWidget(duplicateAsLocalBtn_);
+        row->addWidget(profileStatusLabel_);
 		row->addWidget(jsonTableToggle_);
         v->addLayout(row);
 
@@ -301,6 +291,11 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
     connect(saveProfileBtn_, &QPushButton::clicked, this, &ConfigTabs::onSaveProfile);
     connect(deleteProfileBtn_, &QPushButton::clicked, this, &ConfigTabs::onDeleteProfile);
     connect(renameProfileBtn_, &QPushButton::clicked, this, &ConfigTabs::onRenameProfile);
+    connect(checkUpdatesBtn_, &QPushButton::clicked, this, &ConfigTabs::onCheckProfileUpdates);
+    connect(updateSelectedBtn_, &QPushButton::clicked, this, &ConfigTabs::onUpdateSelectedProfile);
+    connect(showDiffBtn_, &QPushButton::clicked, this, &ConfigTabs::onShowProfileDiff);
+    connect(duplicateAsLocalBtn_, &QPushButton::clicked, this, &ConfigTabs::onDuplicateProfileAsLocal);
+    refreshProfileStatusLabel();
 }
 
 QString ConfigTabs::appDirIncludePath(const QString& fileName) const {
@@ -322,6 +317,17 @@ QString ConfigTabs::currentJsPath() const {
     return defaultJsPath();
 }
 
+void ConfigTabs::clearJsonSyncIndicators()
+{
+    if (jsonUnsavedLabel_) {
+        jsonUnsavedLabel_->setVisible(false);
+        jsonUnsavedLabel_->setText(tr("Unsaved changes – click Save to apply."));
+    }
+    if (jsonConflictLabel_) {
+        jsonConflictLabel_->setVisible(false);
+    }
+}
+
 bool ConfigTabs::loadFileToEditor(const QString& path, QPlainTextEdit* editor, QString* err) {
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
@@ -332,7 +338,9 @@ bool ConfigTabs::loadFileToEditor(const QString& path, QPlainTextEdit* editor, Q
     const bool blocked = editor->blockSignals(true);
     editor->setPlainText(in.readAll());
     editor->blockSignals(blocked);
-    if (editor == jsonEdit_ && jsonUnsavedLabel_) jsonUnsavedLabel_->setVisible(false);
+    if (editor == jsonEdit_) {
+        clearJsonSyncIndicators();
+    }
     if (editor == jsEdit_ && jsUnsavedLabel_) jsUnsavedLabel_->setVisible(false);
     return true;
 }
@@ -393,7 +401,7 @@ void ConfigTabs::onReloadJson() {
         return;
     }
     jsonPathLabel_->setText(path);
-    if (jsonUnsavedLabel_) jsonUnsavedLabel_->setVisible(false);
+    clearJsonSyncIndicators();
     if (jsonStack_ && jsonStack_->currentIndex() == 1) {
         refreshJsonTableModel();
     }
@@ -408,7 +416,7 @@ void ConfigTabs::onSaveJson() {
         return;
     }
     QMessageBox::information(this, tr("Save config.json"), tr("Saved."));
-    if (jsonUnsavedLabel_) jsonUnsavedLabel_->setVisible(false);
+    clearJsonSyncIndicators();
     if (jsonStack_ && jsonStack_->currentIndex() == 1) {
         refreshJsonTableModel();
     }
@@ -522,7 +530,7 @@ void ConfigTabs::onBrowseJson() {
         return;
     }
     jsonPathLabel_->setText(selected);
-    if (jsonUnsavedLabel_) jsonUnsavedLabel_->setVisible(false);
+    clearJsonSyncIndicators();
     if (jsonStack_ && jsonStack_->currentIndex() == 1) {
         refreshJsonTableModel();
     }
@@ -757,33 +765,36 @@ void ConfigTabs::onExternalConfigFileChanged(const QString& path) {
     if (path != currentJsonPath()) {
         return;
     }
-    
-    // Only reload if there are no unsaved changes to avoid overwriting user edits
+
+    // Only reload if there are no unsaved changes to avoid overwriting user edits.
     if (jsonUnsavedLabel_ && jsonUnsavedLabel_->isVisible()) {
-        SPDLOG_DEBUG("ConfigTabs: skipping external file reload due to unsaved changes");
+        if (jsonConflictLabel_) {
+            jsonConflictLabel_->setVisible(true);
+        }
+        SPDLOG_WARN("ConfigTabs: config changed externally while editor has unsaved changes");
         return;
     }
-    
+
     // Reload the file into the editor
     QString err;
     if (!loadFileToEditor(path, jsonEdit_, &err)) {
         SPDLOG_WARN("ConfigTabs: failed to reload config.json from {}: {}", path.toStdString(), err.toStdString());
         return;
     }
-    
+
     // Refresh the JSON table if it's visible
     if (jsonStack_ && jsonStack_->currentIndex() == 1) {
         refreshJsonTableModel();
     }
-    
+
     SPDLOG_DEBUG("ConfigTabs: reloaded config.json from external change");
 }
 
 void ConfigTabs::rebuildJsonFromTable() {
 	if (!jsonEdit_) return;
-	
-	QJsonObject root;
-	
+
+	QMap<QString, jsonutil::FlattenTable> sections;
+
 	// Collect data from all section tables
 	for (auto it = jsonSectionModels_.constBegin(); it != jsonSectionModels_.constEnd(); ++it) {
 		const QString& sectionName = it.key();
@@ -792,81 +803,19 @@ void ConfigTabs::rebuildJsonFromTable() {
 		
 		const auto& cols = model->columns();
 		const auto& rows = model->rows();
-		
-		if (cols.size() >= 2 && cols.at(0) == "key" && cols.at(1) == "value") {
-			// Key-value format: build nested object under section name
-			QJsonObject sectionObj;
-			for (const auto& r : rows) {
-				if (r.size() < 2) continue;
-				const QString keyPath = r.at(0);
-				const QString valStr = r.at(1);
-				if (!keyPath.isEmpty() && keyPath != "(value)") {
-					setObjectValueByPath(sectionObj, keyPath, parseValueFromString(valStr));
-				} else if (keyPath == "(value)") {
-					// Scalar value for the section itself
-					root.insert(sectionName, parseValueFromString(valStr));
-					sectionObj = QJsonObject(); // Clear, we've set it directly
-					break;
-				}
-			}
-			if (!sectionObj.isEmpty()) {
-				root.insert(sectionName, sectionObj);
-			}
-		} else if (cols.size() > 2) {
-			// Array of objects format: build array under section name
-			QJsonArray arr;
-			for (const auto& r : rows) {
-				QJsonObject obj;
-				for (int c = 0; c < cols.size() && c < r.size(); ++c) {
-					const QString keyPath = cols.at(c);
-					const QString valStr = r.at(c);
-					if (!keyPath.isEmpty() && keyPath != "key" && keyPath != "type") {
-						setObjectValueByPath(obj, keyPath, parseValueFromString(valStr));
-					}
-				}
-				if (!obj.isEmpty()) {
-					arr.append(obj);
-				}
-			}
-			if (!arr.isEmpty()) {
-				root.insert(sectionName, arr);
-			}
-		}
+		sections.insert(sectionName, jsonutil::FlattenTable{cols, rows});
 	}
-	
-	// Fallback to legacy single table if no section tables exist
-	if (root.isEmpty() && jsonModel_) {
-		const auto& cols = jsonModel_->columns();
-		const auto& rows = jsonModel_->rows();
-		if (cols.size() == 2 && cols.at(0) == "key" && cols.at(1) == "value") {
-			for (const auto& r : rows) {
-				if (r.size() < 2) continue;
-				const QString keyPath = r.at(0);
-				const QString valStr = r.at(1);
-				setObjectValueByPath(root, keyPath, parseValueFromString(valStr));
-			}
-		} else {
-			QJsonArray arr;
-			for (const auto& r : rows) {
-				QJsonObject obj;
-				for (int c = 0; c < cols.size() && c < r.size(); ++c) {
-					const QString keyPath = cols.at(c);
-					const QString valStr = r.at(c);
-					setObjectValueByPath(obj, keyPath, parseValueFromString(valStr));
-				}
-				arr.append(obj);
-			}
-			QJsonDocument arrDoc(arr);
-			// Update editor without triggering table refresh loop
-			const bool blocked = jsonEdit_->blockSignals(true);
-			jsonEdit_->setPlainText(QString::fromUtf8(arrDoc.toJson(QJsonDocument::Indented)));
-			jsonEdit_->blockSignals(blocked);
-			if (jsonUnsavedLabel_) jsonUnsavedLabel_->setVisible(true);
-			return;
-		}
+
+	if (sections.isEmpty() && jsonModel_) {
+		sections.insert(QStringLiteral("General"),
+		                jsonutil::FlattenTable{jsonModel_->columns(), jsonModel_->rows()});
 	}
-	
-	QJsonDocument outDoc(root);
+
+	const QJsonDocument outDoc = jsonutil::rebuildJsonDocumentFromSections(sections);
+	if (outDoc.isNull()) {
+		return;
+	}
+
 	// Update editor without triggering table refresh loop
 	const bool blocked = jsonEdit_->blockSignals(true);
 	jsonEdit_->setPlainText(QString::fromUtf8(outDoc.toJson(QJsonDocument::Indented)));
@@ -876,12 +825,11 @@ void ConfigTabs::rebuildJsonFromTable() {
 
 // ===== Profiles helpers =====
 QString ConfigTabs::profilesBaseDir() const {
-    // Use centralized helper to get user-writable config directory
-    return QDir(getUserConfigDir()).absoluteFilePath("profiles");
+    return profileManager_.profilesBaseDir();
 }
 
 bool ConfigTabs::ensureProfilesDirExists(QString* err) const {
-    QDir dir(profilesBaseDir());
+    QDir dir(profileManager_.profilesBaseDir());
     if (dir.exists()) return true;
     if (!dir.mkpath(".")) {
         if (err) *err = tr("Failed to create profiles dir: %1").arg(dir.absolutePath());
@@ -892,14 +840,13 @@ bool ConfigTabs::ensureProfilesDirExists(QString* err) const {
 
 QStringList ConfigTabs::listProfiles() const {
     QStringList result;
-    QDir dir(profilesBaseDir());
-    if (!dir.exists()) return result;
-    const QFileInfoList entries = dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
-    for (const QFileInfo& fi : entries) {
-        const QString cfg = QDir(fi.absoluteFilePath()).absoluteFilePath("config.json");
-        if (QFile::exists(cfg)) {
-            result << fi.fileName();
-        }
+    QString err;
+    const auto summaries = profileManager_.scanLocalProfiles(true, remoteCatalog_ ? &*remoteCatalog_ : nullptr, &err);
+    if (!err.isEmpty()) {
+        SPDLOG_WARN("ConfigTabs: failed to scan profiles for list: {}", err.toStdString());
+    }
+    for (const auto& summary : summaries) {
+        result << summary.profileName;
     }
     return result;
 }
@@ -907,20 +854,25 @@ QStringList ConfigTabs::listProfiles() const {
 void ConfigTabs::refreshProfilesList() {
     if (!profileSelect_) return;
     const QString last = QSettings().value("Profiles/LastProfileName").toString();
-    const QStringList profiles = listProfiles();
+    QString err;
+    const auto summaries = profileManager_.scanLocalProfiles(true, remoteCatalog_ ? &*remoteCatalog_ : nullptr, &err);
+    if (!err.isEmpty()) {
+        SPDLOG_WARN("ConfigTabs: profile scan warning: {}", err.toStdString());
+    }
     const bool blocked = profileSelect_->blockSignals(true);
     profileSelect_->clear();
     profileSelect_->addItem(tr("<no profile>"), "");
-    for (const QString& p : profiles) {
-        profileSelect_->addItem(p, p);
+    for (const auto& summary : summaries) {
+        profileSelect_->addItem(profileLabelForSummary(summary), summary.profileName);
     }
     int idx = profileSelect_->findData(last);
     if (idx < 0) idx = 0;
     profileSelect_->setCurrentIndex(idx);
     profileSelect_->blockSignals(blocked);
-    // Auto-load if not <no profile>
     if (idx > 0) {
         onProfileSelectionChanged(idx);
+    } else {
+        refreshProfileStatusLabel();
     }
 }
 
@@ -966,6 +918,122 @@ QString ConfigTabs::profileJsPath(const QString& profileName) const {
     return QDir(profileDirPath(profileName)).absoluteFilePath("egrabberConfig.js");
 }
 
+QString ConfigTabs::selectedProfileName() const {
+    if (!profileSelect_) {
+        return QString();
+    }
+    return profileSelect_->currentData().toString();
+}
+
+std::optional<frontend::ProfileManager::LocalProfile> ConfigTabs::selectedProfileSummary() const {
+    const QString name = selectedProfileName();
+    if (name.isEmpty()) {
+        return std::nullopt;
+    }
+    QString err;
+    const auto summaries = profileManager_.scanLocalProfiles(true, remoteCatalog_ ? &*remoteCatalog_ : nullptr, &err);
+    if (!err.isEmpty()) {
+        SPDLOG_WARN("ConfigTabs: failed to fetch selected profile summary: {}", err.toStdString());
+    }
+    for (const auto& summary : summaries) {
+        if (summary.profileName == name) {
+            return summary;
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<frontend::ProfileManager::CatalogEntry> ConfigTabs::selectedRemoteCatalogEntry() const {
+    const auto summary = selectedProfileSummary();
+    if (!summary.has_value() || !summary->remoteEntry.has_value()) {
+        return std::nullopt;
+    }
+    return summary->remoteEntry;
+}
+
+QString ConfigTabs::profileLabelForSummary(const frontend::ProfileManager::LocalProfile& summary) const {
+    QStringList tags;
+    if (summary.remoteEntry.has_value()) {
+        tags << tr("remote");
+    } else {
+        tags << tr("local");
+    }
+    if (summary.updateAvailable) {
+        tags << tr("update available");
+    }
+    if (summary.dirty) {
+        tags << tr("dirty");
+    }
+    if (summary.incompatible) {
+        tags << tr("incompatible");
+    }
+    const QString base = summary.displayName.trimmed().isEmpty() ? summary.profileName : summary.displayName.trimmed();
+    return tags.isEmpty() ? base : QStringLiteral("%1 [%2]").arg(base, tags.join(QStringLiteral(", ")));
+}
+
+void ConfigTabs::refreshProfileStatusLabel() {
+    if (!profileStatusLabel_) {
+        return;
+    }
+    const auto summary = selectedProfileSummary();
+    if (!summary.has_value()) {
+        profileStatusLabel_->setText(tr("No profile selected"));
+        profileStatusLabel_->setToolTip(QString());
+        return;
+    }
+
+    QStringList details;
+    details << (summary->remoteEntry.has_value() ? tr("remote") : tr("local-only"));
+    if (summary->updateAvailable) {
+        details << tr("update available");
+    }
+    if (summary->dirty) {
+        details << tr("dirty");
+    }
+    if (summary->incompatible) {
+        details << tr("incompatible");
+    }
+    profileStatusLabel_->setText(details.join(QStringLiteral(" | ")));
+    profileStatusLabel_->setToolTip(QStringLiteral("Profile: %1\nConfig: %2\nMetadata: %3")
+                                        .arg(summary->profileName,
+                                             summary->hasConfig ? summary->configPath : tr("missing"),
+                                             summary->hasMetadata ? summary->metaPath : tr("missing")));
+}
+
+void ConfigTabs::showDiffDialog(const QString& title, const QVector<frontend::ProfileManager::DiffRow>& rows) {
+    QDialog dialog(this);
+    dialog.setWindowTitle(title);
+    dialog.resize(1100, 640);
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* table = new QTableWidget(&dialog);
+    table->setColumnCount(6);
+    table->setHorizontalHeaderLabels({tr("Path"), tr("Status"), tr("Local value"), tr("Remote value"), tr("Risk"), tr("Source")});
+    table->setRowCount(rows.size());
+    table->setAlternatingRowColors(true);
+    table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    table->setSelectionBehavior(QAbstractItemView::SelectRows);
+    table->setSelectionMode(QAbstractItemView::SingleSelection);
+    table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    table->horizontalHeader()->setStretchLastSection(true);
+
+    for (int i = 0; i < rows.size(); ++i) {
+        const auto& row = rows.at(i);
+        const QString status = frontend::ProfileManager::diffStatusToString(row.status);
+        table->setItem(i, 0, new QTableWidgetItem(row.path));
+        table->setItem(i, 1, new QTableWidgetItem(status));
+        table->setItem(i, 2, new QTableWidgetItem(row.localValue));
+        table->setItem(i, 3, new QTableWidgetItem(row.remoteValue));
+        table->setItem(i, 4, new QTableWidgetItem(row.risk));
+        table->setItem(i, 5, new QTableWidgetItem(row.source));
+    }
+
+    layout->addWidget(table, 1);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+    dialog.exec();
+}
+
 void ConfigTabs::loadSelectedProfileInternal(const QString& profileName) {
     if (profileName.isEmpty()) return;
     const QString cfgPath = profileJsonPath(profileName);
@@ -989,6 +1057,7 @@ void ConfigTabs::loadSelectedProfileInternal(const QString& profileName) {
         QSettings().setValue("Config/ExternalCameraScriptPath", jsPath);
         onReloadJs();
     }
+    refreshProfileStatusLabel();
 }
 
 // ===== Profiles slots =====
@@ -1004,6 +1073,7 @@ void ConfigTabs::onProfileSelectionChanged(int index) {
         SPDLOG_INFO("Profiles: cleared active profile; reverting to default include paths");
         onReloadJson();
         onReloadJs();
+        refreshProfileStatusLabel();
         return;
     }
     loadSelectedProfileInternal(profileName);
@@ -1089,6 +1159,7 @@ void ConfigTabs::onSaveProfile() {
     }
     SPDLOG_INFO("Profiles: saved profile '{}' (json={}, js_included={})",
                 name.toStdString(), cfgPath.toStdString(), includeJs ? 1 : 0);
+    refreshProfileStatusLabel();
 }
 
 void ConfigTabs::onDeleteProfile() {
@@ -1169,6 +1240,154 @@ void ConfigTabs::onRenameProfile() {
     refreshProfilesList();
     const int idx = profileSelect_->findData(newName);
     if (idx >= 0) profileSelect_->setCurrentIndex(idx);
+    refreshProfileStatusLabel();
+}
+
+void ConfigTabs::onCheckProfileUpdates() {
+    const QUrl catalogUrl = profileManager_.catalogUrlFromEnvOrDefault(QStringLiteral("stable"));
+    QString err;
+    const auto catalog = profileManager_.fetchCatalog(catalogUrl, &err);
+    if (!catalog.has_value()) {
+        QMessageBox::warning(this, tr("Check Updates"), tr("Failed to fetch catalog:\n%1").arg(err));
+        SPDLOG_WARN("ConfigTabs: catalog fetch failed from {}: {}", catalogUrl.toString().toStdString(), err.toStdString());
+        return;
+    }
+    if (catalog->catalogSchemaVersion <= 0) {
+        QMessageBox::warning(this, tr("Check Updates"), tr("Catalog is missing catalog_schema_version."));
+        return;
+    }
+
+    remoteCatalog_ = catalog;
+    refreshProfilesList();
+
+    const int remoteCount = catalog->profiles.size();
+    int updateCount = 0;
+    const auto refreshed = profileManager_.scanLocalProfiles(true, &*remoteCatalog_, nullptr);
+    for (const auto& profile : refreshed) {
+        if (profile.updateAvailable) {
+            ++updateCount;
+        }
+    }
+    QMessageBox::information(this,
+                             tr("Check Updates"),
+                             tr("Catalog refreshed from %1.\n\nProfiles in catalog: %2\nProfiles with updates: %3")
+                                 .arg(catalogUrl.toString())
+                                 .arg(remoteCount)
+                                 .arg(updateCount));
+}
+
+void ConfigTabs::onUpdateSelectedProfile() {
+    const auto selected = selectedProfileSummary();
+    if (!selected.has_value()) {
+        QMessageBox::information(this, tr("Update Selected"), tr("No profile selected."));
+        return;
+    }
+    if (!selected->remoteEntry.has_value()) {
+        QMessageBox::information(this, tr("Update Selected"), tr("The selected profile does not have remote catalog data."));
+        return;
+    }
+    const auto ret = QMessageBox::question(this,
+                                           tr("Update Selected"),
+                                           tr("Update profile '%1' from the public catalog?\n\nThis will replace config.json and any matching camera script after checksum verification.").arg(selected->profileName),
+                                           QMessageBox::Yes | QMessageBox::No,
+                                           QMessageBox::Yes);
+    if (ret != QMessageBox::Yes) {
+        return;
+    }
+
+    QString err;
+    if (!profileManager_.installRemoteProfile(*selected->remoteEntry, selected->profileName, &err)) {
+        QMessageBox::warning(this, tr("Update Selected"), tr("Failed to install profile update:\n%1").arg(err));
+        SPDLOG_WARN("ConfigTabs: failed to install remote profile '{}': {}", selected->profileName.toStdString(), err.toStdString());
+        return;
+    }
+
+    refreshProfilesList();
+    const QString cfgPath = profileJsonPath(selected->profileName);
+    const bool active = QFileInfo(currentJsonPath()).absoluteFilePath() == QFileInfo(cfgPath).absoluteFilePath();
+    if (active) {
+        emit appConfigPathChanged(cfgPath);
+        onReloadJson();
+        const bool includeJs = profilesIncludeJsCheck_ ? profilesIncludeJsCheck_->isChecked() : true;
+        if (includeJs && QFile::exists(profileJsPath(selected->profileName))) {
+            QSettings().setValue("Config/ExternalCameraScriptPath", profileJsPath(selected->profileName));
+            onReloadJs();
+        }
+    }
+    refreshProfileStatusLabel();
+    QMessageBox::information(this, tr("Update Selected"), tr("Profile update installed successfully."));
+}
+
+void ConfigTabs::onShowProfileDiff() {
+    const auto selected = selectedProfileSummary();
+    if (!selected.has_value()) {
+        QMessageBox::information(this, tr("Show Diff"), tr("No profile selected."));
+        return;
+    }
+    if (!remoteCatalog_.has_value() || !selected->remoteEntry.has_value()) {
+        QMessageBox::information(this, tr("Show Diff"), tr("Fetch the public catalog first, then select a remote-managed profile."));
+        return;
+    }
+
+    QByteArray remoteConfig;
+    QString remoteErr;
+    if (!profileManager_.downloadUrlBlocking(selected->remoteEntry->configUrl, &remoteConfig, &remoteErr)) {
+        QMessageBox::warning(this, tr("Show Diff"), tr("Failed to download remote config:\n%1").arg(remoteErr));
+        return;
+    }
+
+    QString localErr;
+    const auto localBytes = profileManager_.readFileBytes(profileJsonPath(selected->profileName), &localErr);
+    if (!localBytes.has_value()) {
+        QMessageBox::warning(this, tr("Show Diff"), tr("Failed to read local config:\n%1").arg(localErr));
+        return;
+    }
+
+    QString diffErr;
+    const auto rows = profileManager_.diffConfigBytes(*localBytes, remoteConfig, &diffErr);
+    if (!diffErr.isEmpty()) {
+        QMessageBox::warning(this, tr("Show Diff"), tr("Failed to diff configs:\n%1").arg(diffErr));
+        return;
+    }
+    if (rows.isEmpty()) {
+        QMessageBox::information(this, tr("Show Diff"), tr("No configuration differences detected."));
+        return;
+    }
+    showDiffDialog(tr("Profile Diff: %1").arg(selected->profileName), rows);
+}
+
+void ConfigTabs::onDuplicateProfileAsLocal() {
+    const auto selected = selectedProfileSummary();
+    if (!selected.has_value()) {
+        QMessageBox::information(this, tr("Duplicate as Local"), tr("No profile selected."));
+        return;
+    }
+    QString newName = QInputDialog::getText(this,
+                                            tr("Duplicate as Local"),
+                                            tr("New local profile name:"),
+                                            QLineEdit::Normal,
+                                            selected->profileName + QStringLiteral("-copy"));
+    if (newName.isNull()) {
+        return;
+    }
+    newName = sanitizeProfileName(newName);
+    if (newName.isEmpty()) {
+        QMessageBox::warning(this, tr("Duplicate as Local"), tr("Invalid profile name."));
+        return;
+    }
+
+    QString err;
+    if (!profileManager_.duplicateProfileAsLocal(selected->profileName, newName, &err)) {
+        QMessageBox::warning(this, tr("Duplicate as Local"), tr("Failed to duplicate profile:\n%1").arg(err));
+        return;
+    }
+
+    refreshProfilesList();
+    const int idx = profileSelect_ ? profileSelect_->findData(newName) : -1;
+    if (idx >= 0) {
+        profileSelect_->setCurrentIndex(idx);
+    }
+    QMessageBox::information(this, tr("Duplicate as Local"), tr("Created local profile '%1'.").arg(newName));
 }
 
 void ConfigTabs::onIncludeJsToggled(bool checked) {
@@ -1176,6 +1395,3 @@ void ConfigTabs::onIncludeJsToggled(bool checked) {
 }
 
 } // namespace frontend
-
-
-

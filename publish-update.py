@@ -12,13 +12,103 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from scripts.s3_upload import upload_file_to_s3, upload_file_with_wrangler
+from scripts.s3_upload import (
+    download_bytes_from_s3,
+    upload_file_to_s3,
+    upload_file_with_wrangler,
+)
 
 
 DEFAULT_BUCKET = "mib-studio-qt-updates"
 DEFAULT_PUBLIC_BASE_URL = "https://updates.yofo.bio"
 ARTIFACT_CACHE_CONTROL = "public, max-age=31536000, immutable"
 MANIFEST_CACHE_CONTROL = "public, max-age=60, must-revalidate"
+INDEX_SCHEMA_VERSION = 1
+
+
+def _version_sort_key(version: str) -> tuple:
+    """Sort key for a version string. A release sorts AFTER its betas; betas
+    ascend by number. e.g. 1.0.4-beta.1 < 1.0.4-beta.2 < 1.0.4."""
+    core, _, suffix = str(version).partition("-")
+    parts = [int(x) if x.isdigit() else 0 for x in core.split(".")]
+    parts += [0] * (3 - len(parts))  # pad so 1.0 and 1.0.0 compare equal-ish
+    if suffix.startswith("beta."):
+        rest = suffix[len("beta."):]
+        beta = int(rest) if rest.isdigit() else 0
+    else:
+        beta = float("inf")  # a release sorts after all of its betas
+    return (tuple(parts[:3]), beta)
+
+
+def merge_index(existing: dict, entry: dict, channel: str) -> dict:
+    """Insert/replace `entry` (keyed by 'version') into a per-channel index,
+    returning a newest-first {schema_version, channel, versions} dict. Pure."""
+    versions = [v for v in (existing.get("versions") or []) if v.get("version") != entry.get("version")]
+    versions.append(entry)
+    versions.sort(key=lambda v: _version_sort_key(v.get("version", "")), reverse=True)
+    return {"schema_version": INDEX_SCHEMA_VERSION, "channel": channel, "versions": versions}
+
+
+def _index_entry_from_manifest(manifest: dict) -> dict:
+    """Map a latest.json-style manifest to an index.json version entry. The
+    app's UpdateCatalog reads published_utc (manifests carry published_at)."""
+    return {
+        "version": manifest.get("version", ""),
+        "installer_url": manifest.get("installer_url", ""),
+        "installer_sha256": manifest.get("installer_sha256", ""),
+        "installer_size_bytes": manifest.get("installer_size_bytes", -1),
+        "release_notes_url": manifest.get("release_notes_url", ""),
+        "published_utc": manifest.get("published_utc") or manifest.get("published_at", ""),
+    }
+
+
+def fetch_json_url(url: str) -> dict | None:
+    """GET a public JSON document; return None on any error (e.g. 404).
+
+    Sends an explicit User-Agent because the default Python-urllib UA is often
+    blocked/challenged by CDNs (e.g. Cloudflare), which silently broke index
+    reads from CI runners."""
+    import urllib.request
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "mib-studio-publish/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310 (trusted host)
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+
+
+def resolve_index_update(existing: dict | None, read_ok: bool, entry: dict, channel: str):
+    """Decide the index to upload after a publish.
+
+    Returns None to SKIP the upload (the existing index could not be read, so we
+    must not clobber it with a single-entry index). Otherwise returns the merged
+    index (existing entries preserved + the new entry, newest-first)."""
+    if not read_ok:
+        return None
+    return merge_index(existing or {}, entry, channel)
+
+
+def read_existing_index(args, index_key: str):
+    """Read the channel's current index.json. Returns (index_or_None, read_ok).
+
+    Prefers the S3 API (same endpoint/credentials as uploads — reliable from CI)
+    and falls back to the public URL. read_ok=False means the read genuinely
+    failed (caller must not overwrite); a missing object is read_ok=True with {}.
+    """
+    method = resolve_upload_method(args.upload_method, args.endpoint)
+    if method == "s3" and args.endpoint:
+        try:
+            data = download_bytes_from_s3(
+                endpoint=args.endpoint, bucket=args.bucket, key=index_key, profile=args.profile)
+            if data is None:
+                return {}, True  # no index yet (first publish)
+            return json.loads(data.decode("utf-8")), True
+        except Exception as exc:
+            print(f"WARNING: could not read existing {index_key} via S3: {exc}", file=sys.stderr)
+            return None, False
+    # Wrangler / no endpoint: fall back to the public URL.
+    idx = fetch_json_url(join_public_object_url(args.public_base_url, index_key))
+    return (idx or {}), True
 
 
 def join_public_object_url(base_url: str, key: str) -> str:
@@ -186,6 +276,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Installer URL: {installer_url}")
         return 0
 
+    index_key = f"{args.channel}/index.json"
+
     try:
         print("\n3. Uploading installer...")
         upload_object(
@@ -206,6 +298,28 @@ def main(argv: list[str] | None = None) -> int:
             cache_control=MANIFEST_CACHE_CONTROL,
         )
         print("   Manifest uploaded successfully")
+
+        print("\n5. Updating version index...")
+        existing_index, read_ok = read_existing_index(args, index_key)
+        index = resolve_index_update(
+            existing_index, read_ok, _index_entry_from_manifest(manifest), args.channel)
+        if index is None:
+            # Read failed: skip rather than overwrite a good catalog with one entry.
+            print("   WARNING: skipping index.json update (could not read existing index)",
+                  file=sys.stderr)
+        else:
+            index_path = write_manifest_file(index, None)
+            try:
+                upload_object(
+                    args=args,
+                    key=index_key,
+                    file_path=index_path,
+                    content_type="application/json",
+                    cache_control=MANIFEST_CACHE_CONTROL,
+                )
+            finally:
+                index_path.unlink(missing_ok=True)
+            print(f"   Version index updated ({len(index['versions'])} version(s))")
     except Exception as exc:
         print(f"ERROR: upload failed: {exc}", file=sys.stderr)
         return 1

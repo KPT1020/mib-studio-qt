@@ -5,6 +5,7 @@ This guide documents the end-to-end process for releasing a new version of MIB S
 ## Overview
 
 The release pipeline builds on a local Windows machine with the required proprietary dependencies, publishes installer assets to GitHub Releases with `gh`, and publishes the auto-update package to Cloudflare R2 through the Python command `publish-update.py`.
+Calibration and lookup-table updates can be published independently with `publish-emodulus-lut.py`; see [`auto-update-r2.md`](auto-update-r2.md) for the LUT-specific object layout and rollback behavior.
 
 ### One-Command Release (`release.ps1`)
 
@@ -36,6 +37,25 @@ The release pipeline builds on a local Windows machine with the required proprie
 6. Pushes branch and tag to GitHub.
 7. Creates a GitHub Release with installers and SHA-256 checksums.
 8. Publishes the update package to Cloudflare R2 via `publish-update.py`.
+
+### Crash reporting (Sentry) in the tagged release
+
+The tag-triggered CI release (`.github/workflows/release.yml`) also wires up
+Sentry so crashes from shipped builds are actually useful:
+
+- **DSN injection** — the Configure step passes `-DMIB_SENTRY_DSN` from the
+  `SENTRY_DSN` secret, so the installed app sends events (without it, releases
+  run in local-only mode and nothing reaches Sentry).
+- **Debug symbol upload** — after the build it runs
+  `sentry-cli debug-files upload` on `build\Release` and creates/finalizes the
+  `mib_studio_qt@<version>` release. Without uploaded PDBs, captured minidumps
+  are unsymbolicated (= useless stacks). Gated on `SENTRY_AUTH_TOKEN` /
+  `SENTRY_ORG` / `SENTRY_PROJECT` (skips cleanly if absent).
+
+Required release secrets for symbolicated Sentry crashes: `SENTRY_DSN`,
+`SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT` (and `SENTRY_URL` for
+self-hosted). `crashpad_handler.exe` must ship next to the app (the installer
+copies it); verify it is present in the build output.
 
 Options:
 
@@ -157,6 +177,9 @@ python publish-update.py --installer "build/dist/MIB_Studio_Qt_Setup_v0.2.0.exe"
 - Computes SHA-256 and file size.
 - Generates `<channel>/latest.json`.
 - Uploads the installer and manifest to `s3://mib-studio-qt-updates/<channel>/...`.
+- Updates `<channel>/index.json` (the version catalog the in-app **Software
+  Updates** dialog reads — inserts the new version, dedupe by version,
+  newest-first; an empty index self-seeds with the prior `latest.json`).
 - Prints final public URLs under `https://updates.yofo.bio`.
 
 Important parameters:
@@ -252,12 +275,14 @@ flowchart TD
 
 ## Legacy Client Compatibility
 
-Released builds compiled before this migration still request `https://s3.yofo.bio/mib-studio-qt-updates/stable/latest.json`. During migration, keep one compatibility path:
+`s3.yofo.bio` is **retired**. All releases publish only to `https://updates.yofo.bio`
+(the compiled default since PR #169) — no release should target the old host.
 
-- Preferred: restore `s3.yofo.bio` as a redirect or compatibility endpoint that serves the migrated R2 manifest and artifacts.
-- Acceptable cutoff plan: publish one final old-host manifest whose `installer_url` points to the R2 update package, then announce that clients must update before the old endpoint is retired.
-
-Do not retire the old URL until release owners explicitly accept the cutoff plan.
+Builds compiled before PR #169 still request
+`https://s3.yofo.bio/mib-studio-qt-updates/stable/latest.json` and will **not**
+auto-update. Upgrade those installs manually (download and run the current full
+installer once); from that point on they track `updates.yofo.bio` like every
+other client. Do not reintroduce an `s3.yofo.bio` manifest or redirect.
 
 ## Rollback
 
@@ -266,7 +291,7 @@ If a bad R2 release is published:
 1. Publish a corrected `stable/latest.json` that points at the last known-good update package.
 2. Run `python verify-update-manifest.py`.
 3. Purge Cloudflare cache for mutable manifest paths if stale content is observed.
-4. Keep the old-host compatibility endpoint or redirect pointing at the corrected manifest until the fixed build is widely installed.
+4. Confirm clients pick up the corrected `updates.yofo.bio` manifest (no legacy `s3.yofo.bio` endpoint is involved).
 
 ## Troubleshooting
 

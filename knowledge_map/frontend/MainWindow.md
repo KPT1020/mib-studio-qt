@@ -17,7 +17,10 @@
 - `onStartExperiment` / `onStopExperiment` — drive
   [[Controllers]] `ExperimentController`. Stop path now issues an explicit
   `Hdf5Service::flush()` immediately before `writeExperimentInfo()` to reduce
-  risk of metadata writes invalidating already-persisted frame batches.
+  risk of metadata writes invalidating already-persisted frame batches. When
+  multi-image is enabled and realtime mode is `async_batch`, start now
+  temporarily switches processing to `inline` for the experiment so series
+  frames are actually captured and reviewable; stop restores the prior mode.
 - `onUpdateStats` — timer tick; pulls `CaptureStats`, count-only
   `ProcessingService::getBufferedFrameCounts()`, and autofocus state for the
   status bar/sidebar. It must not copy full `ProcessedFrame` buffers on the
@@ -27,12 +30,32 @@
 - `onNoCamerasFound` — shows a friendly dialog when
   `DeviceInitManager` reports empty discovery.
 
+- EGrabber JavaScript camera scripts are skipped during `onTabChanged` when
+  a MindVision camera is selected.
+
 ## Composition
 
 - `connectTab_`, `overviewTab_`, `experimentTabs_` (QTabWidget with child
   tabs), `playbackPanel_`, `sidebarWidget_`, `updater_`, `initManager_`.
 - `QFutureWatcher<size_t> flushWatcher_` — used to await the final HDF5
   flush on experiment stop without blocking the UI thread.
+- The nested Experiment pages wire Monitoring apply into
+  `AppConfigWatcher::writeBackProcessingConfig()`, which now emits a direct
+  config-change signal after persistence so Preview and Monitoring refresh
+  without waiting for a filesystem watcher round-trip.
+
+## Menu bar
+
+- **File:** Open Data Folder (`Documents/MIB_Studio_Qt`), Open Logs Folder
+  (`%LOCALAPPDATA%/MIB_Studio_Qt/logs`), Exit.
+- **Settings:** Processing / Monitoring / Pixel-to-Micron / Syringe Pump
+  settings, Boot Service Toggles (added in code), and **Profiles…** (navigates
+  to Experiment ▸ Preview, which hosts the config/profiles editor).
+- **Help:** About, **Software Updates…** (opens [[System-Utilities]]'s
+  `SoftwareUpdatesDialog` — channel + version selection; replaced the old
+  "Check for Updates…"), Documentation and Report a Problem (open the GitHub
+  repo/issues). The Software Updates action is disabled when `auto_update` is
+  disabled at boot.
 
 ## Boot disable GUI
 

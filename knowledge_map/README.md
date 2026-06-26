@@ -34,7 +34,8 @@ following `[[WikiLinks]]`. If you are a new agent, start here:
 
 ### Camera (`src/camera/`)
 - [[camera/_MOC|Camera MOC]]
-- [[camera/ICamera]], [[camera/EGrabberCamera]], [[camera/MockCamera]]
+- [[camera/ICamera]], [[camera/EGrabberCamera]], [[camera/MindVisionCamera]],
+  [[camera/MockCamera]]
 
 ### Data model
 - [[data-model/FrameStore]]

@@ -13,6 +13,7 @@
 #include <deque>
 #include <cmath>
 #include "backend/processing/EModulusLut.h"
+#include "backend/recording/HdfWriteQueue.h"
 
 namespace backend { namespace playback { class FrameStore; struct Frame; } }
 
@@ -93,10 +94,12 @@ struct FilterResult {
     double youngsModulus{0.0}; // Young's modulus (kPa) from LUT lookup
     BrightnessQuantiles brightness;
     bool isTargetGroup{false}; // True if valid AND matches target group criteria
-    // Contours found during processing (for snapshot/display)
-    // These are in the same coordinate space as the processedImage mask
-    std::vector<std::vector<cv::Point>> allContours;
-    std::vector<cv::Vec4i> hierarchy;
+    // Contours found during processing (for snapshot/display), in the same
+    // coordinate space as the processedImage mask. Shared (not deep-copied) so
+    // that the per-object FilterResults of a frame, plus the monitoring /
+    // experiment copies, all reference one allocation instead of duplicating
+    // every contour point N times. Null when no contours were extracted.
+    std::shared_ptr<const std::vector<std::vector<cv::Point>>> allContours;
 };
 
 struct TargetGroupEvent {
@@ -122,6 +125,12 @@ struct BufferedFrameCounts {
     size_t invalid{0};
 
     size_t total() const { return valid + invalid; }
+};
+
+// One unit of work handed to the experiment flush write queue.
+struct ExperimentBatch {
+    std::vector<ProcessedFrame> valid;
+    std::vector<ProcessedFrame> invalid;
 };
 
 class ProcessingService {
@@ -195,9 +204,17 @@ public:
     void clearMonitoringFrames();
     
     // Round-robin buffer flush (for crash resilience)
-    // Returns number of frames flushed
+    // Returns number of frames flushed (submitted to the write queue)
     size_t flushBufferedFrames(class Hdf5Service& hdf5);
-    
+
+    // Drain and tear down the experiment write queue (call at experiment stop,
+    // before writing experiment info). Returns false if a write error occurred.
+    bool finishFlush();
+
+    // Fatal flush-error sink: invoked (on the writer thread) when an experiment
+    // flush write fails or the queue overflows. The experiment should stop.
+    void setFlushErrorCallback(std::function<void(const std::string&)> cb);
+
     // Configuration for round-robin buffer
     void setFlushInterval(size_t frames); // Flush every N frames (default: 1000)
     size_t getFlushInterval() const;
@@ -377,7 +394,11 @@ private:
                                       const ProcessingConfig& config, const cv::Mat& originalImage);
     std::vector<FilterResult> filterProcessedObjects(const cv::Mat& processedImage, const cv::Rect& roi,
                                                      const ProcessingConfig& config, const cv::Mat& originalImage);
-    BrightnessQuantiles calculateBrightnessQuantiles(const cv::Mat& originalImage, const cv::Mat& mask);
+    // region restricts the scan to a sub-rectangle (e.g. an object's bounding
+    // box); an empty rect scans the whole image. Mask pixels outside an object's
+    // bbox are zero, so restricting the scan yields an identical brightness set.
+    BrightnessQuantiles calculateBrightnessQuantiles(const cv::Mat& originalImage, const cv::Mat& mask,
+                                                     const cv::Rect& region = cv::Rect());
     double calculateRingRatio(const std::vector<cv::Point>& innerContour, const std::vector<cv::Point>& outerContour);
     cv::Mat makeObjectMask(const cv::Size& size,
                            const std::vector<std::vector<cv::Point>>& contours,
@@ -431,7 +452,14 @@ private:
     std::thread realtimeThread_;
     std::atomic<bool> rtRunning_{false};
     std::atomic<bool> rtEnabled_{true};
-    std::atomic<bool> rtDropFrames_{false};
+    // Default ON so live view processes only the newest frame and the processed
+    // overlay (mask/contours/target-group) cannot accumulate a backlog behind
+    // the capture write head when capture outpaces processing. Experiments are
+    // unaffected: the realtime loop ignores this flag while experimentActive_ is
+    // true (gated by `rtDropFrames_ && !experimentActive_`), so every frame is
+    // still processed/recorded during an experiment. Users can still turn it off
+    // via ProcessingSettingsDialog. See e2e_live_view_latency_test.
+    std::atomic<bool> rtDropFrames_{true};
     std::atomic<int> rtProcessingMode_{static_cast<int>(RealtimeProcessingMode::Inline)};
     mutable std::mutex rtBatchSettingsMutex_;
     RealtimeBatchSettings rtBatchSettings_{};
@@ -449,6 +477,12 @@ private:
     mutable std::mutex framesMutex_;
     std::vector<ProcessedFrame> validFrames_;
     std::vector<ProcessedFrame> invalidFrames_;
+
+    // Experiment flush write queue (decouples HDF5 writes from frame
+    // accumulation). Created lazily on the first flush, drained by finishFlush.
+    std::mutex flushQueueMutex_;
+    std::unique_ptr<backend::recording::HdfWriteQueue<ExperimentBatch>> flushQueue_;
+    std::function<void(const std::string&)> flushErrorCb_;
     std::atomic<bool> experimentActive_{false};
     
     // Monitoring frames (always accumulated, separate from experiment)
