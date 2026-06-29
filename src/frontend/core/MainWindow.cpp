@@ -415,8 +415,14 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
             this, [this](int offsetX, int offsetY, int width, int height) {
         if (roiLabel_)
             roiLabel_->setText(tr("ROI: %1 x %2 @ (%3, %4)").arg(width).arg(height).arg(offsetX).arg(offsetY));
+        backend::services::ProcessingService::Roi roi{};
+        roi.x = offsetX;
+        roi.y = offsetY;
+        roi.w = width;
+        roi.h = height;
+        backend_.processing().setRealtimeRoi(roi);
     });
-    // Initialize both displays with current ROI values
+    // Initialize displays and processing ROI with current values
     {
         int ox = static_cast<int>(overviewTab_->roiPosition().x());
         int oy = static_cast<int>(overviewTab_->roiPosition().y());
@@ -425,6 +431,12 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         monitoringTab->updateRoiDisplay(ox, oy, w, h);
         if (roiLabel_)
             roiLabel_->setText(tr("ROI: %1 x %2 @ (%3, %4)").arg(w).arg(h).arg(ox).arg(oy));
+        backend::services::ProcessingService::Roi initialRoi{};
+        initialRoi.x = ox;
+        initialRoi.y = oy;
+        initialRoi.w = w;
+        initialRoi.h = h;
+        backend_.processing().setRealtimeRoi(initialRoi);
     }
 
     connect(connectTab_, &frontend::ConnectTab::noCamerasFound, this, &MainWindow::onNoCamerasFound);

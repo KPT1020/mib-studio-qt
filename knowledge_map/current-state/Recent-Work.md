@@ -5,6 +5,13 @@
 
 ## Features shipped
 
+- **OverviewTab ROI propagation to recording** (2026-06-29) — `MainWindow`
+  now connects `OverviewTab::roiChanged` to
+  `ProcessingService::setRealtimeRoi()`, so the recording thread crops
+  frames to the OverviewTab ROI instead of saving the full camera frame.
+  The startup initialization block also seeds the processing ROI from the
+  current OverviewTab values. Files: `src/frontend/core/MainWindow.cpp`.
+
 - **HDF5 recording finalization hardening** (2026-06-26) - `Hdf5Service`
   now creates writable HDF5 files with strong-close semantics and performs an
   explicit final global flush before `H5Fclose`, logging final flush status,
