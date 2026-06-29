@@ -77,6 +77,8 @@ frames. The currently active
 
 ## Layout
 
+- The entire tab is wrapped in a `QScrollArea` so toolbars and content
+  are always reachable via scrolling on small windows.
 - The toolbar is split across two rows to prevent overflow on narrow windows:
   row 1 contains file/export actions and the file path; row 2 contains overlay
   controls (mode combo, legend, ROI checkbox).

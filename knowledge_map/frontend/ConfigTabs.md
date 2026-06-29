@@ -36,6 +36,8 @@
   actions (Reset/Save/Browse/Clear, json/table toggle, path label, status
   labels); row 2 has profile controls (Profile selector, Save/Rename/Delete,
   Check Updates, Show Diff, Duplicate as Local, status label).
+- Each toolbar row is wrapped in a horizontal `QScrollArea` so buttons
+  are scrollable when the window is too narrow to fit them all.
 - Path and status labels use `QSizePolicy::Ignored` so they can shrink with
   the window rather than forcing a minimum width.
 

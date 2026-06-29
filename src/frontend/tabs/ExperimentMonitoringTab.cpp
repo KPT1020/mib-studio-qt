@@ -146,7 +146,19 @@ namespace frontend
     ExperimentMonitoringTab::ExperimentMonitoringTab(backend::AppBackend &backend, QWidget *parent)
         : QWidget(parent), ui(new Ui::ExperimentMonitoringTab), backend_(backend)
     {
-        ui->setupUi(this);
+        // Set up the UI on a content widget, then wrap it in a scroll
+        // area so the entire tab is scrollable when the window is smaller
+        // than the combined minimum sizes of charts + thumbnails + tune panel.
+        auto* content = new QWidget(this);
+        ui->setupUi(content);
+
+        auto* scrollArea = new QScrollArea(this);
+        scrollArea->setWidget(content);
+        scrollArea->setWidgetResizable(true);
+        scrollArea->setFrameShape(QFrame::NoFrame);
+        auto* outerLayout = new QVBoxLayout(this);
+        outerLayout->setContentsMargins(0, 0, 0, 0);
+        outerLayout->addWidget(scrollArea);
 
         roiLabel_ = new QLabel(tr("ROI: --"), this);
         roiLabel_->setStyleSheet("font-weight: bold; padding: 0 8px;");

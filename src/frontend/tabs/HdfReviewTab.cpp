@@ -14,7 +14,9 @@
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QInputDialog>
+#include <QScrollArea>
 #include <QScrollBar>
+#include <QVBoxLayout>
 #include <QEventLoop>
 #include <QComboBox>
 #include <QChartView>
@@ -204,7 +206,19 @@ private:
 
 HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
     : QWidget(parent), ui(new Ui::HdfReviewTab), backend_(backend) {
-    ui->setupUi(this);
+    // Set up the UI on a content widget, then wrap it in a scroll area
+    // so the toolbar rows and content remain reachable on small windows.
+    auto* content = new QWidget(this);
+    ui->setupUi(content);
+    {
+        auto* scrollArea = new QScrollArea(this);
+        scrollArea->setWidget(content);
+        scrollArea->setWidgetResizable(true);
+        scrollArea->setFrameShape(QFrame::NoFrame);
+        auto* outerLayout = new QVBoxLayout(this);
+        outerLayout->setContentsMargins(0, 0, 0, 0);
+        outerLayout->addWidget(scrollArea);
+    }
 
     // Configure thumbnail cache (store up to ~2048 thumbnails)
     thumbnailCache_.setMaxCost(2048);

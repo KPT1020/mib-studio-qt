@@ -7,9 +7,11 @@
 
 - **Window resize and overflow fixes** (2026-06-29) — MainWindow now has
   an 800 x 500 minimum size and persists window geometry via QSettings.
-  Dense toolbar rows in HdfReviewTab (split into file + overlay rows),
-  ConfigTabs (split into file + profile rows), and OverviewTab were
-  reworked to prevent horizontal overflow. Reduced over-aggressive
+  ExperimentMonitoringTab and HdfReviewTab are wrapped in `QScrollArea`
+  so content is always reachable via scrolling.  ConfigTabs toolbar rows
+  are individually wrapped in horizontal scroll areas.  Dense toolbar
+  rows in HdfReviewTab (split into file + overlay rows) and ConfigTabs
+  (split into file + profile rows) were reworked.  Reduced over-aggressive
   minimum sizes on scroll areas (HdfReviewTab image scrolls 400→200 px,
   ExperimentMonitoringTab frame panels 200→100 px). Labels that were
   forcing minimum widths now use `QSizePolicy::Ignored`.

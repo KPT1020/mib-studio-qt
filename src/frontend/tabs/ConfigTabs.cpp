@@ -134,14 +134,23 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         row->addWidget(jsonSaveBtn_);
         row->addWidget(jsonBrowseBtn_);
         row->addWidget(jsonClearBtn_);
-		row->addWidget(jsonTableToggle_);
-		row->addStretch(1);
-		row->addWidget(jsonPathLabel_);
+        row->addWidget(jsonTableToggle_);
+        row->addStretch(1);
+        row->addWidget(jsonPathLabel_);
         row->addSpacing(8);
         row->addWidget(jsonUnsavedLabel_);
         row->addSpacing(8);
         row->addWidget(jsonConflictLabel_);
-        v->addLayout(row);
+        auto* rowWidget = new QWidget(page);
+        rowWidget->setLayout(row);
+        auto* rowScroll = new QScrollArea(page);
+        rowScroll->setWidget(rowWidget);
+        rowScroll->setWidgetResizable(true);
+        rowScroll->setFrameShape(QFrame::NoFrame);
+        rowScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        rowScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        rowScroll->setFixedHeight(rowWidget->sizeHint().height() + 4);
+        v->addWidget(rowScroll);
 
         auto* profileRow = new QHBoxLayout();
         profileRow->addWidget(new QLabel(tr("Profile:"), page));
@@ -155,7 +164,16 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         profileRow->addWidget(duplicateAsLocalBtn_);
         profileRow->addStretch(1);
         profileRow->addWidget(profileStatusLabel_);
-        v->addLayout(profileRow);
+        auto* profileRowWidget = new QWidget(page);
+        profileRowWidget->setLayout(profileRow);
+        auto* profileRowScroll = new QScrollArea(page);
+        profileRowScroll->setWidget(profileRowWidget);
+        profileRowScroll->setWidgetResizable(true);
+        profileRowScroll->setFrameShape(QFrame::NoFrame);
+        profileRowScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        profileRowScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        profileRowScroll->setFixedHeight(profileRowWidget->sizeHint().height() + 4);
+        v->addWidget(profileRowScroll);
 
         // Legacy single table (for backward compatibility)
         jsonModel_ = new JsonTableModel(this);
@@ -266,7 +284,16 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         row->addWidget(jsUnsavedLabel_);
         row->addSpacing(8);
         row->addWidget(profilesIncludeJsCheck_);
-        v->addLayout(row);
+        auto* jsRowWidget = new QWidget(page);
+        jsRowWidget->setLayout(row);
+        auto* jsRowScroll = new QScrollArea(page);
+        jsRowScroll->setWidget(jsRowWidget);
+        jsRowScroll->setWidgetResizable(true);
+        jsRowScroll->setFrameShape(QFrame::NoFrame);
+        jsRowScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        jsRowScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        jsRowScroll->setFixedHeight(jsRowWidget->sizeHint().height() + 4);
+        v->addWidget(jsRowScroll);
         v->addWidget(jsEdit_, 1);
         page->setLayout(v);
         tabs_->addTab(page, tr("Camera script (egrabberConfig.js)"));

@@ -34,6 +34,9 @@
 
 ## Layout
 
+- The entire tab content is wrapped in a `QScrollArea` so the grid of
+  charts, thumbnails, and tune params is always reachable via scrolling
+  when the window is too small to fit everything.
 - Frame thumbnail scroll areas use a 100 px minimum height (reduced from 200)
   so the grid layout has more room to shrink on small windows.
 
