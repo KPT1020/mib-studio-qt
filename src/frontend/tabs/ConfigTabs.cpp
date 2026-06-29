@@ -103,11 +103,9 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         jsonTableToggle_->setToolTip(tr("Toggle table view"));
         jsonTableToggle_->setCheckable(true);
         jsonPathLabel_ = new QLabel(page);
-        jsonPathLabel_->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
+        jsonPathLabel_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         jsonPathLabel_->setTextFormat(Qt::PlainText);
         jsonPathLabel_->setWordWrap(false);
-        jsonPathLabel_->setMinimumWidth(0);
-        jsonPathLabel_->setMaximumWidth(400);
         jsonUnsavedLabel_ = new QLabel(page);
         jsonUnsavedLabel_->setText(tr("Unsaved changes – click Save to apply."));
         jsonUnsavedLabel_->setVisible(false);
@@ -130,30 +128,34 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         profileStatusLabel_->setText(tr("No profile selected"));
         profileStatusLabel_->setTextFormat(Qt::PlainText);
         profileStatusLabel_->setWordWrap(false);
-        profileStatusLabel_->setMinimumWidth(220);
+        profileStatusLabel_->setMinimumWidth(0);
+        profileStatusLabel_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         row->addWidget(jsonReloadBtn_);
         row->addWidget(jsonSaveBtn_);
         row->addWidget(jsonBrowseBtn_);
         row->addWidget(jsonClearBtn_);
+		row->addWidget(jsonTableToggle_);
 		row->addStretch(1);
 		row->addWidget(jsonPathLabel_);
         row->addSpacing(8);
         row->addWidget(jsonUnsavedLabel_);
         row->addSpacing(8);
         row->addWidget(jsonConflictLabel_);
-        row->addSpacing(8);
-        row->addWidget(new QLabel(tr("Profile:"), page));
-        row->addWidget(profileSelect_);
-        row->addWidget(saveProfileBtn_);
-        row->addWidget(renameProfileBtn_);
-        row->addWidget(deleteProfileBtn_);
-        row->addWidget(checkUpdatesBtn_);
-        row->addWidget(updateSelectedBtn_);
-        row->addWidget(showDiffBtn_);
-        row->addWidget(duplicateAsLocalBtn_);
-        row->addWidget(profileStatusLabel_);
-		row->addWidget(jsonTableToggle_);
         v->addLayout(row);
+
+        auto* profileRow = new QHBoxLayout();
+        profileRow->addWidget(new QLabel(tr("Profile:"), page));
+        profileRow->addWidget(profileSelect_);
+        profileRow->addWidget(saveProfileBtn_);
+        profileRow->addWidget(renameProfileBtn_);
+        profileRow->addWidget(deleteProfileBtn_);
+        profileRow->addWidget(checkUpdatesBtn_);
+        profileRow->addWidget(updateSelectedBtn_);
+        profileRow->addWidget(showDiffBtn_);
+        profileRow->addWidget(duplicateAsLocalBtn_);
+        profileRow->addStretch(1);
+        profileRow->addWidget(profileStatusLabel_);
+        v->addLayout(profileRow);
 
         // Legacy single table (for backward compatibility)
         jsonModel_ = new JsonTableModel(this);
@@ -242,6 +244,7 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         jsBrowseBtn_ = new QPushButton(tr("Browse..."), page);
         jsClearBtn_ = new QPushButton(tr("Clear"), page);
         jsPathLabel_ = new QLabel(page);
+        jsPathLabel_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         jsUnsavedLabel_ = new QLabel(page);
         jsUnsavedLabel_->setText(tr("Unsaved changes – click Save to apply."));
         jsUnsavedLabel_->setVisible(false);

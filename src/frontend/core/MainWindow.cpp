@@ -454,6 +454,15 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
             if (updater_) updater_->checkForUpdates(false);
         });
     }
+
+    // Restore saved window geometry
+    {
+        QSettings settings;
+        if (settings.contains("MainWindow/geometry"))
+            restoreGeometry(settings.value("MainWindow/geometry").toByteArray());
+        if (settings.contains("MainWindow/state"))
+            restoreState(settings.value("MainWindow/state").toByteArray());
+    }
 }
 
 MainWindow::~MainWindow() {
@@ -1283,6 +1292,13 @@ void MainWindow::onTabChanged(int index)
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
+    // Save window geometry for next launch
+    {
+        QSettings settings;
+        settings.setValue("MainWindow/geometry", saveGeometry());
+        settings.setValue("MainWindow/state", saveState());
+    }
+
     // Guard: Warn if closing during active experiment
     if (experimentActive_) {
         QMessageBox::StandardButton reply = QMessageBox::question(

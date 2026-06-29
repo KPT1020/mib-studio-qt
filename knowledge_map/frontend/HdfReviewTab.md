@@ -75,6 +75,14 @@ frames. The currently active
 `processing().getProcessingConfig()` / `getRealtimeRoi()` /
 `getRealtimeBackgroundGray()`) are used as inputs.
 
+## Layout
+
+- The toolbar is split across two rows to prevent overflow on narrow windows:
+  row 1 contains file/export actions and the file path; row 2 contains overlay
+  controls (mode combo, legend, ROI checkbox).
+- Image scroll areas use a 200 px minimum width (not 400) so the layout can
+  shrink when the window is small.
+
 ## Gotchas
 
 - Multi-image series (4D dataset) need `readSeriesImagesByIndex` — not the

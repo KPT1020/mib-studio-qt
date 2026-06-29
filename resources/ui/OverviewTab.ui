@@ -220,16 +220,10 @@
          <item>
           <widget class="QLabel" name="jsPathLabel">
            <property name="sizePolicy">
-            <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
+            <sizepolicy hsizetype="Ignored" vsizetype="Preferred">
              <horstretch>0</horstretch>
              <verstretch>0</verstretch>
             </sizepolicy>
-           </property>
-           <property name="maximumSize">
-            <size>
-             <width>400</width>
-             <height>16777215</height>
-            </size>
            </property>
            <property name="textFormat">
             <enum>Qt::PlainText</enum>

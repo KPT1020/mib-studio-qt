@@ -5,6 +5,15 @@
 
 ## Features shipped
 
+- **Window resize and overflow fixes** (2026-06-29) — MainWindow now has
+  an 800 x 500 minimum size and persists window geometry via QSettings.
+  Dense toolbar rows in HdfReviewTab (split into file + overlay rows),
+  ConfigTabs (split into file + profile rows), and OverviewTab were
+  reworked to prevent horizontal overflow. Reduced over-aggressive
+  minimum sizes on scroll areas (HdfReviewTab image scrolls 400→200 px,
+  ExperimentMonitoringTab frame panels 200→100 px). Labels that were
+  forcing minimum widths now use `QSizePolicy::Ignored`.
+
 - **HDF5 recording finalization hardening** (2026-06-26) - `Hdf5Service`
   now creates writable HDF5 files with strong-close semantics and performs an
   explicit final global flush before `H5Fclose`, logging final flush status,

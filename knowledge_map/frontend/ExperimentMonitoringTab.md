@@ -32,6 +32,11 @@
     needing live target-group classifications. See
     [[../services/TriggerService]].
 
+## Layout
+
+- Frame thumbnail scroll areas use a 100 px minimum height (reduced from 200)
+  so the grid layout has more room to shrink on small windows.
+
 ## Gotchas
 
 - Histograms are computed client-side from the monitoring rings — not

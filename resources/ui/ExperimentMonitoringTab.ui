@@ -181,7 +181,7 @@
         <property name="minimumSize">
          <size>
           <width>0</width>
-          <height>200</height>
+          <height>100</height>
          </size>
         </property>
         <widget class="QWidget" name="validFramesWidget">
@@ -254,7 +254,7 @@
         <property name="minimumSize">
          <size>
           <width>0</width>
-          <height>200</height>
+          <height>100</height>
          </size>
         </property>
         <widget class="QWidget" name="invalidFramesWidget">

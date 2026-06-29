@@ -86,6 +86,33 @@
       </widget>
      </item>
      <item>
+      <widget class="QLabel" name="filePathLabel">
+       <property name="text">
+        <string>No file selected</string>
+       </property>
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Ignored" vsizetype="Preferred">
+         <horstretch>1</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
+       <property name="wordWrap">
+        <bool>false</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="statusLabel">
+       <property name="text">
+        <string>Ready</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="overlayRowLayout">
+     <item>
       <widget class="QLabel" name="overlayModeLabel">
        <property name="text">
         <string>Overlay:</string>
@@ -151,24 +178,17 @@
       </widget>
      </item>
      <item>
-      <widget class="QLabel" name="filePathLabel">
-       <property name="text">
-        <string>No file selected</string>
+      <spacer name="overlayRowSpacer">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
        </property>
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
-         <horstretch>1</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
+       <property name="sizeHint" stdset="0">
+        <size>
+         <width>40</width>
+         <height>20</height>
+        </size>
        </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QLabel" name="statusLabel">
-       <property name="text">
-        <string>Ready</string>
-       </property>
-      </widget>
+      </spacer>
      </item>
     </layout>
    </item>
@@ -201,7 +221,7 @@
          </property>
          <property name="minimumSize">
           <size>
-           <width>400</width>
+           <width>200</width>
            <height>0</height>
           </size>
          </property>
@@ -213,7 +233,7 @@
            <rect>
             <x>0</x>
             <y>0</y>
-            <width>400</width>
+            <width>200</width>
             <height>300</height>
            </rect>
           </property>
@@ -261,7 +281,7 @@
          </property>
          <property name="minimumSize">
           <size>
-           <width>400</width>
+           <width>200</width>
            <height>0</height>
           </size>
          </property>
@@ -273,7 +293,7 @@
            <rect>
             <x>0</x>
             <y>0</y>
-            <width>400</width>
+            <width>200</width>
             <height>300</height>
            </rect>
           </property>

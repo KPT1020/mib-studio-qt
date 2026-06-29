@@ -67,6 +67,14 @@
 - `auto_update` is honored in `MainWindow` startup: updater construction and
   quiet update checks are skipped when disabled.
 
+## Window size and geometry
+
+- Minimum size is 800 x 500 (set in `MainWindow.ui`).
+- Window geometry (position, size, maximised state) is persisted via
+  `QSettings` keys `MainWindow/geometry` and `MainWindow/state`.
+  Saved in `closeEvent`, restored at the end of the constructor.
+- Initial size (when no saved geometry exists) is 960 x 600 (`main.cpp`).
+
 ## Gotchas
 
 - `closeEvent` must stop capture + experiment cleanly. Mis-ordering causes
