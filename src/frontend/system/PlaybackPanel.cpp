@@ -1040,13 +1040,36 @@ void PlaybackPanel::computeProcessedOverlay()
     cv::morphologyEx(thresh, dstR, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
     cv::morphologyEx(dstR, dstR, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
-    // Determine overlay color from processing classification
+    // Determine overlay color from the displayed frame's classification.
     QColor overlayColor(0, 255, 0); // default green
-    backend::services::ProcessingService::RealtimeSnapshot snapshot;
-    if (backend_.processing().getLatestSnapshot(snapshot)) {
-        if (snapshot.validation.isTargetGroup) {
+    const bool liveFollowing =
+        backend_.capture().isRunning() && followLive_ && !scrubbing_;
+    backend::services::FilterResult validation;
+    bool haveValidation = false;
+    if (liveFollowing) {
+        // Following live: the on-screen frame is the latest captured frame,
+        // so the live snapshot is authoritative (it also carries cross-frame
+        // tracking / target-group ownership a single frame cannot reproduce).
+        backend::services::ProcessingService::RealtimeSnapshot snapshot;
+        if (backend_.processing().getLatestSnapshot(snapshot)) {
+            validation = snapshot.validation;
+            haveValidation = true;
+        }
+    } else {
+        // Stopped / scrubbing / review: the on-screen frame is a buffered
+        // replay frame unrelated to the latest live snapshot, so classify it
+        // directly instead of reusing the stale snapshot (which would leave
+        // the cell stuck on the last live frame's color, usually red).
+        auto pf = backend_.processing().computeProcessedFrame(
+            current, canUseBg ? bg : cv::Mat(), cfg,
+            {roi.x(), roi.y(), roi.width(), roi.height()});
+        validation = pf.validation;
+        haveValidation = true;
+    }
+    if (haveValidation) {
+        if (validation.isTargetGroup) {
             overlayColor = QColor(0, 120, 255);  // Blue
-        } else if (snapshot.validation.isValid) {
+        } else if (validation.isValid) {
             overlayColor = QColor(0, 255, 0);    // Green
         } else {
             overlayColor = QColor(255, 0, 0);    // Red
