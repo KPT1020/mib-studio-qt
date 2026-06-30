@@ -32,3 +32,6 @@ spinner (μm/pixel — see [[Dialogs]] `ConversionFactorDialog`).
   `knowledge_map/task/2025-11-17-preview-60hz.md`.
 - PreviewPage does not push frames to HDF5; only [[../services/ProcessingService]]
   does, during an active experiment.
+- Overlay cell color is per-frame only while following live; in paused/replay
+  it is recomputed from the displayed buffered frame (see [[System-Utilities]]
+  `PlaybackPanel`).

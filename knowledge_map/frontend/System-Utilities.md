@@ -55,6 +55,12 @@
 - **`PlaybackPanel`** — the scrub+preview widget used by [[PreviewPage]]
   and [[MainWindow]]. Owns a `QImage` display, ROI overlay, scrub slider,
   display-FPS throttle, and overlay mode (Off/Mask/Contours/Both).
+  - Overlay cell color (blue=target / green=valid / red=invalid) only uses
+    the live [[../services/ProcessingService]] `getLatestSnapshot()` while
+    *following live*. When stopped/scrubbing/replaying buffered frames the
+    snapshot is stale and unrelated to the on-screen frame, so the color is
+    re-derived per displayed frame via `computeProcessedFrame()` — otherwise
+    the cell stays stuck on the last live frame's color (usually red).
 
 ## Models (`src/frontend/models/`)
 
