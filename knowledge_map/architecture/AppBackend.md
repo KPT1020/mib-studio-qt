@@ -133,11 +133,14 @@ no contour processing.
 - The queue's writer thread must not block on synchronous I/O or it backs up and
   trips the fatal overflow, so [[../services/Hdf5Service]] flushes on a time
   interval (no per-append full-file copy); see `MIB_HDF5_FLUSH_INTERVAL_MS`.
-- Each frame is **cropped to the preview ROI** (`getRealtimeRoi`, set by
-  [[../frontend/PreviewPage]]'s PlaybackPanel) before storage, via the pure
-  `backend::recording::clampRoiToFrame` (`include/backend/recording/RoiCrop.h`,
-  tested by `tests/backend/roi_crop_test.cpp`) — full frame when no ROI is set.
+- Each frame is **cropped to the preview ROI** (`getRealtimeRoi`) before
+  storage, via the pure `backend::recording::clampRoiToFrame`
+  (`include/backend/recording/RoiCrop.h`, tested by
+  `tests/backend/roi_crop_test.cpp`) — full frame when no ROI is set.
   Recorded frame metadata width/height reflect the crop.
+  The realtime ROI is set from two sources: PlaybackPanel's canvas ROI
+  drawing and OverviewTab's `roiChanged` signal (connected in
+  `MainWindow.cpp`). Both call `ProcessingService::setRealtimeRoi()`.
 
 ### Fatal save-error sink
 
