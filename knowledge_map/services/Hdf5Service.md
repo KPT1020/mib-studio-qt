@@ -87,6 +87,16 @@ Blocking I/O on whichever thread calls it. In practice:
   Note: paths exceeding the Windows `MAX_PATH` (260) limit still fail unless
   long-path support is enabled at the OS level.
 - `writeConfigJson` must follow `writeExperimentInfo`.
+- **Append paths validate batch dimensions against the dataset extent**
+  (`appendImageDataset`, `appendSeriesImageDataset`): the extent is fixed by
+  the first-ever batch, so a mid-recording frame-size change fails loudly
+  with a precise log message (surfaced via the fatal-save-error sink) instead
+  of a cryptic `H5Dwrite` error. The series path also rejects a series image
+  whose dims differ from the dataset's — its row-copy scratch buffer is sized
+  from the dataset dims and a larger image would overflow the heap.
+- `writeImageDataset` computes per-frame byte size in `size_t` (an `int`
+  product would overflow for pathological frame sizes and undersize the
+  staging buffer).
 - `loadFile(path)` opens the primary file only — there is no recovery-sidecar
   fallback. A corrupt/unfinalized primary fails to load (try
   `h5clear --increment`).

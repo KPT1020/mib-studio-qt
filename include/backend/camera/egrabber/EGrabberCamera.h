@@ -10,6 +10,7 @@
 #include <EGrabber.h>
 #endif
 
+#include <atomic>
 #include <deque>
 #include <optional>
 #include <memory>
@@ -31,7 +32,7 @@ public:
     void applyConfig(const CameraConfig& config) override;
     bool start() override;
     void stop() override;
-    bool isRunning() const override { return running_; }
+    bool isRunning() const override { return running_.load(std::memory_order_acquire); }
 
     bool grabFrame(Frame& out) override;
     bool pollStats(CameraStats& out) const override;
@@ -59,8 +60,15 @@ private:
 
     mutable CameraStats lastStats_{};
     std::deque<Frame> pendingFrames_;
-    bool running_ = false;
+    // Atomic: read lock-free by the trigger thread (setTriggerOutput) and by
+    // isRunning() while the capture thread writes it under stateMutex_.
+    std::atomic<bool> running_{false};
     mutable std::mutex stateMutex_;
+    // Guards grabber_ pointer lifetime against the trigger thread. Held by
+    // setTriggerOutput() for the whole grabber_ use and by start()/stop()
+    // around every grabber_ assignment/reset. Deliberately separate from
+    // stateMutex_, which stop() holds across ~360 ms of teardown sleeps.
+    mutable std::mutex triggerMutex_;
 
     // Trigger output state
     std::string triggerLineSelector_;

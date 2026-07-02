@@ -20,6 +20,10 @@ mib_add_backend_test_executable(emodulus_lut_catalog_test backend/emodulus_lut_c
 add_test(NAME backend.emodulus_lut_catalog COMMAND $<TARGET_FILE:emodulus_lut_catalog_test>)
 set_tests_properties(backend.emodulus_lut_catalog PROPERTIES LABELS "backend;processing")
 
+mib_add_backend_test_executable(emodulus_lut_degenerate_test backend/emodulus_lut_degenerate_test.cpp)
+add_test(NAME backend.emodulus_lut_degenerate COMMAND $<TARGET_FILE:emodulus_lut_degenerate_test>)
+set_tests_properties(backend.emodulus_lut_degenerate PROPERTIES LABELS "backend;processing")
+
 mib_add_backend_test_executable(backend_lifecycle_smoke_test backend/backend_lifecycle_smoke_test.cpp)
 add_test(NAME backend.lifecycle_smoke COMMAND $<TARGET_FILE:backend_lifecycle_smoke_test>)
 set_tests_properties(backend.lifecycle_smoke PROPERTIES LABELS "backend")
@@ -100,6 +104,10 @@ set_tests_properties(processing.pipeline_smoke PROPERTIES LABELS "processing;bac
 mib_add_backend_test_executable(processing_batch_pipeline_test processing/processing_batch_pipeline_test.cpp)
 add_test(NAME backend.processing_batch_pipeline COMMAND $<TARGET_FILE:processing_batch_pipeline_test>)
 set_tests_properties(backend.processing_batch_pipeline PROPERTIES LABELS "processing;backend")
+
+mib_add_backend_test_executable(processing_fault_injection_test processing/processing_fault_injection_test.cpp)
+add_test(NAME processing.fault_injection COMMAND $<TARGET_FILE:processing_fault_injection_test>)
+set_tests_properties(processing.fault_injection PROPERTIES LABELS "processing;backend")
 
 mib_add_backend_test_executable(recording_lifecycle_test recording/recording_lifecycle_test.cpp)
 add_test(NAME recording.lifecycle COMMAND $<TARGET_FILE:recording_lifecycle_test>)

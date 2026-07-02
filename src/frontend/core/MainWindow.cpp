@@ -470,6 +470,11 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
 
 MainWindow::~MainWindow() {
     backend_.setBackgroundCaptureCallback({});
+    // Block on any in-flight async flush before members are destroyed; the
+    // watcher's own destructor would not wait for the running task.
+    if (flushWatcher_ && flushWatcher_->isRunning()) {
+        flushWatcher_->waitForFinished();
+    }
     delete ui;
 }
 
@@ -1032,8 +1037,12 @@ void MainWindow::onUpdateStats()
         {
             // Flush frames to disk asynchronously to avoid blocking UI
             flushInProgress_ = true;
-            // Capture backend_ by reference - it's a member variable so safe
-            QFuture<size_t> future = QtConcurrent::run([this]()
+            // Capture the backend pointer, NOT `this`: QFutureWatcher's
+            // destructor does not block on a running future, so the task can
+            // outlive this window. The backend itself outlives the window
+            // (constructed before it in main()).
+            auto* backend = &backend_;
+            QFuture<size_t> future = QtConcurrent::run([backend]()
                                                        {
 #ifdef _WIN32
                 // Lower OS thread priority and optionally set affinity to a non-critical core
@@ -1050,8 +1059,8 @@ void MainWindow::onUpdateStats()
                     SetThreadAffinityMask(GetCurrentThread(), mask);
                 }
 #endif
-                auto& hdf5 = backend_.hdf5();
-                auto& proc = backend_.processing();
+                auto& hdf5 = backend->hdf5();
+                auto& proc = backend->processing();
                 return proc.flushBufferedFrames(hdf5); });
             flushWatcher_->setFuture(future);
         }

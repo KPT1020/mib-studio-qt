@@ -23,6 +23,19 @@
   with accepted/dropped status so capture can keep running while workers process
   behind it.
 
+The destructor is self-sufficient: it calls `stopRealtime()` +
+`stopBatchPipeline()` + `stop()`, so destroying the service with any thread
+still live is safe (previously a joinable `realtimeThread_` at destruction
+`std::terminate`d unless GUI teardown had called `stopRealtime()` first).
+`isRealtimeRunning()` exposes the realtime thread state.
+
+All three thread families contain exceptions instead of letting them escape
+the thread entry function (which is `std::terminate`): worker jobs and batch
+compute/callback sections log-and-drop the failing job/batch;
+`realtimeLoop()` catches, cleans up the batch pipeline, sleeps 100 ms, and
+restarts the loop (same policy as `CaptureService::run`). Verified by
+`tests/processing/processing_fault_injection_test.cpp`.
+
 ## Pipeline (per frame)
 
 1. Optional background subtraction (`setRealtimeBackgroundGray`).

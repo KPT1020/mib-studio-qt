@@ -1,5 +1,6 @@
 #include "backend/app/AppBackend.h"
 #include "backend/camera/mock/MockCamera.h"
+#include "backend/processing/ProcessingService.h"
 
 #include <QCoreApplication>
 
@@ -107,8 +108,26 @@ int main(int argc, char** argv)
         }
 
         backend.stopFrameRecording();
+
+        // Destroy the backend while the realtime thread is still running.
+        // ~AppBackend must stop it itself; before AppBackend::shutdown() this
+        // path left realtimeThread_ joinable and std::terminate'd.
+        backend.processing().startRealtime(backend.getFrameStore());
+        if (!backend.processing().isRealtimeRunning())
+        {
+            std::cerr << "startRealtime should leave the realtime thread running\n";
+            return 8;
+        }
         return 0;
     }();
+
+    {
+        // shutdown() must also be safe to call explicitly and repeatedly,
+        // including on a backend that was never initialized.
+        backend::AppBackend uninitialized;
+        uninitialized.shutdown();
+        uninitialized.shutdown();
+    }
 
     std::error_code cleanupError;
     std::filesystem::remove_all(dataDir, cleanupError);

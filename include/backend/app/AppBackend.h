@@ -46,6 +46,11 @@ namespace backend
 
         bool initialize(const std::string &dataDir);
 
+        // Stop every service-owned thread in dependency order (capture →
+        // trigger → recording → realtime/processing). Idempotent; called by
+        // the destructor so teardown never depends on GUI close handling.
+        void shutdown();
+
         services::SqliteService &sqlite();
         services::Hdf5Service &hdf5();
         services::CaptureService &capture();

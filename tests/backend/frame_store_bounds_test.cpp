@@ -98,6 +98,33 @@ int main()
     expect(!store.getByWriteIndexROI(0, 0, 0, 2, 2, r),
            "getByWriteIndexROI must reject evicted index 0");
 
+    // A frame whose buffer is smaller than its geometry requires (here:
+    // linePitch > width while data was sized to width*height) must be
+    // rejected by the ROI accessor, not read out of bounds row by row.
+    {
+        FrameStore pitchStore(kCapacity);
+        std::vector<uint8_t> shortBuf(kBytes, 0x5A); // 16 bytes
+        pitchStore.pushFrame(shortBuf.data(), shortBuf.size(), kW, kH,
+                             /*linePitch=*/kW * 4, kPixelFormatMono8, /*timestamp=*/1);
+        Frame bad;
+        expect(!pitchStore.getByWriteIndexROI(0, 0, 0, static_cast<int>(kW),
+                                              static_cast<int>(kH), bad),
+               "getByWriteIndexROI must reject a frame whose data is smaller "
+               "than (h-1)*pitch + w");
+        // A consistent frame with pitch > width and a correctly sized buffer
+        // still works.
+        const size_t paddedPitch = kW + 2;
+        std::vector<uint8_t> padded(paddedPitch * kH, 0x33);
+        pitchStore.pushFrame(padded.data(), padded.size(), kW, kH,
+                             paddedPitch, kPixelFormatMono8, /*timestamp=*/2);
+        Frame good;
+        expect(pitchStore.getByWriteIndexROI(1, 0, 0, static_cast<int>(kW),
+                                             static_cast<int>(kH), good) &&
+                   good.data.size() == kBytes && good.data[0] == 0x33,
+               "getByWriteIndexROI accepts a padded-pitch frame with a "
+               "correctly sized buffer");
+    }
+
     if (failures == 0) {
         std::cout << "FrameStore bounds: evicted indices rejected, in-window reads correct\n";
         return 0;

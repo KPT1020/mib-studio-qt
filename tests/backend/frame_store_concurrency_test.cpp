@@ -62,6 +62,15 @@ int main() {
         stop.store(true);
     });
 
+    // Identity invariant (TOCTOU regression): if getByWriteIndex(idx, ...)
+    // succeeds, the returned frame must BE frame idx (producer keys
+    // timestamp == index). Before the under-slot-lock eviction re-check, a
+    // wrapping producer could overwrite the slot between the eviction check
+    // and the copy, returning a self-consistent but WRONG (newer) frame.
+    auto identityOk = [&](const Frame& f, uint64_t idx) {
+        return frameConsistent(f) && f.timestamp == idx;
+    };
+
     auto consumer = [&] {
         Frame f;
         Frame g;
@@ -72,12 +81,26 @@ int main() {
             const uint64_t latest = store.latestAvailableIndex();
             const uint64_t earliest = store.earliestAvailableIndex();
 
-            if (store.getByWriteIndex(latest, f) && !frameConsistent(f)) {
+            if (store.getByWriteIndex(latest, f) && !identityOk(f, latest)) {
                 failed.store(true);
                 break;
             }
             if (earliest < latest &&
-                store.getByWriteIndex((earliest + latest) / 2, f) && !frameConsistent(f)) {
+                store.getByWriteIndex((earliest + latest) / 2, f) &&
+                !identityOk(f, (earliest + latest) / 2)) {
+                failed.store(true);
+                break;
+            }
+            // Hammer the eviction edge — the slot most likely to be
+            // overwritten between the snapshot check and the slot lock.
+            if (store.getByWriteIndex(earliest, f) && !identityOk(f, earliest)) {
+                failed.store(true);
+                break;
+            }
+            Frame roi;
+            if (store.getByWriteIndexROI(earliest, 2, 2, 8, 8, roi) &&
+                (roi.timestamp != earliest ||
+                 (!roi.data.empty() && roi.data[0] != expectedByte(earliest)))) {
                 failed.store(true);
                 break;
             }

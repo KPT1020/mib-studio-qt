@@ -163,6 +163,9 @@ int findMatchingTrack(const std::vector<BatchTrack>& tracks,
 
 ProcessingService::ProcessingService() = default;
 ProcessingService::~ProcessingService() {
+    // A joinable realtimeThread_ at destruction would std::terminate; do not
+    // rely on the GUI teardown path having called stopRealtime() first.
+    stopRealtime();
     stopBatchPipeline();
     stop();
 }
@@ -230,7 +233,13 @@ void ProcessingService::workerLoop() {
             queue_.pop();
         }
         if (job) {
-            job();
+            try {
+                job();
+            } catch (const std::exception& ex) {
+                SPDLOG_ERROR("ProcessingService: worker job threw: {} — job skipped", ex.what());
+            } catch (...) {
+                SPDLOG_ERROR("ProcessingService: worker job threw unknown exception — job skipped");
+            }
             stats_.jobsProcessed.fetch_add(1, std::memory_order_relaxed);
             backend::diagnostics::CrashStateMirror::instance().processing.jobsProcessed
                 .fetch_add(1, std::memory_order_relaxed);
@@ -496,11 +505,24 @@ bool ProcessingService::loadEModulusLut(const std::string& path) {
     return eModulusLut_.loadFromFile(path);
 }
 
-static inline cv::Mat makeGrayCopy(uint64_t width, uint64_t height, size_t linePitch, const uint8_t* data) {
-    const int w = static_cast<int>(width);
-    const int h = static_cast<int>(height);
-    const size_t step = (linePitch == 0 ? static_cast<size_t>(width) : linePitch);
-    cv::Mat view(h, w, CV_8UC1, const_cast<uint8_t*>(data), step);
+static inline cv::Mat makeGrayCopy(const backend::playback::Frame& frame) {
+    if (frame.data.empty() || frame.width == 0 || frame.height == 0) {
+        return cv::Mat();
+    }
+    const int w = static_cast<int>(frame.width);
+    const int h = static_cast<int>(frame.height);
+    const size_t step = (frame.linePitch == 0 ? static_cast<size_t>(frame.width) : frame.linePitch);
+    // Geometry comes from the camera and the buffer from a separate SDK
+    // query; a short buffer (pixel-format change, partial delivery on
+    // disconnect) would make the clone below read out of bounds.
+    const size_t requiredBytes = static_cast<size_t>(h - 1) * step + static_cast<size_t>(w);
+    if (frame.data.size() < requiredBytes) {
+        SPDLOG_WARN("ProcessingService: frame data ({} bytes) smaller than geometry requires "
+                    "({}x{} pitch={} -> {} bytes); frame skipped",
+                    frame.data.size(), frame.width, frame.height, step, requiredBytes);
+        return cv::Mat();
+    }
+    cv::Mat view(h, w, CV_8UC1, const_cast<uint8_t*>(frame.data.data()), step);
     return view.clone();
 }
 
@@ -509,22 +531,32 @@ static inline cv::Mat makeGrayROI(const backend::playback::Frame& frame, int roi
     if (frame.data.empty() || frame.width == 0 || frame.height == 0) {
         return cv::Mat();
     }
-    
+
     const int frameW = static_cast<int>(frame.width);
     const int frameH = static_cast<int>(frame.height);
-    
+
     // Clamp ROI to frame bounds
     const int clampedX = std::max(0, std::min(roiX, frameW - 1));
     const int clampedY = std::max(0, std::min(roiY, frameH - 1));
     const int clampedW = std::max(1, std::min(roiW, frameW - clampedX));
     const int clampedH = std::max(1, std::min(roiH, frameH - clampedY));
-    
+
     const size_t srcPitch = (frame.linePitch == 0 ? static_cast<size_t>(frame.width) : frame.linePitch);
+    // Same producer-trust issue as makeGrayCopy: validate the buffer actually
+    // covers the rows the strided view will touch.
+    const size_t requiredBytes = static_cast<size_t>(clampedY + clampedH - 1) * srcPitch +
+                                 static_cast<size_t>(clampedX + clampedW);
+    if (frame.data.size() < requiredBytes) {
+        SPDLOG_WARN("ProcessingService: frame data ({} bytes) smaller than ROI requires "
+                    "({}x{} pitch={} -> {} bytes); frame skipped",
+                    frame.data.size(), frame.width, frame.height, srcPitch, requiredBytes);
+        return cv::Mat();
+    }
     const uint8_t* srcPtr = frame.data.data() + (clampedY * srcPitch) + clampedX;
-    
+
     // Create ROI Mat view
     cv::Mat roiView(clampedH, clampedW, CV_8UC1, const_cast<uint8_t*>(srcPtr), srcPitch);
-    
+
     // Clone to ensure contiguous memory and ownership
     return roiView.clone();
 }
@@ -537,7 +569,10 @@ bool ProcessingService::isFrameEmpty(const backend::playback::Frame& frame,
         return true;
     }
 
-    cv::Mat gray = makeGrayCopy(frame.width, frame.height, frame.linePitch, frame.data.data());
+    cv::Mat gray = makeGrayCopy(frame);
+    if (gray.empty()) {
+        return true; // undecodable frame counts as empty
+    }
 
     // Determine ROI
     Roi effectiveRoi = roi;
@@ -908,7 +943,10 @@ bool ProcessingService::enqueueBatchFrame(const backend::playback::Frame& frame,
         return false;
     }
 
-    cv::Mat gray = makeGrayCopy(frame.width, frame.height, frame.linePitch, frame.data.data());
+    cv::Mat gray = makeGrayCopy(frame);
+    if (gray.empty()) {
+        return false;
+    }
     return enqueueBatchFrame(gray, index, frame.timestamp);
 }
 
@@ -969,6 +1007,7 @@ void ProcessingService::batchWorkerLoop() {
         const auto algoStart = std::chrono::steady_clock::now();
         std::vector<ProcessedFrame> results;
         results.reserve(inputs.size());
+        try {
         for (const auto& item : inputs) {
             ProcessedFrame base = computeProcessedFrame(item.gray,
                                                         config.background,
@@ -1022,6 +1061,13 @@ void ProcessingService::batchWorkerLoop() {
             if (callback) {
                 callback(std::move(results));
             }
+        }
+        } catch (const std::exception& ex) {
+            SPDLOG_ERROR("ProcessingService: batch worker exception: {} — batch of {} frames dropped",
+                         ex.what(), inputs.size());
+        } catch (...) {
+            SPDLOG_ERROR("ProcessingService: batch worker unknown exception — batch of {} frames dropped",
+                         inputs.size());
         }
     }
 }
@@ -1877,6 +1923,13 @@ void ProcessingService::realtimeBatchLoop() {
         const uint64_t earliest = rtStore_->earliestAvailableIndex();
         const uint64_t latest = rtStore_->latestAvailableIndex();
         uint64_t last = rtLastProcessed_.load(std::memory_order_relaxed);
+        if (last > latest) {
+            // FrameStore::resize() renumbers frames from 0; a cached pointer
+            // from the old numbering would idle this loop forever.
+            SPDLOG_WARN("Async batch realtime pointer {} beyond latest {} (store resized?); resyncing", last, latest);
+            last = latest;
+            rtLastProcessed_.store(last, std::memory_order_relaxed);
+        }
         if (last + 1 < earliest) {
             const uint64_t skipped = earliest - (last + 1);
             skippedSinceSummary += skipped;
@@ -1966,10 +2019,26 @@ void ProcessingService::realtimeBatchLoop() {
 }
 
 void ProcessingService::realtimeLoop() {
-    if (getRealtimeProcessingMode() == RealtimeProcessingMode::AsyncBatch) {
-        realtimeBatchLoop();
-    } else {
-        realtimeInlineLoop();
+    // An exception escaping a std::thread entry function is std::terminate —
+    // the whole process dies on one bad frame. Catch, log, and restart the
+    // loop instead (same policy as CaptureService::run).
+    while (rtRunning_.load(std::memory_order_acquire)) {
+        try {
+            if (getRealtimeProcessingMode() == RealtimeProcessingMode::AsyncBatch) {
+                realtimeBatchLoop();
+            } else {
+                realtimeInlineLoop();
+            }
+            break; // normal exit (stopRealtime or mode switch)
+        } catch (const std::exception& ex) {
+            SPDLOG_ERROR("ProcessingService: realtime loop exception: {} — restarting loop", ex.what());
+        } catch (...) {
+            SPDLOG_ERROR("ProcessingService: realtime loop unknown exception — restarting loop");
+        }
+        // The batch loop may have thrown before its own cleanup ran.
+        rtBatchPipelineActive_.store(false, std::memory_order_release);
+        stopBatchPipeline();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 }
 
@@ -2027,6 +2096,13 @@ void ProcessingService::realtimeInlineLoop() {
         const uint64_t earliest = rtStore_->earliestAvailableIndex();
         const uint64_t latest = rtStore_->latestAvailableIndex();
         uint64_t last = rtLastProcessed_.load();
+        if (last > latest) {
+            // FrameStore::resize() renumbers frames from 0; a cached pointer
+            // from the old numbering would idle this loop forever.
+            SPDLOG_WARN("Realtime pointer {} beyond latest {} (store resized?); resyncing", last, latest);
+            last = latest;
+            rtLastProcessed_.store(last);
+        }
         if (last + 1 < earliest) {
             // Skip ahead if our pointer fell behind the ring window
             uint64_t skipped = earliest - (last + 1);
@@ -2142,7 +2218,7 @@ void ProcessingService::realtimeInlineLoop() {
                             framesSinceCapture >= static_cast<uint64_t>(config.auto_background_cooldown_frames)) {
                             
                             // Capture full frame as background (not just ROI)
-                            cv::Mat fullGray = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
+                            cv::Mat fullGray = makeGrayCopy(f);
                             if (!fullGray.empty()) {
                                 setRealtimeBackgroundGray(fullGray);
                                 lastAutoBackgroundFrame_.store(idx, std::memory_order_relaxed);
@@ -2289,7 +2365,7 @@ void ProcessingService::realtimeInlineLoop() {
                 // Frozen invariant: do not write through the returned Mat.
                 auto makeFullGray = [&]() -> cv::Mat {
                     if (grayFull.empty()) {
-                        grayFull = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
+                        grayFull = makeGrayCopy(f);
                     }
                     return grayFull; // shallow refcount copy — caller must not modify
                 };
@@ -2376,7 +2452,7 @@ void ProcessingService::realtimeInlineLoop() {
                         if (!grayFull.empty()) {
                             grayFullSnap = grayFull;
                         } else if (!f.data.empty()) {
-                            grayFullSnap = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
+                            grayFullSnap = makeGrayCopy(f);
                         }
                         if (!grayFullSnap.empty()) {
                             fullMaskSnapshot = cv::Mat(grayFullSnap.rows, grayFullSnap.cols, CV_8UC1, cv::Scalar(0));
@@ -2407,7 +2483,11 @@ void ProcessingService::realtimeInlineLoop() {
                 if (f.width == 0 || f.height == 0 || f.data.empty()) {
                     continue;
                 }
-                cv::Mat gray = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
+                cv::Mat gray = makeGrayCopy(f);
+                if (gray.empty()) {
+                    rtLastProcessed_.store(idx);
+                    continue;
+                }
 
                 // Clamp ROI (will be full frame if not set)
                 if (roi.w <= 0 || roi.h <= 0) {
@@ -2482,7 +2562,7 @@ void ProcessingService::realtimeInlineLoop() {
                             framesSinceCapture >= static_cast<uint64_t>(config.auto_background_cooldown_frames)) {
                             
                             // Capture full frame as background (not just ROI)
-                            cv::Mat fullGray = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
+                            cv::Mat fullGray = makeGrayCopy(f);
                             if (!fullGray.empty()) {
                                 setRealtimeBackgroundGray(fullGray);
                                 lastAutoBackgroundFrame_.store(idx, std::memory_order_relaxed);
@@ -2700,7 +2780,11 @@ void ProcessingService::realtimeInlineLoop() {
                 if (f.width == 0 || f.height == 0 || f.data.empty()) {
                     continue;
                 }
-                cv::Mat gray = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
+                cv::Mat gray = makeGrayCopy(f);
+                if (gray.empty()) {
+                    rtLastProcessed_.store(idx);
+                    continue;
+                }
 
                 // Use hoisted config/roi/bg (refreshed at top of while loop when configVersion_ changed)
                 Roi roi = rtCachedRoi;
@@ -2780,7 +2864,7 @@ void ProcessingService::realtimeInlineLoop() {
                             framesSinceCapture >= static_cast<uint64_t>(config.auto_background_cooldown_frames)) {
                             
                             // Capture full frame as background (not just ROI)
-                            cv::Mat fullGray = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
+                            cv::Mat fullGray = makeGrayCopy(f);
                             if (!fullGray.empty()) {
                                 setRealtimeBackgroundGray(fullGray);
                                 lastAutoBackgroundFrame_.store(idx, std::memory_order_relaxed);

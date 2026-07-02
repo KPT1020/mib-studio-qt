@@ -41,3 +41,7 @@ bool loopFiles{true};
 - See `docs/howto/mock-camera-dev-mode.md` and task
   `knowledge_map/task/mock_camera_dev_mode.md`.
 - `data/mock_frames/frame_00000.tiff` is checked in as a minimal sample.
+- `refreshFileList` uses the `std::error_code` overload of
+  `directory_iterator` — the folder can vanish between the `exists()` check
+  and iteration, and the throwing overload would propagate
+  `std::filesystem_error` out of `start()`.

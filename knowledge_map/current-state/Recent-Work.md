@@ -21,6 +21,62 @@
   throughput increase). Gates are loose and non-flaky (C: speedup ≥1.3×; D:
   ≥10×; E: reader throughput ≥0.5× legacy). No behavior change; test-only.
 
+- **Crash-hardening: input/IO batch** (2026-07-02) — `EModulusLut` rejects
+  degenerate LUT files (constant area/deform column → zero grid step →
+  `size_t(floor(NaN))` UB indexing `grid_` out of bounds) and clamps lookup
+  indices (new `backend.emodulus_lut_degenerate` test); `Hdf5Service` append
+  paths validate batch dims against the dataset extent and series-image dims
+  against the scratch buffer (heap overflow otherwise); `MainWindow`'s async
+  flush captures the backend pointer instead of `this` and the destructor
+  waits for an in-flight flush; `MockCamera::refreshFileList` uses the
+  `error_code` `directory_iterator`; realtime loops resync a cached
+  `rtLastProcessed_` that lands beyond `latest` after a `FrameStore::resize`;
+  `HdfReviewTab` nav state is a `shared_ptr` instead of
+  `new`/`delete`-in-connect.
+
+- **Crash-hardening: frame buffer geometry + FrameStore identity** (2026-07-02) —
+  camera buffers are validated where produced (`replenishPendingFrames`
+  rejects null-base/short/garbage-size SDK buffers) and where consumed
+  (`makeGrayCopy`/`makeGrayROI` in ProcessingService, the recording thread's
+  strided view, and `FrameStore::getByWriteIndexROI` + AVI/TIFF exports all
+  check `data.size() >= (h-1)*pitch + w` before building strided views —
+  previously a pitch/size mismatch read out of bounds on the hot path).
+  `FrameStore` reads also re-verify frame identity under the slot lock via a
+  new `slotWriteIndices_` array, closing a TOCTOU where a wrapping producer
+  (or a reader arriving before the producer's copy) returned a
+  self-consistent but *wrong* frame — possibly with different geometry —
+  under the requested index. Extended `frame_store_bounds_test` (pitch
+  mismatch) and `frame_store_concurrency_test` (identity assertions).
+
+- **Crash-hardening: trigger/camera stop race** (2026-07-02) —
+  `CaptureService::stop()` (GUI thread) now stops the trigger thread via
+  `cameraReadyCallback_(nullptr)` before `activeCamera_->stop()`, and
+  `EGrabberCamera` guards every `grabber_` assignment/reset plus the
+  trigger-thread `setTriggerOutput` read with a dedicated `triggerMutex_`
+  (`running_` is now `std::atomic<bool>`). Previously a pending trigger pulse
+  during a GUI-initiated camera stop could call into a half-destroyed
+  grabber (use-after-free inside the Euresys SDK). Corrects the 2026-04-16
+  thread-audit F4 assumption that camera lifecycle only runs on the capture
+  thread.
+
+- **Crash-hardening: ProcessingService exception containment** (2026-07-02) —
+  worker jobs, batch workers, and the realtime loop now catch and log
+  exceptions (dropping the failing job/batch or restarting the loop) instead
+  of letting them escape the thread entry function and `std::terminate` the
+  process on one bad frame or a throwing `cv::` call. New
+  `tests/processing/processing_fault_injection_test.cpp` injects throwing
+  jobs and callbacks and asserts the service keeps processing.
+
+- **Crash-hardening: self-sufficient backend shutdown** (2026-07-02) —
+  `~ProcessingService` now calls `stopRealtime()` (a joinable
+  `realtimeThread_` at destruction previously hit `std::terminate`), and
+  `AppBackend::shutdown()` (called from `~AppBackend`) stops capture →
+  trigger → recording → processing before member destruction, closing a
+  use-after-free where the realtime loop's callbacks fired into
+  already-destroyed `triggerService_`/`autofocusService_` on any exit path
+  that bypassed `MainWindow::closeEvent`. Regression coverage in
+  `tests/backend/backend_lifecycle_smoke_test.cpp`.
+
 - **Real-time performance examination + remediation plan** (2026-07-02) —
   Audited every component on the real-time hot path and committed
   `docs/exec-plans/active/2026-07-02-realtime-performance.md`, a 6-PR plan

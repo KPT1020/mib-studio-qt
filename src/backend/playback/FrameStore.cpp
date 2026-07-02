@@ -16,7 +16,8 @@
 namespace backend::playback {
 
 FrameStore::FrameStore(size_t capacity)
-    : capacity_(capacity), slotMutexes_(capacity), ring_(capacity) {
+    : capacity_(capacity), slotMutexes_(capacity), ring_(capacity),
+      slotWriteIndices_(capacity, kSlotEmpty) {
     backend::diagnostics::CrashStateMirror::instance().frameStore.capacity.store(capacity_.load());
 }
 
@@ -62,6 +63,7 @@ void FrameStore::pushFrame(const uint8_t* src,
         f.timestamp = timestamp;
         f.data.resize(size);
         std::copy_n(src, size, f.data.begin());
+        slotWriteIndices_[idx] = w - 1;
     }
 
     // Periodic stats
@@ -93,8 +95,16 @@ bool FrameStore::getByWriteIndex(uint64_t writeIndex, Frame& out) const {
         return false;
     }
     std::shared_lock structLk(structureMutex_);
-    const size_t idx = static_cast<size_t>(writeIndex % capacity_.load(std::memory_order_acquire));
+    const size_t cap = capacity_.load(std::memory_order_acquire);
+    const size_t idx = static_cast<size_t>(writeIndex % cap);
     std::scoped_lock slotLk(slotMutexes_[idx]);
+    // Verify identity now that the slot is locked: totalWritten_ is
+    // incremented before the slot data is copied, so the eviction check above
+    // is a snapshot — a wrapping producer may have overwritten this slot with
+    // a newer frame, or not yet written the frame this index refers to.
+    if (slotWriteIndices_[idx] != writeIndex) {
+        return false;
+    }
     out = ring_[idx];
     return !out.data.empty();
 }
@@ -109,9 +119,16 @@ bool FrameStore::getByWriteIndexROI(uint64_t writeIndex, int roiX, int roiY, int
         return false;
     }
     std::shared_lock structLk(structureMutex_);
-    const size_t idx = static_cast<size_t>(writeIndex % capacity_.load(std::memory_order_acquire));
+    const size_t cap = capacity_.load(std::memory_order_acquire);
+    const size_t idx = static_cast<size_t>(writeIndex % cap);
 
     std::scoped_lock slotLk(slotMutexes_[idx]);
+    // Verify identity under the slot lock (see getByWriteIndex): the slot may
+    // hold a different frame — possibly with different geometry — than the
+    // snapshot check above assumed.
+    if (slotWriteIndices_[idx] != writeIndex) {
+        return false;
+    }
     const Frame& src = ring_[idx];
     if (src.data.empty() || src.width == 0 || src.height == 0) return false;
     
@@ -132,6 +149,17 @@ bool FrameStore::getByWriteIndexROI(uint64_t writeIndex, int roiX, int roiY, int
     
     // Extract ROI region
     const size_t srcPitch = (src.linePitch == 0 ? static_cast<size_t>(src.width) : src.linePitch);
+    // The ROI is clamped to width/height above, but the stride comes from the
+    // producer: a frame whose data was sized to width*height while
+    // linePitch > width would make the row walk below read past the buffer.
+    const size_t requiredBytes = static_cast<size_t>(clampedY + clampedH - 1) * srcPitch +
+                                 static_cast<size_t>(clampedX + clampedW);
+    if (src.data.size() < requiredBytes) {
+        SPDLOG_WARN("FrameStore: frame {} data ({} bytes) smaller than geometry requires "
+                    "({}x{} pitch={} -> {} bytes); ROI read rejected",
+                    writeIndex, src.data.size(), src.width, src.height, srcPitch, requiredBytes);
+        return false;
+    }
     const size_t roiSize = static_cast<size_t>(clampedW * clampedH);
     out.data.resize(roiSize);
     
@@ -464,15 +492,16 @@ bool FrameStore::writeFramesAsAvi(const std::vector<std::pair<uint64_t, Frame>>&
 
             const int w = static_cast<int>(frame.width);
             const int h = static_cast<int>(frame.height);
-            const size_t expectedSize = static_cast<size_t>(w * h);
+            const size_t pitch = frame.linePitch == 0 ? static_cast<size_t>(w) : frame.linePitch;
+            // Pitch-aware: the strided row walk below reads up to
+            // (h-1)*pitch + w bytes, more than w*h when pitch > w.
+            const size_t expectedSize = static_cast<size_t>(h - 1) * pitch + static_cast<size_t>(w);
             if (frame.data.size() < expectedSize) {
                 SPDLOG_WARN("FrameStore: Frame {} data too small ({} < {}); skipping",
                             pair.first, frame.data.size(), expectedSize);
                 ++skippedCount;
                 continue;
             }
-
-            const size_t pitch = frame.linePitch == 0 ? static_cast<size_t>(w) : frame.linePitch;
             cv::Mat gray;
             if (pitch == static_cast<size_t>(w)) {
                 gray = cv::Mat(h, w, CV_8UC1, const_cast<uint8_t*>(frame.data.data())).clone();
@@ -526,6 +555,7 @@ bool FrameStore::resize(size_t newCapacity) {
 
     // Create new ring buffer
     std::vector<Frame> newRing(newCapacity);
+    std::vector<uint64_t> newSlotIndices(newCapacity, kSlotEmpty);
 
     if (newCapacity >= currentAvailable && w > 0) {
         // Preserve existing frames - access ring buffer directly since we hold the lock
@@ -535,6 +565,8 @@ bool FrameStore::resize(size_t newCapacity) {
             const size_t ringIdx = static_cast<size_t>(idx % capacity_.load(std::memory_order_acquire));
             if (ringIdx < ring_.size() && !ring_[ringIdx].data.empty()) {
                 newRing[preservedCount] = ring_[ringIdx];
+                // Frames are renumbered 0..preservedCount-1 after a resize.
+                newSlotIndices[preservedCount] = static_cast<uint64_t>(preservedCount);
                 ++preservedCount;
             }
         }
@@ -559,6 +591,7 @@ bool FrameStore::resize(size_t newCapacity) {
     slotMutexes_.swap(newMutexes);
 
     ring_ = std::move(newRing);
+    slotWriteIndices_ = std::move(newSlotIndices);
     capacity_.store(newCapacity, std::memory_order_release);
     backend::diagnostics::CrashStateMirror::instance().frameStore.capacity.store(capacity_.load());
 
@@ -658,16 +691,17 @@ bool FrameStore::saveFrameAsTiff(const Frame& frame, const std::string& filepath
     try {
         const int width = static_cast<int>(frame.width);
         const int height = static_cast<int>(frame.height);
-        const size_t expectedSize = static_cast<size_t>(width * height);
-        
+        // Calculate pitch - use linePitch if available, otherwise assume width
+        const size_t pitch = frame.linePitch == 0 ? static_cast<size_t>(width) : frame.linePitch;
+        // Pitch-aware: the strided access below reads up to
+        // (height-1)*pitch + width bytes, more than width*height when pitch > width.
+        const size_t expectedSize = static_cast<size_t>(height - 1) * pitch + static_cast<size_t>(width);
+
         if (frame.data.size() < expectedSize) {
-            SPDLOG_ERROR("FrameStore: Frame data size ({}) is less than expected ({})", 
+            SPDLOG_ERROR("FrameStore: Frame data size ({}) is less than expected ({})",
                         frame.data.size(), expectedSize);
             return false;
         }
-
-        // Calculate pitch - use linePitch if available, otherwise assume width
-        const size_t pitch = frame.linePitch == 0 ? static_cast<size_t>(width) : frame.linePitch;
         
         // If pitch equals width, data is contiguous - we can use it directly
         // Otherwise, we need to copy to make it contiguous
