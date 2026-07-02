@@ -1783,6 +1783,31 @@ void ProcessingService::realtimeBatchLoop() {
     std::atomic<uint64_t> callbackValid{0};
     std::atomic<uint64_t> callbackInvalid{0};
 
+    // Declared immediately after the atomics the batch callback below
+    // captures BY REFERENCE. C++ destroys locals in reverse declaration
+    // order on every exit path, including exception unwinding — so this
+    // guard's destructor (which joins the batch workers via
+    // stopBatchPipeline(), guaranteeing no worker is still executing the
+    // captured-by-reference callback) is guaranteed to run before
+    // callbackValid/callbackInvalid go out of scope. Without this, an
+    // exception thrown from the per-frame loop below (e.g. enqueueBatchFrame
+    // -> makeGrayCopy on a bad frame) unwound past the previous
+    // bottom-of-function stopBatchPipeline() call, leaving a worker thread
+    // able to reference already-destroyed stack memory.
+    // `armed` preserves the existing semantic that a failed
+    // startBatchPipeline() (already running from elsewhere) must NOT stop a
+    // pipeline this function never started.
+    struct BatchPipelineGuard {
+        ProcessingService* self;
+        bool armed = false;
+        ~BatchPipelineGuard() {
+            if (armed) {
+                self->rtBatchPipelineActive_.store(false, std::memory_order_release);
+                self->stopBatchPipeline();
+            }
+        }
+    } batchGuard{this};
+
     const BatchPipelineConfig initialConfig = makeRealtimeBatchPipelineConfig();
     rtBatchPipelineActive_.store(true, std::memory_order_release);
     const bool started = startBatchPipeline(initialConfig,
@@ -1819,12 +1844,15 @@ void ProcessingService::realtimeBatchLoop() {
                                                 }
                                                 });
     if (!started) {
+        // Not armed: some other caller's batch pipeline is running and this
+        // function never started one of its own, so the guard must not stop it.
         rtBatchPipelineActive_.store(false, std::memory_order_release);
         rtRunning_.store(false, std::memory_order_release);
         backend::diagnostics::CrashStateMirror::instance().processing.realtimeRunning.store(false);
         SPDLOG_ERROR("ProcessingService: async realtime batch mode could not start");
         return;
     }
+    batchGuard.armed = true;
 
     using clock = std::chrono::steady_clock;
     auto lastSummaryTs = clock::now();
@@ -1859,8 +1887,10 @@ void ProcessingService::realtimeBatchLoop() {
         const uint64_t latest = rtStore_->latestAvailableIndex();
         uint64_t last = rtLastProcessed_.load(std::memory_order_relaxed);
         if (last > latest) {
-            // FrameStore::resize() renumbers frames from 0; a cached pointer
-            // from the old numbering would idle this loop forever.
+            // FrameStore::resize() keeps absolute indices stable (never
+            // renumbers), so this should not fire from a resize alone; kept
+            // as defense in depth against any other cause of the pointer
+            // exceeding latest (e.g. a future FrameStore change).
             SPDLOG_WARN("Async batch realtime pointer {} beyond latest {} (store resized?); resyncing", last, latest);
             last = latest;
             rtLastProcessed_.store(last, std::memory_order_relaxed);
@@ -1889,6 +1919,10 @@ void ProcessingService::realtimeBatchLoop() {
                 if (!rtEnabled_.load(std::memory_order_relaxed)) {
                     rtLastProcessed_.store(idx, std::memory_order_relaxed);
                     continue;
+                }
+
+                if (testOnlyRealtimeBatchFaultHook_) {
+                    testOnlyRealtimeBatchFaultHook_(idx);
                 }
 
                 backend::playback::Frame frame;
@@ -1948,8 +1982,8 @@ void ProcessingService::realtimeBatchLoop() {
         }
     }
 
-    rtBatchPipelineActive_.store(false, std::memory_order_release);
-    stopBatchPipeline();
+    // batchGuard's destructor (below, on scope exit) joins the batch workers
+    // via stopBatchPipeline() on this and every other exit path.
     SPDLOG_INFO("ProcessingService: realtime async batch loop stopped");
 }
 
@@ -1970,7 +2004,9 @@ void ProcessingService::realtimeLoop() {
         } catch (...) {
             SPDLOG_ERROR("ProcessingService: realtime loop unknown exception — restarting loop");
         }
-        // The batch loop may have thrown before its own cleanup ran.
+        // realtimeBatchLoop's own RAII guard already joined the batch workers
+        // before this catch runs (even on the exception path); these calls
+        // are a harmless, idempotent second no-op kept as defense in depth.
         rtBatchPipelineActive_.store(false, std::memory_order_release);
         stopBatchPipeline();
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -2007,8 +2043,10 @@ void ProcessingService::realtimeInlineLoop() {
         const uint64_t latest = rtStore_->latestAvailableIndex();
         uint64_t last = rtLastProcessed_.load();
         if (last > latest) {
-            // FrameStore::resize() renumbers frames from 0; a cached pointer
-            // from the old numbering would idle this loop forever.
+            // FrameStore::resize() keeps absolute indices stable (never
+            // renumbers), so this should not fire from a resize alone; kept
+            // as defense in depth against any other cause of the pointer
+            // exceeding latest (e.g. a future FrameStore change).
             SPDLOG_WARN("Realtime pointer {} beyond latest {} (store resized?); resyncing", last, latest);
             last = latest;
             rtLastProcessed_.store(last);

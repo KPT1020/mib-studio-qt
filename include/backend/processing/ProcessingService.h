@@ -189,6 +189,15 @@ public:
     cv::Mat getRealtimeBackgroundGray() const;
     bool getLatestSnapshot(RealtimeSnapshot& out);
 
+    // Test-only fault injection: if set, invoked once per driving-loop
+    // iteration in realtimeBatchLoop() with the write index about to be
+    // processed. May throw to exercise the loop's exception-safety path
+    // (see tests/processing/processing_realtime_fault_injection_test.cpp).
+    // No production caller sets this; empty by default (zero-cost check).
+    void setTestOnlyRealtimeBatchFaultHook(std::function<void(uint64_t)> hook) {
+        testOnlyRealtimeBatchFaultHook_ = std::move(hook);
+    }
+
     // Experiment lifecycle
     void startExperiment();
     void endExperiment();
@@ -452,6 +461,7 @@ private:
     // Realtime processing state
     std::thread realtimeThread_;
     std::atomic<bool> rtRunning_{false};
+    std::function<void(uint64_t)> testOnlyRealtimeBatchFaultHook_;
     std::atomic<bool> rtEnabled_{true};
     // Default ON so live view processes only the newest frame and the processed
     // overlay (mask/contours/target-group) cannot accumulate a backlog behind

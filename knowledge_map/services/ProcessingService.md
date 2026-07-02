@@ -36,6 +36,28 @@ compute/callback sections log-and-drop the failing job/batch;
 restarts the loop (same policy as `CaptureService::run`). Verified by
 `tests/processing/processing_fault_injection_test.cpp`.
 
+**`realtimeBatchLoop()`'s cleanup is an RAII guard, not a bottom-of-function
+call.** The batch result callback captures `callbackValid`/`callbackInvalid`
+(local atomics) BY REFERENCE and runs on batch-worker threads. A plain
+bottom-of-function `stopBatchPipeline()` call only joins those workers on
+the loop's *normal* exit — an exception thrown from the per-frame driving
+loop unwound past it, destroying the atomics while a worker could still be
+executing the callback that references them (a dangling-reference race).
+The fix: a `BatchPipelineGuard` local, declared immediately after the two
+atomics, whose destructor calls `stopBatchPipeline()`; C++ destroys locals in
+reverse declaration order on every exit path including exception unwinding,
+so the join is now guaranteed to happen before the atomics go out of scope.
+The guard only arms once `startBatchPipeline()` has actually succeeded, so a
+failed start (already running from elsewhere) still does not stop a
+pipeline this function never started. Dynamically verified — not just
+reasoned about — by
+`tests/processing/processing_realtime_fault_injection_test.cpp`, which
+drives the real `startRealtime()`/`realtimeLoop()`/`realtimeBatchLoop()`
+path (unlike `processing_fault_injection_test.cpp`, which only exercises
+`startBatchPipeline()` directly) via a test-only
+`setTestOnlyRealtimeBatchFaultHook()` seam that throws mid-loop, run clean
+under TSan across 200+ throw/restart cycles with concurrent workers.
+
 ## Pipeline (per frame)
 
 1. Optional background subtraction (`setRealtimeBackgroundGray`).

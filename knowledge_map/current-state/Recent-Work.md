@@ -5,6 +5,32 @@
 
 ## Features shipped
 
+- **Crash-hardening: audit-surfaced fixes (dangling reference + resize
+  identity)** (2026-07-02) — a multi-agent audit of the crash-hardening
+  commits above (prompted by a request to review them with subagents,
+  inspired by Anthropic's "Effective harnesses for long-running agents"
+  article) surfaced two real, independently-confirmed issues before the
+  broader audit workflow even ran, both fixed in this pass:
+  - `ProcessingService::realtimeBatchLoop()`'s cleanup is now an RAII
+    `BatchPipelineGuard` instead of a bottom-of-function call — a
+    stack-local pair of atomics captured by reference in the batch
+    callback could be destroyed by exception unwinding while a worker
+    thread was still executing that callback. Dynamically confirmed fixed
+    (200+ throw/restart cycles, clean under TSan) by new
+    `tests/processing/processing_realtime_fault_injection_test.cpp`.
+  - `FrameStore::resize()` no longer renumbers preserved frames from 0 or
+    rewinds `totalWritten_` — reproduced-on-first-run wrong-frame bug where
+    a stale pre-resize `writeIndex` could spuriously match a different
+    frame's renumbered post-resize identity. Absolute indices are now
+    globally unique for the store's lifetime. New resize-vs-stale-reader
+    scenario in `tests/backend/frame_store_concurrency_test.cpp`.
+  - Also confirmed (not yet acted on): commit 3's new `EGrabberCamera`
+    `triggerMutex_` never compiled in this Linux session
+    (`MIB_HAS_EGRABBER` is off without `WIN32 AND
+    MIB_ENABLE_HARDWARE_SDKS`) — the earlier "43/43 tests + TSan clean"
+    claim said nothing about that specific fix; only
+    `CaptureService::stop()`'s reordering half is cross-platform-verified.
+
 - **Crash-hardening: input/IO batch** (2026-07-02) — `EModulusLut` rejects
   degenerate LUT files (constant area/deform column → zero grid step →
   `size_t(floor(NaN))` UB indexing `grid_` out of bounds) and clamps lookup

@@ -591,39 +591,38 @@ bool FrameStore::resize(size_t newCapacity) {
     std::unique_lock<std::shared_mutex> lk(structureMutex_);
 
     const uint64_t w = totalWritten_.load();
-    const size_t currentAvailable = availableCount();
-    const uint64_t earliest = earliestAvailableIndex();
+    const size_t oldCapacity = capacity_.load(std::memory_order_acquire);
 
     // Create new ring buffer
     std::vector<Frame> newRing(newCapacity);
     std::vector<uint64_t> newSlotIndices(newCapacity, kSlotEmpty);
 
-    if (newCapacity >= currentAvailable && w > 0) {
-        // Preserve existing frames - access ring buffer directly since we hold the lock
-        size_t preservedCount = 0;
-        for (uint64_t idx = earliest; idx < earliest + currentAvailable && preservedCount < newCapacity; ++idx) {
-            if (idx >= w) break;
-            const size_t ringIdx = static_cast<size_t>(idx % capacity_.load(std::memory_order_acquire));
-            if (ringIdx < ring_.size() && !ring_[ringIdx].data.empty()) {
-                newRing[preservedCount] = ring_[ringIdx];
-                // Frames are renumbered 0..preservedCount-1 after a resize.
-                newSlotIndices[preservedCount] = static_cast<uint64_t>(preservedCount);
-                ++preservedCount;
-            }
+    // Preserve up to newCapacity of the most-recent frames, keyed by their
+    // ORIGINAL absolute write index (never renumbered) — this is exactly the
+    // "earliest available" computation, evaluated as if newCapacity had been
+    // in effect all along. totalWritten_ is deliberately NEVER reset or
+    // rewound by resize(): absolute indices stay globally unique for the
+    // life of the FrameStore, so a writeIndex a caller obtained before this
+    // resize can never spuriously collide with a *different* frame that
+    // happens to reuse the same small number after the resize (the bug a
+    // renumbering scheme reintroduces) — it either still names the same
+    // frame (if retained) or fails the ordinary w/earliest bounds check
+    // exactly as it would without any resize at all.
+    const uint64_t newEarliest = (w > static_cast<uint64_t>(newCapacity)) ? (w - newCapacity) : 0;
+    size_t preservedCount = 0;
+    for (uint64_t idx = newEarliest; idx < w; ++idx) {
+        const size_t oldRingIdx = static_cast<size_t>(idx % oldCapacity);
+        if (oldRingIdx < ring_.size() && !ring_[oldRingIdx].data.empty()) {
+            const size_t newRingIdx = static_cast<size_t>(idx % newCapacity);
+            newRing[newRingIdx] = ring_[oldRingIdx];
+            newSlotIndices[newRingIdx] = idx;
+            ++preservedCount;
         }
-
-        // Update totalWritten_ to reflect preserved frames
-        // After resize, frames will be at indices 0 to preservedCount-1
-        totalWritten_.store(static_cast<uint64_t>(preservedCount));
-
-        SPDLOG_INFO("FrameStore: Resized from {} to {} capacity, preserved {}/{} frames", 
-                    capacity_.load(std::memory_order_acquire), newCapacity, preservedCount, currentAvailable);
-    } else {
-        // New capacity is smaller than available frames, clear buffer
-        totalWritten_.store(0);
-        SPDLOG_INFO("FrameStore: Resized from {} to {} capacity, cleared buffer (new size < available frames)", 
-                    capacity_.load(std::memory_order_acquire), newCapacity);
     }
+
+    SPDLOG_INFO("FrameStore: Resized from {} to {} capacity, preserved {} frame(s) "
+                "(absolute indices [{}, {}))",
+                oldCapacity, newCapacity, preservedCount, newEarliest, w);
 
     // Rebuild the per-slot lock array to match the new ring. Safe under the
     // exclusive structural lock: no hot-path op can hold a slot lock here

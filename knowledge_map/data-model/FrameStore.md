@@ -137,6 +137,28 @@ this is safe because every hot-path op acquires the shared structural lock
   success now guarantees the returned frame IS the requested write index.
   Guarded by the identity assertions in
   `tests/backend/frame_store_concurrency_test.cpp`.
+- **`resize()` never renumbers or rewinds `totalWritten_` — absolute write
+  indices are globally unique for the life of the FrameStore.** An earlier
+  version renumbered preserved frames to `0..preservedCount-1` and reset
+  `totalWritten_` to `preservedCount` (or to 0 on a shrink-below-available).
+  That let a stale pre-resize `writeIndex` spuriously pass the
+  `slotWriteIndices_` identity check post-resize: small index values get
+  reused across "epochs," so a caller's old index could coincide with a
+  *different* frame's new (also-small, renumbered) identity in the same
+  slot — silently wrong frame data, not a crash. Confirmed reproducible on
+  the first run of a targeted stress test before the fix (`requested idx=0
+  got timestamp=4360`). The fix: `resize()` computes
+  `newEarliest = max(0, totalWritten_ - newCapacity)` (exactly
+  `earliestAvailableIndex()` evaluated as if `newCapacity` had always been
+  in effect) and preserves frames in `[newEarliest, totalWritten_)` at their
+  **original** absolute indices — `totalWritten_` itself is never touched.
+  A stale `writeIndex` from before a resize now either still names the same
+  frame (if retained) or fails the ordinary bounds check exactly as it
+  would with no resize at all — collision is structurally impossible, not
+  just less likely. Guarded by the resize-vs-stale-reader scenario in
+  `tests/backend/frame_store_concurrency_test.cpp` (hammers small indices
+  against a concurrently resizing store; asserts any successful read has
+  correct identity).
 - `getByWriteIndexROI` validates `data.size() >= (h-1)*pitch + w` before its
   strided row walk (a producer-supplied `linePitch > width` with a
   tightly-sized buffer would otherwise read past the vector); the AVI/TIFF

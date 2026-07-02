@@ -9,6 +9,7 @@
 #include "backend/playback/FrameStore.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <thread>
@@ -37,6 +38,101 @@ bool frameConsistent(const Frame& f) {
         }
     }
     return true;
+}
+
+// Targeted stress test for a hypothesized residual TOCTOU: getByWriteIndex's
+// identity check (slotWriteIndices_[idx] != writeIndex) verifies the slot
+// holds the requested frame, but resize() RENUMBERS all preserved frames to
+// 0..preservedCount-1. A reader holding a stale writeIndex from BEFORE a
+// concurrent resize() could, if that stale value happens to be small enough
+// to coincide with a post-resize renumbered identity in the same slot, have
+// the identity check spuriously pass -- returning a frame that is NOT the
+// one the caller meant, just one that happens to carry the same (now
+// reused) absolute index in the new epoch. This targets small indices
+// specifically, since resize() always renumbers starting from 0.
+// Returns 0 on success (either no coincidence was ever hit, or every hit was
+// still identity-correct), non-zero on a genuine wrong-frame return.
+int testResizeVsStaleReaders() {
+    constexpr size_t kSmallCapacity = 8;
+    constexpr uint64_t kProducerFrames = 50000;
+    constexpr uint64_t kMaxStaleIndexProbed = 24; // > kSmallCapacity on purpose
+
+    FrameStore store(kSmallCapacity);
+    std::atomic<bool> stop{false};
+    std::atomic<bool> failed{false};
+    std::atomic<uint64_t> coincidenceHits{0};
+
+    std::thread producer([&] {
+        std::vector<uint8_t> buf;
+        for (uint64_t i = 0; i < kProducerFrames && !failed.load(); ++i) {
+            constexpr uint64_t w = 8, h = 8;
+            buf.assign(static_cast<size_t>(w * h), expectedByte(i));
+            store.pushFrame(buf.data(), buf.size(), w, h, /*linePitch=*/0,
+                            /*pixelFormat=*/0x01080001, /*timestamp=*/i);
+        }
+        stop.store(true);
+    });
+
+    std::thread resizer([&] {
+        size_t caps[] = {8, 16, 4, 8, 32, 8};
+        size_t i = 0;
+        while (!stop.load() && !failed.load()) {
+            store.resize(caps[i % (sizeof(caps) / sizeof(caps[0]))]);
+            ++i;
+            std::this_thread::sleep_for(std::chrono::microseconds(50));
+        }
+    });
+
+    auto staleReader = [&] {
+        Frame f;
+        while (!stop.load() && !failed.load()) {
+            for (uint64_t staleIdx = 0; staleIdx <= kMaxStaleIndexProbed; ++staleIdx) {
+                if (store.getByWriteIndex(staleIdx, f)) {
+                    coincidenceHits.fetch_add(1, std::memory_order_relaxed);
+                    // The ONLY acceptable outcome for a successful read is the
+                    // frame actually being the one requested. A mismatch here
+                    // means resize() renumbering fooled the identity check.
+                    if (f.timestamp != staleIdx || !frameConsistent(f)) {
+                        std::cerr << "FrameStore: resize-vs-stale-reader identity "
+                                     "violation: requested idx=" << staleIdx
+                                  << " got timestamp=" << f.timestamp << "\n";
+                        failed.store(true);
+                        return;
+                    }
+                }
+                Frame roi;
+                if (store.getByWriteIndexROI(staleIdx, 0, 0, 4, 4, roi)) {
+                    if (roi.timestamp != staleIdx ||
+                        (!roi.data.empty() && roi.data[0] != expectedByte(staleIdx))) {
+                        std::cerr << "FrameStore: resize-vs-stale-reader ROI identity "
+                                     "violation: requested idx=" << staleIdx
+                                  << " got timestamp=" << roi.timestamp << "\n";
+                        failed.store(true);
+                        return;
+                    }
+                }
+            }
+        }
+    };
+
+    std::vector<std::thread> readers;
+    for (int i = 0; i < 3; ++i) {
+        readers.emplace_back(staleReader);
+    }
+
+    producer.join();
+    resizer.join();
+    for (auto& t : readers) {
+        t.join();
+    }
+
+    if (failed.load()) {
+        return 1;
+    }
+    std::cout << "FrameStore resize-vs-stale-reader test OK ("
+              << coincidenceHits.load() << " successful stale-index reads, "
+                 "all identity-correct)\n";
+    return 0;
 }
 
 } // namespace
@@ -161,5 +257,11 @@ int main() {
     }
 
     std::cout << "FrameStore concurrency test OK\n";
+
+    const int resizeVsStaleResult = testResizeVsStaleReaders();
+    if (resizeVsStaleResult != 0) {
+        return 6 + resizeVsStaleResult; // 7+: resize-vs-stale-reader failure
+    }
+
     return 0;
 }
