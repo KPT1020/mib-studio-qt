@@ -5,6 +5,18 @@
 
 ## Features shipped
 
+- **Mask-generation pipeline benchmark** (2026-07-02, `benchmarks/mask-gen/`)
+  — Offline harness scoring the production segmentation pipeline
+  ([[ProcessingService]] `computeProcessedFrame`) and a proposed
+  `absdiff → CLAHE → bilateral → DoG/Top-hat → Otsu → close → findContours`
+  chain against the SAM2 reference masks in the
+  `gavinlouuu/biowork-mask-gen-benchmark` dataset (173 detections). Finding:
+  restricting to the channel-interior ROI + swapping the fixed threshold for
+  per-frame **Otsu** lifts mean IoU 0.34 → 0.85 (detection 21 % → 98 %) at
+  ~7000 fps, while the *literal* CLAHE/bilateral/DoG chain is both slower
+  (2000 fps) and less accurate. Recommended real-time config, per-stage cost
+  table, and a C++ adoption sketch are in
+  `benchmarks/mask-gen/REPORT.md`. Benchmark-only; no app behaviour change yet.
 - **Realtime-performance benchmark parts C/D/E** (2026-07-02, PR1 of
   `docs/exec-plans/active/2026-07-02-realtime-performance.md`) —
   Extended `tests/performance/pipeline_timing_benchmark.cpp` (CTest
