@@ -16,3 +16,11 @@ deadlock:CPLAcquireMutex
 called_from_lib:libglib-2.0.so
 called_from_lib:libgobject-2.0.so
 race:libglib-2.0.so
+
+# Intel TBB (OpenCV's parallel_for backend on some builds, e.g. Ubuntu's
+# libopencv-dev linked against libtbb). TBB's scalable allocator manages its
+# own worker-thread buffers with atomics/fences TSan cannot model when the
+# library is uninstrumented, so it reports self-contained delete[]-vs-read
+# races entirely within libtbb (no backend:: frames). Not our code.
+called_from_lib:libtbb.so
+race:libtbb.so
