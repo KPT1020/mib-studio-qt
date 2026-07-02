@@ -126,8 +126,22 @@ this is safe because every hot-path op acquires the shared structural lock
   treat `false` as "skip this frame" (`continue`) or clamp to the available
   range first, so rejecting is safe. Guarded by
   `tests/backend/frame_store_bounds_test.cpp` (`backend.frame_store_bounds`).
-  Note: a frame right at the eviction boundary can still race (you may get the
-  next frame); that ±1 boundary race is inherent to the lock-light ring.
+- **Identity is re-verified under the slot lock** via `slotWriteIndices_`
+  (parallel to `ring_`; written by `pushFrame` after the copy, remapped by
+  `resize`). The snapshot eviction check above races the producer two ways:
+  a wrapping producer can overwrite the slot between check and lock (newer
+  frame under the requested index), and because `totalWritten_` is
+  incremented *before* the slot data is copied, a reader can also lock the
+  slot before the producer and see the previous occupant. One
+  `slotWriteIndices_[idx] != writeIndex → false` comparison closes both, so
+  success now guarantees the returned frame IS the requested write index.
+  Guarded by the identity assertions in
+  `tests/backend/frame_store_concurrency_test.cpp`.
+- `getByWriteIndexROI` validates `data.size() >= (h-1)*pitch + w` before its
+  strided row walk (a producer-supplied `linePitch > width` with a
+  tightly-sized buffer would otherwise read past the vector); the AVI/TIFF
+  export paths use the same pitch-aware bound. Guarded by
+  `frame_store_bounds_test`.
 - If a consumer holds onto a `getByWriteIndex` copy for longer than
   `capacity / fps` seconds, its data is still valid (copy) but the index
   may fall off the available range.

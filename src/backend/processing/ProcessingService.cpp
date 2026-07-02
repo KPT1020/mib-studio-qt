@@ -491,11 +491,24 @@ bool ProcessingService::loadEModulusLut(const std::string& path) {
     return eModulusLut_.loadFromFile(path);
 }
 
-static inline cv::Mat makeGrayCopy(uint64_t width, uint64_t height, size_t linePitch, const uint8_t* data) {
-    const int w = static_cast<int>(width);
-    const int h = static_cast<int>(height);
-    const size_t step = (linePitch == 0 ? static_cast<size_t>(width) : linePitch);
-    cv::Mat view(h, w, CV_8UC1, const_cast<uint8_t*>(data), step);
+static inline cv::Mat makeGrayCopy(const backend::playback::Frame& frame) {
+    if (frame.data.empty() || frame.width == 0 || frame.height == 0) {
+        return cv::Mat();
+    }
+    const int w = static_cast<int>(frame.width);
+    const int h = static_cast<int>(frame.height);
+    const size_t step = (frame.linePitch == 0 ? static_cast<size_t>(frame.width) : frame.linePitch);
+    // Geometry comes from the camera and the buffer from a separate SDK
+    // query; a short buffer (pixel-format change, partial delivery on
+    // disconnect) would make the clone below read out of bounds.
+    const size_t requiredBytes = static_cast<size_t>(h - 1) * step + static_cast<size_t>(w);
+    if (frame.data.size() < requiredBytes) {
+        SPDLOG_WARN("ProcessingService: frame data ({} bytes) smaller than geometry requires "
+                    "({}x{} pitch={} -> {} bytes); frame skipped",
+                    frame.data.size(), frame.width, frame.height, step, requiredBytes);
+        return cv::Mat();
+    }
+    cv::Mat view(h, w, CV_8UC1, const_cast<uint8_t*>(frame.data.data()), step);
     return view.clone();
 }
 
@@ -504,22 +517,32 @@ static inline cv::Mat makeGrayROI(const backend::playback::Frame& frame, int roi
     if (frame.data.empty() || frame.width == 0 || frame.height == 0) {
         return cv::Mat();
     }
-    
+
     const int frameW = static_cast<int>(frame.width);
     const int frameH = static_cast<int>(frame.height);
-    
+
     // Clamp ROI to frame bounds
     const int clampedX = std::max(0, std::min(roiX, frameW - 1));
     const int clampedY = std::max(0, std::min(roiY, frameH - 1));
     const int clampedW = std::max(1, std::min(roiW, frameW - clampedX));
     const int clampedH = std::max(1, std::min(roiH, frameH - clampedY));
-    
+
     const size_t srcPitch = (frame.linePitch == 0 ? static_cast<size_t>(frame.width) : frame.linePitch);
+    // Same producer-trust issue as makeGrayCopy: validate the buffer actually
+    // covers the rows the strided view will touch.
+    const size_t requiredBytes = static_cast<size_t>(clampedY + clampedH - 1) * srcPitch +
+                                 static_cast<size_t>(clampedX + clampedW);
+    if (frame.data.size() < requiredBytes) {
+        SPDLOG_WARN("ProcessingService: frame data ({} bytes) smaller than ROI requires "
+                    "({}x{} pitch={} -> {} bytes); frame skipped",
+                    frame.data.size(), frame.width, frame.height, srcPitch, requiredBytes);
+        return cv::Mat();
+    }
     const uint8_t* srcPtr = frame.data.data() + (clampedY * srcPitch) + clampedX;
-    
+
     // Create ROI Mat view
     cv::Mat roiView(clampedH, clampedW, CV_8UC1, const_cast<uint8_t*>(srcPtr), srcPitch);
-    
+
     // Clone to ensure contiguous memory and ownership
     return roiView.clone();
 }
@@ -532,7 +555,10 @@ bool ProcessingService::isFrameEmpty(const backend::playback::Frame& frame,
         return true;
     }
 
-    cv::Mat gray = makeGrayCopy(frame.width, frame.height, frame.linePitch, frame.data.data());
+    cv::Mat gray = makeGrayCopy(frame);
+    if (gray.empty()) {
+        return true; // undecodable frame counts as empty
+    }
 
     // Determine ROI
     Roi effectiveRoi = roi;
@@ -863,7 +889,10 @@ bool ProcessingService::enqueueBatchFrame(const backend::playback::Frame& frame,
         return false;
     }
 
-    cv::Mat gray = makeGrayCopy(frame.width, frame.height, frame.linePitch, frame.data.data());
+    cv::Mat gray = makeGrayCopy(frame);
+    if (gray.empty()) {
+        return false;
+    }
     return enqueueBatchFrame(gray, index, frame.timestamp);
 }
 
@@ -2094,7 +2123,7 @@ void ProcessingService::realtimeInlineLoop() {
                             framesSinceCapture >= static_cast<uint64_t>(config.auto_background_cooldown_frames)) {
                             
                             // Capture full frame as background (not just ROI)
-                            cv::Mat fullGray = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
+                            cv::Mat fullGray = makeGrayCopy(f);
                             if (!fullGray.empty()) {
                                 setRealtimeBackgroundGray(fullGray);
                                 lastAutoBackgroundFrame_.store(idx, std::memory_order_relaxed);
@@ -2240,7 +2269,7 @@ void ProcessingService::realtimeInlineLoop() {
                 // Helper: create full frame from ROI path data
                 auto makeFullGray = [&]() -> cv::Mat {
                     if (grayFull.empty()) {
-                        grayFull = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
+                        grayFull = makeGrayCopy(f);
                     }
                     return grayFull.clone();
                 };
@@ -2329,7 +2358,7 @@ void ProcessingService::realtimeInlineLoop() {
                         if (!grayFull.empty()) {
                             grayFullSnap = grayFull;
                         } else if (!f.data.empty()) {
-                            grayFullSnap = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
+                            grayFullSnap = makeGrayCopy(f);
                         }
                         if (!grayFullSnap.empty()) {
                             fullMaskSnapshot = cv::Mat(grayFullSnap.rows, grayFullSnap.cols, CV_8UC1, cv::Scalar(0));
@@ -2356,7 +2385,11 @@ void ProcessingService::realtimeInlineLoop() {
                 if (f.width == 0 || f.height == 0 || f.data.empty()) {
                     continue;
                 }
-                cv::Mat gray = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
+                cv::Mat gray = makeGrayCopy(f);
+                if (gray.empty()) {
+                    rtLastProcessed_.store(idx);
+                    continue;
+                }
 
                 // Clamp ROI (will be full frame if not set)
                 if (roi.w <= 0 || roi.h <= 0) {
@@ -2431,7 +2464,7 @@ void ProcessingService::realtimeInlineLoop() {
                             framesSinceCapture >= static_cast<uint64_t>(config.auto_background_cooldown_frames)) {
                             
                             // Capture full frame as background (not just ROI)
-                            cv::Mat fullGray = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
+                            cv::Mat fullGray = makeGrayCopy(f);
                             if (!fullGray.empty()) {
                                 setRealtimeBackgroundGray(fullGray);
                                 lastAutoBackgroundFrame_.store(idx, std::memory_order_relaxed);
@@ -2653,7 +2686,11 @@ void ProcessingService::realtimeInlineLoop() {
                 if (f.width == 0 || f.height == 0 || f.data.empty()) {
                     continue;
                 }
-                cv::Mat gray = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
+                cv::Mat gray = makeGrayCopy(f);
+                if (gray.empty()) {
+                    rtLastProcessed_.store(idx);
+                    continue;
+                }
 
                 // Grab ROI, background, and config first (outside frame processing to minimize lock time)
                 Roi roi{};
@@ -2742,7 +2779,7 @@ void ProcessingService::realtimeInlineLoop() {
                             framesSinceCapture >= static_cast<uint64_t>(config.auto_background_cooldown_frames)) {
                             
                             // Capture full frame as background (not just ROI)
-                            cv::Mat fullGray = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
+                            cv::Mat fullGray = makeGrayCopy(f);
                             if (!fullGray.empty()) {
                                 setRealtimeBackgroundGray(fullGray);
                                 lastAutoBackgroundFrame_.store(idx, std::memory_order_relaxed);

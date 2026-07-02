@@ -160,6 +160,14 @@ namespace backend::playback
         // consumer reading slot B.
         mutable std::vector<std::mutex> slotMutexes_;
         std::vector<Frame> ring_;
+        // Parallel to ring_: the write index whose frame each slot currently
+        // holds (kSlotEmpty when never written). Written/read only under the
+        // slot's lock. Readers use it to verify identity after locking the
+        // slot: totalWritten_ is incremented before the slot data is copied,
+        // so both "slot overwritten by a wrapping producer" and "slot not yet
+        // written for this index" races are caught by one comparison.
+        static constexpr uint64_t kSlotEmpty = ~0ULL;
+        std::vector<uint64_t> slotWriteIndices_;
         std::atomic<uint64_t> totalWritten_{0};
         std::atomic<uint64_t> totalFiltered_{0};
 

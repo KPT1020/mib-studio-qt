@@ -290,6 +290,24 @@ void EGrabberCamera::replenishPendingFrames() {
         const size_t tsCount = rawTimestamps.size() / sizeof(uint64_t);
         const uint64_t* timestamps = tsCount > 0 ? reinterpret_cast<const uint64_t*>(rawTimestamps.data()) : nullptr;
 
+        // Validate the SDK-reported buffer against the geometry every frame
+        // downstream will trust: on unplug/partial delivery the base pointer
+        // can be null or the part size garbage, and copy_n below would
+        // segfault (or resize() would throw a huge bad_alloc). Consumers
+        // build strided views reading (height-1)*pitch + width bytes.
+        const size_t effPitch = (linePitch == 0 ? static_cast<size_t>(width_) : linePitch);
+        const size_t requiredBytes = (height_ > 0 && width_ > 0)
+            ? (static_cast<size_t>(height_) - 1) * effPitch + static_cast<size_t>(width_)
+            : 0;
+        if (basePtr == nullptr || imageSize == 0 || requiredBytes == 0 ||
+            imageSize < requiredBytes) {
+            SPDLOG_WARN("EGrabberCamera: rejected delivered buffer (base={}, partSize={}, "
+                        "geometry {}x{} pitch={} needs {} bytes)",
+                        static_cast<const void*>(basePtr), imageSize, width_, height_,
+                        effPitch, requiredBytes);
+            return;
+        }
+
         for (size_t idx = 0; idx < delivered; ++idx) {
             const uint8_t* partPtr = basePtr + idx * imageSize;
 

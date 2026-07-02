@@ -5,6 +5,20 @@
 
 ## Features shipped
 
+- **Crash-hardening: frame buffer geometry + FrameStore identity** (2026-07-02) —
+  camera buffers are validated where produced (`replenishPendingFrames`
+  rejects null-base/short/garbage-size SDK buffers) and where consumed
+  (`makeGrayCopy`/`makeGrayROI` in ProcessingService, the recording thread's
+  strided view, and `FrameStore::getByWriteIndexROI` + AVI/TIFF exports all
+  check `data.size() >= (h-1)*pitch + w` before building strided views —
+  previously a pitch/size mismatch read out of bounds on the hot path).
+  `FrameStore` reads also re-verify frame identity under the slot lock via a
+  new `slotWriteIndices_` array, closing a TOCTOU where a wrapping producer
+  (or a reader arriving before the producer's copy) returned a
+  self-consistent but *wrong* frame — possibly with different geometry —
+  under the requested index. Extended `frame_store_bounds_test` (pitch
+  mismatch) and `frame_store_concurrency_test` (identity assertions).
+
 - **Crash-hardening: trigger/camera stop race** (2026-07-02) —
   `CaptureService::stop()` (GUI thread) now stops the trigger thread via
   `cameraReadyCallback_(nullptr)` before `activeCamera_->stop()`, and

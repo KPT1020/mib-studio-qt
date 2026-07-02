@@ -967,6 +967,13 @@ namespace backend
                     const int w = static_cast<int>(f.width);
                     const int h = static_cast<int>(f.height);
                     const size_t step = (f.linePitch == 0 ? static_cast<size_t>(f.width) : f.linePitch);
+                    // isFrameEmpty() above already rejects short buffers, but
+                    // keep the strided view safe on its own terms.
+                    if (f.data.size() < static_cast<size_t>(h - 1) * step + static_cast<size_t>(w)) {
+                        frameRecordingFiltered_.fetch_add(1, std::memory_order_relaxed);
+                        lastProcessedIdx = idx;
+                        continue;
+                    }
                     cv::Mat view(h, w, CV_8UC1, f.data.data(), step);
                     const auto crop = backend::recording::clampRoiToFrame(w, h, roi.x, roi.y, roi.w, roi.h);
                     cv::Mat region = view(cv::Rect(crop.x, crop.y, crop.w, crop.h));
