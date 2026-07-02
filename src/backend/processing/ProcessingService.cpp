@@ -163,6 +163,9 @@ int findMatchingTrack(const std::vector<BatchTrack>& tracks,
 
 ProcessingService::ProcessingService() = default;
 ProcessingService::~ProcessingService() {
+    // A joinable realtimeThread_ at destruction would std::terminate; do not
+    // rely on the GUI teardown path having called stopRealtime() first.
+    stopRealtime();
     stopBatchPipeline();
     stop();
 }

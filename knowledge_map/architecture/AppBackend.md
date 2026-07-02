@@ -88,6 +88,21 @@ Notes:
 - Services are still constructed to preserve existing references in frontend
   and backend code; toggles control startup wiring/initialization.
 
+## Shutdown
+
+`shutdown()` stops every service-owned thread in dependency order — capture
+(joins the capture thread, which stops the trigger via the camera-ready
+callback), trigger (defensive, idempotent), frame recording, then processing
+(`stopRealtime()` + `stopBatchPipeline()` + `stop()`). The destructor calls
+it, so teardown no longer depends on `MainWindow::closeEvent` having stopped
+experiment services first. Ordering matters: members are destroyed in reverse
+declaration order, so `triggerService_`/`autofocusService_` die before
+`processingService_` — a realtime loop still running at member destruction
+would invoke its callbacks on freed services. `shutdown()` is idempotent and
+safe on a never-initialized backend. Verified by
+`tests/backend/backend_lifecycle_smoke_test.cpp` (destroys the backend with
+the realtime thread live).
+
 ## Camera selection
 
 - `setHardwareCameraSelection(ifIdx, devIdx, label)` — choose device (no start)

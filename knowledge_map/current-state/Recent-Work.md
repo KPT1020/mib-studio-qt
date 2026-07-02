@@ -5,6 +5,16 @@
 
 ## Features shipped
 
+- **Crash-hardening: self-sufficient backend shutdown** (2026-07-02) —
+  `~ProcessingService` now calls `stopRealtime()` (a joinable
+  `realtimeThread_` at destruction previously hit `std::terminate`), and
+  `AppBackend::shutdown()` (called from `~AppBackend`) stops capture →
+  trigger → recording → processing before member destruction, closing a
+  use-after-free where the realtime loop's callbacks fired into
+  already-destroyed `triggerService_`/`autofocusService_` on any exit path
+  that bypassed `MainWindow::closeEvent`. Regression coverage in
+  `tests/backend/backend_lifecycle_smoke_test.cpp`.
+
 - **Real-time performance examination + remediation plan** (2026-07-02) —
   Audited every component on the real-time hot path and committed
   `docs/exec-plans/active/2026-07-02-realtime-performance.md`, a 6-PR plan

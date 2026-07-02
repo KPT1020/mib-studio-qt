@@ -134,7 +134,27 @@ namespace backend
     AppBackend::AppBackend() = default;
 
     AppBackend::~AppBackend() {
+        shutdown();
+    }
+
+    void AppBackend::shutdown() {
+        // Stop threads before member destruction begins. Members are destroyed
+        // in reverse declaration order, so triggerService_/autofocusService_
+        // die before processingService_ — a still-running realtime loop would
+        // invoke its callbacks on freed services. Every call below is
+        // idempotent, so shutdown() may run more than once.
+        if (captureService_) {
+            captureService_->stop();
+        }
+        if (triggerService_) {
+            triggerService_->stop();
+        }
         stopFrameRecording();
+        if (processingService_) {
+            processingService_->stopRealtime();
+            processingService_->stopBatchPipeline();
+            processingService_->stop();
+        }
     }
 
     bool AppBackend::initialize(const std::string &dataDir)

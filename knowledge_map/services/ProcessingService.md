@@ -23,6 +23,12 @@
   with accepted/dropped status so capture can keep running while workers process
   behind it.
 
+The destructor is self-sufficient: it calls `stopRealtime()` +
+`stopBatchPipeline()` + `stop()`, so destroying the service with any thread
+still live is safe (previously a joinable `realtimeThread_` at destruction
+`std::terminate`d unless GUI teardown had called `stopRealtime()` first).
+`isRealtimeRunning()` exposes the realtime thread state.
+
 ## Pipeline (per frame)
 
 1. Optional background subtraction (`setRealtimeBackgroundGray`).
