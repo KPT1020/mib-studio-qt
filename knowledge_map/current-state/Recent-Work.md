@@ -5,6 +5,14 @@
 
 ## Features shipped
 
+- **Crash-hardening: ProcessingService exception containment** (2026-07-02) —
+  worker jobs, batch workers, and the realtime loop now catch and log
+  exceptions (dropping the failing job/batch or restarting the loop) instead
+  of letting them escape the thread entry function and `std::terminate` the
+  process on one bad frame or a throwing `cv::` call. New
+  `tests/processing/processing_fault_injection_test.cpp` injects throwing
+  jobs and callbacks and asserts the service keeps processing.
+
 - **Crash-hardening: self-sufficient backend shutdown** (2026-07-02) —
   `~ProcessingService` now calls `stopRealtime()` (a joinable
   `realtimeThread_` at destruction previously hit `std::terminate`), and

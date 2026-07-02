@@ -233,7 +233,13 @@ void ProcessingService::workerLoop() {
             queue_.pop();
         }
         if (job) {
-            job();
+            try {
+                job();
+            } catch (const std::exception& ex) {
+                SPDLOG_ERROR("ProcessingService: worker job threw: {} — job skipped", ex.what());
+            } catch (...) {
+                SPDLOG_ERROR("ProcessingService: worker job threw unknown exception — job skipped");
+            }
             stats_.jobsProcessed.fetch_add(1, std::memory_order_relaxed);
             backend::diagnostics::CrashStateMirror::instance().processing.jobsProcessed
                 .fetch_add(1, std::memory_order_relaxed);
@@ -918,6 +924,7 @@ void ProcessingService::batchWorkerLoop() {
         const auto algoStart = std::chrono::steady_clock::now();
         std::vector<ProcessedFrame> results;
         results.reserve(inputs.size());
+        try {
         for (const auto& item : inputs) {
             ProcessedFrame base = computeProcessedFrame(item.gray,
                                                         config.background,
@@ -971,6 +978,13 @@ void ProcessingService::batchWorkerLoop() {
             if (callback) {
                 callback(std::move(results));
             }
+        }
+        } catch (const std::exception& ex) {
+            SPDLOG_ERROR("ProcessingService: batch worker exception: {} — batch of {} frames dropped",
+                         ex.what(), inputs.size());
+        } catch (...) {
+            SPDLOG_ERROR("ProcessingService: batch worker unknown exception — batch of {} frames dropped",
+                         inputs.size());
         }
     }
 }
@@ -1904,10 +1918,26 @@ void ProcessingService::realtimeBatchLoop() {
 }
 
 void ProcessingService::realtimeLoop() {
-    if (getRealtimeProcessingMode() == RealtimeProcessingMode::AsyncBatch) {
-        realtimeBatchLoop();
-    } else {
-        realtimeInlineLoop();
+    // An exception escaping a std::thread entry function is std::terminate —
+    // the whole process dies on one bad frame. Catch, log, and restart the
+    // loop instead (same policy as CaptureService::run).
+    while (rtRunning_.load(std::memory_order_acquire)) {
+        try {
+            if (getRealtimeProcessingMode() == RealtimeProcessingMode::AsyncBatch) {
+                realtimeBatchLoop();
+            } else {
+                realtimeInlineLoop();
+            }
+            break; // normal exit (stopRealtime or mode switch)
+        } catch (const std::exception& ex) {
+            SPDLOG_ERROR("ProcessingService: realtime loop exception: {} — restarting loop", ex.what());
+        } catch (...) {
+            SPDLOG_ERROR("ProcessingService: realtime loop unknown exception — restarting loop");
+        }
+        // The batch loop may have thrown before its own cleanup ran.
+        rtBatchPipelineActive_.store(false, std::memory_order_release);
+        stopBatchPipeline();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 }
 

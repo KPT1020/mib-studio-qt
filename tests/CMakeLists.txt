@@ -93,6 +93,10 @@ mib_add_backend_test_executable(processing_batch_pipeline_test processing/proces
 add_test(NAME backend.processing_batch_pipeline COMMAND $<TARGET_FILE:processing_batch_pipeline_test>)
 set_tests_properties(backend.processing_batch_pipeline PROPERTIES LABELS "processing;backend")
 
+mib_add_backend_test_executable(processing_fault_injection_test processing/processing_fault_injection_test.cpp)
+add_test(NAME processing.fault_injection COMMAND $<TARGET_FILE:processing_fault_injection_test>)
+set_tests_properties(processing.fault_injection PROPERTIES LABELS "processing;backend")
+
 mib_add_backend_test_executable(recording_lifecycle_test recording/recording_lifecycle_test.cpp)
 add_test(NAME recording.lifecycle COMMAND $<TARGET_FILE:recording_lifecycle_test>)
 set_tests_properties(recording.lifecycle PROPERTIES LABELS "recording;backend")
