@@ -5,10 +5,12 @@
 
 **Source:** `src/backend/camera/mindvision/MindVisionCamera.cpp`,
 `include/backend/camera/mindvision/MindVisionCamera.h`,
-`include/backend/camera/mindvision/MindVisionConfig.h` (pure JSON parse + bounds)
-**Tests:** `tests/backend/mindvision_config_test.cpp`
+`include/backend/camera/mindvision/MindVisionConfig.h` (pure JSON parse + bounds),
+`include/backend/camera/mindvision/MindVisionFrameGeometry.h` (pure frame-vs-buffer bounds check)
+**Tests:** `tests/backend/mindvision_config_test.cpp`,
+`tests/backend/mindvision_frame_geometry_test.cpp`
 **Related:** [[ICamera]], [[../services/CameraControlService]],
-[[../architecture/AppBackend]], [[../frontend/ConnectTab]]
+[[../architecture/AppBackend]], [[../frontend/ConnectTab]], [[EGrabberCamera]]
 
 ## Responsibility
 
@@ -53,6 +55,26 @@ neither validated bounds):
 Both call sites read the file, call `parseConfig`, log warnings, then apply
 `config.*` to the SDK (the camera applies the full set; the control service
 still applies only its historical subset).
+
+## Frame-vs-buffer bounds check (`MindVisionFrameGeometry.h`)
+
+`start()` allocates `outBuffer_` once, sized `bufferWidth_ * bufferHeight_`
+from a `CameraGetImageResolution` query. `grabFrame()` then reads
+`tSdkFrameHead::iWidth/iHeight` fresh from every delivered frame to size both
+`CameraImageProcess()`'s write into `outBuffer_` and the `out.data.assign()`
+read out of it. Those two numbers come from separate SDK calls at separate
+times, so nothing guaranteed a later frame's reported geometry still fit the
+buffer sized once at `start()` — the same untrusted-delivery mismatch class
+`EGrabberCamera::replenishPendingFrames` guards against for its own
+buffer/geometry pair. `grabFrame()` now calls
+`backend::camera::mindvision::frameFitsInBuffer(frameHead.iWidth,
+frameHead.iHeight, bufferWidth_, bufferHeight_)` before invoking
+`CameraImageProcess()`; an oversized frame is logged and skipped (the
+capture loop retries) instead of overflowing `outBuffer_`. The check is a
+header-only, SDK-independent function (same split as
+`MindVisionConfig.h`) so it is unit-testable on Linux even though
+`grabFrame()` itself only compiles under `MIB_HAS_MINDVISION` (Windows +
+SDK).
 
 ## Gotchas
 

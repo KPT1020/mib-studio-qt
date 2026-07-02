@@ -24,6 +24,7 @@
 #endif
 
 #include "backend/camera/mindvision/MindVisionConfig.h"
+#include "backend/camera/mindvision/MindVisionFrameGeometry.h"
 
 #include <QFile>
 #include <QJsonDocument>
@@ -390,6 +391,19 @@ bool MindVisionCamera::grabFrame(Frame &out)
             {
                 CameraReleaseImageBuffer(hCamera, pBuffer);
                 return false;
+            }
+            // frameHead geometry comes from this delivery; outBuffer_'s capacity
+            // was fixed from a separate CameraGetImageResolution query back in
+            // start(). Reject a frame that would overflow it instead of letting
+            // CameraImageProcess write past the allocation (see
+            // backend::camera::mindvision::frameFitsInBuffer).
+            if (!backend::camera::mindvision::frameFitsInBuffer(
+                    frameHead.iWidth, frameHead.iHeight, bufferWidth_, bufferHeight_))
+            {
+                SPDLOG_WARN("MindVisionCamera: rejected frame {}x{} exceeding allocated buffer {}x{}",
+                            frameHead.iWidth, frameHead.iHeight, bufferWidth_, bufferHeight_);
+                CameraReleaseImageBuffer(hCamera, pBuffer);
+                continue;
             }
             procStatus = CameraImageProcess(hCamera_, pBuffer, outBuffer_, &frameHead);
         }

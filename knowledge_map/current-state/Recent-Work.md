@@ -5,6 +5,29 @@
 
 ## Features shipped
 
+- **Crash-hardening: MindVisionCamera unbounded frame-vs-buffer geometry**
+  (2026-07-02) — audit finding on the third `ICamera` backend, alongside the
+  `EGrabberCamera`/`FrameStore` hardening above: `grabFrame()` sized its
+  `out.data.assign()` read (and let `CameraImageProcess()` write) purely from
+  the per-frame SDK-reported `tSdkFrameHead::iWidth/iHeight`, with no check
+  against `outBuffer_`'s fixed capacity (`bufferWidth_ * bufferHeight_`,
+  allocated once in `start()` from an earlier, separate
+  `CameraGetImageResolution` query). A frame report larger than that
+  allocation — the same untrusted-delivery mismatch class the sibling
+  `EGrabberCamera::replenishPendingFrames` fix guards against — would
+  overflow `outBuffer_` with no downstream catch (the resulting `Frame`'s own
+  `width`/`height`/`data.size()` stay internally consistent, so
+  `ProcessingService`'s frame-buffer checks would not reject it). Fix:
+  extracted a pure `backend::camera::mindvision::frameFitsInBuffer()` helper
+  ([[../camera/MindVisionCamera]]) that `grabFrame()` now checks before
+  calling `CameraImageProcess()`, rejecting (and logging, skip-and-continue)
+  an oversized frame instead of writing past the allocation. New
+  `tests/backend/mindvision_frame_geometry_test.cpp`
+  (`backend.mindvision_frame_geometry`) pins the helper's accept/reject
+  boundary; the helper is header-only and SDK-independent (mirrors
+  `MindVisionConfig.h`'s split) so it is testable on Linux even though
+  `grabFrame()` itself only compiles under `MIB_HAS_MINDVISION` (Windows).
+
 - **Crash-hardening: TriggerService concurrent-stop() double-join** (2026-07-02)
   — the GUI-initiated-stop ordering fix in "Close trigger-thread
   use-after-free during GUI-initiated camera stop" (below) added a second,
