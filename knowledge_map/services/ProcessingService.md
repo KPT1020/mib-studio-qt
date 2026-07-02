@@ -93,8 +93,10 @@ All gates in one struct. Notable fields:
 - **Monitoring rings** — `monitoringValidFrames_` / `monitoringInvalidFrames_`,
   fixed 1000-frame capacity. **Gated** by `setMonitoringActive(bool)` (default
   off). When inactive, `appendRealtimeMonitoringFrame` returns immediately with
-  no allocations. Wire to UI tab show/hide. Stored frames share cv::Mat refcounts
-  with the processing loop (no per-frame clone); consumers are read-only.
+  no allocations. Wired to [[../frontend/ExperimentMonitoringTab]] show/hide —
+  the rings only fill while that tab is visible. Stored frames share cv::Mat
+  refcounts with the processing loop (no per-frame clone); consumers are
+  read-only.
 - **Experiment accumulation** — bounded `std::deque<ProcessedFrame>` populated
   while `experimentActive_` is true. Deque gives O(1) `pop_front()` when the
   bounded backlog is full under high frame rates. `flushBufferedFrames(Hdf5Service&)`

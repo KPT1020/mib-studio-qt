@@ -581,6 +581,9 @@ namespace frontend
         {
             updateTimer_->start();
         }
+        // Enable monitoring accumulation only while this tab is visible —
+        // ProcessingService skips the per-object frame copies when inactive.
+        backend_.processing().setMonitoringActive(true);
         // Refresh tune panel with current config when tab becomes visible
         loadCurrentConfig();
     }
@@ -592,6 +595,8 @@ namespace frontend
         {
             updateTimer_->stop();
         }
+        // Stop monitoring accumulation while hidden (no consumer polling)
+        backend_.processing().setMonitoringActive(false);
         // Disarm periodic test trigger on hide to avoid background pulsing
         if (ui->periodicTriggerBtn->isChecked())
         {

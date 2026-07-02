@@ -17,7 +17,12 @@
 - Render via `QtCharts`: `QScatterSeries`, `QHistogramSeries`,
   `QBarSeries`, etc. `frontend::ZoomableChartView` adds scroll/zoom.
 - Live totals: valid count, invalid count, algo FPS, valid FPS.
-- `showEvent` / `hideEvent` pause rendering when the tab isn't visible.
+- `showEvent` / `hideEvent` pause rendering when the tab isn't visible **and**
+  gate the backend accumulation: `showEvent` calls
+  `ProcessingService::setMonitoringActive(true)`, `hideEvent` calls
+  `setMonitoringActive(false)`. Monitoring rings only fill while this tab is
+  visible — when hidden, the realtime loop skips the per-object frame copies
+  entirely (see [[../services/ProcessingService]] "Monitoring rings").
 - **Top-row trigger controls:**
   - `sortTriggerBtn` — single manual pulse; calls
     `backend_.trigger().onTargetGroupResult(services::TargetGroupSignal{.isTargetGroup=true})`.
