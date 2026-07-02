@@ -42,6 +42,11 @@ mib_add_backend_test_executable(modbus_rtu_test backend/modbus_rtu_test.cpp)
 add_test(NAME backend.modbus_rtu COMMAND $<TARGET_FILE:modbus_rtu_test>)
 set_tests_properties(backend.modbus_rtu PROPERTIES LABELS "backend" TIMEOUT 30)
 
+mib_add_backend_test_executable(trigger_service_start_stop_race_test backend/trigger_service_start_stop_race_test.cpp)
+target_link_libraries(trigger_service_start_stop_race_test PRIVATE Threads::Threads)
+add_test(NAME backend.trigger_service_start_stop_race COMMAND $<TARGET_FILE:trigger_service_start_stop_race_test>)
+set_tests_properties(backend.trigger_service_start_stop_race PROPERTIES LABELS "backend;trigger" TIMEOUT 60)
+
 mib_add_backend_test_executable(autofocus_math_test backend/autofocus_math_test.cpp)
 add_test(NAME backend.autofocus_math COMMAND $<TARGET_FILE:autofocus_math_test>)
 set_tests_properties(backend.autofocus_math PROPERTIES LABELS "backend" TIMEOUT 30)

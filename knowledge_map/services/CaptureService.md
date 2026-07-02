@@ -46,9 +46,13 @@ realtime loop shuts down.
   it to grab a live `ICamera*` and start itself.
 - `stop()` (GUI thread) invokes `cameraReadyCallback_(nullptr)` **before**
   `activeCamera_->stop()` so the trigger thread is stopped before the grabber
-  is torn down; `releaseCamera()` on the capture thread repeats the call
-  (idempotent). Without this ordering a pending trigger raced the grabber
-  teardown (use-after-free inside the SDK).
+  is torn down; `releaseCamera()` on the capture thread repeats the call.
+  Without this ordering a pending trigger raced the grabber teardown
+  (use-after-free inside the SDK). This means the callback (and therefore
+  [[TriggerService]]::stop()) can genuinely race between the GUI thread and
+  the capture thread — see [[TriggerService]]'s "Concurrent-stop() fix"
+  gotcha for why `TriggerService::stop()` had to be made safe against being
+  entered by two threads at once, not just safe to call twice sequentially.
 - Platform default factory:
   - Windows (`MIB_HAS_EGRABBER=1`) defaults to [[../camera/EGrabberCamera]].
   - Non-Windows defaults to [[../camera/MockCamera]] (`data/mock_frames`) so

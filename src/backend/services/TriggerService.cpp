@@ -17,6 +17,16 @@ void TriggerService::start() {
 }
 
 void TriggerService::stop() {
+    // Serialize the whole stop sequence: stop() can be called concurrently
+    // from the GUI thread (CaptureService::stop()) and the capture thread
+    // (CaptureService::run()'s releaseCamera()) via the same
+    // cameraReadyCallback_. Without this lock, both callers can pass the
+    // running_.load() check below before either clears running_, and both
+    // then reach thread_.join() on the same std::thread concurrently, which
+    // is UB. Holding stopMutex_ across the entire body makes the losing
+    // caller block until the winner has already joined, then observe
+    // running_==false and return.
+    std::lock_guard<std::mutex> stopLock(stopMutex_);
     if (!running_.load()) return;
     // Clear running_ while holding triggerMutex_ (the mutex the trigger thread
     // holds when evaluating its wait predicate) before notifying. Storing it

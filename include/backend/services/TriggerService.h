@@ -55,6 +55,17 @@ private:
     std::thread thread_;
     std::atomic<bool> running_{false};
 
+    // Serializes stop() end-to-end. stop() can be invoked concurrently from
+    // more than one thread (e.g. CaptureService::stop() on the GUI thread and
+    // CaptureService::run()'s releaseCamera() on the capture thread both funnel
+    // into the same cameraReadyCallback_ -> TriggerService::stop()). The plain
+    // `running_.load()` guard alone is not synchronized: two callers can both
+    // observe running_==true before either clears it, then both proceed to
+    // thread_.join() the same std::thread concurrently, which is UB. Holding
+    // this mutex across the whole body makes a second, racing stop() block
+    // until the first has already joined, then see running_==false and return.
+    std::mutex stopMutex_;
+
     // Trigger request signaling
     std::mutex triggerMutex_;
     std::condition_variable triggerCV_;

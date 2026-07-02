@@ -83,3 +83,18 @@ microseconds (default 1 µs).
   one fire. Residual latency jitter (tens to ~hundreds of µs under load)
   is inherent to OS scheduling of the busy-wait thread; sub-10 µs
   determinism would require real-time thread priority.
+- **Concurrent-stop() fix:** `stop()` can be invoked from two threads at
+  once — [[CaptureService]]::stop() (GUI thread) calls
+  `cameraReadyCallback_(nullptr)` before joining its own capture thread, and
+  that same capture thread's `releaseCamera()` independently reaches the
+  identical callback on its own exit path (health-check failure, grabFrame
+  failure, or noticing `running_==false`). Both funnel into
+  `TriggerService::stop()`. The old guard was a lock-free
+  `if (!running_.load()) return;` — two racing callers could both pass it
+  before either cleared `running_`, then both call `thread_.join()` on the
+  same `std::thread` concurrently, which is UB (observed as a hang or
+  `std::system_error`). `stop()` now takes `stopMutex_` across its entire
+  body so a losing racer blocks until the winner has already joined, then
+  observes `running_==false` and returns. Regression guard:
+  `tests/backend/trigger_service_start_stop_race_test.cpp`
+  (`backend.trigger_service_start_stop_race`).

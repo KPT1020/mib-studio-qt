@@ -5,6 +5,27 @@
 
 ## Features shipped
 
+- **Crash-hardening: TriggerService concurrent-stop() double-join** (2026-07-02)
+  — the GUI-initiated-stop ordering fix in "Close trigger-thread
+  use-after-free during GUI-initiated camera stop" (below) added a second,
+  unsynchronized call site for `cameraReadyCallback_(nullptr)`:
+  `CaptureService::stop()` (GUI thread) now calls it before joining the
+  capture thread, while `CaptureService::run()`'s `releaseCamera()` (capture
+  thread) can independently reach the same callback on its own exit path.
+  Both funnel into `TriggerService::stop()`, whose only guard was a
+  lock-free `if (!running_.load()) return;` — two racing callers could both
+  pass it before either cleared `running_`, then both call
+  `thread_.join()` on the same `std::thread` concurrently (UB: observed as a
+  hang in repeated pre-fix runs). Fix: `TriggerService::stop()` now takes a
+  dedicated `stopMutex_` across its entire body, serializing racing callers
+  so the loser sees `running_==false` after the winner has already joined
+  and returns without touching `thread_` again. New regression test
+  `tests/backend/trigger_service_start_stop_race_test.cpp`
+  (`backend.trigger_service_start_stop_race`) hammers `stop()` from two
+  barrier-synchronized threads over 500 iterations; reproduced a hang on the
+  pre-fix code within a handful of runs, passes cleanly (also under TSan)
+  post-fix.
+
 - **Crash-hardening: audit-surfaced fixes (dangling reference + resize
   identity)** (2026-07-02) — a multi-agent audit of the crash-hardening
   commits above (prompted by a request to review them with subagents,
