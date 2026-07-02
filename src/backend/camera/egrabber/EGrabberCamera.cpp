@@ -44,11 +44,19 @@ bool EGrabberCamera::start() {
 
     try {
         genTL_ = std::make_unique<EGenTL>();
-        if (hasSelection_) {
-            grabber_ = std::make_unique<EGrabber<CallbackOnDemand>>(
-                *genTL_, selectedInterfaceIndex_, selectedDeviceIndex_);
-        } else {
-            grabber_ = std::make_unique<EGrabber<CallbackOnDemand>>(*genTL_);
+        {
+            // Construct outside the lock (device open can be slow), publish
+            // under triggerMutex_ so the trigger thread never sees a torn
+            // grabber_ pointer.
+            std::unique_ptr<EGrabber<CallbackOnDemand>> grabber;
+            if (hasSelection_) {
+                grabber = std::make_unique<EGrabber<CallbackOnDemand>>(
+                    *genTL_, selectedInterfaceIndex_, selectedDeviceIndex_);
+            } else {
+                grabber = std::make_unique<EGrabber<CallbackOnDemand>>(*genTL_);
+            }
+            std::lock_guard<std::mutex> triggerLock(triggerMutex_);
+            grabber_ = std::move(grabber);
         }
 
         // CRITICAL: Verify device is accessible before proceeding
@@ -64,7 +72,10 @@ bool EGrabberCamera::start() {
             SPDLOG_DEBUG("Camera device: {} {}", deviceVendor, deviceModel);
         } catch (const std::exception& ex) {
             SPDLOG_ERROR("Camera not accessible - device may be disconnected or in invalid state: {}", ex.what());
-            grabber_.reset();
+            {
+                std::lock_guard<std::mutex> triggerLock(triggerMutex_);
+                grabber_.reset();
+            }
             genTL_.reset();
             return false;
         }
@@ -96,7 +107,10 @@ bool EGrabberCamera::start() {
         } catch (const std::exception& ex) {
             SPDLOG_ERROR("EGrabberCamera AcquisitionStart failed - camera may be in invalid state: {}", ex.what());
             // Clean up and return false - this is a fatal error
-            grabber_.reset();
+            {
+                std::lock_guard<std::mutex> triggerLock(triggerMutex_);
+                grabber_.reset();
+            }
             genTL_.reset();
             return false;
         }
@@ -185,7 +199,13 @@ void EGrabberCamera::stop() {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
-    grabber_.reset();
+    {
+        // The trigger thread reads grabber_ in setTriggerOutput(); destroying
+        // it without this lock is a use-after-free when a trigger fires
+        // during stop (GUI-thread camera stop leaves the trigger thread live).
+        std::lock_guard<std::mutex> triggerLock(triggerMutex_);
+        grabber_.reset();
+    }
     genTL_.reset();
     
     if (wasRunning) {
@@ -324,11 +344,15 @@ void EGrabberCamera::configureTriggerOutput(const std::string& lineSelector) {
 }
 
 bool EGrabberCamera::setTriggerOutput(bool high) {
-    if (!triggerConfigured_ || !running_ || !grabber_) return false;
+    // triggerMutex_ (not stateMutex_) pins grabber_ alive for the duration of
+    // the call: stop() resets grabber_ under the same lock, so a trigger pulse
+    // racing a camera stop fails cleanly instead of touching a destroyed
+    // grabber. InterfaceModule operations themselves are thread-safe vs
+    // StreamModule (frame grabbing on the capture thread), and stateMutex_ is
+    // deliberately avoided — stop() holds it across ~360 ms of teardown sleeps.
+    std::lock_guard<std::mutex> triggerLock(triggerMutex_);
+    if (!triggerConfigured_ || !running_.load(std::memory_order_acquire) || !grabber_) return false;
     try {
-        // InterfaceModule operations are thread-safe vs StreamModule (frame grabbing),
-        // so no mutex needed here. This runs on the trigger thread while
-        // grabFrame() runs on the capture thread.
         grabber_->setString<Euresys::InterfaceModule>("LineSelector", triggerLineSelector_);
         grabber_->setString<Euresys::InterfaceModule>("LineSource", high ? "High" : "Low");
         return true;

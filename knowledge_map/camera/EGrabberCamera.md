@@ -40,3 +40,10 @@
   `Frame::pixelFormat`.
 - Header and source are guarded by `MIB_HAS_EGRABBER`; non-Windows compile must
   not include `EGrabber.h`.
+- **Trigger-thread lifetime protocol:** `setTriggerOutput` runs on the
+  [[../services/TriggerService]] thread and takes `triggerMutex_` (never
+  `stateMutex_`, which `stop()` holds across ~360 ms of teardown sleeps).
+  Every assignment/reset of `grabber_` also holds `triggerMutex_`, so a
+  trigger pulse racing a camera stop fails cleanly instead of dereferencing a
+  destroyed grabber. `running_` is `std::atomic<bool>` for the same reason
+  (read lock-free by the trigger thread and `isRunning()`).

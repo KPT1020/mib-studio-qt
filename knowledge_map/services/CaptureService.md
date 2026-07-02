@@ -44,6 +44,11 @@ realtime loop shuts down.
   `docs/howto/safe-start-stop-egrabber.md`.
 - `setCameraReadyCallback` fires from this thread; [[TriggerService]] uses
   it to grab a live `ICamera*` and start itself.
+- `stop()` (GUI thread) invokes `cameraReadyCallback_(nullptr)` **before**
+  `activeCamera_->stop()` so the trigger thread is stopped before the grabber
+  is torn down; `releaseCamera()` on the capture thread repeats the call
+  (idempotent). Without this ordering a pending trigger raced the grabber
+  teardown (use-after-free inside the SDK).
 - Platform default factory:
   - Windows (`MIB_HAS_EGRABBER=1`) defaults to [[../camera/EGrabberCamera]].
   - Non-Windows defaults to [[../camera/MockCamera]] (`data/mock_frames`) so

@@ -55,6 +55,13 @@ bool CaptureService::start() {
 void CaptureService::stop() {
     const bool wasRunning = running_.exchange(false);
     if (wasRunning) {
+        // Stop the trigger thread BEFORE tearing the camera down: it calls
+        // ICamera::setTriggerOutput and must not race the grabber teardown.
+        // releaseCamera() on the capture thread repeats this call later; both
+        // the callback and TriggerService::stop() are idempotent.
+        if (cameraReadyCallback_) {
+            cameraReadyCallback_(nullptr);
+        }
         std::scoped_lock lk(cameraMutex_);
         if (activeCamera_) {
             activeCamera_->stop();

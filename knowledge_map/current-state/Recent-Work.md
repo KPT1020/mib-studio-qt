@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Crash-hardening: trigger/camera stop race** (2026-07-02) —
+  `CaptureService::stop()` (GUI thread) now stops the trigger thread via
+  `cameraReadyCallback_(nullptr)` before `activeCamera_->stop()`, and
+  `EGrabberCamera` guards every `grabber_` assignment/reset plus the
+  trigger-thread `setTriggerOutput` read with a dedicated `triggerMutex_`
+  (`running_` is now `std::atomic<bool>`). Previously a pending trigger pulse
+  during a GUI-initiated camera stop could call into a half-destroyed
+  grabber (use-after-free inside the Euresys SDK). Corrects the 2026-04-16
+  thread-audit F4 assumption that camera lifecycle only runs on the capture
+  thread.
+
 - **Crash-hardening: ProcessingService exception containment** (2026-07-02) —
   worker jobs, batch workers, and the realtime loop now catch and log
   exceptions (dropping the failing job/batch or restarting the loop) instead
