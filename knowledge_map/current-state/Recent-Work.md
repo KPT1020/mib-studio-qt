@@ -5,6 +5,20 @@
 
 ## Features shipped
 
+- **Real-time performance examination + remediation plan** (2026-07-02) —
+  Audited every component on the real-time hot path and committed
+  `docs/exec-plans/active/2026-07-02-realtime-performance.md`, a 6-PR plan
+  covering the remaining per-frame costs: recording-thread background
+  clone/config copy + full-frame `isFrameEmpty` (P1), per-object monitoring
+  clones (P2), O(n²) experiment-buffer trim (P3), redundant experiment-path
+  clones (P4), mutex-held snapshot clone (P5), display-tick copies/rescale
+  (P6), per-frame config/callback copies (P7), dead `FrameStore` frame-filter
+  (P8), and RT thread priority (P9 → new tech-debt row TD-7). Also annotated
+  the fully-implemented 2026-06-24 high-speed-capture-buffering plan
+  `Status: completed`. Details in
+  `knowledge_map/task/2026-07-02-realtime-performance-plan.md`. Docs-only
+  change; code lands via the plan's PRs.
+
 - **OverviewTab ROI propagation to recording** (2026-06-29) — `MainWindow`
   now connects `OverviewTab::roiChanged` to
   `ProcessingService::setRealtimeRoi()`, so the recording thread crops

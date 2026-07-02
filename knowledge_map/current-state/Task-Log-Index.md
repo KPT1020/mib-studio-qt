@@ -51,6 +51,7 @@
 ### Trigger / realtime performance
 - `task/2026-04-15-trigger-timing-bug.md`
 - `task/2026-04-16-thread-performance-audit.md`
+- `task/2026-07-02-realtime-performance-plan.md`
 
 ## By filename (all 30)
 

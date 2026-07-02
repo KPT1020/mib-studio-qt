@@ -1,5 +1,17 @@
 # High-speed Capture Buffering Implementation Plan
 
+Status: completed
+
+> **Completion note (2026-07-02):** all tasks verified implemented in the tree —
+> `HdfWriteQueue` exists at `include/backend/recording/HdfWriteQueue.h` and is
+> used by recording (`src/backend/app/AppBackend.cpp` `startFrameRecording`) and
+> experiment flush (`src/backend/processing/ProcessingService.cpp`
+> `flushBufferedFrames`); `FrameStore::reserveFrameBytes` is implemented and
+> called from `CaptureService`; the fatal-save-error UI bridge is wired. The
+> checkboxes below were never ticked during implementation; treat this file as
+> historical. New plans go to `docs/exec-plans/` (see
+> `docs/exec-plans/README.md`).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Decouple HDF5 writing from high-speed capture via a bounded 3-slot write queue, pre-reserve the FIFO so the per-frame hot path is allocation-free, and stop+alert on save failure instead of losing data silently.
