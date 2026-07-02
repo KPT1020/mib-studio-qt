@@ -9,6 +9,7 @@
 
 ## Tabs
 - [[ConnectTab]] — device selection (hardware or mock)
+- [[OverviewTab]] — live Mono8 display with ROI overlay and JS config editor
 - [[PreviewPage]] — live display + playback + [[ConfigTabs]] dock
 - [[ConfigTabs]] — experiment settings, JS camera scripts, ROI
 - [[ExperimentMonitoringTab]] — live histograms + scatter plots

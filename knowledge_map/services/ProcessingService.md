@@ -40,6 +40,26 @@
    - **Background capture** (if auto-background enabled) via
      `BackgroundCaptureCallback` → UI notifier.
 
+## Background accessor — zero-copy hot path
+
+Two getters exist for the current background:
+
+- `cv::Mat getRealtimeBackgroundGray()` — clones the background (safe for
+  cold callers, e.g. `MainWindow`, `BufferSaveDialog`).
+- `std::shared_ptr<const cv::Mat> getRealtimeBackgroundGrayShared()` — returns
+  the shared_ptr directly (no clone). Use in hot paths where you only need to
+  read the background. The pointed-to Mat is immutable; `setRealtimeBackgroundGray`
+  always replaces the pointer atomically rather than mutating in place.
+
+`getConfigVersion()` returns a monotonic counter bumped by `setProcessingConfig`
+and `setRealtimeRoi`. Hot loops can compare against a cached version to skip
+per-frame config reads.
+
+`isFrameEmpty(frame, config, roi, shared_ptr<const cv::Mat>)` — ROI-only
+overload: extracts only the ROI pixels (no full-frame copy) and uses the
+background directly via shared_ptr. Classifies identically to the full-frame
+overload (`recording_isframeempty_roi_test` is the invariant test).
+
 ## Config — `ProcessingConfig`
 
 All gates in one struct. Notable fields:
@@ -58,19 +78,43 @@ All gates in one struct. Notable fields:
 ## Accumulation modes
 
 - **Monitoring rings** — `monitoringValidFrames_` / `monitoringInvalidFrames_`,
-  fixed 1000-frame capacity. Always on when realtime is running.
-- **Experiment accumulation** — bounded vectors populated while
-  `experimentActive_` is true. `flushBufferedFrames(Hdf5Service&)` moves them out
-  under a brief lock and submits them to a 3-slot
-  [[Hdf5Service]] `HdfWriteQueue` whose writer thread does the slow append, so
-  capture/processing never blocks on disk. The write queue is created lazily on
-  first flush and torn down by `finishFlush()` at experiment stop (drains +
-  joins before any direct HDF5 write, so the file is never written by two
-  threads at once). A write failure or queue overflow (disk too slow) is fatal:
-  it fires `setFlushErrorCallback` (→ [[../architecture/AppBackend]] →
-  UI stop + dialog) instead of the old silent trim-and-drop. `totalValidFlushed_`
-  advances only on a confirmed write.
+  fixed 1000-frame capacity. **Gated** by `setMonitoringActive(bool)` (default
+  off). When inactive, `appendRealtimeMonitoringFrame` returns immediately with
+  no allocations. Wire to UI tab show/hide. Stored frames share cv::Mat refcounts
+  with the processing loop (no per-frame clone); consumers are read-only.
+- **Experiment accumulation** — bounded `std::deque<ProcessedFrame>` populated
+  while `experimentActive_` is true. Deque gives O(1) `pop_front()` when the
+  bounded backlog is full under high frame rates. `flushBufferedFrames(Hdf5Service&)`
+  moves frames into an `ExperimentBatch` via `std::make_move_iterator` (O(1)
+  per Mat, refcount transfer), submits to a 3-slot [[Hdf5Service]] `HdfWriteQueue`
+  whose writer thread does the slow append, so capture/processing never blocks
+  on disk. The write queue is created lazily on first flush and torn down by
+  `finishFlush()` at experiment stop (drains + joins before any direct HDF5
+  write, so the file is never written by two threads at once). A write failure
+  or queue overflow (disk too slow) is fatal: it fires `setFlushErrorCallback`
+  (→ [[../architecture/AppBackend]] → UI stop + dialog) instead of the old
+  silent trim-and-drop. `totalValidFlushed_` advances only on a confirmed write.
+- **Frozen-Mats invariant**: every `cv::Mat` published from `realtimeInlineLoop`
+  (`gray`, `mask`, `grayROI`, `grayFull`, `fullMask`) is freshly allocated per
+  iteration and never written after publication. Experiment frames and monitoring
+  ring entries share refcounts instead of cloning (PR3 clone elimination).
+  Consumers (`Hdf5Service::appendFrames`, monitoring/HDF readers, overlay) are
+  all read-only. Enforced by comment at the top of `realtimeInlineLoop`.
 - Invalid frame sampling rate defaults to 1-in-100 to bound HDF5 size.
+
+## Snapshot model (PR4)
+
+`latestSnapshot_` is `std::shared_ptr<const RealtimeSnapshot>`. Producers
+(`realtimeInlineLoop`, `publishRealtimeBatchFrame`) build a new `RealtimeSnapshot`
+outside `snapshotMutex_`, then pointer-swap inside the lock (O(1) hold time —
+no full-frame memcpy under the mutex). Consumers call `getLatestSnapshot(out)`,
+which copies the shared_ptr under the lock (O(1)) and reads fields outside.
+`out.mask` is a shallow refcount share of the snapshot mask — no clone on the
+read path. Snapshot is immutable; readers are safe without extra locking.
+
+`configVersion_` is also bumped by `setRealtimeBackgroundGray` (in addition to
+`setProcessingConfig` / `setRealtimeRoi`), so the realtime loop's hoisted-config
+cache refreshes when the background changes.
 
 ## Metrics exposed
 

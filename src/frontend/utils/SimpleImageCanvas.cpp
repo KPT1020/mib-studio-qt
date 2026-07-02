@@ -75,9 +75,15 @@ namespace frontend
         topLeft_ = topLeft;
         drawSize_ = drawSize;
 
-        // Base image
-        QImage scaled = image_->scaled(drawSize.toSize(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        p.drawImage(topLeft.toPoint(), scaled);
+        // Base image: cache the scaled result; recompute only on content/size change
+        const QSize drawSz = drawSize.toSize();
+        const qint64 imgKey = image_->cacheKey();
+        if (scaledImgCache_.isNull() || imgKey != lastImgCacheKey_ || drawSz != lastDrawSize_) {
+            scaledImgCache_ = image_->scaled(drawSz, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            lastImgCacheKey_ = imgKey;
+            lastDrawSize_ = drawSz;
+        }
+        p.drawImage(topLeft.toPoint(), scaledImgCache_);
 
         // Draw ROI overlay if visible
         if (roiVisible_ && *roiVisible_ && roiPos_)

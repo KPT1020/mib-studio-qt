@@ -331,6 +331,7 @@ void ProcessingService::setRealtimeRoi(const Roi& roi) {
         std::scoped_lock lk(rtMutex_);
         rtRoi_ = roi;
     }
+    configVersion_.fetch_add(1, std::memory_order_release);
     refreshRealtimeBatchPipelineConfig();
 }
 
@@ -352,6 +353,7 @@ void ProcessingService::setRealtimeBackgroundGray(const cv::Mat& bg) {
             rtBgGray_.reset();
         }
     }
+    configVersion_.fetch_add(1, std::memory_order_release); // wake cached-config refresh in realtime loop
     refreshRealtimeBatchPipelineConfig();
 }
 
@@ -363,13 +365,26 @@ cv::Mat ProcessingService::getRealtimeBackgroundGray() const {
     return cv::Mat();
 }
 
+std::shared_ptr<const cv::Mat> ProcessingService::getRealtimeBackgroundGrayShared() const {
+    std::scoped_lock lk(rtMutex_);
+    return rtBgGray_; // implicit conversion shared_ptr<cv::Mat> → shared_ptr<const cv::Mat>
+}
+
+uint64_t ProcessingService::getConfigVersion() const {
+    return configVersion_.load(std::memory_order_acquire);
+}
+
 bool ProcessingService::getLatestSnapshot(RealtimeSnapshot& out) {
-    std::scoped_lock lk(snapshotMutex_);
-    if (latestSnapshot_.mask.empty() && latestSnapshot_.contours.empty()) return false;
-    out.index = latestSnapshot_.index;
-    out.mask = latestSnapshot_.mask.clone();
-    out.contours = latestSnapshot_.contours;
-    out.validation = latestSnapshot_.validation;
+    std::shared_ptr<const RealtimeSnapshot> snap;
+    {
+        std::scoped_lock lk(snapshotMutex_);
+        snap = latestSnapshot_; // O(1) pointer copy inside lock
+    }
+    if (!snap || (snap->mask.empty() && snap->contours.empty())) return false;
+    out.index = snap->index;
+    out.mask = snap->mask;           // shallow refcount share (read-only consumers)
+    out.contours = snap->contours;
+    out.validation = snap->validation;
     return true;
 }
 
@@ -383,14 +398,8 @@ void ProcessingService::startExperiment() {
     std::scoped_lock lk(framesMutex_);
     validFrames_.clear();
     invalidFrames_.clear();
-    // Reserve within the same cap used at runtime; invalid frames are sampled
-    // and may dominate sparse-valid runs, but should not pre-allocate beyond
-    // the bounded backlog.
     const size_t flushInterval = flushInterval_.load(std::memory_order_relaxed);
     const size_t maxBuffered = maxBufferedFrames_.load(std::memory_order_relaxed);
-    const size_t validReserve = std::min(flushInterval, maxBuffered);
-    validFrames_.reserve(validReserve);
-    invalidFrames_.reserve(maxBuffered - validReserve);
     framesSinceLastFlush_.store(0);
     invalidFrameCounter_.store(0);
     totalValidFlushed_.store(0, std::memory_order_relaxed);
@@ -421,12 +430,12 @@ void ProcessingService::endExperiment() {
 
 std::vector<ProcessedFrame> ProcessingService::getValidFrames() const {
     std::scoped_lock lk(framesMutex_);
-    return validFrames_;
+    return {validFrames_.begin(), validFrames_.end()};
 }
 
 std::vector<ProcessedFrame> ProcessingService::getInvalidFrames() const {
     std::scoped_lock lk(framesMutex_);
-    return invalidFrames_;
+    return {invalidFrames_.begin(), invalidFrames_.end()};
 }
 
 BufferedFrameCounts ProcessingService::getBufferedFrameCounts() const {
@@ -457,11 +466,16 @@ void ProcessingService::clearMonitoringFrames() {
     monitoringInvalidFrames_.clear();
 }
 
+void ProcessingService::setMonitoringActive(bool active) {
+    monitoringActive_.store(active, std::memory_order_relaxed);
+}
+
 void ProcessingService::setProcessingConfig(const ProcessingConfig& config) {
     {
         std::scoped_lock lk(configMutex_);
         processingConfig_ = config;
     }
+    configVersion_.fetch_add(1, std::memory_order_release);
     refreshRealtimeBatchPipelineConfig();
 }
 
@@ -557,6 +571,46 @@ bool ProcessingService::isFrameEmpty(const backend::playback::Frame& frame,
     // Count non-zero pixels
     int pixelCount = cv::countNonZero(thresh);
     return pixelCount < config.empty_frame_pixel_threshold;
+}
+
+bool ProcessingService::isFrameEmpty(const backend::playback::Frame& frame,
+                                     const ProcessingConfig& config,
+                                     const Roi& roi,
+                                     const std::shared_ptr<const cv::Mat>& background) {
+    if (frame.width == 0 || frame.height == 0 || frame.data.empty()) {
+        return true;
+    }
+
+    const int frameW = static_cast<int>(frame.width);
+    const int frameH = static_cast<int>(frame.height);
+
+    Roi effectiveRoi = roi;
+    if (effectiveRoi.w <= 0 || effectiveRoi.h <= 0) {
+        effectiveRoi = {0, 0, frameW, frameH};
+    }
+    effectiveRoi.x = std::max(0, std::min(effectiveRoi.x, frameW - 1));
+    effectiveRoi.y = std::max(0, std::min(effectiveRoi.y, frameH - 1));
+    effectiveRoi.w = std::max(1, std::min(effectiveRoi.w, frameW - effectiveRoi.x));
+    effectiveRoi.h = std::max(1, std::min(effectiveRoi.h, frameH - effectiveRoi.y));
+
+    // ROI-only extraction — no full-frame copy
+    cv::Mat roiCurr = makeGrayROI(frame, effectiveRoi.x, effectiveRoi.y, effectiveRoi.w, effectiveRoi.h);
+
+    cv::Rect cvRoi(effectiveRoi.x, effectiveRoi.y, effectiveRoi.w, effectiveRoi.h);
+    cv::Mat blurredCurr, blurredBg, diff, thresh;
+    cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(3, 3), 0);
+
+    if (background && !background->empty() &&
+        background->cols == frameW && background->rows == frameH &&
+        background->type() == CV_8UC1) {
+        cv::GaussianBlur((*background)(cvRoi), blurredBg, cv::Size(3, 3), 0);
+        cv::subtract(blurredCurr, blurredBg, diff);
+    } else {
+        diff = blurredCurr;
+    }
+
+    cv::threshold(diff, thresh, config.bg_subtract_threshold, 255, cv::THRESH_BINARY);
+    return cv::countNonZero(thresh) < config.empty_frame_pixel_threshold;
 }
 
 ProcessedFrame ProcessingService::computeProcessedFrame(
@@ -994,12 +1048,12 @@ ProcessingService::DroppedFrameCounts ProcessingService::trimExperimentBuffersLo
     }
 
     while (validFrames_.size() + invalidFrames_.size() > maxBufferedFrames && !invalidFrames_.empty()) {
-        invalidFrames_.erase(invalidFrames_.begin());
+        invalidFrames_.pop_front();
         ++dropped.invalid;
     }
 
     while (validFrames_.size() + invalidFrames_.size() > maxBufferedFrames && !validFrames_.empty()) {
-        validFrames_.erase(validFrames_.begin());
+        validFrames_.pop_front();
         ++dropped.valid;
     }
 
@@ -1050,7 +1104,7 @@ bool ProcessingService::appendExperimentFrame(ProcessedFrame&& frame, bool isVal
 
         if (currentTotal >= maxBufferedFrames) {
             if (isValid && !invalidFrames_.empty()) {
-                invalidFrames_.erase(invalidFrames_.begin());
+                invalidFrames_.pop_front();
                 ++dropped.invalid;
             } else {
                 if (isValid) {
@@ -1098,8 +1152,11 @@ size_t ProcessingService::flushBufferedFrames(class Hdf5Service& hdf5) {
     {
         std::scoped_lock lk(framesMutex_);
         if (validFrames_.empty() && invalidFrames_.empty()) return 0;
-        batch.valid = std::move(validFrames_);
-        batch.invalid = std::move(invalidFrames_);
+        // Move-construct vectors from deques — cv::Mat moves are O(1) refcount transfers
+        batch.valid.assign(std::make_move_iterator(validFrames_.begin()),
+                           std::make_move_iterator(validFrames_.end()));
+        batch.invalid.assign(std::make_move_iterator(invalidFrames_.begin()),
+                             std::make_move_iterator(invalidFrames_.end()));
         validFrames_.clear();
         invalidFrames_.clear();
         framesSinceLastFlush_.store(0, std::memory_order_relaxed);
@@ -1628,17 +1685,20 @@ void ProcessingService::publishRealtimeValidationCallbacks(const std::vector<Fil
         if (tgCb) tgCb(targetOwner);
     }
 
+    // Hoist the callback copy out of the per-object loop: one mutex-guarded
+    // std::function copy per frame, not per validation object (P7).
+    RingRatioCallback rrCb;
+    {
+        std::scoped_lock cbLk(ringRatioCallbackMutex_);
+        rrCb = ringRatioCallback_;
+    }
+    if (!rrCb) return;
+
     for (const auto& validation : validations) {
         if (!validation.isValid || validation.ringRatio <= 0.0) {
             continue;
         }
-
-        RingRatioCallback rrCb;
-        {
-            std::scoped_lock cbLk(ringRatioCallbackMutex_);
-            rrCb = ringRatioCallback_;
-        }
-        if (rrCb) rrCb(validation.ringRatio, static_cast<int64_t>(timestampNs));
+        rrCb(validation.ringRatio, static_cast<int64_t>(timestampNs));
     }
 }
 
@@ -1647,6 +1707,7 @@ void ProcessingService::appendRealtimeMonitoringFrame(uint64_t index,
                                                       const FilterResult& validation,
                                                       const cv::Mat& originalImage,
                                                       const cv::Mat& processedImage) {
+    if (!monitoringActive_.load(std::memory_order_relaxed)) return; // gating: no-op when inactive
     if (originalImage.empty() || processedImage.empty()) {
         return;
     }
@@ -1655,8 +1716,8 @@ void ProcessingService::appendRealtimeMonitoringFrame(uint64_t index,
     monitoringFrame.index = index;
     monitoringFrame.timestampNs = timestampNs;
     monitoringFrame.validation = validation;
-    monitoringFrame.originalImage = originalImage.clone();
-    monitoringFrame.processedImage = processedImage.clone();
+    monitoringFrame.originalImage = originalImage; // shallow refcount share (frozen-mats invariant)
+    monitoringFrame.processedImage = processedImage; // shallow refcount share
 
     std::scoped_lock monitoringLk(monitoringFramesMutex_);
     if (validation.isValid) {
@@ -1674,43 +1735,47 @@ void ProcessingService::publishRealtimeBatchFrame(ProcessedFrame&& frame) {
     const uint64_t frameIndex = frame.index;
     const FilterResult validation = frame.validation;
 
-    {
-        std::scoped_lock snapshotLk(snapshotMutex_);
-        latestSnapshot_.index = frameIndex;
-        latestSnapshot_.mask = frame.processedImage.clone();
-        latestSnapshot_.contours = validation.allContours
-                                       ? *validation.allContours
-                                       : std::vector<std::vector<cv::Point>>{};
-        latestSnapshot_.validation = validation;
-    }
+    // Monitoring (gated — skip when no consumer is active; ROI clones outside lock)
+    if (monitoringActive_.load(std::memory_order_relaxed)) {
+        Roi roi = getRealtimeRoi();
+        if (roi.w <= 0 || roi.h <= 0) {
+            roi.x = 0;
+            roi.y = 0;
+            roi.w = frame.originalImage.cols;
+            roi.h = frame.originalImage.rows;
+        }
+        roi.x = std::max(0, std::min(roi.x, frame.originalImage.cols - 1));
+        roi.y = std::max(0, std::min(roi.y, frame.originalImage.rows - 1));
+        roi.w = std::max(1, std::min(roi.w, frame.originalImage.cols - roi.x));
+        roi.h = std::max(1, std::min(roi.h, frame.originalImage.rows - roi.y));
+        const cv::Rect cvRoi(roi.x, roi.y, roi.w, roi.h);
 
-    ProcessedFrame monitoringFrame;
-    monitoringFrame.index = frameIndex;
-    monitoringFrame.timestampNs = frame.timestampNs;
-    monitoringFrame.validation = validation;
+        ProcessedFrame monitoringFrame;
+        monitoringFrame.index = frameIndex;
+        monitoringFrame.timestampNs = frame.timestampNs;
+        monitoringFrame.validation = validation;
+        monitoringFrame.originalImage = frame.originalImage(cvRoi).clone();
+        monitoringFrame.processedImage = frame.processedImage(cvRoi).clone();
 
-    Roi roi = getRealtimeRoi();
-    if (roi.w <= 0 || roi.h <= 0) {
-        roi.x = 0;
-        roi.y = 0;
-        roi.w = frame.originalImage.cols;
-        roi.h = frame.originalImage.rows;
-    }
-    roi.x = std::max(0, std::min(roi.x, frame.originalImage.cols - 1));
-    roi.y = std::max(0, std::min(roi.y, frame.originalImage.rows - 1));
-    roi.w = std::max(1, std::min(roi.w, frame.originalImage.cols - roi.x));
-    roi.h = std::max(1, std::min(roi.h, frame.originalImage.rows - roi.y));
-    const cv::Rect cvRoi(roi.x, roi.y, roi.w, roi.h);
-    monitoringFrame.originalImage = frame.originalImage(cvRoi).clone();
-    monitoringFrame.processedImage = frame.processedImage(cvRoi).clone();
-
-    {
         std::scoped_lock monitoringLk(monitoringFramesMutex_);
         if (validation.isValid) {
             monitoringValidFrames_.push_back(std::move(monitoringFrame));
         } else {
             monitoringInvalidFrames_.push_back(std::move(monitoringFrame));
         }
+    }
+
+    // Publish snapshot: build outside lock, pointer-swap inside (no full-frame copy under mutex)
+    {
+        auto newSnap = std::make_shared<RealtimeSnapshot>();
+        newSnap->index = frameIndex;
+        newSnap->mask = frame.processedImage; // shallow refcount share (frozen-mats invariant)
+        newSnap->contours = validation.allContours
+                                ? *validation.allContours
+                                : std::vector<std::vector<cv::Point>>{};
+        newSnap->validation = validation;
+        std::scoped_lock snapshotLk(snapshotMutex_);
+        latestSnapshot_ = std::move(newSnap); // O(1) pointer swap inside lock
     }
 
     uint64_t observed = rtLastProcessed_.load(std::memory_order_relaxed);
@@ -1908,6 +1973,11 @@ void ProcessingService::realtimeLoop() {
     }
 }
 
+// FROZEN-MATS INVARIANT: every cv::Mat published from this loop (gray, mask,
+// grayROI, grayFull, fullMask) is freshly allocated per iteration and never
+// written after publication. All consumers (Hdf5Service, monitoring rings,
+// overlay readers) are read-only. Shallow refcount assigns are therefore safe.
+// If in-place buffer reuse is ever added here this invariant must be revisited.
 void ProcessingService::realtimeInlineLoop() {
     rtLastProcessed_.store(0);
     using clock = std::chrono::steady_clock;
@@ -1924,7 +1994,27 @@ void ProcessingService::realtimeInlineLoop() {
     size_t multiImageRemaining = 0; // frames still needed to complete current series
     bool multiImagePending = false;
 
+    // Hoisted config/roi/bg: refresh only when configVersion_ changes (P7)
+    uint64_t lastRtConfigVer = std::numeric_limits<uint64_t>::max();
+    Roi rtCachedRoi{};
+    std::shared_ptr<cv::Mat> rtCachedBg;
+    ProcessingConfig rtCachedConfig;
+
     while (rtRunning_.load()) {
+        // Refresh config/roi/background only when something changed
+        const uint64_t curRtConfigVer = configVersion_.load(std::memory_order_acquire);
+        if (curRtConfigVer != lastRtConfigVer) {
+            {
+                std::scoped_lock lk(rtMutex_);
+                rtCachedRoi = rtRoi_;
+                rtCachedBg = rtBgGray_;
+            }
+            {
+                std::scoped_lock lk(configMutex_);
+                rtCachedConfig = processingConfig_;
+            }
+            lastRtConfigVer = curRtConfigVer;
+        }
         if (!rtStore_) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
@@ -1961,20 +2051,11 @@ void ProcessingService::realtimeInlineLoop() {
             const auto frameStart = clock::now();
             if (!rtEnabled_.load()) { rtLastProcessed_.store(idx); continue; }
             
-            // Get ROI and config first (outside frame access to minimize lock time)
-            Roi roi{};
-            std::shared_ptr<cv::Mat> bgShared;
-            ProcessingConfig config;
-            {
-                std::scoped_lock lk(rtMutex_);
-                roi = rtRoi_;
-                bgShared = rtBgGray_; // shared_ptr copy is cheap, no cloning
-            }
-            {
-                std::scoped_lock cfgLk(configMutex_);
-                config = processingConfig_;
-            }
-            
+            // Use hoisted config/roi/bg (refreshed at top of while loop when configVersion_ changed)
+            Roi roi = rtCachedRoi;
+            std::shared_ptr<cv::Mat> bgShared = rtCachedBg;
+            ProcessingConfig config = rtCachedConfig;
+
             // Get frame - use ROI access if ROI is specified, otherwise full frame
             backend::playback::Frame f{};
             bool useROI = (roi.w > 0 && roi.h > 0);
@@ -2204,12 +2285,13 @@ void ProcessingService::realtimeInlineLoop() {
                     }
                 }
 
-                // Helper: create full frame from ROI path data
+                // Helper: lazy-init full-frame gray; returns a shallow refcount copy.
+                // Frozen invariant: do not write through the returned Mat.
                 auto makeFullGray = [&]() -> cv::Mat {
                     if (grayFull.empty()) {
                         grayFull = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
                     }
-                    return grayFull.clone();
+                    return grayFull; // shallow refcount copy — caller must not modify
                 };
 
                 if (multiImagePending) {
@@ -2239,8 +2321,8 @@ void ProcessingService::realtimeInlineLoop() {
                             pendingMultiImageFrame.index = idx;
                             pendingMultiImageFrame.timestampNs = f.timestamp;
                             pendingMultiImageFrame.validation = *triggerAnchor;
-                            pendingMultiImageFrame.originalImage = fullGray.clone();
-                            pendingMultiImageFrame.processedImage = fullMask.clone();
+                            pendingMultiImageFrame.originalImage = fullGray; // shallow refcount share
+                            pendingMultiImageFrame.processedImage = std::move(fullMask);
                             pendingMultiImageFrame.seriesImages.push_back(std::move(fullGray));
                             multiImageRemaining = static_cast<size_t>(config.multi_image_count - 1);
                             multiImagePending = true;
@@ -2265,8 +2347,8 @@ void ProcessingService::realtimeInlineLoop() {
                         cv::Mat fullMask(fullGray.rows, fullGray.cols, CV_8UC1, cv::Scalar(0));
                         cv::Rect fullCvRoi(roi.x, roi.y, roi.w, roi.h);
                         mask.copyTo(fullMask(fullCvRoi));
-                        frame.originalImage = fullGray.clone();
-                        frame.processedImage = fullMask.clone();
+                        frame.originalImage = std::move(fullGray);
+                        frame.processedImage = std::move(fullMask);
 
                         appendExperimentFrame(std::move(frame), validation.isValid);
                     }
@@ -2281,10 +2363,8 @@ void ProcessingService::realtimeInlineLoop() {
                 pendingMultiImageFrame = ProcessedFrame{};
             }
 
-                // Publish snapshot
+                // Publish snapshot: build outside lock, pointer-swap inside
                 {
-                    std::scoped_lock lk(snapshotMutex_);
-                    latestSnapshot_.index = idx;
                     // Create full-size mask for snapshot display
                     cv::Mat fullMaskSnapshot;
                     if (useROI) {
@@ -2303,14 +2383,18 @@ void ProcessingService::realtimeInlineLoop() {
                             cv::Rect fullCvRoiSnap(roi.x, roi.y, roi.w, roi.h);
                             mask.copyTo(fullMaskSnapshot(fullCvRoiSnap));
                         } else {
-                            fullMaskSnapshot = mask.clone();
+                            fullMaskSnapshot = mask; // shallow (mask not modified after this)
                         }
                     } else {
-                        fullMaskSnapshot = mask.clone();
+                        fullMaskSnapshot = mask; // shallow (mask not modified after this)
                     }
-                    latestSnapshot_.mask = fullMaskSnapshot;
-                    latestSnapshot_.contours = std::move(contours);
-                    latestSnapshot_.validation = validation;
+                    auto newSnap = std::make_shared<RealtimeSnapshot>();
+                    newSnap->index = idx;
+                    newSnap->mask = std::move(fullMaskSnapshot);
+                    newSnap->contours = std::move(contours);
+                    newSnap->validation = validation;
+                    std::scoped_lock lk(snapshotMutex_);
+                    latestSnapshot_ = std::move(newSnap); // O(1) pointer swap inside lock
                 }
 
                 rtLastProcessed_.store(idx);
@@ -2532,20 +2616,22 @@ void ProcessingService::realtimeInlineLoop() {
                         frame.index = idx;
                         frame.timestampNs = f.timestamp;
                         frame.validation = validation;
-                        frame.originalImage = gray.clone();
-                        frame.processedImage = mask.clone();
-                        
+                        frame.originalImage = gray; // shallow refcount share
+                        frame.processedImage = mask; // shallow (mask used for snapshot below)
+
                         appendExperimentFrame(std::move(frame), validation.isValid);
                     }
                 }
 
-                // Publish snapshot
+                // Publish snapshot: build outside lock, pointer-swap inside
                 {
+                    auto newSnap = std::make_shared<RealtimeSnapshot>();
+                    newSnap->index = idx;
+                    newSnap->mask = mask; // shallow refcount share (mask not modified after this)
+                    newSnap->contours = std::move(contours);
+                    newSnap->validation = validation;
                     std::scoped_lock lk(snapshotMutex_);
-                    latestSnapshot_.index = idx;
-                    latestSnapshot_.mask = mask.clone();
-                    latestSnapshot_.contours = std::move(contours);
-                    latestSnapshot_.validation = validation;
+                    latestSnapshot_ = std::move(newSnap); // O(1) pointer swap inside lock
                 }
 
                 rtLastProcessed_.store(idx);
@@ -2588,19 +2674,13 @@ void ProcessingService::realtimeInlineLoop() {
                     monValidSz = monitoringValidFrames_.size();
                     monInvalidSz = monitoringInvalidFrames_.size();
                 }
-                Roi roi{};
-                bool hasBg = false;
-                {
-                    std::scoped_lock rtLk(rtMutex_);
-                    roi = rtRoi_;
-                    hasBg = (rtBgGray_ != nullptr && !rtBgGray_->empty());
-                }
+                const bool hasBg = (rtCachedBg != nullptr && !rtCachedBg->empty());
                 const size_t flushInt = flushInterval_.load();
                 const size_t sinceFlush = framesSinceLastFlush_.load();
                 const double memMB = backend::Tools::getProcessMemoryMB();
                 const double peakMB = backend::Tools::getPeakProcessMemoryMB();
                 SPDLOG_DEBUG("Realtime buffers: acc_valid={} acc_invalid={} mon_valid={} mon_invalid={} flush_interval={} since_last_flush={} roi={}x{} bg={} mem_mb={:.1f} peak_mb={:.1f}",
-                             vSz, iSz, monValidSz, monInvalidSz, flushInt, sinceFlush, roi.w, roi.h, hasBg ? 1 : 0, memMB, peakMB);
+                             vSz, iSz, monValidSz, monInvalidSz, flushInt, sinceFlush, rtCachedRoi.w, rtCachedRoi.h, hasBg ? 1 : 0, memMB, peakMB);
                 lastSummaryTs = now;
                 framesSinceSummary = 0;
                 framesSkippedSinceSummary = 0;
@@ -2622,19 +2702,10 @@ void ProcessingService::realtimeInlineLoop() {
                 }
                 cv::Mat gray = makeGrayCopy(f.width, f.height, f.linePitch, f.data.data());
 
-                // Grab ROI, background, and config first (outside frame processing to minimize lock time)
-                Roi roi{};
-                std::shared_ptr<cv::Mat> bgShared;
-                ProcessingConfig config;
-                {
-                    std::scoped_lock lk(rtMutex_);
-                    roi = rtRoi_;
-                    bgShared = rtBgGray_; // shared_ptr copy is cheap, no cloning
-                }
-                {
-                    std::scoped_lock cfgLk(configMutex_);
-                    config = processingConfig_;
-                }
+                // Use hoisted config/roi/bg (refreshed at top of while loop when configVersion_ changed)
+                Roi roi = rtCachedRoi;
+                std::shared_ptr<cv::Mat> bgShared = rtCachedBg;
+                ProcessingConfig config = rtCachedConfig;
 
                 // Clamp ROI
                 if (roi.w <= 0 || roi.h <= 0) {
@@ -2742,7 +2813,7 @@ void ProcessingService::realtimeInlineLoop() {
                     
                     // Even on empty frames, capture series images if multi-image collection is active
                     if (multiImagePending && experimentActive_.load()) {
-                        pendingMultiImageFrame.seriesImages.push_back(gray.clone());
+                        pendingMultiImageFrame.seriesImages.push_back(gray); // shallow refcount share (frozen-mats invariant)
                         --multiImageRemaining;
                         SPDLOG_TRACE("Multi-image series: captured empty frame {} (remaining={})", idx, multiImageRemaining);
                         if (multiImageRemaining == 0) {
@@ -2876,7 +2947,7 @@ void ProcessingService::realtimeInlineLoop() {
 
                     if (multiImagePending) {
                         // We're collecting series images for a pending multi-image trigger frame
-                        pendingMultiImageFrame.seriesImages.push_back(gray.clone());
+                        pendingMultiImageFrame.seriesImages.push_back(gray); // shallow refcount share
                         --multiImageRemaining;
                         SPDLOG_TRACE("Multi-image series: captured frame {} for series (remaining={})", idx, multiImageRemaining);
 
@@ -2905,9 +2976,9 @@ void ProcessingService::realtimeInlineLoop() {
                                 pendingMultiImageFrame.index = idx;
                                 pendingMultiImageFrame.timestampNs = f.timestamp;
                                 pendingMultiImageFrame.validation = *triggerAnchor;
-                                pendingMultiImageFrame.originalImage = gray.clone();
-                                pendingMultiImageFrame.processedImage = mask.clone();
-                                pendingMultiImageFrame.seriesImages.push_back(gray.clone());
+                                pendingMultiImageFrame.originalImage = gray; // shallow refcount share
+                                pendingMultiImageFrame.processedImage = mask; // shallow (mask used for snapshot below)
+                                pendingMultiImageFrame.seriesImages.push_back(gray); // shallow refcount share
                                 multiImageRemaining = static_cast<size_t>(config.multi_image_count - 1);
                                 multiImagePending = true;
                                 SPDLOG_DEBUG("Multi-image series started: trigger_idx={}, count={}", idx, config.multi_image_count);
@@ -2926,8 +2997,8 @@ void ProcessingService::realtimeInlineLoop() {
                                     frame.index = idx;
                                     frame.timestampNs = f.timestamp;
                                     frame.validation = objectValidation;
-                                    frame.originalImage = gray.clone();
-                                    frame.processedImage = mask.clone();
+                                    frame.originalImage = gray; // shallow (mask used for snapshot below)
+                                    frame.processedImage = mask; // shallow (mask used for snapshot below)
 
                                     appendExperimentFrame(std::move(frame), objectValidation.isValid);
                                 }
@@ -2946,14 +3017,15 @@ void ProcessingService::realtimeInlineLoop() {
                     pendingMultiImageFrame = ProcessedFrame{};
                 }
 
-                // Publish snapshot
+                // Publish snapshot: build outside lock, pointer-swap inside
                 {
+                    auto newSnap = std::make_shared<RealtimeSnapshot>();
+                    newSnap->index = idx;
+                    newSnap->mask = mask; // shallow refcount share (mask not modified after this)
+                    newSnap->contours = std::move(contours);
+                    newSnap->validation = validation;
                     std::scoped_lock lk(snapshotMutex_);
-                    latestSnapshot_.index = idx;
-                    latestSnapshot_.mask = mask; // shallow copy ok; mask will be destroyed after leaving scope, so clone
-                    latestSnapshot_.mask = latestSnapshot_.mask.clone();
-                    latestSnapshot_.contours = std::move(contours);
-                    latestSnapshot_.validation = validation;
+                    latestSnapshot_ = std::move(newSnap); // O(1) pointer swap inside lock
                 }
 
                 rtLastProcessed_.store(idx);
@@ -2995,19 +3067,13 @@ void ProcessingService::realtimeInlineLoop() {
                         monValidSz = monitoringValidFrames_.size();
                         monInvalidSz = monitoringInvalidFrames_.size();
                     }
-                    Roi roi{};
-                    bool hasBg = false;
-                    {
-                        std::scoped_lock rtLk(rtMutex_);
-                        roi = rtRoi_;
-                        hasBg = (rtBgGray_ != nullptr && !rtBgGray_->empty());
-                    }
+                    const bool hasBgDf = (rtCachedBg != nullptr && !rtCachedBg->empty());
                     const size_t flushInt = flushInterval_.load();
                     const size_t sinceFlush = framesSinceLastFlush_.load();
                     const double memMB = backend::Tools::getProcessMemoryMB();
                     const double peakMB = backend::Tools::getPeakProcessMemoryMB();
                     SPDLOG_DEBUG("Realtime buffers: acc_valid={} acc_invalid={} mon_valid={} mon_invalid={} flush_interval={} since_last_flush={} roi={}x{} bg={} mem_mb={:.1f} peak_mb={:.1f}",
-                                 vSz, iSz, monValidSz, monInvalidSz, flushInt, sinceFlush, roi.w, roi.h, hasBg ? 1 : 0, memMB, peakMB);
+                                 vSz, iSz, monValidSz, monInvalidSz, flushInt, sinceFlush, rtCachedRoi.w, rtCachedRoi.h, hasBgDf ? 1 : 0, memMB, peakMB);
                     lastSummaryTs = now;
                     framesSinceSummary = 0;
                     framesSkippedSinceSummary = 0;

@@ -27,6 +27,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <utility>
 #include <QString>
@@ -902,7 +903,24 @@ namespace backend
                     reportFatalSaveError("Recording save failed: " + msg);
                 });
 
+            // Hoisted per-poll-batch: refreshed only when configVersion changes.
+            // Staleness window is one poll iteration (~ms), which is acceptable
+            // and documented. Per-frame refresh was the dominant lock cost (P1).
+            uint64_t lastConfigVer = std::numeric_limits<uint64_t>::max();
+            services::ProcessingConfig config;
+            services::ProcessingService::Roi roi;
+            std::shared_ptr<const cv::Mat> bgShared;
+
             while (frameRecordingRunning_.load()) {
+                // Refresh config/roi/background only when something changed.
+                const uint64_t curVer = processingService_->getConfigVersion();
+                if (curVer != lastConfigVer) {
+                    config    = processingService_->getProcessingConfig();
+                    roi       = processingService_->getRealtimeRoi();
+                    bgShared  = processingService_->getRealtimeBackgroundGrayShared();
+                    lastConfigVer = curVer;
+                }
+
                 // Get latest available index from FrameStore
                 const uint64_t totalWritten = frameStore_->totalWritten();
                 if (totalWritten == 0) {
@@ -929,12 +947,7 @@ namespace backend
                         continue;
                     }
 
-                    // Check if empty using processing service config
-                    auto config = processingService_->getProcessingConfig();
-                    auto roi = processingService_->getRealtimeRoi();
-                    auto bg = processingService_->getRealtimeBackgroundGray();
-
-                    if (services::ProcessingService::isFrameEmpty(f, config, roi, bg)) {
+                    if (services::ProcessingService::isFrameEmpty(f, config, roi, bgShared)) {
                         frameRecordingFiltered_.fetch_add(1, std::memory_order_relaxed);
                         lastProcessedIdx = idx;
                         continue;

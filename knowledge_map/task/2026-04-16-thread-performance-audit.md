@@ -105,19 +105,22 @@ The ProcessingService realtime thread no longer touches
 ring-ratio deque grew or the sort got more expensive, it could never
 delay a trigger-worthy frame's CV wake-up.
 
+## Resolved items (2026-07-02)
+
+- **Background clone eliminated (PR2):** `AppBackend` recording thread now
+  calls `getRealtimeBackgroundGrayShared()` (zero-copy shared_ptr) and uses
+  the ROI-only `isFrameEmpty` overload; config/ROI are refreshed once per
+  poll batch via `getConfigVersion()`, not per frame.
+- **FrameStore two-tier locking (PR before this audit):** `structureMutex_`
+  is a `std::shared_mutex`; per-frame hot path takes it shared, so producer
+  and consumers never serialize on the full memcpy.
+- **Snapshot mutex hold time (PR4):** `latestSnapshot_` changed to
+  `shared_ptr<const RealtimeSnapshot>` — producer builds outside any lock,
+  pointer-swaps inside `snapshotMutex_`. Hold time is now one pointer copy.
+
 ## Not fixed (tracked for later)
-- `FrameStore::mutex_` is a single `std::mutex` shared by push (capture
-  thread) and query (realtime/UI/frame-recording). Contention is bounded
-  by small per-call hold times, but a reader/writer lock or a lock-free
-  ring would reduce jitter at high fps.
-- `AppBackend` frame-recording thread calls
-  `processingService_->getRealtimeBackgroundGray()` per frame, which
-  clones the background matrix while holding `rtMutex_`. A shared_ptr
-  accessor (`getRealtimeBackgroundGraySharedPtr`) would remove the clone.
-- `ProcessingService::snapshotMutex_` serialises every realtime frame's
-  snapshot publication against `PlaybackPanel`'s overlay read at display
-  FPS. Not on the trigger path; hold time is a `mask.clone()` (full
-  frame) so at 2000×2000 this is ~4 MB of memcpy per realtime frame.
+- `ProcessingService::snapshotMutex_` — hold time now O(1) (pointer swap)
+  as of PR4; remaining contention is negligible.
 
 ## Files changed
 

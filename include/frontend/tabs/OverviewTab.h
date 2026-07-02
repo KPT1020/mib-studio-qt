@@ -2,6 +2,7 @@
 
 #include <QWidget>
 #include <QImage>
+#include "backend/playback/FrameStore.h"
 
 namespace backend
 {
@@ -72,6 +73,7 @@ namespace frontend
         QTimer *timer_ = nullptr;
         QImage frameImage_;
         FitMode fitMode_{FitMode::FitToWindow};
+        backend::playback::Frame scratchFrame_; // reuses vector capacity across ticks
 
         // ROI overlay state
         bool roiOverlayVisible_ = false;

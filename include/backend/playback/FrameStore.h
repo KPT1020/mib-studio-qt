@@ -129,30 +129,18 @@ namespace backend::playback
         // Uses average frame size from existing frames if available, otherwise uses conservative default
         size_t estimateMemoryBytesForCapacity(size_t capacity) const;
 
-        // Frame filter for recording mode
-        // When set, pushFrame() will call this filter before storing.
-        // The filter receives a temporary Frame reference and returns true if the frame should be SKIPPED (filtered out).
-        using FrameFilter = std::function<bool(const Frame&)>;
-        void setFrameFilter(FrameFilter filter);
-        void clearFrameFilter();
-        bool hasFrameFilter() const;
-
-        // Number of frames filtered (skipped) since start or last reset
-        uint64_t totalFiltered() const { return totalFiltered_.load(); }
-        void resetFilteredCount() { totalFiltered_.store(0); }
-
     private:
         // Atomic so the lock-free guard reads (earliest/latest/availableCount and
         // the top-of-function `capacity_ == 0` checks) cannot data-race with
         // resize()'s write. resize() holds structureMutex_ exclusively and also
         // calls those readers, so they cannot take the lock — atomicity is the fix.
         std::atomic<size_t> capacity_;
-        // Structural lock: guards the identity of ring_ / slotMutexes_, capacity_
-        // and frameFilter_. Held in SHARED mode by the per-frame hot path
-        // (pushFrame / getByWriteIndex / getLatest) so producer and consumers do
-        // not serialize against each other, and in EXCLUSIVE mode only by rare
-        // whole-ring operations (resize / save / estimate) that replace the ring
-        // or touch many slots at once.
+        // Structural lock: guards the identity of ring_ / slotMutexes_ and
+        // capacity_. Held in SHARED mode by the per-frame hot path (pushFrame /
+        // getByWriteIndex / getLatest) so producer and consumers do not serialize
+        // against each other, and in EXCLUSIVE mode only by rare whole-ring
+        // operations (resize / save / estimate) that replace the ring or touch
+        // many slots at once.
         mutable std::shared_mutex structureMutex_;
         // Per-slot locks (parallel to ring_): a single slot lock is held only
         // while copying one frame in/out, so the large memcpy no longer happens
@@ -161,10 +149,6 @@ namespace backend::playback
         mutable std::vector<std::mutex> slotMutexes_;
         std::vector<Frame> ring_;
         std::atomic<uint64_t> totalWritten_{0};
-        std::atomic<uint64_t> totalFiltered_{0};
-
-        // Frame filter (protected by structureMutex_)
-        FrameFilter frameFilter_;
 
         // Internal helper to save a single frame as TIFF
         bool saveFrameAsTiff(const Frame& frame, const std::string& filepath) const;

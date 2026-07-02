@@ -49,6 +49,11 @@ namespace frontend
         bool dragging_ = false;
         QPointF dragStartCanvasPos_;
         QPointF dragStartRoiPos_;
+
+        // Scaled image cache: only rescale when image content or draw size changes
+        mutable QImage scaledImgCache_;
+        mutable qint64 lastImgCacheKey_{-1};
+        mutable QSize  lastDrawSize_;
     };
 
 } // namespace frontend

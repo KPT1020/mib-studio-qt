@@ -5,6 +5,22 @@
 
 ## Features shipped
 
+- **Realtime-performance benchmark parts C/D/E** (2026-07-02, PR1 of
+  `docs/exec-plans/active/2026-07-02-realtime-performance.md`) —
+  Extended `tests/performance/pipeline_timing_benchmark.cpp` (CTest
+  `performance.pipeline_timing`) with three new parts proving the planned
+  optimizations are real before any behavior is changed. **(C)** recording
+  per-frame overhead: per-frame config lock + full-frame background clone +
+  full-frame `isFrameEmpty` vs hoisted config/shared-ptr + ROI-only
+  `isFrameEmpty` (1280×1024 frame, 128×128 cell ROI; measured ~4.6× speedup
+  on a 24-core box). **(D)** experiment buffer trim: `vector::erase(begin())`
+  at 10k-frame backlog vs `deque::pop_front()` (measured ~1500× speedup,
+  proving the O(n²) steady-state cost). **(E)** snapshot publish/read
+  contention: mutex-held `mask.clone()` publish vs pointer-swap with clone
+  outside the mutex, under a hammering reader pool (measured ~64× reader
+  throughput increase). Gates are loose and non-flaky (C: speedup ≥1.3×; D:
+  ≥10×; E: reader throughput ≥0.5× legacy). No behavior change; test-only.
+
 - **Real-time performance examination + remediation plan** (2026-07-02) —
   Audited every component on the real-time hot path and committed
   `docs/exec-plans/active/2026-07-02-realtime-performance.md`, a 6-PR plan

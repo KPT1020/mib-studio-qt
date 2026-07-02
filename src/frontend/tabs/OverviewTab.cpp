@@ -1,6 +1,7 @@
 #include "frontend/tabs/OverviewTab.h"
 #include "ui_OverviewTab.h"
 
+#include <cstring>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -183,25 +184,35 @@ namespace frontend
 
     void OverviewTab::onTick()
     {
-        // Fetch latest frame from playback service
-        backend::playback::Frame f;
-        bool got = backend_.playback().fetchLatest(f);
+        // Fetch into member scratch so the vector capacity is reused across ticks
+        bool got = backend_.playback().fetchLatest(scratchFrame_);
 
         if (got)
         {
-            // Convert Mono8 to QImage; fallback to grayscale if unknown
-            if (f.pixelFormat == 0x01080001 /* PFNC Mono8 */ || true)
+            // Convert Mono8 to QImage (all current cameras are Mono8)
+            const int w = static_cast<int>(scratchFrame_.width);
+            const int h = static_cast<int>(scratchFrame_.height);
+            const int pitch = static_cast<int>(scratchFrame_.linePitch == 0 ? scratchFrame_.width : scratchFrame_.linePitch);
+
+            // Reuse the existing QImage allocation when size/format are unchanged
+            if (frameImage_.width() == w && frameImage_.height() == h &&
+                frameImage_.format() == QImage::Format_Grayscale8 && !frameImage_.isNull())
             {
-                const int w = static_cast<int>(f.width);
-                const int h = static_cast<int>(f.height);
-                const int pitch = static_cast<int>(f.linePitch == 0 ? f.width : f.linePitch);
-                QImage img(f.data.data(), w, h, pitch, QImage::Format_Grayscale8);
-                frameImage_ = img.copy(); // ensure ownership
+                // Update pixels in place — no heap allocation
+                uchar* dst = frameImage_.bits();
+                const uchar* src = scratchFrame_.data.data();
+                const int bytePitch = frameImage_.bytesPerLine();
+                for (int row = 0; row < h; ++row) {
+                    std::memcpy(dst + row * bytePitch, src + row * pitch, static_cast<size_t>(w));
+                }
+                frameImage_.detach(); // invalidate cacheKey so canvas rescale fires
             }
             else
             {
-                frameImage_ = QImage();
+                QImage img(scratchFrame_.data.data(), w, h, pitch, QImage::Format_Grayscale8);
+                frameImage_ = img.copy(); // allocate once on geometry change
             }
+
             if (canvas_)
                 canvas_->update();
         }

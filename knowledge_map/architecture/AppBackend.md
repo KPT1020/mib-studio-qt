@@ -120,8 +120,11 @@ no contour processing.
 
 - `startFrameRecording(hdf5Path)`, `stopFrameRecording()`, `isFrameRecording()`
 - Counters: `frameRecordingCount()`, `frameRecordingFiltered()`
-- Uses a dedicated `frameRecordingThread_` and leverages
-  [[../data-model/FrameStore]]'s `setFrameFilter` to drop empty frames.
+- Uses a dedicated `frameRecordingThread_`. Empty frames are dropped via
+  `ProcessingService::isFrameEmpty` (ROI-only shared_ptr overload) after the
+  recording thread has hoisted config/ROI/background out of the per-frame loop.
+  All three are refreshed once per poll batch, keyed off `getConfigVersion()`.
+  (The old `FrameStore::setFrameFilter` API was dead code and has been removed.)
 - `stopFrameRecording()` joins the recording thread; the thread drains the write
   queue, writes `/recording_info`, and closes the HDF5 file before the stop call
   returns.

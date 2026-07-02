@@ -186,6 +186,10 @@ public:
     Roi getRealtimeRoi() const;
     void setRealtimeBackgroundGray(const cv::Mat& bg);
     cv::Mat getRealtimeBackgroundGray() const;
+    // Zero-copy background accessor for hot paths; returns the shared_ptr directly.
+    std::shared_ptr<const cv::Mat> getRealtimeBackgroundGrayShared() const;
+    // Monotonic counter bumped by setProcessingConfig / setRealtimeRoi.
+    uint64_t getConfigVersion() const;
     bool getLatestSnapshot(RealtimeSnapshot& out);
 
     // Experiment lifecycle
@@ -198,10 +202,13 @@ public:
     BufferedFrameCounts getBufferedFrameCounts() const;
     void clearAccumulatedFrames();
     
-    // Monitoring frames (always available, even without experiment)
+    // Monitoring frames (accumulated only while active; gate with setMonitoringActive)
     std::vector<ProcessedFrame> getMonitoringValidFrames() const;
     std::vector<ProcessedFrame> getMonitoringInvalidFrames() const;
     void clearMonitoringFrames();
+    // Enable/disable monitoring accumulation. When false, appendRealtimeMonitoringFrame
+    // returns immediately with no clones. Wire to tab show/hide in the UI.
+    void setMonitoringActive(bool active);
     
     // Round-robin buffer flush (for crash resilience)
     // Returns number of frames flushed (submitted to the write queue)
@@ -259,6 +266,12 @@ public:
                             const ProcessingConfig& config,
                             const Roi& roi,
                             const cv::Mat& background = cv::Mat());
+    // Hot-path overload: extracts only the ROI (no full-frame copy) and reads
+    // background via shared_ptr (no clone). Semantically identical to the above.
+    static bool isFrameEmpty(const backend::playback::Frame& frame,
+                            const ProcessingConfig& config,
+                            const Roi& roi,
+                            const std::shared_ptr<const cv::Mat>& background);
 
     // ---- Batch mask generation ----
     // Pure pipeline: Gaussian blur -> (optional) background subtract -> binary
@@ -471,12 +484,12 @@ private:
     std::atomic<uint64_t> rtLastProcessed_{0};
 
     std::mutex snapshotMutex_;
-    RealtimeSnapshot latestSnapshot_;
+    std::shared_ptr<const RealtimeSnapshot> latestSnapshot_; // pointer-swap on publish (no mutex-held copy)
 
-    // Frame accumulation for experiment
+    // Frame accumulation for experiment — deque for O(1) pop_front under backpressure
     mutable std::mutex framesMutex_;
-    std::vector<ProcessedFrame> validFrames_;
-    std::vector<ProcessedFrame> invalidFrames_;
+    std::deque<ProcessedFrame> validFrames_;
+    std::deque<ProcessedFrame> invalidFrames_;
 
     // Experiment flush write queue (decouples HDF5 writes from frame
     // accumulation). Created lazily on the first flush, drained by finishFlush.
@@ -531,8 +544,10 @@ private:
     FrameRingBuffer monitoringValidFrames_{1000};
     FrameRingBuffer monitoringInvalidFrames_{1000};
     static constexpr size_t MAX_MONITORING_FRAMES = 1000; // Keep last 1000 frames for monitoring
+    std::atomic<bool> monitoringActive_{false}; // gating: no clones when no consumer is active
     mutable ProcessingConfig processingConfig_;
     mutable std::mutex configMutex_;
+    std::atomic<uint64_t> configVersion_{0}; // bumped by setProcessingConfig / setRealtimeRoi
     
     // Round-robin buffer for periodic flushing
     std::atomic<size_t> flushInterval_{100}; // Flush every 100 frames by default

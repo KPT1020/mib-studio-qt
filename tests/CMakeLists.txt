@@ -51,6 +51,14 @@ mib_add_backend_test_executable(frame_store_reserve_test backend/frame_store_res
 add_test(NAME backend.frame_store_reserve COMMAND $<TARGET_FILE:frame_store_reserve_test>)
 set_tests_properties(backend.frame_store_reserve PROPERTIES LABELS "backend" TIMEOUT 30)
 
+mib_add_backend_test_executable(recording_isframeempty_roi_test backend/recording_isframeempty_roi_test.cpp)
+add_test(NAME backend.recording_isframeempty_roi COMMAND $<TARGET_FILE:recording_isframeempty_roi_test>)
+set_tests_properties(backend.recording_isframeempty_roi PROPERTIES LABELS "backend;processing;recording" TIMEOUT 30)
+
+mib_add_backend_test_executable(pr4_monitoring_snapshot_test backend/pr4_monitoring_snapshot_test.cpp)
+add_test(NAME backend.pr4_monitoring_snapshot COMMAND $<TARGET_FILE:pr4_monitoring_snapshot_test>)
+set_tests_properties(backend.pr4_monitoring_snapshot PROPERTIES LABELS "backend;processing;monitoring" TIMEOUT 30)
+
 mib_add_backend_test_executable(roi_crop_test backend/roi_crop_test.cpp)
 add_test(NAME backend.roi_crop COMMAND $<TARGET_FILE:roi_crop_test>)
 set_tests_properties(backend.roi_crop PROPERTIES LABELS "backend" TIMEOUT 30)

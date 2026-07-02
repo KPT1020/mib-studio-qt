@@ -38,29 +38,6 @@ void FrameStore::pushFrame(const uint8_t* src,
                            uint64_t timestamp) {
     if (capacity_.load(std::memory_order_acquire) == 0 || src == nullptr || size == 0) return;
 
-    // Apply frame filter if set (check before acquiring write slot)
-    {
-        std::shared_lock structLk(structureMutex_);
-        if (frameFilter_) {
-            // Reuse a per-thread scratch Frame so filter inspection does not
-            // allocate on every frame (assign reuses the existing capacity).
-            thread_local Frame tmp;
-            tmp.width = width;
-            tmp.height = height;
-            tmp.pixelFormat = pixelFormat;
-            tmp.linePitch = linePitch;
-            tmp.timestamp = timestamp;
-            tmp.data.assign(src, src + size);
-            if (frameFilter_(tmp)) {
-                // Frame is empty / should be skipped
-                totalFiltered_.fetch_add(1, std::memory_order_relaxed);
-                backend::diagnostics::CrashStateMirror::instance().frameStore.totalFiltered
-                    .fetch_add(1, std::memory_order_relaxed);
-                return;
-            }
-        }
-    }
-
     const uint64_t w = totalWritten_.fetch_add(1) + 1; // next write count
     {
         auto& fs = backend::diagnostics::CrashStateMirror::instance().frameStore;
@@ -90,27 +67,9 @@ void FrameStore::pushFrame(const uint8_t* src,
     // Periodic stats
     if ((w % 5000ULL) == 0ULL) {
         const size_t avail = availableCount();
-        const uint64_t filtered = totalFiltered_.load(std::memory_order_relaxed);
-        SPDLOG_DEBUG("FrameStore: totalWritten={} available={} capacity={} filtered={}",
-                     static_cast<unsigned long long>(w), avail, capacity_.load(std::memory_order_acquire), filtered);
+        SPDLOG_DEBUG("FrameStore: totalWritten={} available={} capacity={}",
+                     static_cast<unsigned long long>(w), avail, capacity_.load(std::memory_order_acquire));
     }
-}
-
-void FrameStore::setFrameFilter(FrameFilter filter) {
-    std::unique_lock structLk(structureMutex_);
-    frameFilter_ = std::move(filter);
-    SPDLOG_INFO("FrameStore: Frame filter {}", frameFilter_ ? "enabled" : "cleared");
-}
-
-void FrameStore::clearFrameFilter() {
-    std::unique_lock structLk(structureMutex_);
-    frameFilter_ = nullptr;
-    SPDLOG_INFO("FrameStore: Frame filter cleared");
-}
-
-bool FrameStore::hasFrameFilter() const {
-    std::shared_lock structLk(structureMutex_);
-    return frameFilter_ != nullptr;
 }
 
 bool FrameStore::getLatest(Frame& out) const {

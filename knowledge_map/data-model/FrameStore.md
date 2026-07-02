@@ -78,21 +78,6 @@ it round-trips cleanly through `cv::VideoCapture` and ImageJ, so mask
 regeneration is unaffected. Use VLC (or ImageJ) to preview saved
 buffers visually.
 
-## Frame filter (recording mode)
-
-```cpp
-using FrameFilter = std::function<bool(const Frame&)>;  // true = SKIP
-void setFrameFilter(FrameFilter);
-void clearFrameFilter();
-bool hasFrameFilter() const;
-
-uint64_t totalFiltered() const;  // count of skipped frames
-void resetFilteredCount();
-```
-
-Used by `AppBackend::startFrameRecording` to drop empty frames before they
-hit the ring.
-
 ## Threading
 
 Two-tier locking so the producer and consumers don't serialise on one lock
@@ -102,10 +87,10 @@ throttled both capture and the realtime pipeline — see
 [[../current-state/Recent-Work]]):
 
 - **`structureMutex_`** (`std::shared_mutex`) guards the *identity* of the
-  ring (`ring_` / `slotMutexes_` / `capacity_`) and `frameFilter_`. The hot
-  path (`pushFrame` / `getLatest` / `getByWriteIndex` / `getByWriteIndexROI`)
-  takes it in **shared** mode; only whole-ring ops (`resize`, `saveFrames*`,
-  `estimateMemoryBytesForCapacity`, `setFrameFilter`) take it **exclusive**.
+  ring (`ring_` / `slotMutexes_` / `capacity_`). The hot path (`pushFrame` /
+  `getLatest` / `getByWriteIndex` / `getByWriteIndexROI`) takes it in
+  **shared** mode; only whole-ring ops (`resize`, `saveFrames*`,
+  `estimateMemoryBytesForCapacity`) take it **exclusive**.
 - **`slotMutexes_`** — one `std::mutex` per ring slot. The actual frame copy
   in/out is done holding only that slot's lock, so the producer writing slot
   A never blocks a consumer reading slot B. Producer vs. consumer on the
