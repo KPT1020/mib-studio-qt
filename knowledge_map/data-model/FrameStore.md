@@ -159,6 +159,28 @@ this is safe because every hot-path op acquires the shared structural lock
   `tests/backend/frame_store_concurrency_test.cpp` (hammers small indices
   against a concurrently resizing store; asserts any successful read has
   correct identity).
+- **The preserved-frame copy loop in `resize()` must check the OLD ring's own
+  identity array before relabeling a slot with a new absolute index — the
+  `newEarliest` fix above closes the renumbering hazard but is not sufficient
+  by itself.** On a *growing* resize (`newCapacity > oldCapacity`) after the
+  ring has wrapped at least once, `newEarliest = totalWritten_ - newCapacity`
+  can reach further back in time than the old (smaller) ring ever retained.
+  Old-ring slots are physically shared by many absolute indices (`idx`,
+  `idx + oldCapacity`, `idx + 2*oldCapacity`, ...), so for any `idx` below the
+  true old retention floor (`totalWritten_ - oldCapacity`), `ring_[idx %
+  oldCapacity]` actually holds a *newer* frame. Copying it into the new ring
+  and unconditionally writing `newSlotIndices[idx % newCapacity] = idx`
+  relabels that newer frame's data with the older index; post-resize
+  `getByWriteIndex(idx)` then *passes* the identity check (`resize()` itself
+  just wrote it) and returns a self-consistent but wrong frame — reproducible
+  single-threaded with no concurrency at all. The fix mirrors the identity
+  check `getByWriteIndex` already does: only copy/relabel a slot when
+  `slotWriteIndices_[oldRingIdx] == idx`, i.e. the old ring's own bookkeeping
+  agrees that slot currently holds frame `idx`. Guarded by
+  `tests/backend/frame_store_resize_growth_identity_test.cpp`
+  (`backend.frame_store_resize_growth_identity`): pushes past two wraps of an
+  8-capacity ring, grows to 16, and asserts indices below the old ring's true
+  floor are rejected rather than returning an aliased newer frame.
 - `getByWriteIndexROI` validates `data.size() >= (h-1)*pitch + w` before its
   strided row walk (a producer-supplied `linePitch > width` with a
   tightly-sized buffer would otherwise read past the vector); the AVI/TIFF

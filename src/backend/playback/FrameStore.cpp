@@ -612,7 +612,16 @@ bool FrameStore::resize(size_t newCapacity) {
     size_t preservedCount = 0;
     for (uint64_t idx = newEarliest; idx < w; ++idx) {
         const size_t oldRingIdx = static_cast<size_t>(idx % oldCapacity);
-        if (oldRingIdx < ring_.size() && !ring_[oldRingIdx].data.empty()) {
+        // On a GROWING resize, newEarliest can reach further back than the old
+        // ring could ever have retained (oldCapacity < newCapacity): once the
+        // ring has wrapped, ring_[oldRingIdx] is physically shared by idx,
+        // idx+oldCapacity, idx+2*oldCapacity, ... To copy it into the new ring
+        // under the label `idx` we must first confirm the old ring's own
+        // identity array agrees this slot currently holds frame `idx` — the
+        // same identity check getByWriteIndex uses. Without it, a slot holding
+        // a NEWER frame would be silently relabeled with the OLDER idx.
+        if (oldRingIdx < ring_.size() && !ring_[oldRingIdx].data.empty() &&
+            slotWriteIndices_[oldRingIdx] == idx) {
             const size_t newRingIdx = static_cast<size_t>(idx % newCapacity);
             newRing[newRingIdx] = ring_[oldRingIdx];
             newSlotIndices[newRingIdx] = idx;

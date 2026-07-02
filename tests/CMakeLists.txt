@@ -77,6 +77,10 @@ target_link_libraries(frame_store_resize_under_load_test PRIVATE Threads::Thread
 add_test(NAME backend.frame_store_resize_under_load COMMAND $<TARGET_FILE:frame_store_resize_under_load_test>)
 set_tests_properties(backend.frame_store_resize_under_load PROPERTIES LABELS "backend" TIMEOUT 60)
 
+mib_add_backend_test_executable(frame_store_resize_growth_identity_test backend/frame_store_resize_growth_identity_test.cpp)
+add_test(NAME backend.frame_store_resize_growth_identity COMMAND $<TARGET_FILE:frame_store_resize_growth_identity_test>)
+set_tests_properties(backend.frame_store_resize_growth_identity PROPERTIES LABELS "backend" TIMEOUT 30)
+
 mib_add_backend_test_executable(pipeline_timing_benchmark performance/pipeline_timing_benchmark.cpp)
 target_link_libraries(pipeline_timing_benchmark PRIVATE Threads::Threads)
 add_test(NAME performance.pipeline_timing COMMAND $<TARGET_FILE:pipeline_timing_benchmark>)
