@@ -212,9 +212,14 @@ namespace camera::mock
             return;
         }
 
-        for (const auto &entry : std::filesystem::directory_iterator(options_.folder))
+        // error_code overload: the folder can vanish between the exists()
+        // check above and iteration; the throwing overload would propagate
+        // std::filesystem_error out of start().
+        std::error_code ec;
+        for (const auto &entry : std::filesystem::directory_iterator(options_.folder, ec))
         {
-            if (!entry.is_regular_file())
+            std::error_code entryEc;
+            if (!entry.is_regular_file(entryEc) || entryEc)
             {
                 continue;
             }
@@ -223,6 +228,10 @@ namespace camera::mock
                 continue;
             }
             files_.push_back(entry.path());
+        }
+        if (ec)
+        {
+            SPDLOG_WARN("MockCamera: failed to enumerate {}: {}", options_.folder.string(), ec.message());
         }
 
         std::sort(files_.begin(), files_.end());

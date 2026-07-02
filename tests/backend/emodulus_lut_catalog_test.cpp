@@ -61,13 +61,18 @@ int main(int argc, char** argv) {
     qputenv("MIB_STUDIO_EMODULUS_LUT_CACHE_DIR", cacheDir.toUtf8());
 
     const QString bundledPath = tempPathSuffix(bundledDir, QStringLiteral("scaled_isoelastic_data_LUT_6.16-4.24.txt"));
-    const QByteArray bundledBytes = QByteArrayLiteral("10.0\t0.2\t12.5\n");
+    // Minimal non-degenerate LUT: EModulusLut rejects files whose area or
+    // deform column is constant (zero axis range), so give it a 2x2 spread
+    // with a uniform value.
+    const QByteArray bundledBytes = QByteArrayLiteral(
+        "5.0\t0.1\t12.5\n5.0\t0.3\t12.5\n15.0\t0.1\t12.5\n15.0\t0.3\t12.5\n");
     if (!writeTextFile(bundledPath, bundledBytes)) {
         return 1;
     }
 
     const QString remotePath = tempPathSuffix(remoteDir, QStringLiteral("scaled_isoelastic_data_LUT_6.16-4.24.txt"));
-    const QByteArray remoteBytes = QByteArrayLiteral("10.0\t0.2\t42.0\n");
+    const QByteArray remoteBytes = QByteArrayLiteral(
+        "5.0\t0.1\t42.0\n5.0\t0.3\t42.0\n15.0\t0.1\t42.0\n15.0\t0.3\t42.0\n");
     if (!writeTextFile(remotePath, remoteBytes)) {
         return 2;
     }

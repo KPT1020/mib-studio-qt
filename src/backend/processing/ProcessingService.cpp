@@ -1858,6 +1858,13 @@ void ProcessingService::realtimeBatchLoop() {
         const uint64_t earliest = rtStore_->earliestAvailableIndex();
         const uint64_t latest = rtStore_->latestAvailableIndex();
         uint64_t last = rtLastProcessed_.load(std::memory_order_relaxed);
+        if (last > latest) {
+            // FrameStore::resize() renumbers frames from 0; a cached pointer
+            // from the old numbering would idle this loop forever.
+            SPDLOG_WARN("Async batch realtime pointer {} beyond latest {} (store resized?); resyncing", last, latest);
+            last = latest;
+            rtLastProcessed_.store(last, std::memory_order_relaxed);
+        }
         if (last + 1 < earliest) {
             const uint64_t skipped = earliest - (last + 1);
             skippedSinceSummary += skipped;
@@ -1999,6 +2006,13 @@ void ProcessingService::realtimeInlineLoop() {
         const uint64_t earliest = rtStore_->earliestAvailableIndex();
         const uint64_t latest = rtStore_->latestAvailableIndex();
         uint64_t last = rtLastProcessed_.load();
+        if (last > latest) {
+            // FrameStore::resize() renumbers frames from 0; a cached pointer
+            // from the old numbering would idle this loop forever.
+            SPDLOG_WARN("Realtime pointer {} beyond latest {} (store resized?); resyncing", last, latest);
+            last = latest;
+            rtLastProcessed_.store(last);
+        }
         if (last + 1 < earliest) {
             // Skip ahead if our pointer fell behind the ring window
             uint64_t skipped = earliest - (last + 1);

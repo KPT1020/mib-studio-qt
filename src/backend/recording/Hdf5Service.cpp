@@ -493,8 +493,10 @@ namespace backend::services
             return false;
         }
 
-        // Prepare data buffer
-        size_t frameSize = height * width * channels;
+        // Prepare data buffer (size_t casts: int*int*int would overflow in
+        // int arithmetic before widening, undersizing the buffer)
+        size_t frameSize = static_cast<size_t>(height) * static_cast<size_t>(width) *
+                           static_cast<size_t>(channels);
         std::vector<uint8_t> buffer(images.size() * frameSize);
         size_t offset = 0;
         for (const auto &img : images)
@@ -681,6 +683,21 @@ namespace backend::services
         hsize_t currentDims[4];
         H5Sget_simple_extent_dims(filespaceId, currentDims, nullptr);
         H5Sclose(filespaceId);
+
+        // The dataset extent was fixed by the first-ever batch; a
+        // mid-recording dimension change (ROI/resolution) cannot be appended.
+        // Fail with a precise message instead of a cryptic H5Dwrite error.
+        if (currentDims[1] != static_cast<hsize_t>(height) ||
+            currentDims[2] != static_cast<hsize_t>(width) ||
+            (ndims == 4 && currentDims[3] != static_cast<hsize_t>(channels)))
+        {
+            SPDLOG_ERROR("appendImageDataset {}: batch dimensions {}x{}x{} do not match "
+                         "dataset extent {}x{}x{} (frame size changed mid-recording?)",
+                         datasetPath, height, width, channels,
+                         currentDims[1], currentDims[2], ndims == 4 ? currentDims[3] : 1);
+            H5Dclose(datasetId);
+            return false;
+        }
 
         // Extend dataset once for the whole batch
         hsize_t newDims[4];
@@ -960,6 +977,17 @@ namespace backend::services
         H5Sget_simple_extent_dims(fileSpace, currentDims, nullptr);
         H5Sclose(fileSpace);
 
+        // Dataset layout is {N, series, H, W}; its extent was fixed by the
+        // first batch. Reject a mid-recording dimension change loudly.
+        if (currentDims[2] != static_cast<hsize_t>(height) ||
+            currentDims[3] != static_cast<hsize_t>(width)) {
+            SPDLOG_ERROR("appendSeriesImageDataset {}: batch dimensions {}x{} do not match "
+                         "dataset extent {}x{} (frame size changed mid-recording?)",
+                         datasetPath, height, width, currentDims[2], currentDims[3]);
+            H5Dclose(datasetId);
+            return false;
+        }
+
         // Extend first dimension
         hsize_t newDims[4] = {currentDims[0] + seriesFrames.size(), currentDims[1], currentDims[2], currentDims[3]};
         herr_t status = H5Dset_extent(datasetId, newDims);
@@ -982,6 +1010,17 @@ namespace backend::services
             const auto &frame = *seriesFrames[n];
             for (size_t s = 0; s < seriesCount && s < frame.seriesImages.size(); ++s) {
                 const cv::Mat &img = frame.seriesImages[s];
+                // The scratch copy below is sized height*width but walks
+                // img.rows/img.cols — a larger series image would overflow
+                // the heap, a smaller one would write a garbage hyperslab.
+                if (img.rows != height || img.cols != width || img.channels() != 1) {
+                    SPDLOG_ERROR("appendSeriesImageDataset {}: series image [{},{}] is "
+                                 "{}x{}x{} but the dataset expects {}x{}x1; batch aborted",
+                                 datasetPath, n, s, img.rows, img.cols, img.channels(),
+                                 height, width);
+                    H5Dclose(datasetId);
+                    return false;
+                }
                 fileSpace = H5Dget_space(datasetId);
                 hsize_t start[4] = {currentDims[0] + static_cast<hsize_t>(n), static_cast<hsize_t>(s), 0, 0};
                 hsize_t count[4] = {1, 1, static_cast<hsize_t>(height), static_cast<hsize_t>(width)};

@@ -73,3 +73,8 @@
   the stale `StreamModule` stats seen in `docs/howto/safe-start-stop-egrabber.md`.
 - `experimentServicesActive_` must stay in sync with
   `ExperimentController::State` or buttons wedge.
+- The async experiment flush (`QtConcurrent::run` + `flushWatcher_`) captures
+  the **backend pointer, not `this`**: `QFutureWatcher`'s destructor does not
+  block on a running future, so the task can outlive the window (the backend
+  cannot — it is constructed before the window in `main()`). The destructor
+  additionally `waitForFinished()`s any in-flight flush before members die.

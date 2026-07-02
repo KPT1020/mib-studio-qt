@@ -1,6 +1,8 @@
 #include "frontend/tabs/HdfReviewTab.h"
 #include "ui_HdfReviewTab.h"
 
+#include <memory>
+
 #include <QPushButton>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -1515,7 +1517,10 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
         bool isValidSet;
     };
 
-    auto* navState = new NavigationState{frameIndex, isShowingValid_};
+    // shared_ptr: each lambda co-owns the state, so its lifetime no longer
+    // depends on the destroyed-signal connect ordering (a hand-rolled
+    // new/delete-in-connect was one refactor away from a double free / leak).
+    auto navState = std::make_shared<NavigationState>(NavigationState{frameIndex, isShowingValid_});
     
     // Connect navigation signals
     // Helper lambda to load series images for a frame.
@@ -1585,11 +1590,6 @@ void HdfReviewTab::showFrameViewer(int frameIndex) {
             // Update selected frame in main view
             setSelectedFrame(navState->currentIndex);
         }
-    });
-    
-    // Clean up navigation state when dialog is destroyed
-    connect(dialog, &QObject::destroyed, this, [navState]() {
-        delete navState;
     });
     
     // Show dialog

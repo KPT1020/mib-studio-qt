@@ -150,6 +150,23 @@ bool EModulusLut::loadFromFile(const std::string& basePath) {
         return false;
     }
 
+    // Reject degenerate files (all-identical area or deform values): the
+    // grid step would be zero and lookup()'s index math would divide 0/0.
+    double aMin = std::numeric_limits<double>::max(), aMax = std::numeric_limits<double>::lowest();
+    double dMin = std::numeric_limits<double>::max(), dMax = std::numeric_limits<double>::lowest();
+    for (const auto& p : points) {
+        aMin = std::min(aMin, p.area_um);
+        aMax = std::max(aMax, p.area_um);
+        dMin = std::min(dMin, p.deform);
+        dMax = std::max(dMax, p.deform);
+    }
+    if (!(aMax > aMin) || !(dMax > dMin)) {
+        SPDLOG_WARN("EModulusLut: rejected degenerate LUT {} ({} points, "
+                    "area=[{}, {}], deform=[{}, {}]): axis range is zero",
+                    resolvedPath, points.size(), aMin, aMax, dMin, dMax);
+        return false;
+    }
+
     buildGrid(points);
     loaded_ = true;
 
@@ -176,9 +193,16 @@ double EModulusLut::lookup(double area_um, double deformability) const {
     double aIdx = (area_um - areaMin_) / areaStep;
     double dIdx = (deformability - deformMin_) / deformStep;
 
+    // Defense in depth: a zero step (degenerate LUT is rejected at load, but
+    // keep the invariant local) yields NaN/inf here, and casting a NaN to
+    // size_t is UB that indexes grid_ far out of bounds.
+    if (!std::isfinite(aIdx) || !std::isfinite(dIdx)) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
     // Integer grid indices for bilinear interpolation
-    size_t ai0 = static_cast<size_t>(std::floor(aIdx));
-    size_t di0 = static_cast<size_t>(std::floor(dIdx));
+    size_t ai0 = std::min(static_cast<size_t>(std::floor(aIdx)), numAreaBins_ - 1);
+    size_t di0 = std::min(static_cast<size_t>(std::floor(dIdx)), numDeformBins_ - 1);
     size_t ai1 = std::min(ai0 + 1, numAreaBins_ - 1);
     size_t di1 = std::min(di0 + 1, numDeformBins_ - 1);
 

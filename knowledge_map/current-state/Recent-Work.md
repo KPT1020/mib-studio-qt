@@ -5,6 +5,19 @@
 
 ## Features shipped
 
+- **Crash-hardening: input/IO batch** (2026-07-02) — `EModulusLut` rejects
+  degenerate LUT files (constant area/deform column → zero grid step →
+  `size_t(floor(NaN))` UB indexing `grid_` out of bounds) and clamps lookup
+  indices (new `backend.emodulus_lut_degenerate` test); `Hdf5Service` append
+  paths validate batch dims against the dataset extent and series-image dims
+  against the scratch buffer (heap overflow otherwise); `MainWindow`'s async
+  flush captures the backend pointer instead of `this` and the destructor
+  waits for an in-flight flush; `MockCamera::refreshFileList` uses the
+  `error_code` `directory_iterator`; realtime loops resync a cached
+  `rtLastProcessed_` that lands beyond `latest` after a `FrameStore::resize`;
+  `HdfReviewTab` nav state is a `shared_ptr` instead of
+  `new`/`delete`-in-connect.
+
 - **Crash-hardening: frame buffer geometry + FrameStore identity** (2026-07-02) —
   camera buffers are validated where produced (`replenishPendingFrames`
   rejects null-base/short/garbage-size SDK buffers) and where consumed
