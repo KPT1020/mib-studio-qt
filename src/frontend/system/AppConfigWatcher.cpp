@@ -272,6 +272,10 @@ namespace frontend
 					pcfg.gaussian_blur_size = ip.value("gaussian_blur_size").toInt(pcfg.gaussian_blur_size);
 				if (ip.contains("bg_subtract_threshold"))
 					pcfg.bg_subtract_threshold = ip.value("bg_subtract_threshold").toInt(pcfg.bg_subtract_threshold);
+				if (ip.contains("adaptive_threshold"))
+					pcfg.adaptive_threshold = ip.value("adaptive_threshold").toBool(pcfg.adaptive_threshold);
+				if (ip.contains("otsu_scale"))
+					pcfg.otsu_scale = ip.value("otsu_scale").toDouble(pcfg.otsu_scale);
 				if (ip.contains("morph_kernel_size"))
 					pcfg.morph_kernel_size = ip.value("morph_kernel_size").toInt(pcfg.morph_kernel_size);
 				if (ip.contains("morph_iterations"))
@@ -290,6 +294,8 @@ namespace frontend
 					pcfg.ring_ratio_min = ip.value("ring_ratio_min").toDouble(pcfg.ring_ratio_min);
 				if (ip.contains("ring_ratio_max"))
 					pcfg.ring_ratio_max = ip.value("ring_ratio_max").toDouble(pcfg.ring_ratio_max);
+				if (ip.contains("focus_laplacian_min"))
+					pcfg.focus_laplacian_min = ip.value("focus_laplacian_min").toDouble(pcfg.focus_laplacian_min);
 				if (ip.contains("empty_frame_pixel_threshold"))
 					pcfg.empty_frame_pixel_threshold = ip.value("empty_frame_pixel_threshold").toInt(pcfg.empty_frame_pixel_threshold);
 				if (ip.contains("auto_background_enabled"))
@@ -311,6 +317,8 @@ namespace frontend
 						pcfg.enable_area_ratio_check = fl.value("enable_area_ratio_check").toBool(pcfg.enable_area_ratio_check);
 					if (fl.contains("enable_ring_ratio_check"))
 						pcfg.enable_ring_ratio_check = fl.value("enable_ring_ratio_check").toBool(pcfg.enable_ring_ratio_check);
+					if (fl.contains("enable_focus_check"))
+						pcfg.enable_focus_check = fl.value("enable_focus_check").toBool(pcfg.enable_focus_check);
 					if (fl.contains("require_single_inner_contour"))
 						pcfg.require_single_inner_contour = fl.value("require_single_inner_contour").toBool(pcfg.require_single_inner_contour);
 				}
@@ -601,6 +609,8 @@ namespace frontend
 		QJsonObject ip = root.value("image_processing").toObject();
 		ip.insert("gaussian_blur_size", pcfg.gaussian_blur_size);
 		ip.insert("bg_subtract_threshold", pcfg.bg_subtract_threshold);
+		ip.insert("adaptive_threshold", pcfg.adaptive_threshold);
+		ip.insert("otsu_scale", pcfg.otsu_scale);
 		ip.insert("morph_kernel_size", pcfg.morph_kernel_size);
 		ip.insert("morph_iterations", pcfg.morph_iterations);
 		ip.insert("area_threshold_min", pcfg.area_threshold_min);
@@ -610,6 +620,7 @@ namespace frontend
 		ip.insert("area_ratio_threshold_max", pcfg.area_ratio_threshold_max);
 		ip.insert("ring_ratio_min", pcfg.ring_ratio_min);
 		ip.insert("ring_ratio_max", pcfg.ring_ratio_max);
+		ip.insert("focus_laplacian_min", pcfg.focus_laplacian_min);
 		ip.insert("empty_frame_pixel_threshold", pcfg.empty_frame_pixel_threshold);
 		ip.insert("auto_background_enabled", pcfg.auto_background_enabled);
 		ip.insert("auto_background_empty_frames", pcfg.auto_background_empty_frames);
@@ -622,6 +633,7 @@ namespace frontend
 		fl.insert("enable_deformability_range_check", pcfg.enable_deformability_range_check);
 		fl.insert("enable_area_ratio_check", pcfg.enable_area_ratio_check);
 		fl.insert("enable_ring_ratio_check", pcfg.enable_ring_ratio_check);
+		fl.insert("enable_focus_check", pcfg.enable_focus_check);
 		fl.insert("require_single_inner_contour", pcfg.require_single_inner_contour);
 		ip.insert("filters", fl);
 

@@ -22,7 +22,11 @@
   a backward-compatible optional metadata group (presence-checked read; test
   `recording.focus_metric_roundtrip`) and exported in the HdfReviewTab CSV, so
   focus values from a real run can be inspected to pick `focus_laplacian_min`.
-  Follow-up: UI charting/gating controls.
+  **Config plumbing** wired in `AppConfigWatcher` (read+write) and
+  `resources/defaults/config.json`: `adaptive_threshold`, `otsu_scale`,
+  `focus_laplacian_min`, `filters.enable_focus_check` are now settable from
+  config.json / profiles and applied live (all default to prior behaviour).
+  Follow-up: settings-dialog widgets + UI charting.
 - **Adaptive (Otsu) segmentation threshold** (2026-07-03,
   [[ProcessingService]]) — New `applyProcessingThreshold` helper routes all four
   segmentation sites (`computeProcessedFrame` + 3 realtime-loop copies) through

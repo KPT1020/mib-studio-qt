@@ -48,6 +48,12 @@
 - Some gates require their `enable_*` flag too (e.g.
   `enable_ring_ratio_check`). Editing thresholds alone won't change
   classification.
+- `AppConfigWatcher` maps `image_processing` JSON ⇄ `ProcessingConfig`
+  (read block applies to the live service; write block persists). New keys:
+  `adaptive_threshold` + `otsu_scale` (per-frame Otsu segmentation),
+  `focus_laplacian_min` and `filters.enable_focus_check` (topology-free focus
+  gate). All default to the previous behaviour. Settings-dialog widgets for
+  them are still a follow-up — set via config.json / profiles for now.
 - See task `knowledge_map/task/2025-11-25-config-profiles.md` for the
   profile management history and current implementation notes.
 - Bundled defaults now include top-level `config_schema_version`. Remote
