@@ -47,6 +47,7 @@ note in `methods.temporal_eval` and REPORT.md.
 | `download_stream.py` | Fetch the 5000-frame stream, match GT frames by pixel hash |
 | `stream_bench.py` | **Real-stream** background + throughput validation (authoritative) |
 | `focus_metric.py` | Robust focus metric (Laplacian variance) vs the nested-contour ring ratio |
+| `decoupled_bench.py` | Validate decoupled size measurement: detection recall, fallback rate, area drift removed (`results/decoupled_area.csv`) |
 | `visualize_focus.py` | Build `results/focus_data.csv` + ranked-cell montage and analysis figures |
 | `results/`        | Recorded experiment results for later comparison |
 

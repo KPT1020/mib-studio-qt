@@ -694,34 +694,61 @@ cv::Mat ProcessingService::buildMeasurementMask(const cv::Mat& diff, const cv::S
     return measMask;
 }
 
-cv::Point2f ProcessingService::contourCentroid(const std::vector<cv::Point>& contour) {
-    const cv::Moments m = cv::moments(contour);
-    if (m.m00 != 0.0) {
-        return cv::Point2f(static_cast<float>(m.m10 / m.m00), static_cast<float>(m.m01 / m.m00));
+int ProcessingService::matchContourByOverlap(const std::vector<std::vector<cv::Point>>& candidates,
+                                             const std::vector<cv::Point>& object,
+                                             const cv::Size& size, double minIoM) {
+    if (object.size() < 3 || candidates.empty()) {
+        return -1;
     }
-    const cv::Rect box = cv::boundingRect(contour);
-    return cv::Point2f(box.x + box.width * 0.5f, box.y + box.height * 0.5f);
-}
+    const cv::Rect full(0, 0, size.width, size.height);
+    const cv::Rect objBox = cv::boundingRect(object) & full;
+    if (objBox.area() <= 0) {
+        return -1;
+    }
+    // Rasterize the detected object's footprint once, in its own bbox frame.
+    // Every candidate is drawn into the same small frame so intersection is a
+    // cheap countNonZero on objBox-sized scratch masks, not the whole image.
+    const cv::Point off = objBox.tl();
+    cv::Mat objMask = cv::Mat::zeros(objBox.size(), CV_8UC1);
+    std::vector<std::vector<cv::Point>> shifted(1);
+    shifted[0].reserve(object.size());
+    for (const auto& p : object) shifted[0].push_back(p - off);
+    cv::drawContours(objMask, shifted, 0, cv::Scalar(255), cv::FILLED);
+    const int objArea = cv::countNonZero(objMask);
+    if (objArea <= 0) {
+        return -1;
+    }
 
-int ProcessingService::matchContourContaining(const std::vector<std::vector<cv::Point>>& candidates,
-                                              const cv::Point2f& point) {
     int best = -1;
-    double bestArea = 0.0;
+    double bestIoM = 0.0;
+    cv::Mat candMask(objBox.size(), CV_8UC1);
     for (size_t i = 0; i < candidates.size(); ++i) {
-        if (candidates[i].size() < 3) {
-            continue;  // pointPolygonTest needs a polygon
+        const auto& c = candidates[i];
+        if (c.size() < 3) {
+            continue;
         }
-        if (cv::pointPolygonTest(candidates[i], point, false) >= 0) {
-            const double area = cv::contourArea(candidates[i]);
-            // Smallest containing contour wins so a nested hole is preferred over
-            // the blob that encloses it.
-            if (best < 0 || area < bestArea) {
-                best = static_cast<int>(i);
-                bestArea = area;
-            }
+        if ((cv::boundingRect(c) & objBox).area() <= 0) {
+            continue;  // bboxes disjoint -> no overlap
+        }
+        candMask.setTo(cv::Scalar(0));
+        shifted[0].clear();
+        shifted[0].reserve(c.size());
+        for (const auto& p : c) shifted[0].push_back(p - off);
+        cv::drawContours(candMask, shifted, 0, cv::Scalar(255), cv::FILLED);
+        const int inter = cv::countNonZero(objMask & candMask);
+        if (inter == 0) {
+            continue;
+        }
+        // Denominator is the smaller of the two full areas (intersection-over-
+        // min), so a fragment that sits fully inside the object still scores high.
+        const double denom = std::min(static_cast<double>(objArea), cv::contourArea(c));
+        const double iom = denom > 0.0 ? inter / denom : 0.0;
+        if (iom > bestIoM) {
+            bestIoM = iom;
+            best = static_cast<int>(i);
         }
     }
-    return best;
+    return bestIoM >= minIoM ? best : -1;
 }
 
 void ProcessingService::computeFocusMetrics(const cv::Mat& originalImage, const cv::Mat& objectMask,
@@ -1575,7 +1602,8 @@ FilterResult ProcessingService::evaluateInnerContourObject(const ContourAnalysis
     // measurement mask does not resolve a matching hole for this object.
     const std::vector<cv::Point>* sizeContour = &innerContour;
     if (measurement != nullptr) {
-        const int mi = matchContourContaining(measurement->innerContours, contourCentroid(innerContour));
+        const int mi = matchContourByOverlap(measurement->innerContours, innerContour,
+                                             processedImage.size());
         if (mi >= 0) {
             sizeContour = &measurement->innerContours[static_cast<size_t>(mi)];
         }
@@ -1681,7 +1709,8 @@ FilterResult ProcessingService::evaluateOuterContourObject(const ContourAnalysis
     // basis. Fall back to the detection contour when no measurement blob matches.
     const std::vector<cv::Point>* sizeContour = &contour;
     if (measurement != nullptr) {
-        const int mi = matchContourContaining(measurement->filteredContours, contourCentroid(contour));
+        const int mi = matchContourByOverlap(measurement->filteredContours, contour,
+                                             processedImage.size());
         if (mi >= 0) {
             sizeContour = &measurement->filteredContours[static_cast<size_t>(mi)];
         }

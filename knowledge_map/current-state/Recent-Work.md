@@ -15,9 +15,16 @@
   would be with adaptive off: `bg_subtract_threshold` + the same close/open).
   Each of the four threshold call sites (`computeProcessedFrame` + three
   realtime-loop copies) now builds it and passes it to `filterProcessedObjects`,
-  which re-derives per-object size from the measurement contour matched to the
-  detected object (`matchContourContaining` on the object centroid), with a safe
-  fallback to the adaptive contour when no counterpart exists. The batch paths
+  which re-derives per-object size from the measurement contour that best
+  overlaps the detected object (`matchContourByOverlap`), with a safe fallback to
+  the adaptive contour when no counterpart exists. GT validation
+  (`benchmarks/mask-gen/decoupled_bench.py`) drove the match choice: strict
+  centroid containment fell back 62% of the time on fragmented fixed masks vs 0%
+  for overlap, which puts 100% of objects within 2% of the fixed basis. It also
+  showed the current-pipeline Otsu swap does **not** improve detection here
+  (94.8% vs 93.6%) and that the drift removed is config-dependent (small at the
+  default morph 3, large at morph 5) — so keep `adaptive_threshold` off by
+  default. The batch paths
   (`processBatch` + batch-worker) re-filter the detection mask for tracking, so
   `computeProcessedFrame` exposes the mask via `measurementMaskOut` and they
   forward it — the offline / re-analysis path is decoupled too. Adaptive-off

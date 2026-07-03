@@ -54,10 +54,14 @@ restarts the loop (same policy as `CaptureService::run`). Verified by
      (`buildMeasurementMask` — `bg_subtract_threshold` + the same close/open,
      i.e. what the mask would be with adaptive off) and passes it to
      `filterProcessedObjects`. Per object, `area`, `areaRatio` and
-     `deformability` are re-derived from the measurement contour that contains
-     the detected object (`matchContourContaining` on the object centroid;
-     inner-hole contour for the ring path, blob contour for the solid path),
-     falling back to the adaptive contour when no counterpart resolves. This
+     `deformability` are re-derived from the measurement contour that best
+     overlaps the detected object (`matchContourByOverlap`,
+     intersection-over-min-area; inner-hole contour for the ring path, blob
+     contour for the solid path), falling back to the adaptive contour when no
+     counterpart resolves. Overlap (not centroid containment) because the fixed
+     mask can be fragmented/offset — GT validation showed a strict
+     point-in-polygon match falls back 62% of the time vs 0% for overlap
+     (`benchmarks/mask-gen/decoupled_bench.py`). This
      keeps `area`/`deformability`/`youngsModulus` — and the area/target-group
      gates — on a stable, contrast-independent basis so adaptive detection does
      not drift the downstream analysis. With adaptive off the measurement mask

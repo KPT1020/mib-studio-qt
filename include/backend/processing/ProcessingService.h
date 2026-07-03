@@ -474,13 +474,16 @@ private:
                                             const cv::Mat& originalImage,
                                             const ContourAnalysis* measurement = nullptr);
     ContourAnalysis findContours(const cv::Mat& processedImage);
-    // Centroid of a contour (m00-weighted; bbox centre when degenerate).
-    static cv::Point2f contourCentroid(const std::vector<cv::Point>& contour);
-    // Index into `candidates` of the smallest-area contour that geometrically
-    // contains `point`, or -1 if none. Maps a detected object to its counterpart
-    // on the fixed-threshold measurement mask.
-    static int matchContourContaining(const std::vector<std::vector<cv::Point>>& candidates,
-                                      const cv::Point2f& point);
+    // Index into `candidates` of the contour with the largest region overlap
+    // with `object` (intersection over the smaller filled area), or -1 if the
+    // best overlap is below minIoM. Maps a detected object to its counterpart on
+    // the fixed-threshold measurement mask. Overlap (not centroid containment)
+    // because the fixed mask can be fragmented/offset relative to the adaptive
+    // detection — a strict point-in-polygon test misses those (validated on the
+    // GT set in benchmarks/mask-gen/decoupled_bench.py: 62% -> 0% fallback).
+    static int matchContourByOverlap(const std::vector<std::vector<cv::Point>>& candidates,
+                                     const std::vector<cv::Point>& object,
+                                     const cv::Size& size, double minIoM = 0.2);
     // Binarizes a background-subtracted diff into `thresh` using the configured
     // strategy: fixed bg_subtract_threshold, or per-frame Otsu floored at that
     // value and scaled by otsu_scale when config.adaptive_threshold is set.

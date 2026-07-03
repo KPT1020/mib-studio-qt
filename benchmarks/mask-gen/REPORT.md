@@ -148,9 +148,40 @@ read from the segmentation contour, the tighter per-frame Otsu mask would move
 them with contrast/scene content. Detection now stays on the Otsu mask while
 those metrics are re-measured on a fixed-threshold *measurement mask*
 (`buildMeasurementMask` = the adaptive-off mask), per object via
-`matchContourContaining`, with fallback to the adaptive contour. Tied to
+`matchContourByOverlap`, with fallback to the adaptive contour. Tied to
 `adaptive_threshold` (no new knob); test
 `tests/processing/processing_decoupled_measurement_test.cpp`.
+
+### Decoupled measurement — GT validation (`decoupled_bench.py`)
+
+Ran the safeguard over the 173-object GT set (C++ defaults: blur 3, morph 3,
+`bg_subtract_threshold` 8, `otsu_scale` 1.1). Three findings, all decision-relevant:
+
+1. **On this pipeline, adaptive Otsu does not improve detection.** Co-located
+   detection recall is **94.8% fixed vs 93.6% adaptive** (−1.2 pts) at the
+   default config, and adaptive never wins across a morph/threshold sweep. The
+   large detection gain in this report (98% vs 69%) belongs to the *proposed*
+   pipeline (CLAHE/top-hat + Otsu), **not** the current-pipeline Otsu swap. So
+   flipping `adaptive_threshold` on by itself buys little detection.
+2. **The object↔measurement match must be overlap-based, not centroid
+   containment.** The fixed mask is often fragmented/offset for dim cells, so a
+   strict point-in-polygon test on the object centroid fell back **61.7%** of the
+   time and, when it did match, grabbed fragments (p90 area error **40%**).
+   Switching to intersection-over-min-area overlap (`matchContourByOverlap`)
+   dropped fallback to **0%** and put **100%** of objects within 2% of the fixed
+   basis (p90 error **0%**). The C++ helper was changed to overlap accordingly.
+3. **How much drift the safeguard removes is config-dependent.** At morph 3 the
+   adaptive and fixed areas already agree (p90 drift ~6%), so there is little to
+   fix; the drift only becomes large at heavier morphology (morph 5: adaptive-raw
+   p90 drift **74%**), where decoupling cleanly restores the fixed basis (p90
+   **0–1%**). The safeguard therefore earns its cost specifically for the
+   REPORT LEAN adaptive config (5×5 close), and is near-neutral at the current
+   default.
+
+Net: keep `adaptive_threshold` **off** by default (unchanged, byte-identical).
+The decoupling is a correct, graceful safeguard — it degrades to prior behaviour
+via fallback and is exact when it engages — but its benefit is realized only if
+adaptive is adopted with larger morphology. Data: `results/decoupled_area.csv`.
 
 **Follow-ups:** the per-row-mean background source, frontend config wiring for
 the new fields, and the optional top-hat flag.
