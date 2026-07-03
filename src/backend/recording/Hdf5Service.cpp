@@ -503,8 +503,16 @@ namespace backend::services
         {
             if (img.rows != height || img.cols != width || img.channels() != channels)
             {
-                SPDLOG_WARN("Image size mismatch, skipping");
-                continue;
+                // Skipping would shift every later frame one slot (images[i]
+                // no longer matches metadata[i]) and leave uninitialized
+                // bytes in the tail. Fail loudly like the append path does.
+                SPDLOG_ERROR("writeImageDataset {}: image {}x{}x{} does not match batch "
+                             "dimensions {}x{}x{} (frame size changed mid-batch?)",
+                             datasetPath, img.rows, img.cols, img.channels(),
+                             height, width, channels);
+                H5Dclose(datasetId);
+                H5Sclose(dataspaceId);
+                return false;
             }
             if (img.isContinuous())
             {
@@ -680,6 +688,16 @@ namespace backend::services
         // Get current dataspace and dimensions
         hid_t filespaceId = H5Dget_space(datasetId);
         int ndims = H5Sget_simple_extent_ndims(filespaceId);
+        if (ndims < 3 || ndims > 4)
+        {
+            // H5Sget_simple_extent_dims writes `rank` values into the
+            // caller's array; a foreign/corrupt file with a higher-rank
+            // dataset would smash the stack.
+            H5Sclose(filespaceId);
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("appendImageDataset {}: unexpected dataset rank {}", datasetPath, ndims);
+            return false;
+        }
         hsize_t currentDims[4];
         H5Sget_simple_extent_dims(filespaceId, currentDims, nullptr);
         H5Sclose(filespaceId);
@@ -817,6 +835,16 @@ namespace backend::services
 
         // Extend dataset once for the whole batch
         hid_t filespaceId = H5Dget_space(datasetId);
+        if (H5Sget_simple_extent_ndims(filespaceId) != 1)
+        {
+            // Rank guard: get_simple_extent_dims writes `rank` values into
+            // the fixed array below.
+            H5Sclose(filespaceId);
+            H5Tclose(memTypeId);
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("appendMetadataDataset {}: unexpected dataset rank", datasetPath);
+            return false;
+        }
         hsize_t currentDims[1];
         H5Sget_simple_extent_dims(filespaceId, currentDims, nullptr);
         H5Sclose(filespaceId);
@@ -914,6 +942,19 @@ namespace backend::services
             const auto &frame = *seriesFrames[n];
             for (size_t s = 0; s < seriesCount && s < frame.seriesImages.size(); ++s) {
                 const cv::Mat &img = frame.seriesImages[s];
+                // Same guard as the append path: the scratch copy below is
+                // sized height*width but walks img.rows/img.cols — a larger
+                // series image would overflow the heap, a smaller continuous
+                // one would make H5Dwrite overread img.data.
+                if (img.rows != height || img.cols != width || img.channels() != 1) {
+                    SPDLOG_ERROR("writeSeriesImageDataset {}: series image [{},{}] is "
+                                 "{}x{}x{} but the dataset expects {}x{}x1; batch aborted",
+                                 datasetPath, n, s, img.rows, img.cols, img.channels(),
+                                 height, width);
+                    H5Dclose(datasetId);
+                    H5Sclose(dataspaceId);
+                    return false;
+                }
                 hid_t fileSpace = H5Dget_space(datasetId);
                 hsize_t start[4] = {static_cast<hsize_t>(n), static_cast<hsize_t>(s), 0, 0};
                 hsize_t count[4] = {1, 1, static_cast<hsize_t>(height), static_cast<hsize_t>(width)};
@@ -973,6 +1014,15 @@ namespace backend::services
 
         // Get current extent
         hid_t fileSpace = H5Dget_space(datasetId);
+        if (H5Sget_simple_extent_ndims(fileSpace) != 4)
+        {
+            // Rank guard: get_simple_extent_dims writes `rank` values into
+            // the fixed array below.
+            H5Sclose(fileSpace);
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("appendSeriesImageDataset {}: unexpected dataset rank", datasetPath);
+            return false;
+        }
         hsize_t currentDims[4];
         H5Sget_simple_extent_dims(fileSpace, currentDims, nullptr);
         H5Sclose(fileSpace);
@@ -1638,14 +1688,20 @@ namespace backend::services
             return false;
         }
 
-        // Get dataspace and dimensions
+        // Get dataspace and dimensions. Validate the rank BEFORE reading
+        // the extent: get_simple_extent_dims writes `rank` values into the
+        // fixed array, so a foreign/corrupt file with a higher-rank dataset
+        // would smash the stack.
         hid_t dataspaceId = H5Dget_space(datasetId);
         int ndims = H5Sget_simple_extent_ndims(dataspaceId);
-        hsize_t dims[4];
-        H5Sget_simple_extent_dims(dataspaceId, dims, nullptr);
+        hsize_t dims[4] = {0, 0, 0, 0};
+        if (ndims >= 3 && ndims <= 4)
+        {
+            H5Sget_simple_extent_dims(dataspaceId, dims, nullptr);
+        }
         H5Sclose(dataspaceId);
 
-        if (ndims < 3)
+        if (ndims < 3 || ndims > 4)
         {
             SPDLOG_ERROR("Invalid dataset dimensions: {}", ndims);
             H5Dclose(datasetId);
@@ -1721,8 +1777,17 @@ namespace backend::services
             return false;
         }
 
-        // Get dataspace and dimensions
+        // Get dataspace and dimensions (rank guard: get_simple_extent_dims
+        // writes `rank` values into the fixed array below).
         hid_t dataspaceId = H5Dget_space(datasetId);
+        if (H5Sget_simple_extent_ndims(dataspaceId) != 1)
+        {
+            SPDLOG_ERROR("readMetadataDataset {}: unexpected dataset rank", datasetPath);
+            H5Sclose(dataspaceId);
+            H5Tclose(fileTypeId);
+            H5Dclose(datasetId);
+            return false;
+        }
         hsize_t dims[1];
         H5Sget_simple_extent_dims(dataspaceId, dims, nullptr);
         H5Sclose(dataspaceId);
@@ -2181,6 +2246,15 @@ namespace backend::services {
         }
 
         int ndims = H5Sget_simple_extent_ndims(dataspaceId);
+        if (ndims < 1 || ndims > 4)
+        {
+            // Rank guard: get_simple_extent_dims writes `rank` values into
+            // the fixed array below.
+            H5Sclose(dataspaceId);
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("getDatasetInfo: unexpected rank {} for {}", ndims, datasetPath);
+            return false;
+        }
         hsize_t dims[4] = {0, 0, 0, 0};
         if (H5Sget_simple_extent_dims(dataspaceId, dims, nullptr) < 0)
         {
@@ -2248,6 +2322,15 @@ namespace backend::services {
         }
 
         int ndims = H5Sget_simple_extent_ndims(filespaceId);
+        if (ndims < 1 || ndims > 4)
+        {
+            // Rank guard: get_simple_extent_dims writes `rank` values into
+            // the fixed array below.
+            H5Sclose(filespaceId);
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("readImageByIndex: unexpected rank {} for {}", ndims, datasetPath);
+            return false;
+        }
         hsize_t dims[4] = {0, 0, 0, 0};
         if (H5Sget_simple_extent_dims(filespaceId, dims, nullptr) < 0)
         {
@@ -2639,6 +2722,15 @@ namespace backend::services {
 
         // Get dimensions
         int ndims = H5Sget_simple_extent_ndims(dataspaceId);
+        if (ndims < 1 || ndims > 4)
+        {
+            // Rank guard: get_simple_extent_dims writes `rank` values into
+            // the fixed array below.
+            H5Sclose(dataspaceId);
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("readChartSnapshot: unexpected rank {} for {}", ndims, datasetPath);
+            return false;
+        }
         hsize_t dims[4] = {0, 0, 0, 0};
         if (H5Sget_simple_extent_dims(dataspaceId, dims, nullptr) < 0)
         {
@@ -2736,6 +2828,14 @@ namespace backend::services {
         if (dsId < 0) return false;
 
         hid_t spaceId = H5Dget_space(dsId);
+        if (H5Sget_simple_extent_ndims(spaceId) != 4) {
+            // Rank guard: get_simple_extent_dims writes `rank` values into
+            // the fixed array below.
+            H5Sclose(spaceId);
+            H5Dclose(dsId);
+            SPDLOG_ERROR("readSeriesImagesByIndex: unexpected dataset rank");
+            return false;
+        }
         hsize_t dims[4];
         H5Sget_simple_extent_dims(spaceId, dims, nullptr);
 
@@ -2810,6 +2910,15 @@ namespace backend::services {
         }
 
         hid_t dataspaceId = H5Dget_space(datasetId);
+        if (H5Sget_simple_extent_ndims(dataspaceId) != 1)
+        {
+            // Rank guard: get_simple_extent_dims writes `rank` values into
+            // the fixed array below.
+            H5Sclose(dataspaceId);
+            H5Dclose(datasetId);
+            SPDLOG_ERROR("readRecordingMetadata {}: unexpected dataset rank", datasetPath);
+            return false;
+        }
         hsize_t dims[1] = {0};
         H5Sget_simple_extent_dims(dataspaceId, dims, nullptr);
         H5Sclose(dataspaceId);

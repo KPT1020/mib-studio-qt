@@ -83,3 +83,7 @@ microseconds (default 1 µs).
   one fire. Residual latency jitter (tens to ~hundreds of µs under load)
   is inherent to OS scheduling of the busy-wait thread; sub-10 µs
   determinism would require real-time thread priority.
+- `triggerLoop` wraps its body (`triggerLoopBody`) in try/catch and
+  reports escaping exceptions via `CrashReporter::captureException` —
+  an exception out of a `std::thread` body is `std::terminate` for the
+  whole app.

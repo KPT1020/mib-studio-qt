@@ -470,6 +470,9 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
 
 MainWindow::~MainWindow() {
     backend_.setBackgroundCaptureCallback({});
+    // The backend (and its writer threads) outlives this window; a save
+    // error during teardown must not invoke a callback into a dead widget.
+    backend_.setFatalSaveErrorCallback({});
     // Block on any in-flight async flush before members are destroyed; the
     // watcher's own destructor would not wait for the running task.
     if (flushWatcher_ && flushWatcher_->isRunning()) {

@@ -12,25 +12,43 @@
 
 ## Responsibility
 
-- Installs:
+- **Handler ownership depends on whether Sentry came online.** When
+  `sentry_init` succeeds, Sentry's own backend (Crashpad on Windows,
+  inproc elsewhere) keeps the process crash handlers, and the local
+  `.dmp`/`.json` sidecars are written from the `on_crash` hook instead.
+  `SetUnhandledExceptionFilter` / `std::signal` do NOT chain, so
+  installing our own handlers on top of Sentry's (the pre-2026-07 code
+  did) disables Sentry crash capture entirely.
+- When Sentry is NOT live (no DSN, fetch failed, `MIB_USE_SENTRY=OFF`),
+  installs:
   - Windows `SetUnhandledExceptionFilter` → `MiniDumpWriteDump` (always
     available via `dbghelp.lib`).
   - `std::signal` handlers for SIGSEGV / SIGABRT / SIGFPE / SIGILL.
-  - `std::set_terminate` for uncaught C++ exceptions.
+- Always installs:
+  - `std::set_terminate` for uncaught C++ exceptions. The handler
+    extracts `what()` from the active exception, logs it, writes a
+    `-terminate.txt` sidecar with the message, and (when Sentry is live)
+    sends a fatal event with `sentry_flush` before aborting.
   - `qInstallMessageHandler` to route Qt warnings/criticals into spdlog
-    and forward fatal Qt messages as Sentry events.
+    and forward fatal Qt messages as Sentry events (flushed before Qt
+    aborts).
 - On crash: writes `{timestamp}-pid{N}-{reason}.dmp` (Windows) and a
   `.json` sidecar containing the current
   [[../diagnostics/CrashStateMirror]] snapshot under
-  `%LOCALAPPDATA%/MIB_Studio_Qt/crashes/`.
+  `%LOCALAPPDATA%/MIB_Studio_Qt/crashes/`. Reason `crash` = written by
+  the Sentry `on_crash` hook; `seh`/`sig*`/`terminate` = local handlers.
 - On startup: scans the crash dir for `.dmp` files left over from previous
-  runs and (when Sentry is enabled) submits them via `sentry_capture_event`
-  before renaming them `.uploaded` to prevent re-submission.
+  runs and (when Sentry is live) uploads the actual dump via
+  `sentry_capture_minidump` (with the `.json` sidecar attached as the
+  `state_snapshot` extra) before renaming them `.uploaded`.
+  `-crash.dmp` files are retired without re-capture — Crashpad already
+  reported those crashes live.
 
 ## Key APIs
 
 ```cpp
 struct Config { dsn; release; environment; crashDir; databaseDir;
+                handlerPath;  // crashpad_handler.exe, pinned by main()
                 installSignalHandlers; installQtMessageHandler;
                 installTerminateHandler; uploadPendingOnStart; };
 
@@ -103,9 +121,11 @@ Operator setup (org slug, auth token, self-hosted URL) is documented in
   20260522T143015-pid12345-seh.dmp        ← Windows minidump
   20260522T143015-pid12345-seh.json       ← state snapshot
   20260522T143015-pid12345-sigsegv.json   ← (signal-handler path, no dmp on non-Win)
+  20260522T143015-pid12345-crash.dmp      ← Sentry on_crash hook (Crashpad also uploaded it)
   20260522T143015-pid12345-terminate.json ← std::terminate path
+  20260522T143015-pid12345-terminate.txt  ← what() of the uncaught exception
   20260522T143015-pid12345-exception.json ← non-fatal captureException()
-  *.uploaded                              ← already sent to Sentry
+  *.uploaded                              ← already sent to Sentry (or retired)
 ```
 
 ## Symbolication
@@ -136,19 +156,29 @@ sentry-cli releases finalize "mib_studio_qt@$version"
 
 ## Gotchas
 
+- **Never install a SEH filter or signal handler after `sentry_init`.**
+  They replace Sentry's handlers without chaining and silently kill
+  crash capture. Local sidecars belong in the `on_crash` hook; local
+  handlers are for the Sentry-inactive path only. `init()` enforces this.
 - **Crashpad needs `crashpad_handler.exe` next to the EXE.** The CMake
-  post-build copy step handles this when `MIB_USE_SENTRY=ON`. Without it
-  Sentry silently falls back to in-process capture and loses dumps from
-  non-recoverable crashes (heap corruption, stack overflow).
+  post-build copy step handles this when `MIB_USE_SENTRY=ON`, and
+  `main.cpp` now pins the path explicitly via `Config::handlerPath` so
+  startup does not depend on the working directory.
+- `main()` must call `shutdown()` (or `captureException`, which flushes)
+  on every exit path — Sentry's transport is asynchronous and events
+  captured right before `return`/abort are lost without a flush.
 - The signal handler intentionally re-raises the signal with `SIG_DFL`
   so debuggers and Windows Error Reporting still see the fault.
 - `registerStateMirror` MUST point to a function that does not allocate
   unbounded memory or take locks held by the crashing thread. The
   [[../diagnostics/CrashStateMirror]] uses atomics + `try_lock` to
   satisfy this.
-- Worker-thread exception handling is intentionally NOT hardened in this
-  change (per `task/2026-05-22-crash-monitoring.md`). Pure C++ exceptions
-  inside `ProcessingService::workerLoop` will still kill that worker
-  silently; Crashpad only catches SEH/native faults.
+- Backend worker-thread loops (capture, processing, trigger, autofocus,
+  frame recording) wrap their bodies in try/catch and report escaping
+  exceptions via `captureException`; the enriched terminate handler is
+  the backstop for any thread that still lets one escape.
 - Building with `MIB_USE_SENTRY=OFF` (or with no DSN) keeps the local
   minidump path active — useful for offline / air-gapped deployments.
+- Regression tests: `tests/backend/crash_reporter_terminate_test.cpp`
+  (terminate sidecars) and `tests/backend/logger_init_fallback_test.cpp`
+  (logging fallback/idempotency).

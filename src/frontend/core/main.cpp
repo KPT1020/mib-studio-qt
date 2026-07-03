@@ -10,6 +10,7 @@
 #include "backend/app/AppBackend.h"
 #include "backend/diagnostics/CrashStateMirror.h"
 #include "backend/services/CrashReporter.h"
+#include "backend/services/Logger.h"
 #include "frontend/core/MainWindow.h"
 
 #include <algorithm>
@@ -135,6 +136,13 @@ namespace {
                 cfg.tracesSampleRate = std::max(0.0, std::min(1.0, parsed));
             }
         }
+#ifdef _WIN32
+        // crashpad_handler.exe is deployed next to the app executable; pin
+        // it explicitly so Crashpad startup does not depend on the working
+        // directory.
+        cfg.handlerPath =
+            std::filesystem::path(exeDir.toStdString()) / "crashpad_handler.exe";
+#endif
 
         backend::services::CrashReporter::init(cfg);
 
@@ -190,10 +198,13 @@ int main(int argc, char* argv[]) {
         // Convert to std::string for backend
         std::string dataDirStd = dataDir.toStdString();
 
-        // Install crash reporter BEFORE Logger / AppBackend so that crashes
-        // during backend init are still captured. Logger init happens inside
-        // AppBackend::initialize() and CrashReporter uses spdlog for its own
-        // diagnostic messages once Logger comes online.
+        // Bring the file logger up first: the release GUI build has no
+        // console, so anything the CrashReporter logs during init (Sentry
+        // status, pending-crash uploads) would otherwise be lost.
+        backend::services::Logger::initFromDataDir(dataDirStd);
+
+        // Install crash reporter BEFORE AppBackend so that crashes during
+        // backend init are still captured.
         installCrashReporter(exeDir, dataDirStd);
 
         // Early diagnostic output
@@ -204,17 +215,11 @@ int main(int argc, char* argv[]) {
         // Initialize backend with proper path
         backend::AppBackend backend;
         if (!backend.initialize(dataDirStd)) {
-            // Determine log location (may be in user AppData if installed in Program Files)
-            QString logLocation = dataDir + "\\logs\\app.log";
-#ifdef _WIN32
-            QString dataDirLower = dataDir.toLower();
-            if (dataDirLower.contains("program files")) {
-                char appDataPath[MAX_PATH];
-                if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, appDataPath))) {
-                    logLocation = QString::fromStdString(std::string(appDataPath) + "\\MIB_Studio_Qt\\logs\\app.log");
-                }
-            }
-#endif
+            const std::string resolvedLog =
+                backend::services::Logger::resolvedLogFilePath();
+            const QString logLocation = resolvedLog.empty()
+                ? dataDir + "\\logs\\app.log"
+                : QString::fromStdString(resolvedLog);
             QString errorMsg = QString("Failed to initialize application backend.\n\n"
                                       "Data directory: %1\n"
                                       "Log file: %2\n\n"
@@ -224,7 +229,10 @@ int main(int argc, char* argv[]) {
                                       "- Antivirus software blocking file access")
                                       .arg(dataDir, logLocation);
             writeEarlyError("Backend initialization failed: " + dataDirStd);
+            backend::services::CrashReporter::captureMessage(
+                "Backend initialization failed: " + dataDirStd);
             showError("MIB Studio Qt - Initialization Error", errorMsg);
+            backend::services::CrashReporter::shutdown(); // flush pending events
             return 1;
         }
         
@@ -232,8 +240,8 @@ int main(int argc, char* argv[]) {
         MainWindow w(backend);
         w.resize(960, 600);
         w.show();
-        
-        std::cout << "Application started successfully." << std::endl;
+
+        SPDLOG_INFO("Application started successfully.");
 
         const int rc = app.exec();
         backend::services::CrashReporter::shutdown();
@@ -255,6 +263,7 @@ int main(int argc, char* argv[]) {
         } catch (...) {
             std::cerr << "FATAL ERROR: " << errorMsg << std::endl;
         }
+        backend::services::CrashReporter::shutdown(); // flush pending events
         return 1;
     } catch (...) {
         std::string errorMsg = "Unknown exception occurred";
@@ -272,6 +281,7 @@ int main(int argc, char* argv[]) {
         } catch (...) {
             std::cerr << "FATAL ERROR: " << errorMsg << std::endl;
         }
+        backend::services::CrashReporter::shutdown(); // flush pending events
         return 1;
     }
 }

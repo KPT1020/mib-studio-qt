@@ -25,3 +25,6 @@
   dialog uses `SyringePumpService::getComPort(PumpId)` to enforce.
 - `flowRateUnit` is an integer code, not a string — `100` = µL/min.
 - See `docs/dLSP_pump.pdf` for the protocol.
+- Config/connect exceptions are logged with `SPDLOG_ERROR` in addition
+  to the `QMessageBox` — the dialog is transient and was previously the
+  only trace of the failure.

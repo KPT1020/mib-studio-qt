@@ -49,3 +49,8 @@
   to preserve the final view).
 - See tasks `knowledge_map/task/ui-status-stats.md` and
   `fps_mbs_zero.md` for common metric-display issues.
+- Overlay crops go through `cropToRoiClamped` (ROI ∩ image bounds):
+  buffered frames may predate the current realtime ROI, and an
+  out-of-bounds `cv::Rect` crop throws `cv::Exception` out of the
+  update slot, which aborts the app. Mismatched original/mask sizes
+  fall back to the plain (clamped) ROI extraction.

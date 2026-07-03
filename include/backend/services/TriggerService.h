@@ -51,6 +51,7 @@ public:
 
 private:
     void triggerLoop();
+    void triggerLoopBody();
 
     std::thread thread_;
     std::atomic<bool> running_{false};

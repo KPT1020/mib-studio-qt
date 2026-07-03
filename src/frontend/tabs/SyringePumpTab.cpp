@@ -176,6 +176,7 @@ void SyringePumpTab::onConnectSample() {
                 tr("Failed to connect Sample pump on COM%1 addr=%2").arg(comPort).arg(addr));
         }
     } catch (const std::exception& e) {
+        SPDLOG_ERROR("SyringePumpTab: sample pump config/connect failed: {}", e.what());
         QMessageBox::warning(this, tr("Config Error"), QString::fromStdString(e.what()));
     }
     updatePumpUI(0);
@@ -216,6 +217,7 @@ void SyringePumpTab::onConnectSheath() {
                 tr("Failed to connect Sheath pump on COM%1 addr=%2").arg(comPort).arg(addr));
         }
     } catch (const std::exception& e) {
+        SPDLOG_ERROR("SyringePumpTab: sheath pump config/connect failed: {}", e.what());
         QMessageBox::warning(this, tr("Config Error"), QString::fromStdString(e.what()));
     }
     updatePumpUI(1);

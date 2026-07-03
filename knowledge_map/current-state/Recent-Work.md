@@ -5,6 +5,34 @@
 
 ## Features shipped
 
+- **Crash-capture pipeline repair + bug-scan batch** (2026-07-03, task note
+  `task/2026-07-03-crash-capture-repair.md`) — The headline fix:
+  `CrashReporter::init` installed its own SEH/signal handlers AFTER
+  `sentry_init`, silently replacing Crashpad's (Windows) / inproc's (Linux)
+  handlers — real crashes never reached Sentry. Handlers are now installed
+  only when Sentry is not live; local `.dmp`/`.json` sidecars come from the
+  `on_crash` hook; recovered dumps upload via `sentry_capture_minidump`
+  (real stack traces) instead of a message event; fatal paths flush
+  (`captureException`, Qt fatal, terminate handler — which now also records
+  the uncaught exception's `what()`); `main()` flushes on all exit paths and
+  pins `crashpad_handler.exe` explicitly. Logging: `Logger::initFromDataDir`
+  runs before the CrashReporter (its init diagnostics used to vanish in the
+  console-less release build), `rotate_on_open` is off (crash-loops evicted
+  all history), unwritable log dirs fall back to a temp-dir FILE sink, and
+  worker-thread loops (trigger, autofocus×2, frame recording) are
+  exception-guarded and report via `captureException`. Bug-scan fixes:
+  HDF5 rank guards before every `H5Sget_simple_extent_dims` into a fixed
+  array (stack smash on foreign/corrupt files —
+  `recording.hdf5_foreign_rank` test), create-path geometry guards in
+  `writeImageDataset`/`writeSeriesImageDataset`, MindVision `grabFrame`
+  UAF vs `stop()`, torn-`std::function` races (`AutofocusService` status
+  callback, `AppBackend` fatal-save-error callback), NanopositionerTab
+  cross-thread `setText`, ExperimentMonitoringTab unclamped overlay ROI
+  crop, recording-thread `FrameStore::resize` resync, `release.yml` now
+  tags beta releases with `-DMIB_SENTRY_ENVIRONMENT`. New tests:
+  `backend.crash_reporter_terminate`, `backend.logger_init_fallback`,
+  `recording.hdf5_foreign_rank` (all proven failing pre-fix).
+
 - **Realtime-performance benchmark parts C/D/E** (2026-07-02, PR1 of
   `docs/exec-plans/active/2026-07-02-realtime-performance.md`) —
   Extended `tests/performance/pipeline_timing_benchmark.cpp` (CTest

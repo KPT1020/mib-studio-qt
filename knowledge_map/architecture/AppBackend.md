@@ -24,9 +24,11 @@ frameStore_  // shared_ptr<FrameStore>(5000)
 
 See `src/backend/AppBackend.cpp` around lines 79–200.
 
-1. Creates `dataDir` and resolves a user-writable log path (falls back to
-   `%LOCALAPPDATA%/MIB_Studio_Qt/logs/app.log` on Windows when `dataDir`
-   is under `Program Files`).
+1. Creates `dataDir` and calls `Logger::initFromDataDir(dataDir)` (a
+   no-op when `main()` already brought the logger up before the
+   CrashReporter; the path-resolution logic — including the Windows
+   Program Files → `%LOCALAPPDATA%` fallback — now lives in
+   [[../conventions/Logging]]).
 2. Instantiates all services + `FrameStore(5000)`.
 3. `sqliteService_->initialize(dataDir/app.sqlite3)`,
    `hdf5Service_->initialize(dataDir)`.
@@ -143,6 +145,13 @@ no contour processing.
 - `stopFrameRecording()` joins the recording thread; the thread drains the write
   queue, writes `/recording_info`, and closes the HDF5 file before the stop call
   returns.
+- The recording thread body is wrapped in try/catch (an escaping exception is
+  `std::terminate` for the whole app): it logs, reports via
+  `CrashReporter::captureException`, closes the file, and fires the fatal
+  save-error sink. It also resyncs its read pointer when
+  `FrameStore::resize()` renumbers frames (mirroring the realtime loops) —
+  previously a mid-recording resize idled the loop forever while the UI
+  still showed "recording".
 - The collector thread hands batches to a 3-slot [[../services/Hdf5Service]]
   `HdfWriteQueue` (writer thread does `appendRecordingFrames`), so slow disk no
   longer stalls FrameStore reads. The written count advances only on a confirmed
@@ -166,7 +175,10 @@ no contour processing.
 recording **and** experiment-flush ([[../services/ProcessingService]]) write
 failures to one callback. `MainWindow` marshals it to the UI thread, stops the
 active operation, and shows a modal Save Error dialog — failed saves are never
-silent.
+silent. The callback is guarded by `fatalSaveErrorCbMutex_` (set on the GUI
+thread, invoked from writer threads) and `MainWindow`'s destructor clears it;
+`reportFatalSaveError` also sends a `CrashReporter::captureMessage` so save
+failures reach Sentry.
 
 ## Config JSON storage
 

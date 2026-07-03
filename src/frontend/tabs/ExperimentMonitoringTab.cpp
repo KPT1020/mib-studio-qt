@@ -138,6 +138,21 @@ std::vector<InvalidReason> getInvalidReasons(
     return reasons;
 }
 
+// Intersects the requested ROI with the image bounds. Returns an empty Mat
+// when there is no overlap — buffered frames may have been captured under an
+// older ROI/geometry than the current realtime ROI, and an out-of-bounds
+// cv::Rect crop throws cv::Exception out of the update slot (which aborts
+// the app).
+cv::Mat cropToRoiClamped(const cv::Mat& img, int x, int y, int w, int h)
+{
+    const cv::Rect r =
+        cv::Rect(x, y, w, h) & cv::Rect(0, 0, img.cols, img.rows);
+    if (r.width <= 0 || r.height <= 0) {
+        return {};
+    }
+    return img(r);
+}
+
 } // anonymous namespace
 
 namespace frontend
@@ -778,11 +793,19 @@ namespace frontend
 
             if (showValidOverlay_ && !frame.processedImage.empty())
             {
-                // If monitoring stores ROI-only images, use them directly. Otherwise, crop.
+                // If monitoring stores ROI-only images, use them directly. Otherwise, crop
+                // (clamped: the buffered frame may predate the current ROI).
                 bool alreadyRoi = (frame.originalImage.cols == roi.w && frame.originalImage.rows == roi.h);
-                cv::Mat roiOriginal = alreadyRoi ? frame.originalImage : frame.originalImage(cv::Rect(roi.x, roi.y, roi.w, roi.h));
-                cv::Mat roiMask = alreadyRoi ? frame.processedImage : frame.processedImage(cv::Rect(roi.x, roi.y, roi.w, roi.h));
-                roiImage = createOverlayImage(roiOriginal, roiMask, &frame.validation);
+                cv::Mat roiOriginal = alreadyRoi ? frame.originalImage : cropToRoiClamped(frame.originalImage, roi.x, roi.y, roi.w, roi.h);
+                cv::Mat roiMask = alreadyRoi ? frame.processedImage : cropToRoiClamped(frame.processedImage, roi.x, roi.y, roi.w, roi.h);
+                if (!roiOriginal.empty() && roiOriginal.size() == roiMask.size())
+                {
+                    roiImage = createOverlayImage(roiOriginal, roiMask, &frame.validation);
+                }
+                else
+                {
+                    roiImage = extractRoiImage(frame.originalImage, roi.x, roi.y, roi.w, roi.h);
+                }
             }
             else
             {
@@ -854,9 +877,16 @@ namespace frontend
             if (showInvalidOverlay_ && !frame.processedImage.empty())
             {
                 bool alreadyRoi = (frame.originalImage.cols == roi.w && frame.originalImage.rows == roi.h);
-                cv::Mat roiOriginal = alreadyRoi ? frame.originalImage : frame.originalImage(cv::Rect(roi.x, roi.y, roi.w, roi.h));
-                cv::Mat roiMask = alreadyRoi ? frame.processedImage : frame.processedImage(cv::Rect(roi.x, roi.y, roi.w, roi.h));
-                roiImage = createOverlayImage(roiOriginal, roiMask, &frame.validation);
+                cv::Mat roiOriginal = alreadyRoi ? frame.originalImage : cropToRoiClamped(frame.originalImage, roi.x, roi.y, roi.w, roi.h);
+                cv::Mat roiMask = alreadyRoi ? frame.processedImage : cropToRoiClamped(frame.processedImage, roi.x, roi.y, roi.w, roi.h);
+                if (!roiOriginal.empty() && roiOriginal.size() == roiMask.size())
+                {
+                    roiImage = createOverlayImage(roiOriginal, roiMask, &frame.validation);
+                }
+                else
+                {
+                    roiImage = extractRoiImage(frame.originalImage, roi.x, roi.y, roi.w, roi.h);
+                }
             }
             else
             {

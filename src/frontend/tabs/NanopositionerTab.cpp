@@ -133,12 +133,17 @@ namespace frontend
 		connect(statusUpdateTimer_, &QTimer::timeout, this, &NanopositionerTab::onUpdateAutofocusStatus);
 		statusUpdateTimer_->start();
 
-		// Set status callback for autofocus service
+		// Set status callback for autofocus service. It fires on the
+		// autofocus control thread, so marshal to the GUI thread — touching
+		// the QLabel directly from a worker is undefined behavior.
 		backend_.autofocus().setStatusCallback([this](const std::string &message)
 											   {
-		if (ui->statusLabel) {
-			ui->statusLabel->setText(QString::fromStdString(message));
-		} });
+		const QString text = QString::fromStdString(message);
+		QMetaObject::invokeMethod(this, [this, text]() {
+			if (ui->statusLabel) {
+				ui->statusLabel->setText(text);
+			}
+		}, Qt::QueuedConnection); });
 
 		// Auto-connect is managed by DeviceInitManager (runs probe in worker, connect on main thread).
 
@@ -147,6 +152,9 @@ namespace frontend
 	}
 
 	NanopositionerTab::~NanopositionerTab() {
+		// The autofocus control thread outlives this widget; drop its
+		// reference to us before the widget is destroyed.
+		backend_.autofocus().setStatusCallback({});
 		delete ui;
 	}
 

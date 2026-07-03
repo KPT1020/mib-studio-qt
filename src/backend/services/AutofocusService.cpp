@@ -1,5 +1,6 @@
 #include "backend/services/AutofocusService.h"
 #include "backend/services/AutofocusMath.h"
+#include "backend/services/CrashReporter.h"
 #include "backend/app/Tools.h"
 #include "backend/diagnostics/CrashStateMirror.h"
 
@@ -84,9 +85,7 @@ bool AutofocusService::connect(int comPort, int baudRate, unsigned char deviceAd
         if (result == 0) {
             SPDLOG_ERROR("AutofocusService: Failed to open COM{} at {} baud after {} attempts",
                          comPort, baudRate, SERIAL_OPEN_ATTEMPTS);
-            if (statusCallback_) {
-                statusCallback_("Failed to open COM port " + std::to_string(comPort));
-            }
+            notifyStatus("Failed to open COM port " + std::to_string(comPort));
             connected_.store(false);
             CloseSer();
             return false;
@@ -132,9 +131,7 @@ bool AutofocusService::connect(int comPort, int baudRate, unsigned char deviceAd
         controlThread_ = std::thread(&AutofocusService::controlLoop, this);
     }
 
-    if (statusCallback_) {
-        statusCallback_("Connected to nanopositioner on COM" + std::to_string(comPort));
-    }
+    notifyStatus("Connected to nanopositioner on COM" + std::to_string(comPort));
 
     return true;
 }
@@ -180,9 +177,7 @@ void AutofocusService::disconnect() {
     }
 
     SPDLOG_INFO("AutofocusService: Disconnected from nanopositioner");
-    if (statusCallback_) {
-        statusCallback_("Disconnected from nanopositioner");
-    }
+    notifyStatus("Disconnected from nanopositioner");
 }
 
 bool AutofocusService::probeComPort(int comPort, int baudRate, unsigned char deviceAddress) {
@@ -214,9 +209,7 @@ void AutofocusService::setEnabled(bool enabled) {
     enabled_.store(enabled);
     backend::diagnostics::CrashStateMirror::instance().autofocus.enabled.store(enabled);
     SPDLOG_INFO("AutofocusService: Autofocus {}", enabled ? "enabled" : "disabled");
-    if (statusCallback_) {
-        statusCallback_(enabled ? "Autofocus enabled" : "Autofocus disabled");
-    }
+    notifyStatus(enabled ? "Autofocus enabled" : "Autofocus disabled");
 }
 
 void AutofocusService::increaseVoltage() {
@@ -309,7 +302,30 @@ void AutofocusService::setStatusCallback(StatusCallback callback) {
     statusCallback_ = std::move(callback);
 }
 
+void AutofocusService::notifyStatus(const std::string& message) {
+    StatusCallback cb;
+    {
+        std::scoped_lock lock(callbackMutex_);
+        cb = statusCallback_;
+    }
+    if (cb) cb(message);
+}
+
 void AutofocusService::statsLoop() {
+    // An exception escaping a std::thread body is std::terminate for the
+    // whole app; report it and end this service's loop instead.
+    try {
+        statsLoopBody();
+    } catch (const std::exception& e) {
+        SPDLOG_ERROR("AutofocusService stats loop crashed: {}", e.what());
+        CrashReporter::captureException(std::string("AutofocusService stats loop: ") + e.what());
+    } catch (...) {
+        SPDLOG_ERROR("AutofocusService stats loop crashed: unknown exception");
+        CrashReporter::captureException("AutofocusService stats loop: unknown exception");
+    }
+}
+
+void AutofocusService::statsLoopBody() {
     SPDLOG_INFO("AutofocusService: Stats loop started");
 
     // Local drain buffer — swapped with pendingSamples_ under the pending
@@ -358,6 +374,18 @@ void AutofocusService::statsLoop() {
 }
 
 void AutofocusService::controlLoop() {
+    try {
+        controlLoopBody();
+    } catch (const std::exception& e) {
+        SPDLOG_ERROR("AutofocusService control loop crashed: {}", e.what());
+        CrashReporter::captureException(std::string("AutofocusService control loop: ") + e.what());
+    } catch (...) {
+        SPDLOG_ERROR("AutofocusService control loop crashed: unknown exception");
+        CrashReporter::captureException("AutofocusService control loop: unknown exception");
+    }
+}
+
+void AutofocusService::controlLoopBody() {
     SPDLOG_INFO("AutofocusService: Control loop started");
 
     while (running_.load()) {
@@ -384,9 +412,7 @@ void AutofocusService::controlLoop() {
                 currentVoltage_.store(newVoltage);
                 SPDLOG_DEBUG("AutofocusService: Manual voltage increased to {}V", newVoltage);
                 increaseVoltageRequest_.store(false);
-                if (statusCallback_) {
-                    statusCallback_("Voltage: " + std::to_string(newVoltage) + "V");
-                }
+                notifyStatus("Voltage: " + std::to_string(newVoltage) + "V");
             }
 
             if (decreaseVoltageRequest_.load()) {
@@ -398,9 +424,7 @@ void AutofocusService::controlLoop() {
                 currentVoltage_.store(newVoltage);
                 SPDLOG_DEBUG("AutofocusService: Manual voltage decreased to {}V", newVoltage);
                 decreaseVoltageRequest_.store(false);
-                if (statusCallback_) {
-                    statusCallback_("Voltage: " + std::to_string(newVoltage) + "V");
-                }
+                notifyStatus("Voltage: " + std::to_string(newVoltage) + "V");
             }
         }
 
@@ -471,10 +495,8 @@ void AutofocusService::controlLoop() {
 
                     SPDLOG_DEBUG("AutofocusService: Adjusted voltage to {}V (ring width: {:.3f}, deviation: {:.3f})",
                                 newVoltage, medianRingRatio, medianRingRatio - cfg.focusSetpoint);
-                    if (statusCallback_) {
-                        statusCallback_("Voltage: " + std::to_string(newVoltage) + "V (ring width: " + 
-                                      std::to_string(medianRingRatio) + ")");
-                    }
+                    notifyStatus("Voltage: " + std::to_string(newVoltage) + "V (ring width: " +
+                                 std::to_string(medianRingRatio) + ")");
                 }
             }
         }

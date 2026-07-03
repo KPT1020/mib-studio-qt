@@ -151,11 +151,15 @@ jobs:
         shell: pwsh
         env:
           MIB_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          MIB_SENTRY_ENV: ${{ steps.version.outputs.channel == 'stable' && 'production' || 'beta' }}
         run: |
           $cmakeArgs = @("--preset", "windows-default", "-DMIB_ENABLE_MINDVISION=OFF")
           if ($env:MIB_SENTRY_DSN) {
             $cmakeArgs += "-DMIB_SENTRY_DSN=$env:MIB_SENTRY_DSN"
-            Write-Host "Sentry DSN injected into release build."
+            # Tag beta releases as environment=beta (mirrors build-windows.yml);
+            # omitting this made every release report as "production".
+            $cmakeArgs += "-DMIB_SENTRY_ENVIRONMENT=$env:MIB_SENTRY_ENV"
+            Write-Host "Sentry DSN injected into release build (env=$env:MIB_SENTRY_ENV)."
           } else {
             Write-Host "SENTRY_DSN not set; released build runs in local-only crash mode (no events sent)." -ForegroundColor Yellow
           }
