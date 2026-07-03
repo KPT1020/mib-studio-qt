@@ -1,0 +1,15 @@
+group,metric,defined_pct,spearman,n,dyn_range,monotonic_down,curve_norm
+robustness,OLD nested-ring (fixed thresh),66.5,,,,,
+robustness,OLD nested-ring (Otsu thresh),73.4,,,,,
+robustness,lap_var,100.0,,,,,
+robustness,tenengrad,100.0,,,,,
+robustness,intensity_std,100.0,,,,,
+robustness,radial_ratio,100.0,,,,,
+corr_vs_ref_ring,lap_var,,0.398,162.0,,,
+corr_vs_ref_ring,tenengrad,,0.392,162.0,,,
+corr_vs_ref_ring,intensity_std,,0.363,162.0,,,
+corr_vs_ref_ring,radial_ratio,,0.326,162.0,,,
+defocus_response,lap_var,,,,50.9,True,"[np.float64(1.0), np.float64(0.617), np.float64(0.33), np.float64(0.15), np.float64(0.072), np.float64(0.02)]"
+defocus_response,tenengrad,,,,10.9,True,"[np.float64(1.0), np.float64(0.801), np.float64(0.582), np.float64(0.359), np.float64(0.214), np.float64(0.092)]"
+defocus_response,intensity_std,,,,2.0,True,"[np.float64(1.0), np.float64(0.908), np.float64(0.807), np.float64(0.698), np.float64(0.624), np.float64(0.512)]"
+defocus_response,radial_ratio,,,,-28765.9,True,"[np.float64(1.0), np.float64(1.861), np.float64(3.94), np.float64(5.761), np.float64(8.554), np.float64(13.259)]"

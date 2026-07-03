@@ -46,6 +46,7 @@ note in `methods.temporal_eval` and REPORT.md.
 | `run_experiments.py` | Runs every prototype, writes `results/experiments.{csv,json}` |
 | `download_stream.py` | Fetch the 5000-frame stream, match GT frames by pixel hash |
 | `stream_bench.py` | **Real-stream** background + throughput validation (authoritative) |
+| `focus_metric.py` | Robust focus metric (Laplacian variance) vs the nested-contour ring ratio |
 | `results/`        | Recorded experiment results for later comparison |
 
 ## Method notes

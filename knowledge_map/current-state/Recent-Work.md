@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Focus-metric study — Laplacian-variance replacement for ring ratio**
+  (2026-07-03, `benchmarks/mask-gen/focus_metric.py`) — Quantified the fragility
+  of the nested-contour ring ratio ([[ProcessingService]] `calculateRingRatio`):
+  the closed inner ring is present on only 66 % of GT frames (fixed threshold),
+  73 % with adaptive Otsu. A topology-free **variance of the Laplacian** of the
+  bg-subtracted intensity inside the solid cell mask is defined on 100 % of
+  frames and falls monotonically under a controlled defocus sweep with a 50×
+  dynamic range (Tenengrad 11× is a smoother alternative). Recommendation +
+  C++ sketch in `benchmarks/mask-gen/REPORT.md`; numbers in
+  `results/focus_experiments.{csv,json}`. Study only — not yet wired into the
+  service.
 - **Adaptive (Otsu) segmentation threshold** (2026-07-03,
   [[ProcessingService]]) — New `applyProcessingThreshold` helper routes all four
   segmentation sites (`computeProcessedFrame` + 3 realtime-loop copies) through

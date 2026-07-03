@@ -321,6 +321,53 @@ C++ faster still. The top-hat becomes an optional flag for abnormal drift;
 temporal backgrounds, hysteresis, watershed, and shape regularisation are not
 worth it here. Use `pipelines.estimate_background_fast` for the background.
 
+## Focus metric — replacing the nested-contour ring ratio
+
+`ProcessingService::calculateRingRatio` = `sqrt(parentArea − innerArea)` from a
+**nested** contour pair (`findContours(RETR_TREE)`), used to quantify cell
+focus. It only exists when the cell thresholds into a *closed* ring, so it
+breaks whenever the rim is not a closed loop. Measured on this GT set
+(`focus_metric.py`):
+
+* **Robustness** — the nested ring is present on only **66 %** of frames with
+  the fixed threshold and **73 %** with adaptive Otsu. (So the adaptive-Otsu
+  change does *not* degrade the ring — it is marginally more robust — but ~1/3
+  of frames still have no usable ring.)
+
+Focus lives in the cell's **intensity**, not in mask topology. Computing it from
+the background-subtracted intensity inside a *solid* cell mask (the Otsu-filled
+region — always available) decouples "where is the cell" from "is it focused"
+and is defined on **100 %** of frames. Candidates, validated by a controlled
+defocus sweep (blur the 40 sharpest cells, σ 0→3; a good focus metric falls
+monotonically with large dynamic range):
+
+| metric | defined | defocus dynamic range | Spearman vs ref ring_ratio |
+|--------|:-------:|:---------------------:|:--------------------------:|
+| **variance of Laplacian** | 100 % | **50.9×**, monotonic | +0.40 |
+| Tenengrad (Sobel energy)  | 100 % | 10.9×, monotonic | +0.39 |
+| intensity std             | 100 % | 2.0× (weak) | +0.36 |
+| radial contrast ratio     | 100 % | unstable (sign flips) | +0.33 |
+| old nested-ring ratio     | 66–73 % | — (undefined on 1/3) | reference |
+
+**Variance of the Laplacian** is the clear winner: always defined, monotonic
+under defocus with a 50× range, and cheap (one `cv::Laplacian` + `meanStdDev`
+over the object mask, a few µs). Correlation to the old ring_ratio is only
+moderate (+0.40) because that reference is itself the noisy quantity being
+replaced (0 on 11/173 even in the SAM2 pipeline) — the defocus sweep is the
+trustworthy validation. Recorded in `results/focus_experiments.{csv,json}`.
+
+**Recommended change:** add a topology-free `focusScore` = variance of the
+Laplacian of the bg-subtracted ROI within the object mask, as a *new* field
+alongside `ringRatio` (additive, so existing configs keep working), then migrate
+the focus gate from `ringRatio` to `focusScore`:
+
+```cpp
+// bg-subtracted ROI `diff` (CV_8UC1) and the filled object mask `objMask`
+cv::Mat lap; cv::Laplacian(diff, lap, CV_32F, 3);
+cv::Scalar m, sd; cv::meanStdDev(lap, m, sd, objMask);
+double focusScore = sd[0] * sd[0];   // variance of Laplacian within the cell
+```
+
 ## Caveats
 
 * Reference masks are SAM2 pseudo-GT (`gt_status = predicted`), not
