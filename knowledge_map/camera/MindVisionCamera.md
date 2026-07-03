@@ -68,3 +68,6 @@ still applies only its historical subset).
   packaging is enabled.
 - The current backend treats MindVision as a separate camera provider; mock
   and EGrabber paths remain independent.
+- `grabFrame` copies out of `outBuffer_` while still holding
+  `stateMutex_`: `stop()` frees that buffer under the same lock, so an
+  unlocked copy raced Stop Capture and read freed memory (fixed 2026-07).

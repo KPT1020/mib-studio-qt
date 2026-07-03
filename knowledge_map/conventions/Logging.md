@@ -1,7 +1,10 @@
 # Logging
 
 > All runtime logging goes through spdlog. Configured once by
-> `backend::services::Logger::init(path)` during `AppBackend::initialize`.
+> `backend::services::Logger::initFromDataDir(dataDir)` — called first in
+> `main()` (before the CrashReporter, so its init diagnostics reach the
+> file), and again idempotently by `AppBackend::initialize` for tests and
+> embedders that skip `main()`.
 
 **Source:** `src/backend/services/Logger.cpp`,
 `include/backend/services/Logger.h`
@@ -21,11 +24,20 @@ capture source file/line info.
 
 ## Log file location
 
-`AppBackend::initialize` picks a user-writable location:
+`Logger::initFromDataDir` picks a user-writable location:
 
 - Default: `<dataDir>/logs/app.log`.
 - On Windows, if `dataDir` is under `Program Files`, fall back to
   `%LOCALAPPDATA%/MIB_Studio_Qt/logs/app.log`.
+- If the resolved location is unwritable, a second fallback under
+  `<temp>/MIB_Studio_Qt/logs/app.log` keeps FILE logging alive — a
+  console-only fallback is invisible in the release GUI build.
+  `Logger::resolvedLogFilePath()` reports the active file.
+
+Rotation: 10 MB × 5 files, and `rotate_on_open` stays **false** — rotating
+on every launch let a 5-restart crash-loop evict all history before anyone
+could read it. Regression test:
+`tests/backend/logger_init_fallback_test.cpp`.
 
 ## Conventions
 

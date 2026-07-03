@@ -78,3 +78,7 @@
   block on a running future, so the task can outlive the window (the backend
   cannot — it is constructed before the window in `main()`). The destructor
   additionally `waitForFinished()`s any in-flight flush before members die.
+- The destructor clears BOTH backend callbacks
+  (`setBackgroundCaptureCallback({})` and `setFatalSaveErrorCallback({})`)
+  — the backend and its writer threads outlive the window, and a save
+  error during teardown must not invoke a callback into a dead widget.

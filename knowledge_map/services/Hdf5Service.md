@@ -111,3 +111,12 @@ Blocking I/O on whichever thread calls it. In practice:
   before `stopFrameRecording()` returned. With interval flushing, a kill
   between flushes can leave up to `MIB_HDF5_FLUSH_INTERVAL_MS` of frames
   unflushed.
+- **Rank guards before extent reads.** Every reader/appender validates
+  `H5Sget_simple_extent_ndims` against the expected rank BEFORE calling
+  `H5Sget_simple_extent_dims` into a fixed-size array — a foreign/corrupt
+  file with a higher-rank dataset would otherwise smash the stack
+  (regression test: `tests/recording/hdf5_foreign_rank_test.cpp`). The
+  create-path writers (`writeImageDataset`, `writeSeriesImageDataset`)
+  also reject mid-batch geometry changes loudly, mirroring the append
+  path — skipping a mismatched frame silently desynced images[i] from
+  metadata[i] and wrote uninitialized bytes.

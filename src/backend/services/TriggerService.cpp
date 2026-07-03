@@ -1,5 +1,6 @@
 #include "backend/services/TriggerService.h"
 #include "backend/camera/common/ICamera.h"
+#include "backend/services/CrashReporter.h"
 #include <spdlog/spdlog.h>
 #include <chrono>
 
@@ -65,6 +66,20 @@ void TriggerService::onTargetGroupResult(const TargetGroupSignal& signal) {
 }
 
 void TriggerService::triggerLoop() {
+    // An exception escaping a std::thread body is std::terminate for the
+    // whole app; report it and end this service's loop instead.
+    try {
+        triggerLoopBody();
+    } catch (const std::exception& e) {
+        SPDLOG_ERROR("TriggerService loop crashed: {}", e.what());
+        CrashReporter::captureException(std::string("TriggerService loop: ") + e.what());
+    } catch (...) {
+        SPDLOG_ERROR("TriggerService loop crashed: unknown exception");
+        CrashReporter::captureException("TriggerService loop: unknown exception");
+    }
+}
+
+void TriggerService::triggerLoopBody() {
     while (running_.load()) {
         {
             std::unique_lock<std::mutex> lk(triggerMutex_);

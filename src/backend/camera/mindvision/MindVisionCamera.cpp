@@ -392,6 +392,24 @@ bool MindVisionCamera::grabFrame(Frame &out)
                 return false;
             }
             procStatus = CameraImageProcess(hCamera_, pBuffer, outBuffer_, &frameHead);
+            if (procStatus == CAMERA_STATUS_SUCCESS)
+            {
+                // Copy out of outBuffer_ while still holding stateMutex_:
+                // stop() frees outBuffer_ under the same lock, so an
+                // unlocked copy here races a concurrent Stop Capture and
+                // reads freed memory.
+                const int width = frameHead.iWidth;
+                const int height = frameHead.iHeight;
+                const std::size_t byteSize =
+                    static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+                out.width = static_cast<std::uint64_t>(width);
+                out.height = static_cast<std::uint64_t>(height);
+                out.pixelFormat = kMono8PfncCode;
+                out.linePitch = static_cast<std::size_t>(width);
+                out.timestamp = static_cast<std::uint64_t>(frameHead.uiTimeStamp) * 100'000ULL;
+                out.data.assign(outBuffer_, outBuffer_ + byteSize);
+                ++frameCount_;
+            }
         }
 
         CameraReleaseImageBuffer(hCamera, pBuffer);
@@ -400,22 +418,6 @@ bool MindVisionCamera::grabFrame(Frame &out)
         {
             SPDLOG_WARN("MindVisionCamera: CameraImageProcess returned {}", procStatus);
             continue;
-        }
-
-        const int width = frameHead.iWidth;
-        const int height = frameHead.iHeight;
-        const std::size_t byteSize = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
-
-        out.width = static_cast<std::uint64_t>(width);
-        out.height = static_cast<std::uint64_t>(height);
-        out.pixelFormat = kMono8PfncCode;
-        out.linePitch = static_cast<std::size_t>(width);
-        out.timestamp = static_cast<std::uint64_t>(frameHead.uiTimeStamp) * 100'000ULL;
-        out.data.assign(outBuffer_, outBuffer_ + byteSize);
-
-        {
-            std::lock_guard<std::mutex> lock(stateMutex_);
-            ++frameCount_;
         }
         return true;
     }

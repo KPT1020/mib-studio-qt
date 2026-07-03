@@ -3,6 +3,7 @@
 #include <spdlog/spdlog.h>
 
 #include <atomic>
+#include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -43,6 +44,9 @@ namespace {
 struct CrashGlobals {
     std::atomic<bool> initialized{false};
     std::atomic<bool> handlingCrash{false};
+    // True once sentry_init succeeded — the Sentry backend (crashpad on
+    // Windows, inproc elsewhere) then owns the process crash handlers.
+    std::atomic<bool> sentryActive{false};
     CrashReporter::Config config{};
     CrashReporter::StateSnapshotFn stateSnapshot;
     std::mutex stateSnapshotMutex;
@@ -100,12 +104,11 @@ void writeStateJsonSidecar(const std::filesystem::path& jsonPath) {
     auto& g = globals();
     std::string json;
     {
-        // try_lock avoids deadlock if the crashing thread already holds
-        // the snapshot mutex.
-        std::unique_lock<std::mutex> lk(g.stateSnapshotMutex, std::defer_lock);
-        if (lk.try_lock() && g.stateSnapshot) {
-            json = g.stateSnapshot();
-        } else if (g.stateSnapshot) {
+        // try_lock so we never deadlock if the crashing thread holds the
+        // snapshot mutex; on contention we still read the callback without
+        // the lock (best-effort — the mirror is set once at startup).
+        std::unique_lock<std::mutex> lk(g.stateSnapshotMutex, std::try_to_lock);
+        if (g.stateSnapshot) {
             json = g.stateSnapshot();
         } else {
             json = R"({"note":"no state mirror registered"})";
@@ -225,20 +228,81 @@ void terminateHandler() {
     if (!g.handlingCrash.compare_exchange_strong(expected, true)) {
         std::abort();
     }
+    // std::terminate runs on a normal thread (not from a signal), so
+    // describing the active exception and flushing Sentry is safe here.
+    std::string what = "std::terminate without active exception";
+    if (auto ex = std::current_exception()) {
+        try {
+            std::rethrow_exception(ex);
+        } catch (const std::exception& e) {
+            what = std::string("uncaught exception: ") + e.what();
+        } catch (...) {
+            what = "uncaught non-std exception";
+        }
+    }
     try {
+        SPDLOG_CRITICAL("terminateHandler: {}", what);
         std::error_code ec;
         std::filesystem::create_directories(g.config.crashDir, ec);
         const auto base = makeCrashFilenameBase(g.config.crashDir, "terminate");
         const auto json = std::filesystem::path(base.string() + ".json");
         writeStateJsonSidecar(json);
+        std::ofstream txt(base.string() + ".txt");
+        txt << what << "\n";
 #ifdef _WIN32
-        const auto dump = std::filesystem::path(base.string() + ".dmp");
-        writeMinidumpInternal(nullptr, dump);
+        // Only write a local dump when Sentry is not live — otherwise the
+        // abort() below reaches Crashpad, which captures its own dump, and
+        // this one would be re-uploaded next launch as a duplicate.
+        if (!g.sentryActive.load()) {
+            const auto dump = std::filesystem::path(base.string() + ".dmp");
+            writeMinidumpInternal(nullptr, dump);
+        }
+#endif
+#if defined(MIB_USE_SENTRY) && MIB_USE_SENTRY
+        if (g.sentryActive.load()) {
+            sentry_value_t ev = sentry_value_new_message_event(
+                SENTRY_LEVEL_FATAL, "terminate", what.c_str());
+            sentry_capture_event(ev);
+            sentry_flush(2000);
+        }
 #endif
     } catch (...) {
     }
     std::abort();
 }
+
+#if defined(MIB_USE_SENTRY) && MIB_USE_SENTRY
+// Invoked by the Sentry backend from its own crash handler (crashpad's
+// local exception handler on Windows, the inproc signal handler elsewhere)
+// so the local .dmp/.json sidecars are still produced while Sentry keeps
+// ownership of the process crash handlers. Returning the event unchanged
+// lets Sentry upload it.
+sentry_value_t sentryOnCrashHook(const sentry_ucontext_t* uctx,
+                                 sentry_value_t event,
+                                 void* /*closure*/) {
+    auto& g = globals();
+    bool expected = false;
+    if (g.handlingCrash.compare_exchange_strong(expected, true)) {
+        try {
+            std::error_code ec;
+            std::filesystem::create_directories(g.config.crashDir, ec);
+            const auto base = makeCrashFilenameBase(g.config.crashDir, "crash");
+#ifdef _WIN32
+            if (uctx) {
+                EXCEPTION_POINTERS eptr = uctx->exception_ptrs;
+                writeMinidumpInternal(&eptr, std::filesystem::path(base.string() + ".dmp"));
+            }
+#else
+            (void)uctx;
+#endif
+            writeStateJsonSidecar(std::filesystem::path(base.string() + ".json"));
+        } catch (...) {
+            // Already crashing — never throw back into the crash handler.
+        }
+    }
+    return event;
+}
+#endif // MIB_USE_SENTRY
 
 void qtMessageHandler(QtMsgType type, const QMessageLogContext& ctx, const QString& msg) {
     const std::string m = msg.toStdString();
@@ -252,40 +316,58 @@ void qtMessageHandler(QtMsgType type, const QMessageLogContext& ctx, const QStri
         case QtCriticalMsg: SPDLOG_ERROR("[Qt] {} ({}:{} {})", m, file, ctx.line, fn);
                              CrashReporter::captureMessage("Qt critical: " + m); break;
         case QtFatalMsg:    SPDLOG_CRITICAL("[Qt FATAL] {} ({}:{} {})", m, file, ctx.line, fn);
-                             CrashReporter::captureMessage("Qt fatal: " + m); break;
+                             CrashReporter::captureMessage("Qt fatal: " + m);
+                             // Qt aborts right after this handler returns, so
+                             // the event must be flushed now or it is lost.
+#if defined(MIB_USE_SENTRY) && MIB_USE_SENTRY
+                             if (globals().sentryActive.load()) sentry_flush(2000);
+#endif
+                             break;
     }
+}
+
+bool stemEndsWith(const std::filesystem::path& p, std::string_view suffix) {
+    const std::string stem = p.stem().string();
+    return stem.size() >= suffix.size() &&
+           stem.compare(stem.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
 void uploadPendingCrashes(const std::filesystem::path& dir) {
 #if defined(MIB_USE_SENTRY) && MIB_USE_SENTRY
+    if (!globals().sentryActive.load()) return;
     std::error_code ec;
     if (!std::filesystem::exists(dir, ec)) return;
     for (auto& entry : std::filesystem::directory_iterator(dir, ec)) {
         if (ec) break;
-        if (!entry.is_regular_file()) continue;
+        if (!entry.is_regular_file(ec)) continue;
         const auto p = entry.path();
         if (p.extension() != ".dmp") continue;
 
-        sentry_value_t event = sentry_value_new_event();
-        sentry_value_set_by_key(event, "level", sentry_value_new_string("fatal"));
-        sentry_value_set_by_key(event, "message",
-            sentry_value_new_string(("Recovered crash dump: " + p.filename().string()).c_str()));
+        const auto sidecar = std::filesystem::path(p).replace_extension(".json");
+        const bool haveSidecar = std::filesystem::exists(sidecar, ec);
 
-        auto sidecar = std::filesystem::path(p).replace_extension(".json");
-        if (std::filesystem::exists(sidecar, ec)) {
-            std::ifstream f(sidecar);
-            std::stringstream ss; ss << f.rdbuf();
-            sentry_set_extra("state_snapshot", sentry_value_new_string(ss.str().c_str()));
+        // "-crash" dumps were written by the on_crash hook while the Sentry
+        // backend was live, so Crashpad/inproc already reported that crash.
+        // Re-capturing them would duplicate the event; just retire them.
+        if (!stemEndsWith(p, "-crash")) {
+            if (haveSidecar) {
+                std::ifstream f(sidecar);
+                std::stringstream ss; ss << f.rdbuf();
+                sentry_set_extra("state_snapshot",
+                                 sentry_value_new_string(ss.str().c_str()));
+            }
+            // Uploads the minidump itself so the crash gets a real stack
+            // trace, not just a "recovered dump" message.
+            sentry_capture_minidump(p.string().c_str());
+            if (haveSidecar) {
+                sentry_remove_extra("state_snapshot");
+            }
+            SPDLOG_INFO("CrashReporter: uploaded pending crash dump: {}", p.string());
         }
-
-        sentry_capture_event(event);
-        // Note: Crashpad-managed dumps are attached automatically. For
-        // dumps we wrote outside Crashpad we attach the file path here.
-        SPDLOG_INFO("CrashReporter: queued pending crash for upload: {}", p.string());
 
         // Move to .uploaded to avoid re-submission on next launch.
         std::filesystem::rename(p, p.string() + ".uploaded", ec);
-        if (std::filesystem::exists(sidecar, ec)) {
+        if (haveSidecar) {
             std::filesystem::rename(sidecar, sidecar.string() + ".uploaded", ec);
         }
     }
@@ -324,12 +406,25 @@ bool CrashReporter::init(const Config& cfg) {
         if (!cfg.databaseDir.empty()) {
             sentry_options_set_database_path(options, cfg.databaseDir.string().c_str());
         }
+#ifdef _WIN32
+        if (!cfg.handlerPath.empty()) {
+            // Pin crashpad_handler.exe explicitly instead of relying on
+            // sentry-native's implicit lookup (which can miss when the
+            // working directory differs from the install directory).
+            sentry_options_set_handler_pathw(options, cfg.handlerPath.c_str());
+        }
+#endif
         sentry_options_set_auto_session_tracking(options, 1);
         sentry_options_set_symbolize_stacktraces(options, 1);
+        // Local .dmp/.json sidecars are produced from Sentry's own crash
+        // handler so we never have to install a competing SEH/signal
+        // handler on top of it.
+        sentry_options_set_on_crash(options, sentryOnCrashHook, nullptr);
 
         if (sentry_init(options) != 0) {
             SPDLOG_WARN("CrashReporter: sentry_init failed; continuing local-only");
         } else {
+            g.sentryActive.store(true);
             SPDLOG_INFO("CrashReporter: Sentry initialized (release={}, env={}, tracesSampleRate={})",
                         cfg.release, cfg.environment, tracesSampleRate);
         }
@@ -340,27 +435,36 @@ bool CrashReporter::init(const Config& cfg) {
     SPDLOG_INFO("CrashReporter: built without Sentry support; running in local-only mode");
 #endif
 
+    // Install our own crash handlers ONLY when the Sentry backend is not
+    // live. sentry_init() installs the Crashpad (Windows) / inproc (POSIX)
+    // handlers, and SetUnhandledExceptionFilter / std::signal REPLACE the
+    // installed handler without chaining — overriding them here used to
+    // disable Sentry crash capture entirely. When Sentry is live, the local
+    // sidecars come from sentryOnCrashHook instead.
+    if (!g.sentryActive.load()) {
 #ifdef _WIN32
-    ::SetUnhandledExceptionFilter(sehHandler);
+        ::SetUnhandledExceptionFilter(sehHandler);
 #endif
-
-    if (cfg.installSignalHandlers) {
-        std::signal(SIGSEGV, signalHandler);
-        std::signal(SIGABRT, signalHandler);
-        std::signal(SIGFPE,  signalHandler);
-        std::signal(SIGILL,  signalHandler);
+        if (cfg.installSignalHandlers) {
+            std::signal(SIGSEGV, signalHandler);
+            std::signal(SIGABRT, signalHandler);
+            std::signal(SIGFPE,  signalHandler);
+            std::signal(SIGILL,  signalHandler);
+        }
     }
 
     if (cfg.installTerminateHandler) {
         std::set_terminate(terminateHandler);
     }
 
+    g.initialized.store(true);
+
     if (cfg.installQtMessageHandler) {
         qInstallMessageHandler(qtMessageHandler);
     }
 
-    g.initialized.store(true);
-    SPDLOG_INFO("CrashReporter initialized: crashDir={}", cfg.crashDir.string());
+    SPDLOG_INFO("CrashReporter initialized: crashDir={}, sentryActive={}",
+                cfg.crashDir.string(), g.sentryActive.load());
 
     if (cfg.uploadPendingOnStart) {
         uploadPendingCrashes(cfg.crashDir);
@@ -372,7 +476,10 @@ void CrashReporter::shutdown() {
     auto& g = globals();
     if (!g.initialized.load()) return;
 #if defined(MIB_USE_SENTRY) && MIB_USE_SENTRY
-    sentry_close();
+    if (g.sentryActive.load()) {
+        sentry_close(); // flushes pending events
+        g.sentryActive.store(false);
+    }
 #endif
     g.initialized.store(false);
 }
@@ -383,7 +490,7 @@ bool CrashReporter::isInitialized() {
 
 void CrashReporter::setTag(std::string_view key, std::string_view value) {
 #if defined(MIB_USE_SENTRY) && MIB_USE_SENTRY
-    if (!globals().initialized.load()) return;
+    if (!globals().sentryActive.load()) return;
     sentry_set_tag(std::string(key).c_str(), std::string(value).c_str());
 #else
     (void)key; (void)value;
@@ -392,7 +499,7 @@ void CrashReporter::setTag(std::string_view key, std::string_view value) {
 
 void CrashReporter::setContextJson(std::string_view name, std::string_view json) {
 #if defined(MIB_USE_SENTRY) && MIB_USE_SENTRY
-    if (!globals().initialized.load()) return;
+    if (!globals().sentryActive.load()) return;
     sentry_value_t v = sentry_value_new_string(std::string(json).c_str());
     sentry_set_extra(std::string(name).c_str(), v);
 #else
@@ -404,7 +511,7 @@ void CrashReporter::breadcrumb(std::string_view category,
                                 std::string_view message,
                                 std::string_view jsonData) {
 #if defined(MIB_USE_SENTRY) && MIB_USE_SENTRY
-    if (!globals().initialized.load()) return;
+    if (!globals().sentryActive.load()) return;
     sentry_value_t crumb = sentry_value_new_breadcrumb(
         std::string(category).c_str(),
         std::string(message).c_str());
@@ -426,7 +533,7 @@ void CrashReporter::registerStateMirror(StateSnapshotFn fn) {
 
 void CrashReporter::captureMessage(std::string_view message) {
 #if defined(MIB_USE_SENTRY) && MIB_USE_SENTRY
-    if (!globals().initialized.load()) return;
+    if (!globals().sentryActive.load()) return;
     sentry_value_t ev = sentry_value_new_message_event(SENTRY_LEVEL_ERROR, "app",
                                                        std::string(message).c_str());
     sentry_capture_event(ev);
@@ -437,10 +544,14 @@ void CrashReporter::captureMessage(std::string_view message) {
 
 void CrashReporter::captureException(std::string_view what) {
 #if defined(MIB_USE_SENTRY) && MIB_USE_SENTRY
-    if (!globals().initialized.load()) return;
-    sentry_value_t ev = sentry_value_new_message_event(SENTRY_LEVEL_FATAL, "exception",
-                                                       std::string(what).c_str());
-    sentry_capture_event(ev);
+    if (globals().sentryActive.load()) {
+        sentry_value_t ev = sentry_value_new_message_event(SENTRY_LEVEL_FATAL, "exception",
+                                                           std::string(what).c_str());
+        sentry_capture_event(ev);
+        // Callers are usually about to die (top-level catch in main); the
+        // event is lost unless it is flushed before the process exits.
+        sentry_flush(2000);
+    }
 #endif
     // Always write a local sidecar so we have something on disk even
     // without Sentry.
@@ -460,7 +571,7 @@ void CrashReporter::capturePerformanceTransaction(std::string_view name,
                                                   double durationMs,
                                                   std::string_view jsonData) {
 #if defined(MIB_USE_SENTRY) && MIB_USE_SENTRY
-    if (!globals().initialized.load()) return;
+    if (!globals().sentryActive.load()) return;
     if (name.empty() || operation.empty() || durationMs < 0.0) return;
 
     const std::string nameStr(name);

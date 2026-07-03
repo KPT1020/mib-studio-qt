@@ -51,40 +51,6 @@ namespace backend
 {
     namespace
     {
-        // Get a user-writable log path, falling back to dataDir if needed
-        std::string getLogPath(const std::string &dataDir)
-        {
-            std::filesystem::path dataPath(dataDir);
-            std::string logPath;
-
-#ifdef _WIN32
-            // Check if dataDir is in Program Files (requires admin to write)
-            std::string dataDirLower = dataDir;
-            std::transform(dataDirLower.begin(), dataDirLower.end(), dataDirLower.begin(),
-                           [](unsigned char c)
-                           { return static_cast<char>(std::tolower(c)); });
-
-            // Check if path contains "program files" (common install location)
-            if (dataDirLower.find("program files") != std::string::npos ||
-                dataDirLower.find("program files (x86)") != std::string::npos)
-            {
-                // Use user-writable location instead
-                char appDataPath[MAX_PATH];
-                if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, appDataPath)))
-                {
-                    std::filesystem::path userLogDir = std::filesystem::path(appDataPath) / "MIB_Studio_Qt" / "logs";
-                    std::filesystem::create_directories(userLogDir);
-                    logPath = (userLogDir / "app.log").string();
-                    return logPath;
-                }
-            }
-#endif
-            // Default: use dataDir/logs/app.log
-            std::filesystem::create_directories(dataPath / "logs");
-            logPath = (dataPath / "logs" / "app.log").string();
-            return logPath;
-        }
-
         BackgroundFramePixelFormat pixelFormatForMatType(int type)
         {
             switch (type)
@@ -162,9 +128,9 @@ namespace backend
     {
         std::filesystem::create_directories(dataDir);
 
-        // Use user-writable location for logs if dataDir is in Program Files
-        std::string logPath = getLogPath(dataDir);
-        backend::services::Logger::init(logPath);
+        // No-op when main() already brought the logger up; still resolves a
+        // user-writable location for tests/embedders that skip main().
+        backend::services::Logger::initFromDataDir(dataDir);
 
         sqliteService_ = std::make_unique<services::SqliteService>();
         hdf5Service_ = std::make_unique<services::Hdf5Service>();
@@ -883,6 +849,9 @@ namespace backend
 
         // Launch recording thread
         frameRecordingThread_ = std::make_unique<std::thread>([this]() {
+          // An exception escaping a std::thread body is std::terminate for
+          // the whole app; report it and end recording instead.
+          try {
             SPDLOG_INFO("Frame recording thread started");
 
             const uint64_t startTimeNs = static_cast<uint64_t>(
@@ -949,6 +918,14 @@ namespace backend
                 }
 
                 const uint64_t latestIdx = totalWritten - 1;
+                if (!firstFrame && lastProcessedIdx > latestIdx) {
+                    // FrameStore::resize() renumbers frames from 0; a cached
+                    // pointer from the old numbering would idle this loop
+                    // forever while the UI still reports "recording".
+                    SPDLOG_WARN("Frame recording pointer {} beyond latest {} (store resized?); resyncing",
+                                lastProcessedIdx, latestIdx);
+                    lastProcessedIdx = latestIdx;
+                }
                 const uint64_t startIdx = firstFrame ? latestIdx : lastProcessedIdx + 1;
                 firstFrame = false;
 
@@ -1038,6 +1015,21 @@ namespace backend
 
             SPDLOG_INFO("Frame recording stopped: {} frames recorded, {} empty filtered, file: {}",
                         frameRecordingWritten_.load(), frameRecordingFiltered_.load(), frameRecordingPath_);
+          } catch (const std::exception& e) {
+            SPDLOG_ERROR("Frame recording thread crashed: {}", e.what());
+            backend::services::CrashReporter::captureException(
+                std::string("frame recording thread: ") + e.what());
+            frameRecordingRunning_.store(false);
+            try { hdf5Service_->closeFile(); } catch (...) {}
+            reportFatalSaveError(std::string("Recording thread crashed: ") + e.what());
+          } catch (...) {
+            SPDLOG_ERROR("Frame recording thread crashed: unknown exception");
+            backend::services::CrashReporter::captureException(
+                "frame recording thread: unknown exception");
+            frameRecordingRunning_.store(false);
+            try { hdf5Service_->closeFile(); } catch (...) {}
+            reportFatalSaveError("Recording thread crashed: unknown exception");
+          }
         });
 
         SPDLOG_INFO("Frame recording started: {}", path);
@@ -1080,12 +1072,19 @@ namespace backend
     }
 
     void AppBackend::setFatalSaveErrorCallback(FatalSaveErrorCallback callback) {
+        std::scoped_lock lk(fatalSaveErrorCbMutex_);
         fatalSaveErrorCb_ = std::move(callback);
     }
 
     void AppBackend::reportFatalSaveError(const std::string& msg) {
         SPDLOG_ERROR("Fatal save error: {}", msg);
-        if (fatalSaveErrorCb_) fatalSaveErrorCb_(msg);
+        backend::services::CrashReporter::captureMessage("Fatal save error: " + msg);
+        FatalSaveErrorCallback cb;
+        {
+            std::scoped_lock lk(fatalSaveErrorCbMutex_);
+            cb = fatalSaveErrorCb_;
+        }
+        if (cb) cb(msg);
     }
 
     void AppBackend::setLastConfigJson(const std::string& json) {

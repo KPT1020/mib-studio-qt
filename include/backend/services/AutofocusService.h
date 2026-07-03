@@ -73,7 +73,12 @@ public:
 
 private:
     void controlLoop();
+    void controlLoopBody();
     void statsLoop();
+    void statsLoopBody();
+    // Copies the callback under callbackMutex_ before invoking so a
+    // concurrent setStatusCallback cannot tear the std::function.
+    void notifyStatus(const std::string& message);
     void updateStatistics();
     double calculateMedian(const std::vector<double>& sorted) const;
 

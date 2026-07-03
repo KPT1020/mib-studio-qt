@@ -116,6 +116,9 @@ namespace backend
     private:
         void reportFatalSaveError(const std::string& msg);
 
+        // Guards fatalSaveErrorCb_: set on the GUI thread, invoked from
+        // writer threads.
+        mutable std::mutex fatalSaveErrorCbMutex_;
         FatalSaveErrorCallback fatalSaveErrorCb_;
 
         std::unique_ptr<services::SqliteService> sqliteService_;

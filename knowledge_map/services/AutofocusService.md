@@ -92,6 +92,12 @@ probe past its safe range.
   arrival immediately even if `statsLoop` is a few milliseconds behind
   on the sort. The median may lag by up to ~10 ms (a single drain
   interval); the 50 ms control-loop tick absorbs this.
+- `statusCallback_` is copied under `callbackMutex_` via `notifyStatus()`
+  before every invocation — the control thread fires it while the UI may
+  replace it (`setStatusCallback`), and an unlocked read tears the
+  `std::function`. Both loops (`statsLoop`, `controlLoop`) wrap their
+  bodies in try/catch and report escaping exceptions via
+  `CrashReporter::captureException` instead of std::terminate-ing the app.
 
 ## Third-party
 

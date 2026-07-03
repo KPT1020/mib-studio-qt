@@ -117,6 +117,19 @@ mib_add_backend_test_executable(hdf5_resilience_test recording/hdf5_resilience_t
 add_test(NAME recording.hdf5_resilience COMMAND $<TARGET_FILE:hdf5_resilience_test>)
 set_tests_properties(recording.hdf5_resilience PROPERTIES LABELS "recording;backend;hdf5")
 
+mib_add_backend_test_executable(hdf5_foreign_rank_test recording/hdf5_foreign_rank_test.cpp)
+add_test(NAME recording.hdf5_foreign_rank COMMAND $<TARGET_FILE:hdf5_foreign_rank_test>)
+set_tests_properties(recording.hdf5_foreign_rank PROPERTIES LABELS "recording;backend;hdf5" TIMEOUT 30)
+
+mib_add_backend_test_executable(crash_reporter_terminate_test backend/crash_reporter_terminate_test.cpp)
+target_link_libraries(crash_reporter_terminate_test PRIVATE Threads::Threads)
+add_test(NAME backend.crash_reporter_terminate COMMAND $<TARGET_FILE:crash_reporter_terminate_test>)
+set_tests_properties(backend.crash_reporter_terminate PROPERTIES LABELS "backend;diagnostics" TIMEOUT 60)
+
+mib_add_backend_test_executable(logger_init_fallback_test backend/logger_init_fallback_test.cpp)
+add_test(NAME backend.logger_init_fallback COMMAND $<TARGET_FILE:logger_init_fallback_test>)
+set_tests_properties(backend.logger_init_fallback PROPERTIES LABELS "backend;diagnostics" TIMEOUT 30)
+
 mib_add_backend_test_executable(hdf5_save_performance_test recording/hdf5_save_performance_test.cpp)
 add_test(NAME recording.hdf5_save_performance COMMAND $<TARGET_FILE:hdf5_save_performance_test>)
 set_tests_properties(recording.hdf5_save_performance PROPERTIES LABELS "recording;backend;hdf5;performance")

@@ -22,8 +22,14 @@ public:
         std::string environment{"production"};
         std::filesystem::path crashDir;     // where .dmp / .json are written
         std::filesystem::path databaseDir;  // Sentry/Crashpad working dir
+        std::filesystem::path handlerPath;  // crashpad_handler.exe (Windows).
+                                            // Empty = sentry-native's default lookup.
         double tracesSampleRate{0.20};      // Sentry performance sample rate.
         bool uploadPendingOnStart{true};
+        // Local SEH/signal handlers are only installed when the Sentry
+        // backend is NOT live — Sentry's own crash handlers (Crashpad /
+        // inproc) must stay installed or crash capture is lost; local
+        // sidecars then come from the on_crash hook instead.
         bool installSignalHandlers{true};
         bool installQtMessageHandler{true};
         bool installTerminateHandler{true};
