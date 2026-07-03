@@ -5,6 +5,24 @@
 
 ## Features shipped
 
+- **Decoupled size measurement — area no longer drifts with adaptive detection**
+  (2026-07-03, [[ProcessingService]]) — Enabling `adaptive_threshold` tightens
+  the mask per frame, which — since `area`, `areaRatio` and `deformability` are
+  read from the segmentation contour — would move those measurements (and the
+  `youngsModulus` LUT lookup + area/target-group gates) with per-frame contrast
+  and scene content. Fix: keep **detection** on the Otsu mask but **measure** on
+  a fixed-threshold *measurement mask* (`buildMeasurementMask` = what the mask
+  would be with adaptive off: `bg_subtract_threshold` + the same close/open).
+  Each of the four threshold call sites (`computeProcessedFrame` + three
+  realtime-loop copies) now builds it and passes it to `filterProcessedObjects`,
+  which re-derives per-object size from the measurement contour matched to the
+  detected object (`matchContourContaining` on the object centroid), with a safe
+  fallback to the adaptive contour when no counterpart exists. Adaptive-off
+  behaviour is unchanged (measurement mask empty). Tied to `adaptive_threshold`,
+  so no new config knob. Test:
+  `tests/processing/processing_decoupled_measurement_test.cpp` (detection
+  tightens while reported area stays on the fixed basis). Evidence context:
+  `benchmarks/mask-gen/REPORT.md`.
 - **Focus-metric study — Laplacian-variance replacement for ring ratio**
   (2026-07-03, `benchmarks/mask-gen/focus_metric.py`) — Quantified the fragility
   of the nested-contour ring ratio ([[ProcessingService]] `calculateRingRatio`):

@@ -422,10 +422,17 @@ private:
     bool appendExperimentFrame(ProcessedFrame&& frame, bool isValid);
     DroppedFrameCounts trimExperimentBuffersLocked(size_t maxBufferedFrames);
     void logDroppedExperimentFrames(const DroppedFrameCounts& dropped, size_t bufferedTotal, size_t maxBufferedFrames);
-    FilterResult filterProcessedImage(const cv::Mat& processedImage, const cv::Rect& roi, 
-                                      const ProcessingConfig& config, const cv::Mat& originalImage);
+    // measurementMask (optional, same coordinate space as processedImage) carries
+    // the fixed-threshold binary used to measure size when adaptive detection is
+    // on. When non-empty, per-object area/areaRatio/deformability are re-derived
+    // from it so those measurements do not drift with the per-frame Otsu cut. See
+    // buildMeasurementMask and benchmarks/mask-gen/REPORT.md.
+    FilterResult filterProcessedImage(const cv::Mat& processedImage, const cv::Rect& roi,
+                                      const ProcessingConfig& config, const cv::Mat& originalImage,
+                                      const cv::Mat& measurementMask = cv::Mat());
     std::vector<FilterResult> filterProcessedObjects(const cv::Mat& processedImage, const cv::Rect& roi,
-                                                     const ProcessingConfig& config, const cv::Mat& originalImage);
+                                                     const ProcessingConfig& config, const cv::Mat& originalImage,
+                                                     const cv::Mat& measurementMask = cv::Mat());
     // region restricts the scan to a sub-rectangle (e.g. an object's bounding
     // box); an empty rect scans the whole image. Mask pixels outside an object's
     // bbox are zero, so restricting the scan yields an identical brightness set.
@@ -438,6 +445,10 @@ private:
                            int parentIdx,
                            bool nested) const;
     bool contourTouchesRoiBorder(const std::vector<cv::Point>& contour, const cv::Rect& roi) const;
+    // measurement (optional) is the ContourAnalysis of the fixed-threshold
+    // measurement mask; when non-null, size metrics are read from the measurement
+    // contour that corresponds to the detected object instead of the (adaptive)
+    // detection contour.
     FilterResult evaluateInnerContourObject(const ContourAnalysis& analysis,
                                             size_t innerIdx,
                                             int objectId,
@@ -445,7 +456,8 @@ private:
                                             const cv::Mat& processedImage,
                                             const cv::Rect& roi,
                                             const ProcessingConfig& config,
-                                            const cv::Mat& originalImage);
+                                            const cv::Mat& originalImage,
+                                            const ContourAnalysis* measurement = nullptr);
     FilterResult evaluateOuterContourObject(const ContourAnalysis& analysis,
                                             size_t contourIdx,
                                             int objectId,
@@ -453,14 +465,31 @@ private:
                                             const cv::Mat& processedImage,
                                             const cv::Rect& roi,
                                             const ProcessingConfig& config,
-                                            const cv::Mat& originalImage);
+                                            const cv::Mat& originalImage,
+                                            const ContourAnalysis* measurement = nullptr);
     ContourAnalysis findContours(const cv::Mat& processedImage);
+    // Centroid of a contour (m00-weighted; bbox centre when degenerate).
+    static cv::Point2f contourCentroid(const std::vector<cv::Point>& contour);
+    // Index into `candidates` of the smallest-area contour that geometrically
+    // contains `point`, or -1 if none. Maps a detected object to its counterpart
+    // on the fixed-threshold measurement mask.
+    static int matchContourContaining(const std::vector<std::vector<cv::Point>>& candidates,
+                                      const cv::Point2f& point);
     // Binarizes a background-subtracted diff into `thresh` using the configured
     // strategy: fixed bg_subtract_threshold, or per-frame Otsu floored at that
     // value and scaled by otsu_scale when config.adaptive_threshold is set.
     // Shared by computeProcessedFrame and the realtime loops.
     static void applyProcessingThreshold(const cv::Mat& diff, cv::Mat& thresh,
                                          const ProcessingConfig& config);
+    // Fixed-threshold "measurement" mask: the binary the detection mask would be
+    // with adaptive_threshold off (fixed bg_subtract_threshold + the same
+    // close/open morphology), allocated at maskSize and morphed into morphRegion.
+    // Returns an empty Mat when adaptive_threshold is off (callers then measure on
+    // the detection mask). Lets size metrics stay on a stable, contrast-independent
+    // basis while detection uses the per-frame Otsu cut.
+    cv::Mat buildMeasurementMask(const cv::Mat& diff, const cv::Size& maskSize,
+                                 const cv::Rect& morphRegion, int morphK, int morphIter,
+                                 const ProcessingConfig& config) const;
     // Topology-free focus measures from the original intensity inside objectMask
     // (restricted to bbox for speed). High-pass, so the smooth background is
     // ignored — no background/diff input needed.

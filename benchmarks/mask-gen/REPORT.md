@@ -139,9 +139,21 @@ band is a slightly tighter top edge clipping the largest cells.
 `applyProcessingThreshold` helper used by `computeProcessedFrame` and all three
 realtime-loop copies. It is floored at `bg_subtract_threshold` so empty ROIs
 stay empty, defaults off (no behaviour change), and is covered by
-`tests/processing/processing_adaptive_threshold_test.cpp`. **Follow-ups:** the
-per-row-mean background source, frontend config wiring for the new fields, and
-the optional top-hat flag.
+`tests/processing/processing_adaptive_threshold_test.cpp`.
+
+**Landed** (2026-07-03): **decoupled size measurement**, so enabling adaptive
+detection does not drift the size-derived analysis. Because `area`, `areaRatio`
+and `deformability` (hence `youngsModulus` and the area/target-group gates) are
+read from the segmentation contour, the tighter per-frame Otsu mask would move
+them with contrast/scene content. Detection now stays on the Otsu mask while
+those metrics are re-measured on a fixed-threshold *measurement mask*
+(`buildMeasurementMask` = the adaptive-off mask), per object via
+`matchContourContaining`, with fallback to the adaptive contour. Tied to
+`adaptive_threshold` (no new knob); test
+`tests/processing/processing_decoupled_measurement_test.cpp`.
+
+**Follow-ups:** the per-row-mean background source, frontend config wiring for
+the new fields, and the optional top-hat flag.
 
 ### C++ adoption sketch (`ProcessingService::computeProcessedFrame`)
 

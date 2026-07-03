@@ -48,6 +48,21 @@ restarts the loop (same policy as `CaptureService::run`). Verified by
      fixed threshold. Evidence + tuning: `benchmarks/mask-gen/REPORT.md`;
      regression/invariant coverage in
      `tests/processing/processing_adaptive_threshold_test.cpp`.
+   - **Decoupled size measurement.** When `adaptive_threshold` is on, detection
+     uses the tighter per-frame Otsu mask but size metrics do **not**: each
+     call site also builds a fixed-threshold *measurement mask*
+     (`buildMeasurementMask` — `bg_subtract_threshold` + the same close/open,
+     i.e. what the mask would be with adaptive off) and passes it to
+     `filterProcessedObjects`. Per object, `area`, `areaRatio` and
+     `deformability` are re-derived from the measurement contour that contains
+     the detected object (`matchContourContaining` on the object centroid;
+     inner-hole contour for the ring path, blob contour for the solid path),
+     falling back to the adaptive contour when no counterpart resolves. This
+     keeps `area`/`deformability`/`youngsModulus` — and the area/target-group
+     gates — on a stable, contrast-independent basis so adaptive detection does
+     not drift the downstream analysis. With adaptive off the measurement mask
+     is empty and size comes straight from the detection contour (unchanged).
+     Coverage: `tests/processing/processing_decoupled_measurement_test.cpp`.
 3. `filterProcessedImage` produces a `FilterResult`:
    - `deformability`, `area` (μm² via `pixelToMicronFactor_`),
      `areaRatio`, `ringRatio`, `youngsModulus` (LUT lookup)

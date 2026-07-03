@@ -113,6 +113,10 @@ mib_add_backend_test_executable(processing_adaptive_threshold_test processing/pr
 add_test(NAME processing.adaptive_threshold COMMAND $<TARGET_FILE:processing_adaptive_threshold_test>)
 set_tests_properties(processing.adaptive_threshold PROPERTIES LABELS "processing;backend")
 
+mib_add_backend_test_executable(processing_decoupled_measurement_test processing/processing_decoupled_measurement_test.cpp)
+add_test(NAME processing.decoupled_measurement COMMAND $<TARGET_FILE:processing_decoupled_measurement_test>)
+set_tests_properties(processing.decoupled_measurement PROPERTIES LABELS "processing;backend")
+
 mib_add_backend_test_executable(processing_focus_metric_test processing/processing_focus_metric_test.cpp)
 add_test(NAME processing.focus_metric COMMAND $<TARGET_FILE:processing_focus_metric_test>)
 set_tests_properties(processing.focus_metric PROPERTIES LABELS "processing;backend")

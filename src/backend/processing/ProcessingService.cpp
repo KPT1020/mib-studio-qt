@@ -676,6 +676,54 @@ void ProcessingService::applyProcessingThreshold(const cv::Mat& diff, cv::Mat& t
     }
 }
 
+cv::Mat ProcessingService::buildMeasurementMask(const cv::Mat& diff, const cv::Size& maskSize,
+                                                const cv::Rect& morphRegion, int morphK, int morphIter,
+                                                const ProcessingConfig& config) const {
+    // Only needed when detection runs adaptively: with the fixed threshold the
+    // detection mask already IS the measurement mask, so callers measure on it.
+    if (!config.adaptive_threshold) {
+        return cv::Mat();
+    }
+    cv::Mat measMask = cv::Mat::zeros(maskSize, CV_8UC1);
+    cv::Mat measThresh;
+    cv::threshold(diff, measThresh, std::max(0, config.bg_subtract_threshold), 255, cv::THRESH_BINARY);
+    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+    cv::Mat dst = measMask(morphRegion);
+    cv::morphologyEx(measThresh, dst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
+    cv::morphologyEx(dst, dst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
+    return measMask;
+}
+
+cv::Point2f ProcessingService::contourCentroid(const std::vector<cv::Point>& contour) {
+    const cv::Moments m = cv::moments(contour);
+    if (m.m00 != 0.0) {
+        return cv::Point2f(static_cast<float>(m.m10 / m.m00), static_cast<float>(m.m01 / m.m00));
+    }
+    const cv::Rect box = cv::boundingRect(contour);
+    return cv::Point2f(box.x + box.width * 0.5f, box.y + box.height * 0.5f);
+}
+
+int ProcessingService::matchContourContaining(const std::vector<std::vector<cv::Point>>& candidates,
+                                              const cv::Point2f& point) {
+    int best = -1;
+    double bestArea = 0.0;
+    for (size_t i = 0; i < candidates.size(); ++i) {
+        if (candidates[i].size() < 3) {
+            continue;  // pointPolygonTest needs a polygon
+        }
+        if (cv::pointPolygonTest(candidates[i], point, false) >= 0) {
+            const double area = cv::contourArea(candidates[i]);
+            // Smallest containing contour wins so a nested hole is preferred over
+            // the blob that encloses it.
+            if (best < 0 || area < bestArea) {
+                best = static_cast<int>(i);
+                bestArea = area;
+            }
+        }
+    }
+    return best;
+}
+
 void ProcessingService::computeFocusMetrics(const cv::Mat& originalImage, const cv::Mat& objectMask,
                                             const cv::Rect& bbox, double& lapVar, double& tenengrad) {
     lapVar = 0.0;
@@ -788,8 +836,12 @@ ProcessedFrame ProcessingService::computeProcessedFrame(
     cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
     cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
+    // Fixed-threshold measurement mask (empty unless adaptive detection is on) so
+    // size metrics do not drift with the per-frame Otsu cut.
+    const cv::Mat measMask = buildMeasurementMask(diffForProcessing, mask.size(), cvRoi, morphK, morphIter, config);
+
     // Validation + contour/metric extraction (same helper as realtime)
-    out.validation = filterProcessedImage(mask, cvRoi, config, gray);
+    out.validation = filterProcessedImage(mask, cvRoi, config, gray, measMask);
     out.processedImage = std::move(mask);
     return out;
 }
@@ -1471,7 +1523,8 @@ FilterResult ProcessingService::evaluateInnerContourObject(const ContourAnalysis
                                                            const cv::Mat& processedImage,
                                                            const cv::Rect& roi,
                                                            const ProcessingConfig& config,
-                                                           const cv::Mat& originalImage) {
+                                                           const cv::Mat& originalImage,
+                                                           const ContourAnalysis* measurement) {
     FilterResult result{};
     // allContours is assigned once (shared) by filterProcessedObjects after all
     // objects are evaluated; hierarchy is no longer retained on the result.
@@ -1508,13 +1561,26 @@ FilterResult ProcessingService::evaluateInnerContourObject(const ContourAnalysis
         return result;
     }
 
-    const double contourArea = cv::contourArea(innerContour);
+    // Size basis: the adaptive detection contour by default, or — when a
+    // fixed-threshold measurement mask is supplied — the measurement inner
+    // contour that contains this object's hole, so area/deformability stay on a
+    // contrast-independent basis. Fall back to the detection contour when the
+    // measurement mask does not resolve a matching hole for this object.
+    const std::vector<cv::Point>* sizeContour = &innerContour;
+    if (measurement != nullptr) {
+        const int mi = matchContourContaining(measurement->innerContours, contourCentroid(innerContour));
+        if (mi >= 0) {
+            sizeContour = &measurement->innerContours[static_cast<size_t>(mi)];
+        }
+    }
+
+    const double contourArea = cv::contourArea(*sizeContour);
     if (contourArea <= 0.0) {
         return result;
     }
 
     std::vector<cv::Point> hull;
-    cv::convexHull(innerContour, hull);
+    cv::convexHull(*sizeContour, hull);
     const double hullArea = cv::contourArea(hull);
     result.areaRatio = hullArea / contourArea;
     const double perimeter = cv::arcLength(hull, true);
@@ -1571,7 +1637,8 @@ FilterResult ProcessingService::evaluateOuterContourObject(const ContourAnalysis
                                                            const cv::Mat& processedImage,
                                                            const cv::Rect& roi,
                                                            const ProcessingConfig& config,
-                                                           const cv::Mat& originalImage) {
+                                                           const cv::Mat& originalImage,
+                                                           const ContourAnalysis* measurement) {
     FilterResult result{};
     // allContours is assigned once (shared) by filterProcessedObjects after all
     // objects are evaluated; hierarchy is no longer retained on the result.
@@ -1601,13 +1668,25 @@ FilterResult ProcessingService::evaluateOuterContourObject(const ContourAnalysis
         return result;
     }
 
-    const double contourArea = cv::contourArea(contour);
+    // Size basis: the adaptive detection contour by default, or — when a
+    // fixed-threshold measurement mask is supplied — the measurement blob that
+    // contains this object, so area/deformability stay on a contrast-independent
+    // basis. Fall back to the detection contour when no measurement blob matches.
+    const std::vector<cv::Point>* sizeContour = &contour;
+    if (measurement != nullptr) {
+        const int mi = matchContourContaining(measurement->filteredContours, contourCentroid(contour));
+        if (mi >= 0) {
+            sizeContour = &measurement->filteredContours[static_cast<size_t>(mi)];
+        }
+    }
+
+    const double contourArea = cv::contourArea(*sizeContour);
     if (contourArea <= 0.0) {
         return result;
     }
 
     std::vector<cv::Point> hull;
-    cv::convexHull(contour, hull);
+    cv::convexHull(*sizeContour, hull);
     const double hullArea = cv::contourArea(hull);
     result.areaRatio = hullArea / contourArea;
     const double perimeter = cv::arcLength(hull, true);
@@ -1653,8 +1732,19 @@ FilterResult ProcessingService::evaluateOuterContourObject(const ContourAnalysis
 
 std::vector<FilterResult> ProcessingService::filterProcessedObjects(const cv::Mat& processedImage, const cv::Rect& roi,
                                                                     const ProcessingConfig& config,
-                                                                    const cv::Mat& originalImage) {
+                                                                    const cv::Mat& originalImage,
+                                                                    const cv::Mat& measurementMask) {
     const ContourAnalysis analysis = findContours(processedImage);
+
+    // Fixed-threshold contours used only to re-measure object size (area,
+    // areaRatio, deformability) when adaptive detection is on. Empty when
+    // measurement is not decoupled, in which case size stays on `analysis`.
+    ContourAnalysis measAnalysis;
+    const ContourAnalysis* measurement = nullptr;
+    if (!measurementMask.empty()) {
+        measAnalysis = findContours(measurementMask);
+        measurement = &measAnalysis;
+    }
 
     // One shared copy of the frame's contours, referenced by every result (and
     // by the downstream monitoring / experiment copies) instead of deep-copying
@@ -1691,7 +1781,7 @@ std::vector<FilterResult> ProcessingService::filterProcessedObjects(const cv::Ma
         const int objectCount = static_cast<int>(analysis.innerContours.size());
         for (size_t i = 0; i < objectOrder.size(); ++i) {
             results.push_back(evaluateInnerContourObject(analysis, objectOrder[i], static_cast<int>(i + 1), objectCount,
-                                                         processedImage, roi, config, originalImage));
+                                                         processedImage, roi, config, originalImage, measurement));
         }
         for (auto& result : results) {
             result.allContours = sharedContours;
@@ -1724,7 +1814,7 @@ std::vector<FilterResult> ProcessingService::filterProcessedObjects(const cv::Ma
         const int objectCount = static_cast<int>(topLevelContours.size());
         for (size_t i = 0; i < topLevelContours.size(); ++i) {
             results.push_back(evaluateOuterContourObject(analysis, topLevelContours[i], static_cast<int>(i + 1),
-                                                         objectCount, processedImage, roi, config, originalImage));
+                                                         objectCount, processedImage, roi, config, originalImage, measurement));
         }
         for (auto& result : results) {
             result.allContours = sharedContours;
@@ -1736,8 +1826,9 @@ std::vector<FilterResult> ProcessingService::filterProcessedObjects(const cv::Ma
 }
 
 FilterResult ProcessingService::filterProcessedImage(const cv::Mat& processedImage, const cv::Rect& roi,
-                                                     const ProcessingConfig& config, const cv::Mat& originalImage) {
-    auto results = filterProcessedObjects(processedImage, roi, config, originalImage);
+                                                     const ProcessingConfig& config, const cv::Mat& originalImage,
+                                                     const cv::Mat& measurementMask) {
+    auto results = filterProcessedObjects(processedImage, roi, config, originalImage, measurementMask);
     if (results.empty()) {
         return {};
     }
@@ -2345,10 +2436,16 @@ void ProcessingService::realtimeInlineLoop() {
                 cv::morphologyEx(thresh, mask, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
                 cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
+                // Fixed-threshold measurement mask (ROI-sized, matching `mask`);
+                // empty unless adaptive detection is on.
+                const cv::Mat measMask = buildMeasurementMask(diffForProcessing, mask.size(),
+                                                              cv::Rect(0, 0, mask.cols, mask.rows),
+                                                              morphK, morphIter, config);
+
                 // Always run validation for monitoring (even without experiment)
                 // mask is ROI-sized so contour coords are 0-based; use local roi for border check
                 cv::Rect localRoi(0, 0, roi.w, roi.h);
-                auto validations = filterProcessedObjects(mask, localRoi, config, grayROI);
+                auto validations = filterProcessedObjects(mask, localRoi, config, grayROI, measMask);
                 if (validations.empty()) {
                     validations.push_back(FilterResult{});
                 }
@@ -2696,7 +2793,12 @@ void ProcessingService::realtimeInlineLoop() {
                 cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
                 cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
-                auto validations = filterProcessedObjects(mask, cvRoi, config, gray);
+                // Fixed-threshold measurement mask (full-frame, matching `mask`);
+                // empty unless adaptive detection is on.
+                const cv::Mat measMask = buildMeasurementMask(diffForProcessing, mask.size(), cvRoi,
+                                                              morphK, morphIter, config);
+
+                auto validations = filterProcessedObjects(mask, cvRoi, config, gray, measMask);
                 if (validations.empty()) {
                     validations.push_back(FilterResult{});
                 }
@@ -3017,7 +3119,13 @@ void ProcessingService::realtimeInlineLoop() {
                 // mask is ROI-sized so contour coords are 0-based; use local roi for border check
                 cv::Mat roiMaskForValidation = mask(cvRoi).clone();
                 cv::Rect localRoi(0, 0, cvRoi.width, cvRoi.height);
-                auto validations = filterProcessedObjects(roiMaskForValidation, localRoi, config, roiCurr);
+                // Fixed-threshold measurement mask, ROI-sized to match roiMaskForValidation;
+                // empty unless adaptive detection is on.
+                const cv::Mat measMask = buildMeasurementMask(diffForProcessing,
+                                                              cv::Size(cvRoi.width, cvRoi.height),
+                                                              cv::Rect(0, 0, cvRoi.width, cvRoi.height),
+                                                              morphK, morphIter, config);
+                auto validations = filterProcessedObjects(roiMaskForValidation, localRoi, config, roiCurr, measMask);
                 if (validations.empty()) {
                     validations.push_back(FilterResult{});
                 }
