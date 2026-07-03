@@ -128,5 +128,30 @@ int main() {
         return 5;
     }
 
+    // ---- 3. Batch path is decoupled too --------------------------------
+    // processBatch re-runs filterProcessedObjects on the detection mask to get
+    // every object for tracking; it must forward the measurement mask so the
+    // offline / re-analysis path (which feeds downstream analysis) stays on the
+    // fixed size basis rather than the adaptive mask.
+    ProcessingService svc;
+    const auto batchFixed = svc.processBatch({frame}, fixed);
+    const auto batchAdaptive = svc.processBatch({frame}, adaptive);
+    if (batchFixed.empty() || batchAdaptive.empty()) {
+        std::cerr << "batch: expected at least one processed frame\n";
+        return 6;
+    }
+    const double batchAreaFixed = batchFixed.front().validation.area;
+    const double batchAreaAdaptive = batchAdaptive.front().validation.area;
+    if (batchAreaFixed <= 0.0) {
+        std::cerr << "batch setup: fixed batch area should be positive, got " << batchAreaFixed << "\n";
+        return 7;
+    }
+    const double batchRel = std::abs(batchAreaAdaptive - batchAreaFixed) / batchAreaFixed;
+    if (batchRel > 0.02) {
+        std::cerr << "batch safeguard: adaptive batch area should match the fixed basis ("
+                  << batchAreaAdaptive << " vs " << batchAreaFixed << ", rel=" << batchRel << ")\n";
+        return 8;
+    }
+
     return 0;
 }

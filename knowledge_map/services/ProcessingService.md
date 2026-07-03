@@ -62,7 +62,13 @@ restarts the loop (same policy as `CaptureService::run`). Verified by
      gates — on a stable, contrast-independent basis so adaptive detection does
      not drift the downstream analysis. With adaptive off the measurement mask
      is empty and size comes straight from the detection contour (unchanged).
-     Coverage: `tests/processing/processing_decoupled_measurement_test.cpp`.
+     The batch paths (`processBatch` and the batch-worker loop) re-run
+     `filterProcessedObjects` on the returned detection mask to enumerate every
+     object for tracking, so `computeProcessedFrame` exposes the measurement mask
+     via an optional `measurementMaskOut` and those paths forward it — otherwise
+     the offline / re-analysis path would still drift. Coverage:
+     `tests/processing/processing_decoupled_measurement_test.cpp` (single-frame
+     and `processBatch`).
 3. `filterProcessedImage` produces a `FilterResult`:
    - `deformability`, `area` (μm² via `pixelToMicronFactor_`),
      `areaRatio`, `ringRatio`, `youngsModulus` (LUT lookup)

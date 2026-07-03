@@ -308,13 +308,19 @@ public:
     //
     // Returns a ProcessedFrame with originalImage (full gray clone),
     // processedImage (full-size mask, CV_8UC1), and validation metrics filled.
+    // measurementMaskOut (optional): receives the fixed-threshold measurement
+    // mask used to keep size metrics off the per-frame Otsu cut (empty when
+    // adaptive_threshold is off). Callers that re-run filterProcessedObjects on
+    // the returned processedImage (e.g. the batch paths, which need every object
+    // for tracking) must forward it so their per-object size stays decoupled too.
     ProcessedFrame computeProcessedFrame(
         const cv::Mat& grayInput,
         const cv::Mat& backgroundGray,
         const ProcessingConfig& config,
         const Roi& roi,
         uint64_t index = 0,
-        uint64_t timestampNs = 0);
+        uint64_t timestampNs = 0,
+        cv::Mat* measurementMaskOut = nullptr);
 
     struct BatchProgress {
         size_t done{0};

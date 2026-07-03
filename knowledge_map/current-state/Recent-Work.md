@@ -17,7 +17,10 @@
   realtime-loop copies) now builds it and passes it to `filterProcessedObjects`,
   which re-derives per-object size from the measurement contour matched to the
   detected object (`matchContourContaining` on the object centroid), with a safe
-  fallback to the adaptive contour when no counterpart exists. Adaptive-off
+  fallback to the adaptive contour when no counterpart exists. The batch paths
+  (`processBatch` + batch-worker) re-filter the detection mask for tracking, so
+  `computeProcessedFrame` exposes the mask via `measurementMaskOut` and they
+  forward it — the offline / re-analysis path is decoupled too. Adaptive-off
   behaviour is unchanged (measurement mask empty). Tied to `adaptive_threshold`,
   so no new config knob. Test:
   `tests/processing/processing_decoupled_measurement_test.cpp` (detection

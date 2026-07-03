@@ -770,7 +770,8 @@ ProcessedFrame ProcessingService::computeProcessedFrame(
     const ProcessingConfig& config,
     const Roi& roiIn,
     uint64_t index,
-    uint64_t timestampNs) {
+    uint64_t timestampNs,
+    cv::Mat* measurementMaskOut) {
 
     ProcessedFrame out;
     out.index = index;
@@ -839,6 +840,9 @@ ProcessedFrame ProcessingService::computeProcessedFrame(
     // Fixed-threshold measurement mask (empty unless adaptive detection is on) so
     // size metrics do not drift with the per-frame Otsu cut.
     const cv::Mat measMask = buildMeasurementMask(diffForProcessing, mask.size(), cvRoi, morphK, morphIter, config);
+    if (measurementMaskOut) {
+        *measurementMaskOut = measMask;
+    }
 
     // Validation + contour/metric extraction (same helper as realtime)
     out.validation = filterProcessedImage(mask, cvRoi, config, gray, measMask);
@@ -862,8 +866,9 @@ std::vector<ProcessedFrame> ProcessingService::processBatch(
     if (progress) progress(BatchProgress{0, total});
 
     for (size_t i = 0; i < total; ++i) {
+        cv::Mat measMask;  // fixed-threshold measurement mask (empty unless adaptive)
         ProcessedFrame base = computeProcessedFrame(grayImages[i], background, config, roi,
-                                                    static_cast<uint64_t>(i), 0);
+                                                    static_cast<uint64_t>(i), 0, &measMask);
         if (base.originalImage.empty() || base.processedImage.empty()) {
             results.emplace_back(std::move(base));
             if (progress) progress(BatchProgress{i + 1, total});
@@ -883,7 +888,7 @@ std::vector<ProcessedFrame> ProcessingService::processBatch(
         normalizedRoi.h = std::max(1, std::min(normalizedRoi.h, base.originalImage.rows - normalizedRoi.y));
         const cv::Rect cvRoi(normalizedRoi.x, normalizedRoi.y, normalizedRoi.w, normalizedRoi.h);
 
-        auto objectResults = filterProcessedObjects(base.processedImage, cvRoi, config, base.originalImage);
+        auto objectResults = filterProcessedObjects(base.processedImage, cvRoi, config, base.originalImage, measMask);
         if (objectResults.empty()) {
             results.emplace_back(std::move(base));
         } else {
@@ -1128,12 +1133,14 @@ void ProcessingService::batchWorkerLoop() {
         results.reserve(inputs.size());
         try {
         for (const auto& item : inputs) {
+            cv::Mat measMask;  // fixed-threshold measurement mask (empty unless adaptive)
             ProcessedFrame base = computeProcessedFrame(item.gray,
                                                         config.background,
                                                         config.processing,
                                                         config.roi,
                                                         item.index,
-                                                        item.timestampNs);
+                                                        item.timestampNs,
+                                                        &measMask);
             if (base.originalImage.empty() || base.processedImage.empty()) {
                 results.emplace_back(std::move(base));
                 continue;
@@ -1152,7 +1159,7 @@ void ProcessingService::batchWorkerLoop() {
             normalizedRoi.h = std::max(1, std::min(normalizedRoi.h, base.originalImage.rows - normalizedRoi.y));
             const cv::Rect cvRoi(normalizedRoi.x, normalizedRoi.y, normalizedRoi.w, normalizedRoi.h);
 
-            auto objectResults = filterProcessedObjects(base.processedImage, cvRoi, config.processing, base.originalImage);
+            auto objectResults = filterProcessedObjects(base.processedImage, cvRoi, config.processing, base.originalImage, measMask);
             if (objectResults.empty()) {
                 results.emplace_back(std::move(base));
                 continue;
