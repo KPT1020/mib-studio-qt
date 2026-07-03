@@ -206,9 +206,15 @@ the ROI/Otsu interaction, optional top-hat), which is not reachable by tuning th
 current pipeline. Area accuracy for downstream analysis therefore needs the
 **proposed pipeline ported to C++**, not a measurement remap. Because the
 proposed pipeline's area is already accurate (~10% vs GT) and self-consistent,
-it would not need the fixed-threshold decoupling. Adopting it changes absolute
-area values ~40%, so it requires re-calibrating `area_threshold_*`, the
-target-group windows, and the E-modulus LUT. Data: `results/area_accuracy.csv`.
+it would not need the fixed-threshold decoupling. The current pipeline
+under-segments — its cell area is a median **0.53×** the GT (it drops the
+darker-than-background half); the proposed pipeline is **1.08×** GT (near-exact),
+so adopting it roughly **doubles** the reported area (median 2.0×). That is a
+correction toward truth, not drift, but any gate/LUT tuned against the old
+under-count must be re-scaled: `area_threshold_*`, the target-group windows, and
+the E-modulus LUT (or, equivalently, `pixelToMicronFactor`). If those were
+instead grounded in physical µm², the proposed pipeline matches them better and
+needs little change. Data: `results/area_accuracy.csv`.
 
 ### Prototype — C++ A/B, real-time performance (`processing_proposed_pipeline_bench`)
 
@@ -233,7 +239,8 @@ default and wired through `config.json` / `AppConfigWatcher`
 (`proposed_pipeline`, `proposed_tophat_kernel`).
 
 **Follow-ups:** re-calibrate the area gates + E-modulus LUT for the new masks
-(area values shift ~40%); apply `proposed_pipeline` to the realtime-loop copies
+(reported area ~doubles: current 0.53× GT → proposed 1.08× GT); apply
+`proposed_pipeline` to the realtime-loop copies
 (prototype covers the shared `computeProcessedFrame` / batch / playback path);
 per-row-mean background source; settings-dialog widgets.
 

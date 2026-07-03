@@ -18,8 +18,10 @@
   skips without the GT dataset): IoU 0.34→0.81, detection 21%→98%, area error
   48%→16%, for **1.10× latency** (~0.16 ms/frame). When on, size is measured on
   the accurate mask directly (decoupling skipped). Not yet on the realtime-loop
-  copies; adoption shifts absolute area ~40% so the area gates + E-modulus LUT
-  need re-calibration. New benchmark tooling: `area_accuracy.py`, `make_pairs.py`.
+  copies; the current pipeline under-segments (area 0.53× GT) while proposed is
+  1.08× GT, so adoption roughly **doubles** reported area (a correction toward
+  truth) and the area gates + E-modulus LUT need re-scaling unless they were
+  grounded in physical µm². New benchmark tooling: `area_accuracy.py`, `make_pairs.py`.
 - **Decoupled size measurement — area no longer drifts with adaptive detection**
   (2026-07-03, [[ProcessingService]]) — Enabling `adaptive_threshold` tightens
   the mask per frame, which — since `area`, `areaRatio` and `deformability` are

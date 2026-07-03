@@ -58,8 +58,11 @@ restarts the loop (same policy as `CaptureService::run`). Verified by
      (`tests/processing/processing_proposed_pipeline_bench.cpp`,
      `benchmarks/mask-gen/area_accuracy.py`). When on, size is measured on this
      (accurate) mask directly — the fixed-threshold decoupling is skipped. Not
-     yet applied to the realtime-loop copies; adopting it shifts absolute area
-     ~40% so the area gates + E-modulus LUT need re-calibration.
+     yet applied to the realtime-loop copies. The current pipeline
+     under-segments (cell area median 0.53× GT); the proposed is 1.08× GT, so
+     adopting it roughly **doubles** the reported area — a correction toward
+     truth, but the area gates + E-modulus LUT (tuned against the old
+     under-count) need re-scaling unless they were grounded in physical µm².
    - **Decoupled size measurement.** When `adaptive_threshold` is on, detection
      uses the tighter per-frame Otsu mask but size metrics do **not**: each
      call site also builds a fixed-threshold *measurement mask*
