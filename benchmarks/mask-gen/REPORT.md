@@ -132,6 +132,17 @@ careless box. Recommended UX: **user draws a rough ROI → auto-refine snaps it 
 the channel → pipeline runs on the band.** The small residual gap vs the hand
 band is a slightly tighter top edge clipping the largest cells.
 
+### Adoption status
+
+**Landed** (2026-07-03): the per-frame **Otsu threshold**, gated by
+`ProcessingConfig::adaptive_threshold` (+ `otsu_scale`), via a shared
+`applyProcessingThreshold` helper used by `computeProcessedFrame` and all three
+realtime-loop copies. It is floored at `bg_subtract_threshold` so empty ROIs
+stay empty, defaults off (no behaviour change), and is covered by
+`tests/processing/processing_adaptive_threshold_test.cpp`. **Follow-ups:** the
+per-row-mean background source, frontend config wiring for the new fields, and
+the optional top-hat flag.
+
 ### C++ adoption sketch (`ProcessingService::computeProcessedFrame`)
 
 The current ROI body does GaussianBlur → `cv::subtract` → fixed

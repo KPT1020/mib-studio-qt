@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Adaptive (Otsu) segmentation threshold** (2026-07-03,
+  [[ProcessingService]]) — New `applyProcessingThreshold` helper routes all four
+  segmentation sites (`computeProcessedFrame` + 3 realtime-loop copies) through
+  one path. Default is unchanged (fixed `bg_subtract_threshold`); setting
+  `config.adaptive_threshold` switches to per-frame **Otsu**, floored at
+  `bg_subtract_threshold` (keeps near-empty ROIs empty — the safety property
+  proven in the test) and scaled by `otsu_scale`. Motivated by the mask-gen
+  benchmark (IoU 0.34 → 0.85). Off by default, so no behaviour change until a
+  config opts in; frontend config wiring is a follow-up. Test:
+  `tests/processing/processing_adaptive_threshold_test.cpp`
+  (`processing.adaptive_threshold`).
 - **Mask-generation pipeline benchmark** (2026-07-02, `benchmarks/mask-gen/`)
   — Offline harness scoring the production segmentation pipeline
   ([[ProcessingService]] `computeProcessedFrame`) and a proposed

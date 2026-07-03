@@ -648,6 +648,34 @@ bool ProcessingService::isFrameEmpty(const backend::playback::Frame& frame,
     return cv::countNonZero(thresh) < config.empty_frame_pixel_threshold;
 }
 
+void ProcessingService::applyProcessingThreshold(const cv::Mat& diff, cv::Mat& thresh,
+                                                  const ProcessingConfig& config) {
+    const int fixedT = std::max(0, config.bg_subtract_threshold);
+    if (!config.adaptive_threshold) {
+        cv::threshold(diff, thresh, fixedT, 255, cv::THRESH_BINARY);
+        return;
+    }
+    // Otsu picks a per-frame threshold from the diff histogram. Floor it at the
+    // fixed noise threshold so a near-empty ROI (unimodal, near-zero diff) can't
+    // be split into false foreground — on such frames Otsu returns a low value
+    // that the floor overrides, reproducing the fixed-threshold behaviour. A
+    // genuine bright cell yields a bimodal histogram whose Otsu split sits above
+    // the floor and tightly segments the object. otsu_scale tunes mask tightness.
+    // Requires a background-subtracted diff (bright object on ~0 field).
+    cv::Mat otsuMask;
+    const double otsuT = cv::threshold(diff, otsuMask, 0, 255,
+                                       cv::THRESH_BINARY | cv::THRESH_OTSU);
+    const double t = std::max(static_cast<double>(fixedT), otsuT * config.otsu_scale);
+    if (t <= static_cast<double>(fixedT)) {
+        // Otsu did not clear the floor: the floored binary is exactly otsuMask
+        // re-thresholded at fixedT — compute directly to avoid a second pass only
+        // when it differs.
+        cv::threshold(diff, thresh, fixedT, 255, cv::THRESH_BINARY);
+    } else {
+        cv::threshold(diff, thresh, t, 255, cv::THRESH_BINARY);
+    }
+}
+
 ProcessedFrame ProcessingService::computeProcessedFrame(
     const cv::Mat& grayInput,
     const cv::Mat& backgroundGray,
@@ -695,7 +723,6 @@ ProcessedFrame ProcessingService::computeProcessedFrame(
     const int blurK = toOdd(config.gaussian_blur_size);
     const int morphK = toOdd(config.morph_kernel_size);
     const int morphIter = std::max(1, config.morph_iterations);
-    const int threshVal = std::max(0, config.bg_subtract_threshold);
 
     // Full-size mask; process inside ROI only
     cv::Mat mask(gray.rows, gray.cols, CV_8UC1, cv::Scalar(0));
@@ -716,7 +743,7 @@ ProcessedFrame ProcessingService::computeProcessedFrame(
         diffForProcessing = blurredCurr;
     }
 
-    cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+    applyProcessingThreshold(diffForProcessing, thresh, config);
     cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
     cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
     cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
@@ -2265,7 +2292,7 @@ void ProcessingService::realtimeInlineLoop() {
                 }
                 
                 // Use background subtraction diff for actual processing (morphology, contours, etc.)
-                cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+                applyProcessingThreshold(diffForProcessing, thresh, config);
                 cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
                 cv::morphologyEx(thresh, mask, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
                 cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
@@ -2609,7 +2636,7 @@ void ProcessingService::realtimeInlineLoop() {
                 }
                 
                 // Use background subtraction diff for actual processing (morphology, contours, etc.)
-                cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+                applyProcessingThreshold(diffForProcessing, thresh, config);
                 
                 // Update previous frame for frame-to-frame comparison (when no background and auto-capture enabled)
                 if (!hasBackground && config.auto_background_enabled && !experimentActive_.load()) {
@@ -2925,7 +2952,7 @@ void ProcessingService::realtimeInlineLoop() {
                 }
 
                 // Use background subtraction diff for actual processing (morphology, contours, etc.)
-                cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+                applyProcessingThreshold(diffForProcessing, thresh, config);
 
                 // Update previous frame for frame-to-frame comparison (when no background and auto-capture enabled)
                 if (!hasBackground && config.auto_background_enabled && !experimentActive_.load()) {

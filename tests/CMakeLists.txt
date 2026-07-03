@@ -109,6 +109,10 @@ mib_add_backend_test_executable(processing_fault_injection_test processing/proce
 add_test(NAME processing.fault_injection COMMAND $<TARGET_FILE:processing_fault_injection_test>)
 set_tests_properties(processing.fault_injection PROPERTIES LABELS "processing;backend")
 
+mib_add_backend_test_executable(processing_adaptive_threshold_test processing/processing_adaptive_threshold_test.cpp)
+add_test(NAME processing.adaptive_threshold COMMAND $<TARGET_FILE:processing_adaptive_threshold_test>)
+set_tests_properties(processing.adaptive_threshold PROPERTIES LABELS "processing;backend")
+
 mib_add_backend_test_executable(recording_lifecycle_test recording/recording_lifecycle_test.cpp)
 add_test(NAME recording.lifecycle COMMAND $<TARGET_FILE:recording_lifecycle_test>)
 set_tests_properties(recording.lifecycle PROPERTIES LABELS "recording;backend")

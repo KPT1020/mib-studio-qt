@@ -36,6 +36,14 @@ struct ProcessingConfig {
     int bg_subtract_threshold{8};
     int morph_kernel_size{3};
     int morph_iterations{1};
+    // Per-frame adaptive (Otsu) segmentation threshold. When enabled, the
+    // processing threshold is chosen by Otsu on the background-subtracted diff
+    // instead of the fixed bg_subtract_threshold, then floored at
+    // bg_subtract_threshold (so near-empty ROIs stay empty) and scaled by
+    // otsu_scale. Off by default to preserve existing behaviour. See
+    // benchmarks/mask-gen/REPORT.md for the accuracy/latency evidence.
+    bool adaptive_threshold{false};
+    double otsu_scale{1.1};
     int area_threshold_min{60};    // μm²
     int area_threshold_max{290};   // μm²
     double deformability_threshold_min{0.0};
@@ -437,6 +445,12 @@ private:
                                             const ProcessingConfig& config,
                                             const cv::Mat& originalImage);
     ContourAnalysis findContours(const cv::Mat& processedImage);
+    // Binarizes a background-subtracted diff into `thresh` using the configured
+    // strategy: fixed bg_subtract_threshold, or per-frame Otsu floored at that
+    // value and scaled by otsu_scale when config.adaptive_threshold is set.
+    // Shared by computeProcessedFrame and the realtime loops.
+    static void applyProcessingThreshold(const cv::Mat& diff, cv::Mat& thresh,
+                                         const ProcessingConfig& config);
 
     std::vector<std::thread> workers_;
     std::queue<Job> queue_;
