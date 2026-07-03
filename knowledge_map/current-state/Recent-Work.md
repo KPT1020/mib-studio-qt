@@ -5,23 +5,25 @@
 
 ## Features shipped
 
-- **Proposed segmentation pipeline — prototype behind `proposed_pipeline`**
-  (2026-07-03, [[ProcessingService]]) — Revisiting the pipelines against SAM2 GT
-  truth showed the current pipeline (fixed *or* adaptive) mis-measures cell area
-  ~49% vs truth (IoU 0.34), while the proposed front-end reaches ~10% (IoU 0.85).
-  The entire gap is one operator: `cv::absdiff` instead of signed `cv::subtract`
-  (captures the whole cell, not just the brighter-than-bg part) — no
-  CLAHE/bilateral/top-hat needed on flat fields. Prototyped in
+- **Proposed segmentation pipeline — PROTOTYPE (not deploy-ready) behind
+  `proposed_pipeline`** (2026-07-03, [[ProcessingService]]) — Revisiting the
+  pipelines against SAM2 GT showed the accuracy gap is one operator: `cv::absdiff`
+  instead of signed `cv::subtract` (captures the whole cell, not just the
+  brighter-than-bg part) — no CLAHE/bilateral/top-hat needed. Prototyped in
   `computeProcessedFrame` behind `ProcessingConfig::proposed_pipeline` (+ optional
-  `proposed_tophat_kernel`), wired through `AppConfigWatcher` + `config.json`,
-  off by default. A/B in the real C++ path (`processing_proposed_pipeline_bench`,
-  skips without the GT dataset): IoU 0.34→0.81, detection 21%→98%, area error
-  48%→16%, for **1.10× latency** (~0.16 ms/frame). When on, size is measured on
-  the accurate mask directly (decoupling skipped). Not yet on the realtime-loop
-  copies; the current pipeline under-segments (area 0.53× GT) while proposed is
-  1.08× GT, so adoption roughly **doubles** reported area (a correction toward
-  truth) and the area gates + E-modulus LUT need re-scaling unless they were
-  grounded in physical µm². New benchmark tooling: `area_accuracy.py`, `make_pairs.py`.
+  `proposed_tophat_kernel`), wired through `AppConfigWatcher` + `config.json`, off
+  by default. A/B in the real C++ path (`processing_proposed_pipeline_bench`,
+  skips without the GT dataset): IoU 0.34→0.81, detection 21%→98% for **1.10×
+  latency**. **Measurement unified to the OUTER contour** (the diffraction shape;
+  area = convex hull) — there both pipelines are near GT in the median (outer-hull
+  1.11 vs 1.04× GT); the proposed win is detection + a tight distribution, not a
+  median area shift (the earlier "~2×" was a filled-pixel artifact). **Not
+  deploy-ready:** shipped default sources area/deformability from the inner ring
+  and gates on `require_single_inner_contour`, but a nested inner contour forms on
+  only ~20% of frames with *either* pipeline (absdiff fills the cell), so both
+  must move to the outer contour; not on the realtime loops; absdiff changes
+  empty-frame semantics (untested live); gates/LUT need revalidation on the
+  outer-contour measurement. New benchmark tooling: `area_accuracy.py`, `make_pairs.py`.
 - **Decoupled size measurement — area no longer drifts with adaptive detection**
   (2026-07-03, [[ProcessingService]]) — Enabling `adaptive_threshold` tightens
   the mask per frame, which — since `area`, `areaRatio` and `deformability` are

@@ -48,21 +48,25 @@ restarts the loop (same policy as `CaptureService::run`). Verified by
      fixed threshold. Evidence + tuning: `benchmarks/mask-gen/REPORT.md`;
      regression/invariant coverage in
      `tests/processing/processing_adaptive_threshold_test.cpp`.
-   - **Proposed pipeline (prototype, `config.proposed_pipeline`, off by default).**
-     In `computeProcessedFrame` this swaps the signed `cv::subtract` diff for
-     `cv::absdiff` (captures the whole cell, not just the brighter-than-bg part),
-     forces the Otsu cut, and closes/opens with an ellipse kernel; optional
-     `proposed_tophat_kernel` adds a rect white top-hat. That one operator change
-     is the accuracy win — GT A/B in the real C++ path lifts IoU 0.34→0.81,
-     detection 21%→98%, area error 48%→16% for only **1.10× latency**
+   - **Proposed pipeline (PROTOTYPE — not deploy-ready, `config.proposed_pipeline`,
+     off by default).** In `computeProcessedFrame` this swaps the signed
+     `cv::subtract` diff for `cv::absdiff` (captures the whole cell, not just the
+     brighter-than-bg part), forces the Otsu cut, and closes/opens with an ellipse
+     kernel; optional `proposed_tophat_kernel` adds a rect white top-hat. That one
+     operator change is the accuracy win — GT A/B in the real C++ path lifts IoU
+     0.34→0.81 and detection 21%→98% for **1.10× latency**
      (`tests/processing/processing_proposed_pipeline_bench.cpp`,
-     `benchmarks/mask-gen/area_accuracy.py`). When on, size is measured on this
-     (accurate) mask directly — the fixed-threshold decoupling is skipped. Not
-     yet applied to the realtime-loop copies. The current pipeline
-     under-segments (cell area median 0.53× GT); the proposed is 1.08× GT, so
-     adopting it roughly **doubles** the reported area — a correction toward
-     truth, but the area gates + E-modulus LUT (tuned against the old
-     under-count) need re-scaling unless they were grounded in physical µm².
+     `benchmarks/mask-gen/area_accuracy.py`). **Measurement target is the OUTER
+     contour** (the diffraction pattern; area = its convex hull) — on the outer
+     contour both pipelines sit near GT in the median (outer-hull 1.11 vs 1.04×
+     GT), the proposed win being detection + a tight distribution vs the current
+     pipeline's fragmented/noisy one. **Blockers:** the shipped default sources
+     area/deformability from the inner ring and gates on
+     `require_single_inner_contour`, but a nested inner contour forms on only
+     ~20% of frames with *either* pipeline (`absdiff` fills the cell, so it does
+     not restore the ring) — so both must move to the outer contour first; not on
+     the realtime-loop copies; `absdiff` changes empty-frame semantics (untested
+     live); area gates/LUT must be revalidated on the outer-contour measurement.
    - **Decoupled size measurement.** When `adaptive_threshold` is on, detection
      uses the tighter per-frame Otsu mask but size metrics do **not**: each
      call site also builds a fixed-threshold *measurement mask*

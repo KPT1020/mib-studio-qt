@@ -196,25 +196,35 @@ the SAM2 GT area (physical truth), with IoU / detection alongside:
 | proposed LEAN     (absdiff+Otsu, m5)| 0.849 | 98.3% | **10.0%** | 27.5% |
 | proposed OPT      (+ rect top-hat)  | 0.849 | 98.3% | **10.0%** | 27.5% |
 
-The current pipeline — fixed *or* adaptive — mis-measures cell area by ~49%
-against truth; the proposed pipeline by ~10%. So the fixed-threshold basis the
-decoupling stabilises onto is itself badly inaccurate, and the adaptive path we
-gated the safeguard behind is no better than fixed. Crucially the gap is **not**
+(IoU / area error above are on the **filled** mask.) The gap is **not**
 morphology: bumping the current-adaptive path to a 5×5 close *collapses* it (IoU
-0.10, 0% detection) — the accuracy lives in the proposed front-end (absdiff +
-the ROI/Otsu interaction, optional top-hat), which is not reachable by tuning the
-current pipeline. Area accuracy for downstream analysis therefore needs the
-**proposed pipeline ported to C++**, not a measurement remap. Because the
-proposed pipeline's area is already accurate (~10% vs GT) and self-consistent,
-it would not need the fixed-threshold decoupling. The current pipeline
-under-segments — its cell area is a median **0.53×** the GT (it drops the
-darker-than-background half); the proposed pipeline is **1.08×** GT (near-exact),
-so adopting it roughly **doubles** the reported area (median 2.0×). That is a
-correction toward truth, not drift, but any gate/LUT tuned against the old
-under-count must be re-scaled: `area_threshold_*`, the target-group windows, and
-the E-modulus LUT (or, equivalently, `pixelToMicronFactor`). If those were
-instead grounded in physical µm², the proposed pipeline matches them better and
-needs little change. Data: `results/area_accuracy.csv`.
+0.10, 0% detection) — the accuracy lives in the proposed front-end (`absdiff` +
+the ROI/Otsu interaction), not reachable by tuning the current pipeline.
+
+**Measurement target = the outer contour (the diffraction pattern), area = its
+convex hull** (matching `ProcessingService result.area`), scored against the
+solid SAM2 GT. On the outer contour the two pipelines behave very differently in
+*reliability*, not median:
+
+| pipeline | IoU | det@0.5 | outer found | **nested** | outerHull/GT (p25·med·p75) |
+|---|---:|---:|---:|---:|---:|
+| current  (subtract, fixed)   | 0.32 | 21% | 95% | 21% | 0.53 · **1.11** · 1.20 |
+| proposed (absdiff, Otsu, m5) | 0.85 | 98% | 100% | 20% | 0.97 · **1.04** · 1.10 |
+
+Both sit near GT in the **median** outer-hull area (1.11 vs 1.04) — so switching
+does *not* ~2× the reported area, contrary to an earlier filled-pixel reading.
+The proposed win on the outer contour is **detection (98% vs 21%) and
+consistency**: its area distribution is tight (p25–p75 0.97–1.10) where the
+current pipeline's is noisy (0.53–1.20) from fragmented masks. A gate/LUT tuned
+against the current outer-hull median would need little re-centering but would
+see far less spread.
+
+**Nested contours:** a nested inner-child contour forms on only **~20%** of
+frames with *either* pipeline — `absdiff` does not restore the ring's inner hole
+(it fills the cell more solidly). So the shipped `require_single_inner_contour`
+gate would drop ~80% of objects under the proposed pipeline; area/deformability
+must come from the **outer** contour, and the inner-ring requirement relaxed to a
+focus/validity signal at most. Data: `results/area_accuracy.csv`.
 
 ### Prototype — C++ A/B, real-time performance (`processing_proposed_pipeline_bench`)
 
@@ -231,16 +241,29 @@ brighter-than-background part; no CLAHE/bilateral/top-hat needed on flat fields:
 | proposed (absdiff, Otsu, m5)    | 0.811 | 97.7% | 16.0% | 0.163 ms |
 
 **Real-time cost is negligible: 1.10× latency** (~0.16 ms/frame, ~6000 fps) for
-**2.4× IoU, ~5× detection, ~3× better area accuracy**. The C++ numbers track the
-Python prototype (IoU 0.81 vs 0.85; the small gap is the median-vs-nth_element
-background and the full validation path). The bench skips when the dataset is
-absent (CI-safe) and asserts proposed IoU > current otherwise. Flag is off by
-default and wired through `config.json` / `AppConfigWatcher`
-(`proposed_pipeline`, `proposed_tophat_kernel`).
+**2.4× IoU, ~5× detection**. The C++ numbers track the Python prototype (IoU 0.81
+vs 0.85; the small gap is the median-vs-nth_element background and the full
+validation path). The bench measures the **outer** contour
+(`require_single_inner_contour=false`) — the diffraction shape — for both
+pipelines. It skips when the dataset is absent (CI-safe) and asserts proposed IoU
+> current otherwise. Flag is off by default and wired through `config.json` /
+`AppConfigWatcher` (`proposed_pipeline`, `proposed_tophat_kernel`).
 
-**Follow-ups:** re-calibrate the area gates + E-modulus LUT for the new masks
-(reported area ~doubles: current 0.53× GT → proposed 1.08× GT); apply
-`proposed_pipeline` to the realtime-loop copies
+**Status: PROTOTYPE — not ready to deploy.** Open items before it could ship:
+outer-contour is the agreed measurement target (diffraction shape), but the
+shipped default sources `area`/`deformability` from the inner ring and gates on
+`require_single_inner_contour` — both must move to the outer contour, which
+`absdiff` supports (100% outer found) but whose nested inner ring it does **not**
+(~20%). Also: not applied to the realtime-loop copies; `absdiff` changes
+empty-frame/detection semantics (darker-than-bg regions now register), untested
+on the live stream; and any area gate / E-modulus LUT must be revalidated on the
+outer-contour measurement.
+
+**Follow-ups:** move `area`/`deformability` to the outer contour and relax
+`require_single_inner_contour` to a focus/validity signal; revalidate the area
+gates + E-modulus LUT on the outer-contour measurement (median outer-hull area
+barely moves, 1.11→1.04× GT, but the spread tightens); apply `proposed_pipeline`
+to the realtime-loop copies
 (prototype covers the shared `computeProcessedFrame` / batch / playback path);
 per-row-mean background source; settings-dialog widgets.
 
