@@ -133,6 +133,10 @@ mib_add_backend_test_executable(experiment_roundtrip_test recording/experiment_r
 add_test(NAME recording.experiment_roundtrip COMMAND $<TARGET_FILE:experiment_roundtrip_test>)
 set_tests_properties(recording.experiment_roundtrip PROPERTIES LABELS "recording;backend" TIMEOUT 30)
 
+mib_add_backend_test_executable(focus_metric_roundtrip_test recording/focus_metric_roundtrip_test.cpp)
+add_test(NAME recording.focus_metric_roundtrip COMMAND $<TARGET_FILE:focus_metric_roundtrip_test>)
+set_tests_properties(recording.focus_metric_roundtrip PROPERTIES LABELS "recording;backend" TIMEOUT 30)
+
 mib_add_backend_test_executable(kin6_batch_pipeline_evidence integration/kin6_batch_pipeline_evidence.cpp)
 
 mib_add_backend_test_executable(kin10_hf_dataset_pipeline_test integration/kin10_hf_dataset_pipeline_test.cpp)

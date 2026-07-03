@@ -18,8 +18,11 @@
   `FilterResult::focusLaplacianVar` / `focusTenengrad` (both computed via
   `computeFocusMetrics`, additive — `ringRatio` untouched) plus an optional
   default-off gate (`enable_focus_check` + `focus_laplacian_min`). Test:
-  `tests/processing/processing_focus_metric_test.cpp`. Follow-up: HDF5
-  persistence + UI display so the gate can be tuned from saved data.
+  `tests/processing/processing_focus_metric_test.cpp`. **Persisted to HDF5** as
+  a backward-compatible optional metadata group (presence-checked read; test
+  `recording.focus_metric_roundtrip`) and exported in the HdfReviewTab CSV, so
+  focus values from a real run can be inspected to pick `focus_laplacian_min`.
+  Follow-up: UI charting/gating controls.
 - **Adaptive (Otsu) segmentation threshold** (2026-07-03,
   [[ProcessingService]]) — New `applyProcessingThreshold` helper routes all four
   segmentation sites (`computeProcessedFrame` + 3 realtime-loop copies) through

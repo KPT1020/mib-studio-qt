@@ -1074,7 +1074,7 @@ void HdfReviewTab::exportMetricsToCsv(const QString& filePath) {
     out << "Frame Type,Index,Timestamp,Object Id,Object Count,Track Id,Track First,Track Last,Track Observations,"
         << "Deformability,Area,Area (um²),Area Ratio,Ring Ratio,"
         << "Valid,Touches Border,Single Inner,In Range,Inner Count,"
-        << "Bright Q1,Bright Q2,Bright Q3,Bright Q4\n";
+        << "Bright Q1,Bright Q2,Bright Q3,Bright Q4,Focus Lap Var,Focus Tenengrad\n";
 
     // Export valid frames
     for (const auto& frame : validFrames_) {
@@ -1103,7 +1103,9 @@ void HdfReviewTab::exportMetricsToCsv(const QString& filePath) {
         out << QString::number(val.brightness.q1, 'f', 2) << ",";
         out << QString::number(val.brightness.q2, 'f', 2) << ",";
         out << QString::number(val.brightness.q3, 'f', 2) << ",";
-        out << QString::number(val.brightness.q4, 'f', 2) << "\n";
+        out << QString::number(val.brightness.q4, 'f', 2) << ",";
+        out << QString::number(val.focusLaplacianVar, 'f', 2) << ",";
+        out << QString::number(val.focusTenengrad, 'f', 2) << "\n";
     }
 
     // Export invalid frames
@@ -1133,7 +1135,9 @@ void HdfReviewTab::exportMetricsToCsv(const QString& filePath) {
         out << QString::number(val.brightness.q1, 'f', 2) << ",";
         out << QString::number(val.brightness.q2, 'f', 2) << ",";
         out << QString::number(val.brightness.q3, 'f', 2) << ",";
-        out << QString::number(val.brightness.q4, 'f', 2) << "\n";
+        out << QString::number(val.brightness.q4, 'f', 2) << ",";
+        out << QString::number(val.focusLaplacianVar, 'f', 2) << ",";
+        out << QString::number(val.focusTenengrad, 'f', 2) << "\n";
     }
 
     file.close();

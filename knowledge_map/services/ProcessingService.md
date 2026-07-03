@@ -56,9 +56,10 @@ restarts the loop (same policy as `CaptureService::run`). Verified by
      object mask, so they are defined even when the nested ring contour that
      `ringRatio` needs does not form. Optional gate: `enable_focus_check` +
      `focus_laplacian_min` (default off). Evidence: `benchmarks/mask-gen`
-     (`focus_metric.py`, REPORT.md). **Not yet persisted to HDF5 / shown in the
-     UI** — that plumbing (schema field + round-trip test + display) is a
-     follow-up before the gate can be tuned from saved data.
+     (`focus_metric.py`, REPORT.md). Persisted to HDF5 as an optional metadata
+     group (backward-compatible read via `H5Tget_member_index`; round-trip test
+     `recording.focus_metric_roundtrip`) and exported in the HdfReviewTab CSV.
+     UI charting/gating controls are a follow-up.
    - `brightness` quantiles (Q1/Q2/Q3/Q4)
    - border check, single-inner-contour check, range gates
    - `isTargetGroup` (second gate for trigger-worthy frames)

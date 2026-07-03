@@ -35,6 +35,12 @@ a macro). Unit-tested by `tests/backend/hdf_write_queue_test.cpp`.
   (`initializeDatasets` + `appendFrames`).
 - Stores experiment metadata: start/end time (ns), totals, `ProcessingConfig`,
   ROI, optional background image; plus raw config JSON via `writeConfigJson`.
+- Per-frame metadata is a compound datatype (`createProcessedFrameMetadataType`).
+  New fields are added as an **optional group** read behind a
+  `H5Tget_member_index(...) >= 0` presence check (see the object/tracking/focus
+  groups), so files written before the field still load — the pattern to follow
+  when extending the schema. `focusLaplacianVar`/`focusTenengrad` are the latest
+  such group.
 - Append hot paths (`appendFrames`, `appendRecordingFrames`) flush via
   `maybeIntervalFlush()`: an `H5Fflush(H5F_SCOPE_GLOBAL)` at most once per
   `MIB_HDF5_FLUSH_INTERVAL_MS` (default 5000 ms). This keeps the recorder
