@@ -22,7 +22,14 @@
   MOG2 matches but costs 512 µs), hysteresis / watershed / shape-regularisation
   (all neutral-to-negative here), and throughput (strip-batching 2.8×). Full
   numbers recorded in `benchmarks/mask-gen/results/experiments.{csv,json}`.
-  Benchmark-only; no app behaviour change yet.
+  A third round validated on the **real 5000-frame stream**
+  (`gavinlouuu/512x96stream`; GT frames matched to the stream by pixel hash),
+  which *overturned* the synthetic EWMA recommendation: real drift is only ~3
+  gray levels, so an **instantaneous per-row-mean background** (`cv2.reduce`,
+  ~6 µs, drift-proof) beats every temporal/EWMA variant, the top-hat becomes
+  unnecessary, and the pipeline sustains **0.848 IoU / 100 % det at ~5560 fps**
+  including per-frame background. See `stream_bench.py` +
+  `results/stream_experiments.csv`. Benchmark-only; no app behaviour change yet.
 - **Realtime-performance benchmark parts C/D/E** (2026-07-02, PR1 of
   `docs/exec-plans/active/2026-07-02-realtime-performance.md`) —
   Extended `tests/performance/pipeline_timing_benchmark.cpp` (CTest

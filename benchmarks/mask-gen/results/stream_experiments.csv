@@ -1,0 +1,11 @@
+method,iou,det,us,fps,notes
+per-row mean (instantaneous),0.848,1.0,,,
+per-row median (instantaneous),0.8487,0.9827,,,
+captured frame#0 (stale),0.825,0.9538,,,
+temporal median K=30 (real hist),0.8083,0.9306,,,
+EWMA a=0.02 (real hist),0.8192,0.9364,,,
+"per-row mean, NO top-hat",0.8484,1.0,,,top-hat adds nothing on real data
+row-mean bg only,,,6.2,161926.0,cv2.reduce
+np.median bg only,,,335.8,2978.0,33x slower - avoid
+full OPT + row-mean bg,,,218.2,4583.0,with top-hat
+full NO-top-hat + row-mean bg,,,179.8,5562.0,recommended for real stream

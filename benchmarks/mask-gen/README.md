@@ -22,6 +22,9 @@ python ablation.py                 # per-stage accuracy/latency ablation
 python tune.py                     # parameter sweep for the tuned config
 python explore.py                  # drift robustness, auto-refine, alt thresholds
 python run_experiments.py          # all method prototypes -> results/experiments.*
+
+python download_stream.py          # 5000-frame stream + GT->stream index match
+python stream_bench.py             # real-stream validation -> results/stream_experiments.*
 ```
 
 Note: the temporal-background tests (MOG2/KNN/EWMA) synthesise a per-strip
@@ -41,6 +44,8 @@ note in `methods.temporal_eval` and REPORT.md.
 | `explore.py`      | Drift robustness, `auto_refine_band`, alternative thresholds |
 | `methods.py`      | Prototype methods: background models, hysteresis, watershed, shape reg |
 | `run_experiments.py` | Runs every prototype, writes `results/experiments.{csv,json}` |
+| `download_stream.py` | Fetch the 5000-frame stream, match GT frames by pixel hash |
+| `stream_bench.py` | **Real-stream** background + throughput validation (authoritative) |
 | `results/`        | Recorded experiment results for later comparison |
 
 ## Method notes

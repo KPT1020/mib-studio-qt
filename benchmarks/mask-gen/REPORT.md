@@ -12,9 +12,11 @@ Reference = the accepted SAM2 mask per detection.
 
 **Scoring.** Per-detection IoU / Dice inside the (padded) bounding box;
 masks contour-filled to match the filled reference. Latency = median of
-repeated single-thread runs on the real 512×96 strips, background
-precomputed, including `findContours` + fill (same OpenCV kernels as the
-C++ app).
+repeated single-thread runs on the real 512×96 strips, including
+`findContours` + fill (same OpenCV kernels as the C++ app). Latencies in
+this and the next few sections assume a *precomputed* background; the
+**Real-stream validation** section below gives the sustained cost with the
+per-frame background included (the authoritative throughput number).
 
 ## Headline result
 
@@ -137,8 +139,11 @@ The current ROI body does GaussianBlur → `cv::subtract` → fixed
 threshold for Otsu and add the optional top-hat:
 
 ```cpp
-cv::absdiff(roiCurr, backgroundGray(cvRoi), diff);           // was cv::subtract
-if (cfg.enable_tophat) {                                     // optional
+// instantaneous per-row-mean background over the ROI band (drift-proof, ~6 us)
+cv::Mat rowMean; cv::reduce(roiCurr, rowMean, 1, cv::REDUCE_AVG, CV_8U);
+cv::Mat bg; cv::repeat(rowMean, 1, roiCurr.cols, bg);
+cv::absdiff(roiCurr, bg, diff);
+if (cfg.enable_tophat) {                                     // optional (abnormal drift)
     cv::Mat k = cv::getStructuringElement(cv::MORPH_RECT, {21, 21});
     cv::morphologyEx(diff, diff, cv::MORPH_TOPHAT, k);
 }
@@ -151,13 +156,15 @@ cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN,
                  cv::getStructuringElement(cv::MORPH_ELLIPSE, {3, 3}));
 ```
 
-Otsu needs a clean histogram, so it **must** run on the ROI band only (as the
-production code already scopes work to `cvRoi`) — a whole-frame Otsu would be
-dragged by the channel walls. Landing this in the C++ path is a follow-up: it
-changes runtime segmentation behaviour and per the repo rules needs its
-pipeline-e2e + latency-budget tests and vault updates, plus a config flag +
-migration for the now-adaptive threshold. This benchmark validates the method
-and settles the parameters first.
+Two things the real-stream validation made concrete: (1) the background is a
+per-row **mean** over the ROI band, recomputed each frame — instantaneous, so
+it tracks drift for free and needs no captured/rolling background frame; and (2)
+Otsu **must** run on the ROI band only (the production code already scopes work
+to `cvRoi`) — a whole-frame Otsu would be dragged by the channel walls. Landing
+this in the C++ path is a follow-up: it changes runtime segmentation behaviour
+and per the repo rules needs its pipeline-e2e + latency-budget tests and vault
+updates, plus a config flag + migration for the now-adaptive threshold. This
+benchmark validates the method and settles the parameters first.
 
 ## Other methods explored
 
@@ -236,14 +243,72 @@ A quantised U-Net distilled from the SAM2 masks needs a training pipeline + GPU;
 it's a separate track, recorded as not run. Only worth it if classical accuracy
 must exceed ~0.85 IoU.
 
-### Updated recommendation
+### Round-2 recommendation (later superseded)
 
-Keep the OPT pipeline, and upgrade the background from the static per-row median
-to an **EWMA running-average background fed by the live stream** — this handles
-illumination/thermal drift at the source (0.84 under drift vs 0.73), costs a few
-µs, and could even let the top-hat be dropped. Add **strip-batching** if
-throughput headroom is needed. Skip hysteresis, watershed, and shape
-regularisation for this dataset.
+Round 2 recommended an EWMA running-average background, because under a large
+*synthetic* drift a stale background collapsed while an adapting one held up.
+The **real-stream validation below supersedes that** — on genuine video the
+drift is mild and an instantaneous per-row background wins. Kept here for the
+audit trail.
+
+## Real-stream validation (authoritative)
+
+The round-1/2 numbers use the 173-detection GT set, which is *independent*
+frames; the drift tests there had to *synthesise* a history. The full
+**`gavinlouuu/512x96stream`** (5000 consecutive frames of the same channel)
+lets us test on real video: all 171 GT frames are located in the stream by
+exact pixel hash (`download_stream.py`), so temporal backgrounds use the actual
+preceding frames and throughput is measured on a real sequence
+(`stream_bench.py`, `results/stream_experiments.csv`).
+
+Real drift across the matched span (stream idx 20–4807) is only **~3 gray
+levels** — far smaller than the ±14 synthetic ramp. Consequences:
+
+| background (OPT pipeline) | IoU | det | note |
+|---------------------------|:---:|:---:|------|
+| **per-row mean** (instantaneous, `cv2.reduce`) | 0.848 | **100 %** | recomputed each frame → drift-proof for free |
+| per-row median (instantaneous)    | 0.849 | 98 % | equal accuracy, 33× slower to compute |
+| captured frame#0 (stale)          | 0.825 | 95 % | the only case drift actually costs anything |
+| temporal median K=30 (real hist)  | 0.808 | 93 % | **worse** — per-pixel, noisier, picks up transient cells |
+| EWMA α=0.02 (real hist)           | 0.819 | 94 % | **worse** — same reason |
+
+**The temporal-background idea does not survive contact with real data.** An
+*instantaneous* per-row background is recomputed from the current frame, so it
+already tracks drift with zero lag and beats every rolling/EWMA/MOG2 variant,
+which are noisier and cell-contaminated. The earlier drift concern was an
+artifact of pairing a *stale* background with an oversized synthetic ramp.
+
+Sustained per-frame latency **including** the background (single thread, real
+stream, incl. `findContours` + fill) — earlier sections had excluded background
+cost by assuming a stored frame:
+
+| pipeline | µs/frame | fps |
+|----------|:--------:|:---:|
+| `np.median` background alone | 336 | — (avoid: 33× too slow) |
+| `cv2.reduce` row-mean background alone | 6 | — |
+| full OPT **with** top-hat + row-mean bg | 218 | 4600 |
+| **full, NO top-hat + row-mean bg**      | **180** | **5560** |
+
+On real data the top-hat adds **nothing** (0.848 with and without) because the
+mild drift leaves no residual shading to flatten, and it costs ~40 µs. So the
+budget-compliant real-stream pipeline drops it.
+
+### Final recommendation (real-stream)
+
+```
+ROI band (channel interior; auto_refine_band snaps a coarse user ROI)
+  → background = per-row MEAN via cv2.reduce   (instantaneous, ~6 µs, drift-proof)
+  → absdiff(frame, background)
+  → Otsu threshold (× ~1.1)                    (per-frame adaptive)
+  → morphological close 5×5                    (rim → filled disk)
+  → morphological open 3×3
+  → findContours + fill
+```
+
+**0.848 IoU / 100 % detection / ~180 µs (5560 fps) single-thread Python**,
+C++ faster still. The top-hat becomes an optional flag for abnormal drift;
+temporal backgrounds, hysteresis, watershed, and shape regularisation are not
+worth it here. Use `pipelines.estimate_background_fast` for the background.
 
 ## Caveats
 

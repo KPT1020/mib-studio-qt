@@ -1,0 +1,82 @@
+[
+  {
+    "method": "per-row mean (instantaneous)",
+    "iou": 0.848,
+    "det": 1.0,
+    "us": null,
+    "fps": null,
+    "notes": ""
+  },
+  {
+    "method": "per-row median (instantaneous)",
+    "iou": 0.8487,
+    "det": 0.9827,
+    "us": null,
+    "fps": null,
+    "notes": ""
+  },
+  {
+    "method": "captured frame#0 (stale)",
+    "iou": 0.825,
+    "det": 0.9538,
+    "us": null,
+    "fps": null,
+    "notes": ""
+  },
+  {
+    "method": "temporal median K=30 (real hist)",
+    "iou": 0.8083,
+    "det": 0.9306,
+    "us": null,
+    "fps": null,
+    "notes": ""
+  },
+  {
+    "method": "EWMA a=0.02 (real hist)",
+    "iou": 0.8192,
+    "det": 0.9364,
+    "us": null,
+    "fps": null,
+    "notes": ""
+  },
+  {
+    "method": "per-row mean, NO top-hat",
+    "iou": 0.8484,
+    "det": 1.0,
+    "us": null,
+    "fps": null,
+    "notes": "top-hat adds nothing on real data"
+  },
+  {
+    "method": "row-mean bg only",
+    "iou": null,
+    "det": null,
+    "us": 6.2,
+    "fps": 161926,
+    "notes": "cv2.reduce"
+  },
+  {
+    "method": "np.median bg only",
+    "iou": null,
+    "det": null,
+    "us": 335.8,
+    "fps": 2978,
+    "notes": "33x slower - avoid"
+  },
+  {
+    "method": "full OPT + row-mean bg",
+    "iou": null,
+    "det": null,
+    "us": 218.2,
+    "fps": 4583,
+    "notes": "with top-hat"
+  },
+  {
+    "method": "full NO-top-hat + row-mean bg",
+    "iou": null,
+    "det": null,
+    "us": 179.8,
+    "fps": 5562,
+    "notes": "recommended for real stream"
+  }
+]
