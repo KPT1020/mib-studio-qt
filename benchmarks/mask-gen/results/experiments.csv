@@ -1,0 +1,39 @@
+group,method,iou,det,iou_cell,iou_cluster,us,fps,notes
+baseline,OPT (absdiff+tophat+Otsu+close),0.8487,0.9827,0.849,0.8468,162.0244999571696,6171.906102252098,reference
+baseline,OPT drifted-bg,0.7334,0.8786,0.7285,0.7577,,,stale bg + shading
+1-bg-clean,row-median (current),0.8487,0.9827,0.849,0.8468,,,
+1-bg-clean,row-mean,0.8432,1.0,0.8438,0.8399,,,
+1-bg-clean,morph-open k25,0.4072,0.3873,0.394,0.4729,,,
+1-bg-clean,gaussian k51,0.8266,0.9827,0.8286,0.8163,,,
+1-bg-clean,poly surface o2,0.6223,0.8497,0.6133,0.6669,,,
+1-bg-drift,row-median (current),0.7334,0.8786,0.7285,0.7577,,,
+1-bg-drift,row-mean,0.7269,0.8555,0.7234,0.7441,,,
+1-bg-drift,morph-open k25,0.3472,0.2717,0.3227,0.469,,,
+1-bg-drift,gaussian k51,0.7532,0.9249,0.7465,0.7865,,,
+1-bg-drift,poly surface o2,0.6695,0.815,0.6825,0.6052,,,
+1-temporal,MOG2 clean,0.8451,0.9942,,,,,synth clean history
+1-temporal,"MOG2 drift, stale history",0.6281,0.6416,,,,,history pre-drift
+1-temporal,"MOG2 drift, adapted history",0.8451,0.9942,,,,,continuous adaptation
+1-temporal,KNN clean,0.6981,0.8092,,,,,synth clean history
+1-temporal,"KNN drift, stale history",0.6642,0.7572,,,,,history pre-drift
+1-temporal,"KNN drift, adapted history",0.6981,0.8092,,,,,continuous adaptation
+1-temporal,MOG2 per-frame latency,,,,,512.4274999843692,1951.495577482675,"apply+close, warm model; OVER budget"
+1-temporal,EWMA bg clean,0.8426,0.9884,,,,,running-avg bg + OPT
+1-temporal,"EWMA bg drift, adapted",0.8426,0.9884,,,,,"adapts to drift, ~absdiff cost"
+1-temporal,"EWMA bg drift, stale",0.723,0.8555,,,,,no adaptation
+2-hysteresis,hi=1.0 lo=0.4,0.6855,0.9538,0.678,0.723,510.05399996029155,1960.5767234015448,
+2-hysteresis,hi=1.0 lo=0.5,0.7333,0.9769,0.7292,0.7536,445.1755000332014,2246.305108716494,
+2-hysteresis,hi=1.0 lo=0.6,0.7792,0.9884,0.778,0.7852,422.8929999499087,2364.6643479992554,
+2-hysteresis,hi=1.0 lo=0.5 DRIFT,0.6189,0.6301,0.6071,0.6774,,,
+3-watershed,peak_frac=0.4,0.8226,0.9653,0.8112,0.8794,399.07099994707096,2505.81976673983,clusters=single-object GT
+3-watershed,peak_frac=0.5,0.8008,0.948,0.786,0.8741,399.8790000423469,2500.756478570019,clusters=single-object GT
+3-watershed,peak_frac=0.6,0.7837,0.9306,0.7723,0.8401,412.9464999778065,2421.621202876751,clusters=single-object GT
+3-watershed,OPT on multi-det strips,0.7905,1.0,0.7905,,,,n=4
+3-watershed,watershed on multi-det strips,0.5731,0.75,0.5731,,,,n=4
+4-shape,ellipse,0.8428,0.9884,0.8463,0.8254,347.2034999845164,2880.1552981021077,
+4-shape,hull,0.842,0.9942,0.8451,0.8266,214.82149998064415,4655.027546544931,
+5-throughput,single-thread (1 core),,,,,162.0244999571696,6171.906102252098,baseline
+5-throughput,OpenCV threads=all,,,,,164.54299998258648,6077.438724867236,cv2.setNumThreads(0)
+5-throughput,strip-batching K=16 (linear stages),,,,,58.23878124999737,17170.688989994018,per-frame amortized; Otsu still per-strip
+5-throughput,GPU/CUDA,,,,,,,0 CUDA devices - not available
+6-cnn,tiny U-Net distilled from SAM2,,,,,,,NOT RUN - needs training pipeline + GPU; separate track

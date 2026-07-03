@@ -16,7 +16,13 @@
   ~7000 fps, while the *literal* CLAHE/bilateral/DoG chain is both slower
   (2000 fps) and less accurate. Recommended real-time config, per-stage cost
   table, and a C++ adoption sketch are in
-  `benchmarks/mask-gen/REPORT.md`. Benchmark-only; no app behaviour change yet.
+  `benchmarks/mask-gen/REPORT.md`. A second round prototyped background models
+  (an **EWMA running-average background** fixes illumination drift at the source
+  — 0.84 IoU under drift vs 0.73 for static-bg+top-hat, at ~absdiff cost;
+  MOG2 matches but costs 512 µs), hysteresis / watershed / shape-regularisation
+  (all neutral-to-negative here), and throughput (strip-batching 2.8×). Full
+  numbers recorded in `benchmarks/mask-gen/results/experiments.{csv,json}`.
+  Benchmark-only; no app behaviour change yet.
 - **Realtime-performance benchmark parts C/D/E** (2026-07-02, PR1 of
   `docs/exec-plans/active/2026-07-02-realtime-performance.md`) —
   Extended `tests/performance/pipeline_timing_benchmark.cpp` (CTest

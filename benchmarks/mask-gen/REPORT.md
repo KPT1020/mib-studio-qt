@@ -175,27 +175,75 @@ Tested (`explore.py` parts C/D, OPT base, fixed band):
 So among drop-in swaps, only the threshold operator is interesting: Otsu for
 best IoU, Triangle for 100 % recall, adaptive when no background exists.
 
-Worth trying next (not yet benchmarked):
+## Method prototypes — benchmarked (round 2)
 
-1. **Temporal/rolling background** — running median or EWMA of the last N
-   frames, or `BackgroundSubtractorMOG2`/`KNN`. This is a *video* stream, so a
-   real adaptive background would replace the per-row-median proxy and fix
-   drift at the source (making the top-hat unnecessary). Cost/latency needs
-   checking against the budget.
-2. **Hysteresis (double) threshold** — a Canny-style high/low pair to connect
-   faint cell rims to bright cores; should recover the faint cells that sit
-   just under a single Otsu cut without admitting speckle.
-3. **Distance-transform watershed** for the `cluster` class — split touching
-   cells that a single contour merges (the 29 clusters are exactly this case).
-4. **Shape regularization** — fit an ellipse / convex hull to the contour so
-   the mask matches SAM2's smooth blobs; cheap and directly targets the IoU gap
-   from jagged threshold boundaries.
-5. **SIMD/GPU + multi-strip batching** — not an accuracy change but the way to
-   keep 5000 fps if the frame/ROI grows or heavier stages (watershed) are
-   added; `cv::UMat`/CUDA and batching several strips per call.
-6. **Distilled tiny CNN** (separate track) — if classical accuracy plateaus
-   below requirement, a small quantized U-Net distilled from the SAM2 masks,
-   run on GPU, trades the "classical only" constraint for higher fidelity.
+All prototyped and scored against the same GT; full numbers in
+`results/experiments.{csv,json}` (reproduce with `python run_experiments.py`).
+Baseline for comparison is OPT: **0.849 IoU / 98 % / 162 µs** clean,
+**0.733 / 88 %** under drift.
+
+### 1. Background models — the standout win
+
+| background | clean IoU / det | drift IoU / det | per-frame cost |
+|------------|:---------------:|:---------------:|----------------|
+| per-row median (current)     | 0.849 / 98 % | 0.733 / 88 % | cheap |
+| row mean                     | 0.843 / **100 %** | 0.727 / 86 % | cheap |
+| large Gaussian (k=51)        | 0.827 / 98 % | **0.753 / 92 %** | cheap |
+| morph-open k=25 / poly-fit   | 0.41 / 0.62  | worse | — (kernel < cell → eats cells) |
+| MOG2, clean / adapted-history | 0.845 / 99 % | **0.845 / 99 %** | **512 µs — over budget** |
+| MOG2, stale history          | — | 0.628 / 64 % | — |
+| KNN                          | 0.698 | 0.66–0.70 | — |
+| **EWMA running-average**     | 0.843 / 99 % | **0.843 / 99 %** | **~absdiff (few µs)** |
+
+The clear result: a **continuously-adapting background neutralises drift at the
+source** — MOG2 and a cheap **EWMA running average** both fully recover under
+drift (0.84, vs 0.73 for static-bg + top-hat) at parity on clean data. MOG2's
+per-pixel GMM costs 512 µs (over budget); the **EWMA running average gets the
+same accuracy for a few µs** and is the recommended upgrade to the background
+stage — production has the live stream to feed it. (Fairness note: the temporal
+tests use a *synthesised* per-strip history since the GT has no video; the
+"adapted-history" column is the fair mechanism test.) A large-Gaussian
+background is a simpler middle ground: slightly better than row-median under
+drift, still cheap.
+
+### 2–4. Post-processing methods — all neutral-to-negative here
+
+| method | IoU | det | µs | verdict |
+|--------|:---:|:---:|:--:|---------|
+| Hysteresis (double) threshold | 0.69–0.78 | up to 99 % | 420–510 | worse IoU than single Otsu **and** over budget; the low arm admits wall/noise |
+| Watershed (cluster split)     | 0.78–0.82 | 93–97 % | ~400 | lowers IoU; on the 2 multi-detection strips it **drops 0.79 → 0.57**. Clusters are labelled as *single* objects, so splitting fights the GT |
+| Shape reg — ellipse / hull    | 0.843 / 0.842 | 99 % | 347 / 215 | no gain: close(5×5) masks are already blob-like |
+
+None beat OPT's 0.849; recorded so they aren't re-tried blindly. (Watershed
+stays useful if the labelling ever treats touching cells as separate instances —
+not the case in this dataset.)
+
+### 5. Throughput
+
+| path | µs/frame | note |
+|------|:--------:|------|
+| single thread (1 core)        | 162 | baseline |
+| OpenCV threads = all          | 165 | no help — frame too small, threading overhead dominates |
+| **strip-batching K=16**       | **58** | 2.8× — amortises per-call overhead across stacked strips (linear stages; Otsu stays per-strip) |
+| GPU / CUDA                     | —   | 0 devices on this host |
+
+Batching is the real throughput lever if the ROI grows or heavier stages are
+added; multi-threading and GPU don't help at this frame size.
+
+### 6. Distilled tiny CNN — **not run**
+
+A quantised U-Net distilled from the SAM2 masks needs a training pipeline + GPU;
+it's a separate track, recorded as not run. Only worth it if classical accuracy
+must exceed ~0.85 IoU.
+
+### Updated recommendation
+
+Keep the OPT pipeline, and upgrade the background from the static per-row median
+to an **EWMA running-average background fed by the live stream** — this handles
+illumination/thermal drift at the source (0.84 under drift vs 0.73), costs a few
+µs, and could even let the top-hat be dropped. Add **strip-batching** if
+throughput headroom is needed. Skip hysteresis, watershed, and shape
+regularisation for this dataset.
 
 ## Caveats
 

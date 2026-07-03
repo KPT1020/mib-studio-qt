@@ -20,7 +20,13 @@ python final_report.py             # -> results.csv, comparison.png (headline ta
 
 python ablation.py                 # per-stage accuracy/latency ablation
 python tune.py                     # parameter sweep for the tuned config
+python explore.py                  # drift robustness, auto-refine, alt thresholds
+python run_experiments.py          # all method prototypes -> results/experiments.*
 ```
+
+Note: the temporal-background tests (MOG2/KNN/EWMA) synthesise a per-strip
+history because this GT set is independent frames, not video; see the fairness
+note in `methods.temporal_eval` and REPORT.md.
 
 ## Files
 
@@ -33,6 +39,9 @@ python tune.py                     # parameter sweep for the tuned config
 | `ablation.py`     | Which stages earn their cost (CLAHE / bilateral / DoG / top-hat) |
 | `tune.py`         | Top-hat kernel/shape, Otsu scale, morphology sweep |
 | `explore.py`      | Drift robustness, `auto_refine_band`, alternative thresholds |
+| `methods.py`      | Prototype methods: background models, hysteresis, watershed, shape reg |
+| `run_experiments.py` | Runs every prototype, writes `results/experiments.{csv,json}` |
+| `results/`        | Recorded experiment results for later comparison |
 
 ## Method notes
 
