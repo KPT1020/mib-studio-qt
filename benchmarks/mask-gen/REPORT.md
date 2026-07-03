@@ -92,6 +92,44 @@ ROI band (channel interior)
 Config: `pipelines.PROPOSED_OPT_CFG`. Drop the top-hat for the LEAN variant
 when maximum throughput matters and the background estimate is trustworthy.
 
+### Why keep the top-hat? (OPT vs LEAN)
+
+On clean data OPT and LEAN are identical (0.849). The top-hat earns its ~40 µs
+only when the background estimate is imperfect — the normal live condition
+(stale captured background, illumination/thermal drift). Simulating that
+(stale background + a horizontal shading ramp on the current frame,
+`explore.py` part A):
+
+| pipeline | clean IoU / det | **drifted-bg** IoU / det |
+|----------|:---------------:|:------------------------:|
+| LEAN (no top-hat)   | 0.849 / 98 % | 0.541 / **43 %** |
+| OPT (rect top-hat)  | 0.849 / 98 % | 0.733 / **88 %** |
+| OPT + adaptive thr. | 0.809 / 98 % | 0.662 / 80 % |
+
+The top-hat re-flattens residual low-frequency shading so Otsu still sees a
+clean bimodal histogram — the difference between 43 % and 88 % detection under
+drift. Hence OPT is the recommended default.
+
+### User ROI + auto-refine
+
+The app already lets the user draw the ROI (`RoiDrawCanvas` / `RoiManager`,
+persisted via the EGrabber offsets), and that ROI *is* the processing band —
+the dataset-specific `12..70` here is just where this channel sits. Rather than
+ask the user to place it precisely, `pipelines.auto_refine_band()` snaps a
+coarse box to the channel interior (the bright plateau between the two dark
+walls) from the row-brightness profile, ~5 µs (`explore.py` part B):
+
+| band | IoU / det |
+|------|:---------:|
+| fixed hand-set 12..70          | 0.849 / 98 % |
+| auto-refine from **full frame**    | 0.819 / 95 % |
+| auto-refine from **sloppy 5..90 box** | 0.818 / 95 % |
+
+It recovers `y0≈16, y1≈69` identically across all 171 strips and is robust to a
+careless box. Recommended UX: **user draws a rough ROI → auto-refine snaps it to
+the channel → pipeline runs on the band.** The small residual gap vs the hand
+band is a slightly tighter top edge clipping the largest cells.
+
 ### C++ adoption sketch (`ProcessingService::computeProcessedFrame`)
 
 The current ROI body does GaussianBlur → `cv::subtract` → fixed
@@ -120,6 +158,44 @@ changes runtime segmentation behaviour and per the repo rules needs its
 pipeline-e2e + latency-budget tests and vault updates, plus a config flag +
 migration for the now-adaptive threshold. This benchmark validates the method
 and settles the parameters first.
+
+## Other methods explored
+
+Tested (`explore.py` parts C/D, OPT base, fixed band):
+
+| method | IoU | det | µs | note |
+|--------|:---:|:---:|:--:|------|
+| Otsu (baseline)          | 0.849 | 98 %  | 177 | recommended |
+| **Triangle** threshold   | 0.828 | **100 %** | 178 | best recall; looser masks. Triangle suits a small foreground fraction, which is our case — worth a "never-miss" mode |
+| Adaptive (mean) thr., no top-hat | 0.809 | 98 % | 175 | needs **no background at all** — good bg-free fallback / drift mode |
+| Otsu + fill-holes        | 0.508 | 32 %  | 177 | **hurts** — post-close cells are already solid; flood-fill leaks into channel |
+| Triangle + fill-holes    | 0.367 |  1 %  | 153 | **hurts** badly |
+| `connectedComponentsWithStats` vs `findContours` | — | — | 240 vs **44** | findContours wins on these small frames; CCA not worth it |
+
+So among drop-in swaps, only the threshold operator is interesting: Otsu for
+best IoU, Triangle for 100 % recall, adaptive when no background exists.
+
+Worth trying next (not yet benchmarked):
+
+1. **Temporal/rolling background** — running median or EWMA of the last N
+   frames, or `BackgroundSubtractorMOG2`/`KNN`. This is a *video* stream, so a
+   real adaptive background would replace the per-row-median proxy and fix
+   drift at the source (making the top-hat unnecessary). Cost/latency needs
+   checking against the budget.
+2. **Hysteresis (double) threshold** — a Canny-style high/low pair to connect
+   faint cell rims to bright cores; should recover the faint cells that sit
+   just under a single Otsu cut without admitting speckle.
+3. **Distance-transform watershed** for the `cluster` class — split touching
+   cells that a single contour merges (the 29 clusters are exactly this case).
+4. **Shape regularization** — fit an ellipse / convex hull to the contour so
+   the mask matches SAM2's smooth blobs; cheap and directly targets the IoU gap
+   from jagged threshold boundaries.
+5. **SIMD/GPU + multi-strip batching** — not an accuracy change but the way to
+   keep 5000 fps if the frame/ROI grows or heavier stages (watershed) are
+   added; `cv::UMat`/CUDA and batching several strips per call.
+6. **Distilled tiny CNN** (separate track) — if classical accuracy plateaus
+   below requirement, a small quantized U-Net distilled from the SAM2 masks,
+   run on GPU, trades the "classical only" constraint for higher fidelity.
 
 ## Caveats
 

@@ -70,6 +70,36 @@ def _roi_slice(gray, cfg):
     return y0, y1
 
 
+def auto_refine_band(gray, coarse=None, margin=3, cut_frac=0.45):
+    """Snap a coarse user ROI to the channel interior.
+
+    The channel interior is the bright plateau bracketed by the two dark
+    channel walls. Given a coarse (y0, y1) box (or None = full frame), find
+    the brightest row in the middle and walk outward until brightness falls
+    below `cut_frac` of the way from the darkest to brightest row -- i.e. to
+    the walls -- then trim inward by `margin`. ~5 us; robust to a sloppy box.
+
+    Returns (y0, y1) suitable for cfg['roi'].
+    """
+    h = gray.shape[0]
+    y0, y1 = (0, h) if coarse is None else (max(0, coarse[0]), min(h, coarse[1]))
+    prof = gray[y0:y1].mean(axis=1).astype(np.float32)
+    prof = cv2.GaussianBlur(prof, (1, 5), 0).ravel()
+    n = len(prof)
+    if n < 5:
+        return y0, y1
+    c = y0 + n // 4 + int(np.argmax(prof[n // 4:3 * n // 4]))  # peak in middle half
+    lo, hi = float(prof.min()), float(prof.max())
+    cut = lo + cut_frac * (hi - lo)
+    top = c
+    while top > y0 and prof[top - y0] > cut:
+        top -= 1
+    bot = c
+    while bot < y1 - 1 and prof[bot - y0] > cut:
+        bot += 1
+    return max(0, top + margin), min(h, bot - margin)
+
+
 # ---------------------------------------------------------------------------
 # Current pipeline (production port)
 # ---------------------------------------------------------------------------
@@ -150,19 +180,40 @@ def proposed_pipeline(gray, bg, cfg=None):
     else:
         e = d
 
-    # 5. Otsu threshold (optionally scaled / floored)
-    otsu_t, th = cv2.threshold(e, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    if otsu_scale != 1.0 or otsu_floor > 0:
-        t = max(otsu_floor, otsu_t * otsu_scale)
-        _, th = cv2.threshold(e, t, 255, cv2.THRESH_BINARY)
+    # 5. threshold. "otsu" (default) is bimodal; "triangle" suits a small
+    #    foreground fraction; "adaptive" is local (drift-robust, needs no bg).
+    thmethod = cfg.get("threshold", "otsu")
+    if thmethod == "triangle":
+        _, th = cv2.threshold(e, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_TRIANGLE)
+    elif thmethod == "adaptive":
+        blk = _odd(cfg.get("adaptive_block", 25))
+        th = cv2.adaptiveThreshold(e, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
+                                   cv2.THRESH_BINARY, blk, -cfg.get("adaptive_c", 5))
+    else:  # otsu (optionally scaled / floored)
+        otsu_t, th = cv2.threshold(e, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        if otsu_scale != 1.0 or otsu_floor > 0:
+            t = max(otsu_floor, otsu_t * otsu_scale)
+            _, th = cv2.threshold(e, t, 255, cv2.THRESH_BINARY)
 
     # 6. morphological close (+ optional open to drop specks)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (morphK, morphK))
     r = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel, iterations=close_iter)
     if open_iter > 0:
         r = cv2.morphologyEx(r, cv2.MORPH_OPEN, kernel, iterations=open_iter)
+    if cfg.get("fill_holes"):        # ring-shaped cells -> solid disk (matches GT)
+        r = _fill_holes(r)
     m = np.zeros_like(gray); m[y0:y1] = r
     return m
+
+
+def _fill_holes(binary):
+    """Fill interior holes: flood from a border seed on the inverted mask, then
+    OR the un-flooded interior back in. Recovers solid disks from bright rings."""
+    h, w = binary.shape
+    ff = binary.copy()
+    mask = np.zeros((h + 2, w + 2), np.uint8)
+    cv2.floodFill(ff, mask, (0, 0), 255)
+    return binary | cv2.bitwise_not(ff)
 
 
 # ---------------------------------------------------------------------------

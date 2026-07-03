@@ -32,6 +32,7 @@ python tune.py                     # parameter sweep for the tuned config
 | `final_report.py` | Headline comparison table + `comparison.png` montage |
 | `ablation.py`     | Which stages earn their cost (CLAHE / bilateral / DoG / top-hat) |
 | `tune.py`         | Top-hat kernel/shape, Otsu scale, morphology sweep |
+| `explore.py`      | Drift robustness, `auto_refine_band`, alternative thresholds |
 
 ## Method notes
 
