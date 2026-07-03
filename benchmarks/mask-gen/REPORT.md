@@ -183,8 +183,36 @@ The decoupling is a correct, graceful safeguard — it degrades to prior behavio
 via fallback and is exact when it engages — but its benefit is realized only if
 adaptive is adopted with larger morphology. Data: `results/decoupled_area.csv`.
 
-**Follow-ups:** the per-row-mean background source, frontend config wiring for
-the new fields, and the optional top-hat flag.
+### Area accuracy vs GT — the measurement basis is inaccurate (`area_accuracy.py`)
+
+The decoupling keeps `area` on the fixed-threshold basis — but "stable" is only
+useful if the basis is also *accurate*. Scored each pipeline's cell area against
+the SAM2 GT area (physical truth), with IoU / detection alongside:
+
+| pipeline | mean IoU | det@0.5 | area err median | area err p90 |
+|---|---:|---:|---:|---:|
+| current  FIXED    (adaptive off)    | 0.343 | 20.8% | **49.0%** | 85.2% |
+| current  ADAPTIVE (Otsu, shipped)   | 0.331 | 19.1% | **49.5%** | 88.4% |
+| proposed LEAN     (absdiff+Otsu, m5)| 0.849 | 98.3% | **10.0%** | 27.5% |
+| proposed OPT      (+ rect top-hat)  | 0.849 | 98.3% | **10.0%** | 27.5% |
+
+The current pipeline — fixed *or* adaptive — mis-measures cell area by ~49%
+against truth; the proposed pipeline by ~10%. So the fixed-threshold basis the
+decoupling stabilises onto is itself badly inaccurate, and the adaptive path we
+gated the safeguard behind is no better than fixed. Crucially the gap is **not**
+morphology: bumping the current-adaptive path to a 5×5 close *collapses* it (IoU
+0.10, 0% detection) — the accuracy lives in the proposed front-end (absdiff +
+the ROI/Otsu interaction, optional top-hat), which is not reachable by tuning the
+current pipeline. Area accuracy for downstream analysis therefore needs the
+**proposed pipeline ported to C++**, not a measurement remap. Because the
+proposed pipeline's area is already accurate (~10% vs GT) and self-consistent,
+it would not need the fixed-threshold decoupling. Adopting it changes absolute
+area values ~40%, so it requires re-calibrating `area_threshold_*`, the
+target-group windows, and the E-modulus LUT. Data: `results/area_accuracy.csv`.
+
+**Follow-ups:** port the proposed pipeline to C++ (the real accuracy/detection
+win) + re-calibrate the area gates/LUT; the per-row-mean background source;
+frontend config wiring for the new fields.
 
 ### C++ adoption sketch (`ProcessingService::computeProcessedFrame`)
 
