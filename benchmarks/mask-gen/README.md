@@ -48,6 +48,8 @@ note in `methods.temporal_eval` and REPORT.md.
 | `stream_bench.py` | **Real-stream** background + throughput validation (authoritative) |
 | `focus_metric.py` | Robust focus metric (Laplacian variance) vs the nested-contour ring ratio |
 | `visualize_focus.py` | Build `results/focus_data.csv` + ranked-cell montage and analysis figures |
+| `scatter_focus.py` | Light-scattering focus signature on real cells (dark disc + bright rim, signed rim contrast, focus-energy vs ring strength) → `results/scatter_focus_*` |
+| `fetch_resilient.py` | Retry/resume GT fetch (tolerates transient LFS resets); builds `meta.pkl` like `download_gt.py` |
 | `results/`        | Recorded experiment results for later comparison |
 
 ## Method notes

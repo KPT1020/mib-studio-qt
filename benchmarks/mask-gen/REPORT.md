@@ -368,8 +368,61 @@ cv::Scalar m, sd; cv::meanStdDev(lap, m, sd, objMask);
 double focusScore = sd[0] * sd[0];   // variance of Laplacian within the cell
 ```
 
+## Light-scattering focus signature — measured on real cells
+
+Follow-up to the focus-metric section, framing focus as the **light-scattering**
+behaviour of a brightfield phase object rather than as abstract "sharpness"
+(`scatter_focus.py`, figures `results/scatter_focus_metrics.png` and
+`results/scatter_focus_montage.png`, data `results/scatter_focus_data.csv`).
+
+**Physics.** A flowing cell is a phase object: at true focus it is nearly
+invisible, and its contrast — the *white ring* — is a defocus-induced scattering
+signature. Transport-of-intensity (`∂I/∂z ∝ −I₀∇²φ`) predicts a bright rim on one
+side of focus, a dark rim on the other, and near-zero contrast at focus. The
+unsigned focus energies (`focusLaplacianVar`, `focusTenengrad`) measure ring
+*strength*, so they cannot by themselves tell which side of focus we are on.
+
+**What the real data shows** (per-row-mean background subtracted, signed;
+inner disc `r/R < 0.45`, rim annulus `0.75–1.15 R`, n = 173):
+
+* The white ring is unambiguous and consistent: **100 %** of cells have a
+  **dark disc** (median inner −21.6 gray) inside a **bright rim** (median
+  +7.0 gray); rim > centre on **99 %** of detections. Panel A of
+  `scatter_focus_metrics.png` is the averaged radial profile — dark disc rising
+  to a rim over-brightness near `r = R`, decaying outside.
+* The dataset is **one-sided in focus**: every cell sits on the bright-rim side
+  (signed rim−centre > 0), so it spans a range of *defocus magnitude* but never
+  crosses focus. It therefore cannot exhibit (or validate a metric against) the
+  bright↔dark ring inversion — that still needs a real through-focus z-stack.
+* Across these *independent* cells the unsigned energies track ring strength
+  only weakly (Spearman `focusLaplacianVar` −0.16, `focusTenengrad` +0.13):
+  cell-to-cell biological variability (size, type, content) swamps the defocus
+  signal. This is why a clean focus response only appears in a *controlled
+  per-cell* sweep (the σ 0→3 blur test, 50.9×) — and why the live
+  `AutofocusService` servos on the **population median**, which averages that
+  variability out.
+
+**Implications for autofocus.**
+
+* The servo-to-setpoint design in `AutofocusService::computeFocusVoltage`
+  (`focusSetpoint` + `focusDirection`, not peak-seeking) is the right shape for
+  a one-sided scattering signal: it rides a monotonic flank and takes its
+  direction from `focusDirection`, which the unsigned metric cannot supply.
+* A **signed radial contrast** (rim − centre on the signed diff) is a candidate
+  drop-in that carries the bright/dark polarity itself, so it could give the
+  loop its direction without a manual `focusDirection` flag — but only a
+  through-focus capture can confirm the sign actually flips across focus.
+* `focusLaplacianVar` / `focusTenengrad` remain the robust *magnitude* signal
+  (defined on 100 % of frames vs 66–73 % for the nested ring); the montage
+  `scatter_focus_montage.png` shows the ranking is meaningful — high energy =
+  crisp bright ring + internal texture, low energy = faint blurred blob.
+
 ## Caveats
 
+* The scattering analysis uses per-row-mean background subtraction and the SAM2
+  cell mask; the "defocus surrogate" is the signed rim−centre contrast, not a
+  measured z. Absolute focus distances are not recoverable from this
+  independent-frame set — a through-focus z-stack is the missing measurement.
 * Reference masks are SAM2 pseudo-GT (`gt_status = predicted`), not
   hand-labelled; IoU is measured against that target, i.e. "how well can a
   200 µs classical pipeline reproduce the SAM2 mask", not against pixel-truth.
