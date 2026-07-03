@@ -56,6 +56,11 @@ struct ProcessingConfig {
     double ring_ratio_min{15.0};
     double ring_ratio_max{25.0};
     bool enable_ring_ratio_check{true};
+    // Optional focus gate on focusLaplacianVar — a robust, always-defined
+    // alternative to the fragile nested-contour ring ratio. Off by default, so
+    // this is purely additive; enable once a per-setup threshold is chosen.
+    bool enable_focus_check{false};
+    double focus_laplacian_min{0.0};
     bool require_single_inner_contour{true};
     int empty_frame_pixel_threshold{100};
     bool auto_background_enabled{false};
@@ -99,6 +104,11 @@ struct FilterResult {
     double area{0.0};
     double areaRatio{0.0};
     double ringRatio{0.0};
+    // Topology-free focus metrics computed from the original intensity inside the
+    // object mask (do not depend on a closed nested ring contour). See
+    // benchmarks/mask-gen/REPORT.md. Both are reported; gate on whichever suits.
+    double focusLaplacianVar{0.0}; // variance of the Laplacian within the mask
+    double focusTenengrad{0.0};    // mean Sobel gradient energy within the mask
     double youngsModulus{0.0}; // Young's modulus (kPa) from LUT lookup
     BrightnessQuantiles brightness;
     bool isTargetGroup{false}; // True if valid AND matches target group criteria
@@ -451,6 +461,11 @@ private:
     // Shared by computeProcessedFrame and the realtime loops.
     static void applyProcessingThreshold(const cv::Mat& diff, cv::Mat& thresh,
                                          const ProcessingConfig& config);
+    // Topology-free focus measures from the original intensity inside objectMask
+    // (restricted to bbox for speed). High-pass, so the smooth background is
+    // ignored — no background/diff input needed.
+    static void computeFocusMetrics(const cv::Mat& originalImage, const cv::Mat& objectMask,
+                                    const cv::Rect& bbox, double& lapVar, double& tenengrad);
 
     std::vector<std::thread> workers_;
     std::queue<Job> queue_;

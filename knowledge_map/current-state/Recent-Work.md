@@ -14,8 +14,12 @@
   frames and falls monotonically under a controlled defocus sweep with a 50×
   dynamic range (Tenengrad 11× is a smoother alternative). Recommendation +
   C++ sketch in `benchmarks/mask-gen/REPORT.md`; numbers in
-  `results/focus_experiments.{csv,json}`. Study only — not yet wired into the
-  service.
+  `results/focus_experiments.{csv,json}`. **Now implemented** (backend): new
+  `FilterResult::focusLaplacianVar` / `focusTenengrad` (both computed via
+  `computeFocusMetrics`, additive — `ringRatio` untouched) plus an optional
+  default-off gate (`enable_focus_check` + `focus_laplacian_min`). Test:
+  `tests/processing/processing_focus_metric_test.cpp`. Follow-up: HDF5
+  persistence + UI display so the gate can be tuned from saved data.
 - **Adaptive (Otsu) segmentation threshold** (2026-07-03,
   [[ProcessingService]]) — New `applyProcessingThreshold` helper routes all four
   segmentation sites (`computeProcessedFrame` + 3 realtime-loop copies) through

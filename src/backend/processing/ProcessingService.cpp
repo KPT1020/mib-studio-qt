@@ -676,6 +676,46 @@ void ProcessingService::applyProcessingThreshold(const cv::Mat& diff, cv::Mat& t
     }
 }
 
+void ProcessingService::computeFocusMetrics(const cv::Mat& originalImage, const cv::Mat& objectMask,
+                                            const cv::Rect& bbox, double& lapVar, double& tenengrad) {
+    lapVar = 0.0;
+    tenengrad = 0.0;
+    if (originalImage.empty() || objectMask.empty()) {
+        return;
+    }
+    // Work on the object's bounding box only. Clamp to the shared image bounds.
+    cv::Rect area(0, 0, std::min(originalImage.cols, objectMask.cols),
+                  std::min(originalImage.rows, objectMask.rows));
+    if (bbox.width > 0 && bbox.height > 0) {
+        area &= bbox;
+    }
+    if (area.width < 3 || area.height < 3) {
+        return;  // too small for a 3x3 derivative
+    }
+    cv::Mat gray = originalImage(area);
+    if (gray.channels() == 3) {
+        cv::cvtColor(gray, gray, cv::COLOR_BGR2GRAY);
+    }
+    const cv::Mat mask = objectMask(area);
+
+    // Laplacian and Sobel are high-pass, so the smooth per-row background barely
+    // contributes — computing on the original intensity is equivalent to the
+    // background-subtracted diff (Spearman ~0.91) without needing the diff here.
+    cv::Mat lap;
+    cv::Laplacian(gray, lap, CV_32F, 3);
+    cv::Scalar m, sd;
+    cv::meanStdDev(lap, m, sd, mask);
+    lapVar = sd[0] * sd[0];  // variance of the Laplacian within the mask
+
+    cv::Mat gx, gy;
+    cv::Sobel(gray, gx, CV_32F, 1, 0, 3);
+    cv::Sobel(gray, gy, CV_32F, 0, 1, 3);
+    cv::Mat energy;
+    cv::magnitude(gx, gy, energy);
+    cv::multiply(energy, energy, energy);  // squared gradient magnitude
+    tenengrad = cv::mean(energy, mask)[0];
+}
+
 ProcessedFrame ProcessingService::computeProcessedFrame(
     const cv::Mat& grayInput,
     const cv::Mat& backgroundGray,
@@ -1459,6 +1499,8 @@ FilterResult ProcessingService::evaluateInnerContourObject(const ContourAnalysis
         const cv::Rect bbox(static_cast<int>(result.bboxX), static_cast<int>(result.bboxY),
                             static_cast<int>(result.bboxWidth), static_cast<int>(result.bboxHeight));
         result.brightness = calculateBrightnessQuantiles(originalImage, objectMask, bbox);
+        computeFocusMetrics(originalImage, objectMask, bbox,
+                            result.focusLaplacianVar, result.focusTenengrad);
     }
 
     if (config.enable_border_check && contourTouchesRoiBorder(innerContour, roi)) {
@@ -1496,8 +1538,10 @@ FilterResult ProcessingService::evaluateInnerContourObject(const ContourAnalysis
          result.deformability <= config.deformability_threshold_max);
     const bool areaRatioInRange = !config.enable_area_ratio_check ||
         (result.areaRatio <= config.area_ratio_threshold_max);
+    const bool focusInRange = !config.enable_focus_check ||
+        (result.focusLaplacianVar >= config.focus_laplacian_min);
 
-    if (areaInRange && ringRatioInRange && deformabilityInRange && areaRatioInRange) {
+    if (areaInRange && ringRatioInRange && deformabilityInRange && areaRatioInRange && focusInRange) {
         result.inRange = true;
         result.isValid = true;
     }
@@ -1548,6 +1592,8 @@ FilterResult ProcessingService::evaluateOuterContourObject(const ContourAnalysis
         const cv::Rect bbox(static_cast<int>(result.bboxX), static_cast<int>(result.bboxY),
                             static_cast<int>(result.bboxWidth), static_cast<int>(result.bboxHeight));
         result.brightness = calculateBrightnessQuantiles(originalImage, objectMask, bbox);
+        computeFocusMetrics(originalImage, objectMask, bbox,
+                            result.focusLaplacianVar, result.focusTenengrad);
     }
 
     if (config.enable_border_check && contourTouchesRoiBorder(contour, roi)) {
@@ -1579,8 +1625,10 @@ FilterResult ProcessingService::evaluateOuterContourObject(const ContourAnalysis
          result.deformability <= config.deformability_threshold_max);
     const bool areaRatioInRange = !config.enable_area_ratio_check ||
         (result.areaRatio <= config.area_ratio_threshold_max);
+    const bool focusInRange = !config.enable_focus_check ||
+        (result.focusLaplacianVar >= config.focus_laplacian_min);
 
-    if (areaInRange && deformabilityInRange && areaRatioInRange) {
+    if (areaInRange && deformabilityInRange && areaRatioInRange && focusInRange) {
         result.inRange = true;
         result.isValid = true;
     }
