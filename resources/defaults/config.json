@@ -17,6 +17,9 @@
         "ring_ratio_min": 15.0,
         "ring_ratio_max": 25.0,
         "bg_subtract_threshold": 8,
+        "adaptive_threshold": false,
+        "otsu_scale": 1.1,
+        "focus_laplacian_min": 0.0,
         "empty_frame_pixel_threshold": 100,
         "auto_background_enabled": false,
         "auto_background_empty_frames": 30,
@@ -27,6 +30,7 @@
             "enable_area_ratio_check": false,
             "enable_deformability_range_check": true,
             "enable_ring_ratio_check": true,
+            "enable_focus_check": false,
             "enable_multiple_contours_check": true,
             "require_single_inner_contour": true
         },

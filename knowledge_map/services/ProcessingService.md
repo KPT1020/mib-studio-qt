@@ -40,9 +40,26 @@ restarts the loop (same policy as `CaptureService::run`). Verified by
 
 1. Optional background subtraction (`setRealtimeBackgroundGray`).
 2. Gaussian blur → threshold → morphological ops → contour find.
+   - Thresholding goes through `applyProcessingThreshold` (shared by
+     `computeProcessedFrame` and all realtime-loop copies). Default: fixed
+     `bg_subtract_threshold`. When `config.adaptive_threshold` is set, it uses
+     per-frame **Otsu**, floored at `bg_subtract_threshold` (so near-empty ROIs
+     stay empty) and scaled by `otsu_scale`. The `isFrameEmpty` gates keep the
+     fixed threshold. Evidence + tuning: `benchmarks/mask-gen/REPORT.md`;
+     regression/invariant coverage in
+     `tests/processing/processing_adaptive_threshold_test.cpp`.
 3. `filterProcessedImage` produces a `FilterResult`:
    - `deformability`, `area` (μm² via `pixelToMicronFactor_`),
      `areaRatio`, `ringRatio`, `youngsModulus` (LUT lookup)
+   - `focusLaplacianVar` / `focusTenengrad` — topology-free focus measures
+     (`computeFocusMetrics`) computed from the original intensity inside the
+     object mask, so they are defined even when the nested ring contour that
+     `ringRatio` needs does not form. Optional gate: `enable_focus_check` +
+     `focus_laplacian_min` (default off). Evidence: `benchmarks/mask-gen`
+     (`focus_metric.py`, REPORT.md). Persisted to HDF5 as an optional metadata
+     group (backward-compatible read via `H5Tget_member_index`; round-trip test
+     `recording.focus_metric_roundtrip`) and exported in the HdfReviewTab CSV.
+     UI charting/gating controls are a follow-up.
    - `brightness` quantiles (Q1/Q2/Q3/Q4)
    - border check, single-inner-contour check, range gates
    - `isTargetGroup` (second gate for trigger-worthy frames)
@@ -79,6 +96,8 @@ All gates in one struct. Notable fields:
 
 - `area_threshold_min/max` (μm²), `deformability_threshold_min/max`
 - `ring_ratio_min/max` + `enable_ring_ratio_check`
+- `bg_subtract_threshold` — fixed segmentation threshold (also the Otsu floor)
+- `adaptive_threshold` (default off) + `otsu_scale` — per-frame Otsu segmentation
 - `empty_frame_pixel_threshold` — drives empty-frame skipping
 - `auto_background_enabled` + `auto_background_empty_frames`,
   `auto_background_cooldown_frames`

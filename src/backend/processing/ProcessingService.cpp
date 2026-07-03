@@ -648,6 +648,74 @@ bool ProcessingService::isFrameEmpty(const backend::playback::Frame& frame,
     return cv::countNonZero(thresh) < config.empty_frame_pixel_threshold;
 }
 
+void ProcessingService::applyProcessingThreshold(const cv::Mat& diff, cv::Mat& thresh,
+                                                  const ProcessingConfig& config) {
+    const int fixedT = std::max(0, config.bg_subtract_threshold);
+    if (!config.adaptive_threshold) {
+        cv::threshold(diff, thresh, fixedT, 255, cv::THRESH_BINARY);
+        return;
+    }
+    // Otsu picks a per-frame threshold from the diff histogram. Floor it at the
+    // fixed noise threshold so a near-empty ROI (unimodal, near-zero diff) can't
+    // be split into false foreground — on such frames Otsu returns a low value
+    // that the floor overrides, reproducing the fixed-threshold behaviour. A
+    // genuine bright cell yields a bimodal histogram whose Otsu split sits above
+    // the floor and tightly segments the object. otsu_scale tunes mask tightness.
+    // Requires a background-subtracted diff (bright object on ~0 field).
+    cv::Mat otsuMask;
+    const double otsuT = cv::threshold(diff, otsuMask, 0, 255,
+                                       cv::THRESH_BINARY | cv::THRESH_OTSU);
+    const double t = std::max(static_cast<double>(fixedT), otsuT * config.otsu_scale);
+    if (t <= static_cast<double>(fixedT)) {
+        // Otsu did not clear the floor: the floored binary is exactly otsuMask
+        // re-thresholded at fixedT — compute directly to avoid a second pass only
+        // when it differs.
+        cv::threshold(diff, thresh, fixedT, 255, cv::THRESH_BINARY);
+    } else {
+        cv::threshold(diff, thresh, t, 255, cv::THRESH_BINARY);
+    }
+}
+
+void ProcessingService::computeFocusMetrics(const cv::Mat& originalImage, const cv::Mat& objectMask,
+                                            const cv::Rect& bbox, double& lapVar, double& tenengrad) {
+    lapVar = 0.0;
+    tenengrad = 0.0;
+    if (originalImage.empty() || objectMask.empty()) {
+        return;
+    }
+    // Work on the object's bounding box only. Clamp to the shared image bounds.
+    cv::Rect area(0, 0, std::min(originalImage.cols, objectMask.cols),
+                  std::min(originalImage.rows, objectMask.rows));
+    if (bbox.width > 0 && bbox.height > 0) {
+        area &= bbox;
+    }
+    if (area.width < 3 || area.height < 3) {
+        return;  // too small for a 3x3 derivative
+    }
+    cv::Mat gray = originalImage(area);
+    if (gray.channels() == 3) {
+        cv::cvtColor(gray, gray, cv::COLOR_BGR2GRAY);
+    }
+    const cv::Mat mask = objectMask(area);
+
+    // Laplacian and Sobel are high-pass, so the smooth per-row background barely
+    // contributes — computing on the original intensity is equivalent to the
+    // background-subtracted diff (Spearman ~0.91) without needing the diff here.
+    cv::Mat lap;
+    cv::Laplacian(gray, lap, CV_32F, 3);
+    cv::Scalar m, sd;
+    cv::meanStdDev(lap, m, sd, mask);
+    lapVar = sd[0] * sd[0];  // variance of the Laplacian within the mask
+
+    cv::Mat gx, gy;
+    cv::Sobel(gray, gx, CV_32F, 1, 0, 3);
+    cv::Sobel(gray, gy, CV_32F, 0, 1, 3);
+    cv::Mat energy;
+    cv::magnitude(gx, gy, energy);
+    cv::multiply(energy, energy, energy);  // squared gradient magnitude
+    tenengrad = cv::mean(energy, mask)[0];
+}
+
 ProcessedFrame ProcessingService::computeProcessedFrame(
     const cv::Mat& grayInput,
     const cv::Mat& backgroundGray,
@@ -695,7 +763,6 @@ ProcessedFrame ProcessingService::computeProcessedFrame(
     const int blurK = toOdd(config.gaussian_blur_size);
     const int morphK = toOdd(config.morph_kernel_size);
     const int morphIter = std::max(1, config.morph_iterations);
-    const int threshVal = std::max(0, config.bg_subtract_threshold);
 
     // Full-size mask; process inside ROI only
     cv::Mat mask(gray.rows, gray.cols, CV_8UC1, cv::Scalar(0));
@@ -716,7 +783,7 @@ ProcessedFrame ProcessingService::computeProcessedFrame(
         diffForProcessing = blurredCurr;
     }
 
-    cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+    applyProcessingThreshold(diffForProcessing, thresh, config);
     cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
     cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
     cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
@@ -1432,6 +1499,8 @@ FilterResult ProcessingService::evaluateInnerContourObject(const ContourAnalysis
         const cv::Rect bbox(static_cast<int>(result.bboxX), static_cast<int>(result.bboxY),
                             static_cast<int>(result.bboxWidth), static_cast<int>(result.bboxHeight));
         result.brightness = calculateBrightnessQuantiles(originalImage, objectMask, bbox);
+        computeFocusMetrics(originalImage, objectMask, bbox,
+                            result.focusLaplacianVar, result.focusTenengrad);
     }
 
     if (config.enable_border_check && contourTouchesRoiBorder(innerContour, roi)) {
@@ -1469,8 +1538,10 @@ FilterResult ProcessingService::evaluateInnerContourObject(const ContourAnalysis
          result.deformability <= config.deformability_threshold_max);
     const bool areaRatioInRange = !config.enable_area_ratio_check ||
         (result.areaRatio <= config.area_ratio_threshold_max);
+    const bool focusInRange = !config.enable_focus_check ||
+        (result.focusLaplacianVar >= config.focus_laplacian_min);
 
-    if (areaInRange && ringRatioInRange && deformabilityInRange && areaRatioInRange) {
+    if (areaInRange && ringRatioInRange && deformabilityInRange && areaRatioInRange && focusInRange) {
         result.inRange = true;
         result.isValid = true;
     }
@@ -1521,6 +1592,8 @@ FilterResult ProcessingService::evaluateOuterContourObject(const ContourAnalysis
         const cv::Rect bbox(static_cast<int>(result.bboxX), static_cast<int>(result.bboxY),
                             static_cast<int>(result.bboxWidth), static_cast<int>(result.bboxHeight));
         result.brightness = calculateBrightnessQuantiles(originalImage, objectMask, bbox);
+        computeFocusMetrics(originalImage, objectMask, bbox,
+                            result.focusLaplacianVar, result.focusTenengrad);
     }
 
     if (config.enable_border_check && contourTouchesRoiBorder(contour, roi)) {
@@ -1552,8 +1625,10 @@ FilterResult ProcessingService::evaluateOuterContourObject(const ContourAnalysis
          result.deformability <= config.deformability_threshold_max);
     const bool areaRatioInRange = !config.enable_area_ratio_check ||
         (result.areaRatio <= config.area_ratio_threshold_max);
+    const bool focusInRange = !config.enable_focus_check ||
+        (result.focusLaplacianVar >= config.focus_laplacian_min);
 
-    if (areaInRange && deformabilityInRange && areaRatioInRange) {
+    if (areaInRange && deformabilityInRange && areaRatioInRange && focusInRange) {
         result.inRange = true;
         result.isValid = true;
     }
@@ -2265,7 +2340,7 @@ void ProcessingService::realtimeInlineLoop() {
                 }
                 
                 // Use background subtraction diff for actual processing (morphology, contours, etc.)
-                cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+                applyProcessingThreshold(diffForProcessing, thresh, config);
                 cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
                 cv::morphologyEx(thresh, mask, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
                 cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
@@ -2609,7 +2684,7 @@ void ProcessingService::realtimeInlineLoop() {
                 }
                 
                 // Use background subtraction diff for actual processing (morphology, contours, etc.)
-                cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+                applyProcessingThreshold(diffForProcessing, thresh, config);
                 
                 // Update previous frame for frame-to-frame comparison (when no background and auto-capture enabled)
                 if (!hasBackground && config.auto_background_enabled && !experimentActive_.load()) {
@@ -2925,7 +3000,7 @@ void ProcessingService::realtimeInlineLoop() {
                 }
 
                 // Use background subtraction diff for actual processing (morphology, contours, etc.)
-                cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+                applyProcessingThreshold(diffForProcessing, thresh, config);
 
                 // Update previous frame for frame-to-frame comparison (when no background and auto-capture enabled)
                 if (!hasBackground && config.auto_background_enabled && !experimentActive_.load()) {

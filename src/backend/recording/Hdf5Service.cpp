@@ -123,11 +123,14 @@ namespace backend::services
             double brightness_q4;
             double youngsModulus;
             uint8_t isTargetGroup;
+            double focusLaplacianVar;
+            double focusTenengrad;
         };
 
         hid_t createProcessedFrameMetadataType(bool includeBaseFields = true,
                                                bool includeObjectFields = true,
-                                               bool includeTrackingFields = true)
+                                               bool includeTrackingFields = true,
+                                               bool includeFocusFields = true)
         {
             hid_t compTypeId = H5Tcreate(H5T_COMPOUND, sizeof(ProcessedFrameMetadataRecord));
             if (includeBaseFields)
@@ -168,6 +171,13 @@ namespace backend::services
                 H5Tinsert(compTypeId, "centroidX", HOFFSET(ProcessedFrameMetadataRecord, centroidX), H5T_NATIVE_DOUBLE);
                 H5Tinsert(compTypeId, "centroidY", HOFFSET(ProcessedFrameMetadataRecord, centroidY), H5T_NATIVE_DOUBLE);
             }
+            if (includeFocusFields)
+            {
+                // Topology-free focus metrics (added after the initial schema).
+                // Read behind a presence check so older files still load.
+                H5Tinsert(compTypeId, "focusLaplacianVar", HOFFSET(ProcessedFrameMetadataRecord, focusLaplacianVar), H5T_NATIVE_DOUBLE);
+                H5Tinsert(compTypeId, "focusTenengrad", HOFFSET(ProcessedFrameMetadataRecord, focusTenengrad), H5T_NATIVE_DOUBLE);
+            }
             return compTypeId;
         }
 
@@ -203,6 +213,8 @@ namespace backend::services
             md.brightness_q4 = frame.validation.brightness.q4;
             md.youngsModulus = frame.validation.youngsModulus;
             md.isTargetGroup = frame.validation.isTargetGroup ? 1 : 0;
+            md.focusLaplacianVar = frame.validation.focusLaplacianVar;
+            md.focusTenengrad = frame.validation.focusTenengrad;
             return md;
         }
     } // namespace
@@ -1752,9 +1764,11 @@ namespace backend::services
             md.bboxHeight = 0.0;
             md.centroidX = 0.0;
             md.centroidY = 0.0;
+            md.focusLaplacianVar = 0.0;  // stays 0 for files predating the focus group
+            md.focusTenengrad = 0.0;
         }
 
-        hid_t baseMemTypeId = createProcessedFrameMetadataType(true, false, false);
+        hid_t baseMemTypeId = createProcessedFrameMetadataType(true, false, false, false);
         herr_t status = H5Dread(datasetId, baseMemTypeId, H5S_ALL, H5S_ALL, H5P_DEFAULT, metadata.data());
         H5Tclose(baseMemTypeId);
         if (status < 0)
@@ -1769,7 +1783,7 @@ namespace backend::services
         const bool hasObjectCount = H5Tget_member_index(fileTypeId, "objectCount") >= 0;
         if (hasObjectId || hasObjectCount)
         {
-            hid_t objectMemTypeId = createProcessedFrameMetadataType(false, true, false);
+            hid_t objectMemTypeId = createProcessedFrameMetadataType(false, true, false, false);
             status = H5Dread(datasetId, objectMemTypeId, H5S_ALL, H5S_ALL, H5P_DEFAULT, metadata.data());
             H5Tclose(objectMemTypeId);
             if (status < 0)
@@ -1787,7 +1801,7 @@ namespace backend::services
         const bool hasTrackObservationCount = H5Tget_member_index(fileTypeId, "trackObservationCount") >= 0;
         if (hasTrackId || hasTrackFirstFrame || hasTrackLastFrame || hasTrackObservationCount)
         {
-            hid_t trackingMemTypeId = createProcessedFrameMetadataType(false, false, true);
+            hid_t trackingMemTypeId = createProcessedFrameMetadataType(false, false, true, false);
             status = H5Dread(datasetId, trackingMemTypeId, H5S_ALL, H5S_ALL, H5P_DEFAULT, metadata.data());
             H5Tclose(trackingMemTypeId);
             if (status < 0)
@@ -1795,6 +1809,24 @@ namespace backend::services
                 H5Tclose(fileTypeId);
                 H5Dclose(datasetId);
                 SPDLOG_ERROR("Failed to read tracking metadata fields from {}", datasetPath);
+                return false;
+            }
+        }
+
+        // Focus metrics are an optional group added after the initial schema;
+        // read them only when the file actually carries them so older files load.
+        const bool hasFocusLaplacian = H5Tget_member_index(fileTypeId, "focusLaplacianVar") >= 0;
+        const bool hasFocusTenengrad = H5Tget_member_index(fileTypeId, "focusTenengrad") >= 0;
+        if (hasFocusLaplacian || hasFocusTenengrad)
+        {
+            hid_t focusMemTypeId = createProcessedFrameMetadataType(false, false, false, true);
+            status = H5Dread(datasetId, focusMemTypeId, H5S_ALL, H5S_ALL, H5P_DEFAULT, metadata.data());
+            H5Tclose(focusMemTypeId);
+            if (status < 0)
+            {
+                H5Tclose(fileTypeId);
+                H5Dclose(datasetId);
+                SPDLOG_ERROR("Failed to read focus metadata fields from {}", datasetPath);
                 return false;
             }
         }
@@ -1837,6 +1869,8 @@ namespace backend::services
             frame.validation.brightness.q4 = md.brightness_q4;
             frame.validation.youngsModulus = md.youngsModulus;
             frame.validation.isTargetGroup = (md.isTargetGroup != 0);
+            frame.validation.focusLaplacianVar = md.focusLaplacianVar;
+            frame.validation.focusTenengrad = md.focusTenengrad;
             frames.push_back(frame);
         }
 

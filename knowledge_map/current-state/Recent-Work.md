@@ -5,6 +5,64 @@
 
 ## Features shipped
 
+- **Focus-metric study — Laplacian-variance replacement for ring ratio**
+  (2026-07-03, `benchmarks/mask-gen/focus_metric.py`) — Quantified the fragility
+  of the nested-contour ring ratio ([[ProcessingService]] `calculateRingRatio`):
+  the closed inner ring is present on only 66 % of GT frames (fixed threshold),
+  73 % with adaptive Otsu. A topology-free **variance of the Laplacian** of the
+  bg-subtracted intensity inside the solid cell mask is defined on 100 % of
+  frames and falls monotonically under a controlled defocus sweep with a 50×
+  dynamic range (Tenengrad 11× is a smoother alternative). Recommendation +
+  C++ sketch in `benchmarks/mask-gen/REPORT.md`; numbers in
+  `results/focus_experiments.{csv,json}`. **Now implemented** (backend): new
+  `FilterResult::focusLaplacianVar` / `focusTenengrad` (both computed via
+  `computeFocusMetrics`, additive — `ringRatio` untouched) plus an optional
+  default-off gate (`enable_focus_check` + `focus_laplacian_min`). Test:
+  `tests/processing/processing_focus_metric_test.cpp`. **Persisted to HDF5** as
+  a backward-compatible optional metadata group (presence-checked read; test
+  `recording.focus_metric_roundtrip`) and exported in the HdfReviewTab CSV, so
+  focus values from a real run can be inspected to pick `focus_laplacian_min`.
+  **Config plumbing** wired in `AppConfigWatcher` (read+write) and
+  `resources/defaults/config.json`: `adaptive_threshold`, `otsu_scale`,
+  `focus_laplacian_min`, `filters.enable_focus_check` are now settable from
+  config.json / profiles and applied live (all default to prior behaviour).
+  Follow-up: settings-dialog widgets + UI charting.
+- **Adaptive (Otsu) segmentation threshold** (2026-07-03,
+  [[ProcessingService]]) — New `applyProcessingThreshold` helper routes all four
+  segmentation sites (`computeProcessedFrame` + 3 realtime-loop copies) through
+  one path. Default is unchanged (fixed `bg_subtract_threshold`); setting
+  `config.adaptive_threshold` switches to per-frame **Otsu**, floored at
+  `bg_subtract_threshold` (keeps near-empty ROIs empty — the safety property
+  proven in the test) and scaled by `otsu_scale`. Motivated by the mask-gen
+  benchmark (IoU 0.34 → 0.85). Off by default, so no behaviour change until a
+  config opts in; frontend config wiring is a follow-up. Test:
+  `tests/processing/processing_adaptive_threshold_test.cpp`
+  (`processing.adaptive_threshold`).
+- **Mask-generation pipeline benchmark** (2026-07-02, `benchmarks/mask-gen/`)
+  — Offline harness scoring the production segmentation pipeline
+  ([[ProcessingService]] `computeProcessedFrame`) and a proposed
+  `absdiff → CLAHE → bilateral → DoG/Top-hat → Otsu → close → findContours`
+  chain against the SAM2 reference masks in the
+  `gavinlouuu/biowork-mask-gen-benchmark` dataset (173 detections). Finding:
+  restricting to the channel-interior ROI + swapping the fixed threshold for
+  per-frame **Otsu** lifts mean IoU 0.34 → 0.85 (detection 21 % → 98 %) at
+  ~7000 fps, while the *literal* CLAHE/bilateral/DoG chain is both slower
+  (2000 fps) and less accurate. Recommended real-time config, per-stage cost
+  table, and a C++ adoption sketch are in
+  `benchmarks/mask-gen/REPORT.md`. A second round prototyped background models
+  (an **EWMA running-average background** fixes illumination drift at the source
+  — 0.84 IoU under drift vs 0.73 for static-bg+top-hat, at ~absdiff cost;
+  MOG2 matches but costs 512 µs), hysteresis / watershed / shape-regularisation
+  (all neutral-to-negative here), and throughput (strip-batching 2.8×). Full
+  numbers recorded in `benchmarks/mask-gen/results/experiments.{csv,json}`.
+  A third round validated on the **real 5000-frame stream**
+  (`gavinlouuu/512x96stream`; GT frames matched to the stream by pixel hash),
+  which *overturned* the synthetic EWMA recommendation: real drift is only ~3
+  gray levels, so an **instantaneous per-row-mean background** (`cv2.reduce`,
+  ~6 µs, drift-proof) beats every temporal/EWMA variant, the top-hat becomes
+  unnecessary, and the pipeline sustains **0.848 IoU / 100 % det at ~5560 fps**
+  including per-frame background. See `stream_bench.py` +
+  `results/stream_experiments.csv`. Benchmark-only; no app behaviour change yet.
 - **Realtime-performance benchmark parts C/D/E** (2026-07-02, PR1 of
   `docs/exec-plans/active/2026-07-02-realtime-performance.md`) —
   Extended `tests/performance/pipeline_timing_benchmark.cpp` (CTest

@@ -109,6 +109,14 @@ mib_add_backend_test_executable(processing_fault_injection_test processing/proce
 add_test(NAME processing.fault_injection COMMAND $<TARGET_FILE:processing_fault_injection_test>)
 set_tests_properties(processing.fault_injection PROPERTIES LABELS "processing;backend")
 
+mib_add_backend_test_executable(processing_adaptive_threshold_test processing/processing_adaptive_threshold_test.cpp)
+add_test(NAME processing.adaptive_threshold COMMAND $<TARGET_FILE:processing_adaptive_threshold_test>)
+set_tests_properties(processing.adaptive_threshold PROPERTIES LABELS "processing;backend")
+
+mib_add_backend_test_executable(processing_focus_metric_test processing/processing_focus_metric_test.cpp)
+add_test(NAME processing.focus_metric COMMAND $<TARGET_FILE:processing_focus_metric_test>)
+set_tests_properties(processing.focus_metric PROPERTIES LABELS "processing;backend")
+
 mib_add_backend_test_executable(recording_lifecycle_test recording/recording_lifecycle_test.cpp)
 add_test(NAME recording.lifecycle COMMAND $<TARGET_FILE:recording_lifecycle_test>)
 set_tests_properties(recording.lifecycle PROPERTIES LABELS "recording;backend")
@@ -124,6 +132,10 @@ set_tests_properties(recording.hdf5_save_performance PROPERTIES LABELS "recordin
 mib_add_backend_test_executable(experiment_roundtrip_test recording/experiment_roundtrip_test.cpp)
 add_test(NAME recording.experiment_roundtrip COMMAND $<TARGET_FILE:experiment_roundtrip_test>)
 set_tests_properties(recording.experiment_roundtrip PROPERTIES LABELS "recording;backend" TIMEOUT 30)
+
+mib_add_backend_test_executable(focus_metric_roundtrip_test recording/focus_metric_roundtrip_test.cpp)
+add_test(NAME recording.focus_metric_roundtrip COMMAND $<TARGET_FILE:focus_metric_roundtrip_test>)
+set_tests_properties(recording.focus_metric_roundtrip PROPERTIES LABELS "recording;backend" TIMEOUT 30)
 
 mib_add_backend_test_executable(kin6_batch_pipeline_evidence integration/kin6_batch_pipeline_evidence.cpp)
 

@@ -1,0 +1,112 @@
+[
+  {
+    "group": "robustness",
+    "metric": "OLD nested-ring (fixed thresh)",
+    "defined_pct": 66.5
+  },
+  {
+    "group": "robustness",
+    "metric": "OLD nested-ring (Otsu thresh)",
+    "defined_pct": 73.4
+  },
+  {
+    "group": "robustness",
+    "metric": "lap_var",
+    "defined_pct": 100.0
+  },
+  {
+    "group": "robustness",
+    "metric": "tenengrad",
+    "defined_pct": 100.0
+  },
+  {
+    "group": "robustness",
+    "metric": "intensity_std",
+    "defined_pct": 100.0
+  },
+  {
+    "group": "robustness",
+    "metric": "radial_ratio",
+    "defined_pct": 100.0
+  },
+  {
+    "group": "corr_vs_ref_ring",
+    "metric": "lap_var",
+    "spearman": 0.398,
+    "n": 162
+  },
+  {
+    "group": "corr_vs_ref_ring",
+    "metric": "tenengrad",
+    "spearman": 0.392,
+    "n": 162
+  },
+  {
+    "group": "corr_vs_ref_ring",
+    "metric": "intensity_std",
+    "spearman": 0.363,
+    "n": 162
+  },
+  {
+    "group": "corr_vs_ref_ring",
+    "metric": "radial_ratio",
+    "spearman": 0.326,
+    "n": 162
+  },
+  {
+    "group": "defocus_response",
+    "metric": "lap_var",
+    "dyn_range": 50.9,
+    "monotonic_down": true,
+    "curve_norm": [
+      1.0,
+      0.617,
+      0.33,
+      0.15,
+      0.072,
+      0.02
+    ]
+  },
+  {
+    "group": "defocus_response",
+    "metric": "tenengrad",
+    "dyn_range": 10.9,
+    "monotonic_down": true,
+    "curve_norm": [
+      1.0,
+      0.801,
+      0.582,
+      0.359,
+      0.214,
+      0.092
+    ]
+  },
+  {
+    "group": "defocus_response",
+    "metric": "intensity_std",
+    "dyn_range": 2.0,
+    "monotonic_down": true,
+    "curve_norm": [
+      1.0,
+      0.908,
+      0.807,
+      0.698,
+      0.624,
+      0.512
+    ]
+  },
+  {
+    "group": "defocus_response",
+    "metric": "radial_ratio",
+    "dyn_range": -28765.9,
+    "monotonic_down": true,
+    "curve_norm": [
+      1.0,
+      1.861,
+      3.94,
+      5.761,
+      8.554,
+      13.259
+    ]
+  }
+]
