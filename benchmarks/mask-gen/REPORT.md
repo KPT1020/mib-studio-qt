@@ -210,9 +210,32 @@ it would not need the fixed-threshold decoupling. Adopting it changes absolute
 area values ~40%, so it requires re-calibrating `area_threshold_*`, the
 target-group windows, and the E-modulus LUT. Data: `results/area_accuracy.csv`.
 
-**Follow-ups:** port the proposed pipeline to C++ (the real accuracy/detection
-win) + re-calibrate the area gates/LUT; the per-row-mean background source;
-frontend config wiring for the new fields.
+### Prototype — C++ A/B, real-time performance (`processing_proposed_pipeline_bench`)
+
+Ported the proposed front-end into `computeProcessedFrame` behind
+`ProcessingConfig::proposed_pipeline` and benchmarked current vs proposed in the
+**actual C++ path** on the GT set (per-row-median background, channel band, 20
+reps/frame). The entire accuracy gap is one operator — `cv::absdiff` instead of
+signed `cv::subtract` — which captures the whole cell footprint, not just the
+brighter-than-background part; no CLAHE/bilateral/top-hat needed on flat fields:
+
+| pipeline (C++) | mean IoU | det@0.5 | area err median | latency median |
+|---|---:|---:|---:|---:|
+| current  (subtract, fixed)      | 0.343 | 20.8% | 48.2% | 0.148 ms |
+| proposed (absdiff, Otsu, m5)    | 0.811 | 97.7% | 16.0% | 0.163 ms |
+
+**Real-time cost is negligible: 1.10× latency** (~0.16 ms/frame, ~6000 fps) for
+**2.4× IoU, ~5× detection, ~3× better area accuracy**. The C++ numbers track the
+Python prototype (IoU 0.81 vs 0.85; the small gap is the median-vs-nth_element
+background and the full validation path). The bench skips when the dataset is
+absent (CI-safe) and asserts proposed IoU > current otherwise. Flag is off by
+default and wired through `config.json` / `AppConfigWatcher`
+(`proposed_pipeline`, `proposed_tophat_kernel`).
+
+**Follow-ups:** re-calibrate the area gates + E-modulus LUT for the new masks
+(area values shift ~40%); apply `proposed_pipeline` to the realtime-loop copies
+(prototype covers the shared `computeProcessedFrame` / batch / playback path);
+per-row-mean background source; settings-dialog widgets.
 
 ### C++ adoption sketch (`ProcessingService::computeProcessedFrame`)
 

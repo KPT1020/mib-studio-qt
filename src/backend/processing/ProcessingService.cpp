@@ -854,19 +854,45 @@ ProcessedFrame ProcessingService::computeProcessedFrame(
     if (hasBackground) {
         cv::Mat blurredBg;
         cv::GaussianBlur(backgroundGray(cvRoi), blurredBg, cv::Size(blurK, blurK), 0);
-        cv::subtract(blurredCurr, blurredBg, diffForProcessing);
+        // Proposed pipeline: |cur - bg| captures the whole cell, not just the
+        // brighter-than-background part that signed subtract keeps.
+        if (config.proposed_pipeline) {
+            cv::absdiff(blurredCurr, blurredBg, diffForProcessing);
+        } else {
+            cv::subtract(blurredCurr, blurredBg, diffForProcessing);
+        }
     } else {
         diffForProcessing = blurredCurr;
     }
 
-    applyProcessingThreshold(diffForProcessing, thresh, config);
-    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+    cv::Mat kernel;
+    if (config.proposed_pipeline) {
+        // Optional white top-hat re-flattens residual shading before Otsu (off
+        // by default — absdiff alone carries the accuracy win on flat fields).
+        if (config.proposed_tophat_kernel > 1) {
+            const int tk = config.proposed_tophat_kernel | 1;  // force odd
+            const cv::Mat thk = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(tk, tk));
+            cv::morphologyEx(diffForProcessing, diffForProcessing, cv::MORPH_TOPHAT, thk);
+        }
+        // Proposed always uses the per-frame Otsu cut regardless of the flag.
+        ProcessingConfig otsuCfg = config;
+        otsuCfg.adaptive_threshold = true;
+        applyProcessingThreshold(diffForProcessing, thresh, otsuCfg);
+        kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(morphK, morphK));
+    } else {
+        applyProcessingThreshold(diffForProcessing, thresh, config);
+        kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+    }
     cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
     cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
     // Fixed-threshold measurement mask (empty unless adaptive detection is on) so
-    // size metrics do not drift with the per-frame Otsu cut.
-    const cv::Mat measMask = buildMeasurementMask(diffForProcessing, mask.size(), cvRoi, morphK, morphIter, config);
+    // size metrics do not drift with the per-frame Otsu cut. The proposed
+    // pipeline's mask is already accurate, so it measures on itself (no decouple).
+    cv::Mat measMask;
+    if (!config.proposed_pipeline) {
+        measMask = buildMeasurementMask(diffForProcessing, mask.size(), cvRoi, morphK, morphIter, config);
+    }
     if (measurementMaskOut) {
         *measurementMaskOut = measMask;
     }

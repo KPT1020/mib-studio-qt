@@ -18,6 +18,11 @@ export HF_ACCESS_TOKEN=hf_...      # read access to the (private) dataset
 python download_gt.py              # -> cache/, bench.parquet, meta.pkl
 python final_report.py             # -> results.csv, comparison.png (headline table)
 
+python decoupled_bench.py          # decoupled size-measurement safeguard
+python area_accuracy.py            # area error vs GT truth per pipeline
+python make_pairs.py               # cache/pairs.csv for the C++ A/B bench, then:
+#   ctest ... -R processing.proposed_pipeline_bench   (pass pairs.csv as argv[1])
+
 python ablation.py                 # per-stage accuracy/latency ablation
 python tune.py                     # parameter sweep for the tuned config
 python explore.py                  # drift robustness, auto-refine, alt thresholds
@@ -48,6 +53,7 @@ note in `methods.temporal_eval` and REPORT.md.
 | `stream_bench.py` | **Real-stream** background + throughput validation (authoritative) |
 | `focus_metric.py` | Robust focus metric (Laplacian variance) vs the nested-contour ring ratio |
 | `decoupled_bench.py` | Validate decoupled size measurement: detection recall, fallback rate, area drift removed (`results/decoupled_area.csv`) |
+| `area_accuracy.py` | Area error vs GT truth per pipeline — shows the fixed basis is ~49% off, proposed ~10% (`results/area_accuracy.csv`) |
 | `visualize_focus.py` | Build `results/focus_data.csv` + ranked-cell montage and analysis figures |
 | `results/`        | Recorded experiment results for later comparison |
 

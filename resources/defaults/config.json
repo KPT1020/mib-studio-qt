@@ -19,6 +19,8 @@
         "bg_subtract_threshold": 8,
         "adaptive_threshold": false,
         "otsu_scale": 1.1,
+        "proposed_pipeline": false,
+        "proposed_tophat_kernel": 0,
         "focus_laplacian_min": 0.0,
         "empty_frame_pixel_threshold": 100,
         "auto_background_enabled": false,

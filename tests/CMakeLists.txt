@@ -117,6 +117,16 @@ mib_add_backend_test_executable(processing_decoupled_measurement_test processing
 add_test(NAME processing.decoupled_measurement COMMAND $<TARGET_FILE:processing_decoupled_measurement_test>)
 set_tests_properties(processing.decoupled_measurement PROPERTIES LABELS "processing;backend")
 
+mib_add_backend_test_executable(processing_proposed_pipeline_test processing/processing_proposed_pipeline_test.cpp)
+add_test(NAME processing.proposed_pipeline COMMAND $<TARGET_FILE:processing_proposed_pipeline_test>)
+set_tests_properties(processing.proposed_pipeline PROPERTIES LABELS "processing;backend")
+
+# Prototype A/B bench: current vs proposed segmentation front-end on the GT set.
+# Skips (exit 0) when the benchmark dataset is absent, so CI stays green.
+mib_add_backend_test_executable(processing_proposed_pipeline_bench processing/processing_proposed_pipeline_bench.cpp)
+add_test(NAME processing.proposed_pipeline_bench COMMAND $<TARGET_FILE:processing_proposed_pipeline_bench>)
+set_tests_properties(processing.proposed_pipeline_bench PROPERTIES LABELS "processing;backend;bench")
+
 mib_add_backend_test_executable(processing_focus_metric_test processing/processing_focus_metric_test.cpp)
 add_test(NAME processing.focus_metric COMMAND $<TARGET_FILE:processing_focus_metric_test>)
 set_tests_properties(processing.focus_metric PROPERTIES LABELS "processing;backend")

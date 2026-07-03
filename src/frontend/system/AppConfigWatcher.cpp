@@ -276,6 +276,10 @@ namespace frontend
 					pcfg.adaptive_threshold = ip.value("adaptive_threshold").toBool(pcfg.adaptive_threshold);
 				if (ip.contains("otsu_scale"))
 					pcfg.otsu_scale = ip.value("otsu_scale").toDouble(pcfg.otsu_scale);
+				if (ip.contains("proposed_pipeline"))
+					pcfg.proposed_pipeline = ip.value("proposed_pipeline").toBool(pcfg.proposed_pipeline);
+				if (ip.contains("proposed_tophat_kernel"))
+					pcfg.proposed_tophat_kernel = ip.value("proposed_tophat_kernel").toInt(pcfg.proposed_tophat_kernel);
 				if (ip.contains("morph_kernel_size"))
 					pcfg.morph_kernel_size = ip.value("morph_kernel_size").toInt(pcfg.morph_kernel_size);
 				if (ip.contains("morph_iterations"))
@@ -611,6 +615,8 @@ namespace frontend
 		ip.insert("bg_subtract_threshold", pcfg.bg_subtract_threshold);
 		ip.insert("adaptive_threshold", pcfg.adaptive_threshold);
 		ip.insert("otsu_scale", pcfg.otsu_scale);
+		ip.insert("proposed_pipeline", pcfg.proposed_pipeline);
+		ip.insert("proposed_tophat_kernel", pcfg.proposed_tophat_kernel);
 		ip.insert("morph_kernel_size", pcfg.morph_kernel_size);
 		ip.insert("morph_iterations", pcfg.morph_iterations);
 		ip.insert("area_threshold_min", pcfg.area_threshold_min);

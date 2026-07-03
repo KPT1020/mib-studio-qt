@@ -44,6 +44,17 @@ struct ProcessingConfig {
     // benchmarks/mask-gen/REPORT.md for the accuracy/latency evidence.
     bool adaptive_threshold{false};
     double otsu_scale{1.1};
+    // Prototype: the "proposed" segmentation front-end. Swaps the signed
+    // cv::subtract diff for cv::absdiff (captures the full cell footprint, not
+    // just the brighter-than-background part), forces the per-frame Otsu cut, and
+    // closes/opens with an ellipse kernel. On the GT benchmark this lifts IoU
+    // from ~0.34 to ~0.85 and area error vs truth from ~49% to ~10%
+    // (benchmarks/mask-gen/area_accuracy.py). Off by default. The accuracy win is
+    // the absdiff switch alone, so the top-hat is optional
+    // (proposed_tophat_kernel, 0 = off). When on, size is measured on this
+    // (accurate) mask directly, so the fixed-threshold decoupling is skipped.
+    bool proposed_pipeline{false};
+    int proposed_tophat_kernel{0};
     int area_threshold_min{60};    // μm²
     int area_threshold_max{290};   // μm²
     double deformability_threshold_min{0.0};

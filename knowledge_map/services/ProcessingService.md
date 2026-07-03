@@ -48,6 +48,18 @@ restarts the loop (same policy as `CaptureService::run`). Verified by
      fixed threshold. Evidence + tuning: `benchmarks/mask-gen/REPORT.md`;
      regression/invariant coverage in
      `tests/processing/processing_adaptive_threshold_test.cpp`.
+   - **Proposed pipeline (prototype, `config.proposed_pipeline`, off by default).**
+     In `computeProcessedFrame` this swaps the signed `cv::subtract` diff for
+     `cv::absdiff` (captures the whole cell, not just the brighter-than-bg part),
+     forces the Otsu cut, and closes/opens with an ellipse kernel; optional
+     `proposed_tophat_kernel` adds a rect white top-hat. That one operator change
+     is the accuracy win — GT A/B in the real C++ path lifts IoU 0.34→0.81,
+     detection 21%→98%, area error 48%→16% for only **1.10× latency**
+     (`tests/processing/processing_proposed_pipeline_bench.cpp`,
+     `benchmarks/mask-gen/area_accuracy.py`). When on, size is measured on this
+     (accurate) mask directly — the fixed-threshold decoupling is skipped. Not
+     yet applied to the realtime-loop copies; adopting it shifts absolute area
+     ~40% so the area gates + E-modulus LUT need re-calibration.
    - **Decoupled size measurement.** When `adaptive_threshold` is on, detection
      uses the tighter per-frame Otsu mask but size metrics do **not**: each
      call site also builds a fixed-threshold *measurement mask*
@@ -123,6 +135,9 @@ All gates in one struct. Notable fields:
 - `ring_ratio_min/max` + `enable_ring_ratio_check`
 - `bg_subtract_threshold` — fixed segmentation threshold (also the Otsu floor)
 - `adaptive_threshold` (default off) + `otsu_scale` — per-frame Otsu segmentation
+- `proposed_pipeline` (default off) + `proposed_tophat_kernel` — prototype
+  absdiff/Otsu front-end (see Pipeline step 2); wired via `AppConfigWatcher` +
+  `resources/defaults/config.json`
 - `empty_frame_pixel_threshold` — drives empty-frame skipping
 - `auto_background_enabled` + `auto_background_empty_frames`,
   `auto_background_cooldown_frames`
