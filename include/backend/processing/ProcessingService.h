@@ -53,8 +53,12 @@ struct ProcessingConfig {
     // the OUTER contour (the diffraction pattern); before shipping, area /
     // deformability and the require_single_inner_contour gate must move off the
     // inner ring (absdiff yields a nested inner contour on only ~20% of frames),
-    // this must reach the realtime-loop copies, absdiff's empty-frame semantics
-    // must be validated live, and the area gates / E-modulus LUT revalidated. The
+    // this must reach the realtime-loop copies, and the area gates / E-modulus LUT
+    // revalidated. absdiff also detects objects DARKER than background (subtract
+    // cannot), but the empty-frame gates (isFrameEmpty, realtime pixel checks)
+    // still use signed subtract, so a dark-only frame reads as empty and is
+    // skipped before segmentation — realtime dark-body support needs those gates
+    // switched to absdiff too. The
     // accuracy win is the absdiff switch alone, so the top-hat is optional
     // (proposed_tophat_kernel, 0 = off). Off by default.
     bool proposed_pipeline{false};

@@ -254,10 +254,17 @@ outer-contour is the agreed measurement target (diffraction shape), but the
 shipped default sources `area`/`deformability` from the inner ring and gates on
 `require_single_inner_contour` — both must move to the outer contour, which
 `absdiff` supports (100% outer found) but whose nested inner ring it does **not**
-(~20%). Also: not applied to the realtime-loop copies; `absdiff` changes
-empty-frame/detection semantics (darker-than-bg regions now register), untested
-on the live stream; and any area gate / E-modulus LUT must be revalidated on the
-outer-contour measurement.
+(~20%). Also: not applied to the realtime-loop copies; and any area gate /
+E-modulus LUT must be revalidated on the outer-contour measurement.
+
+**Dark-body objects:** `absdiff` segmentation detects objects *darker* than
+background (signed `subtract` clips them to zero — the current pipeline cannot
+see them at all). But the empty-frame gates (`isFrameEmpty`, the realtime
+pixel-count checks) still threshold a signed-`subtract` diff, so a frame whose
+only object is dark reads as *empty* (0 foreground px) and is skipped before
+segmentation. So the prototype detects dark bodies only in the batch/playback
+path (`computeProcessedFrame`, no empty gate); realtime dark-body support also
+needs those empty-frame gates switched to `absdiff`.
 
 **Follow-ups:** move `area`/`deformability` to the outer contour and relax
 `require_single_inner_contour` to a focus/validity signal; revalidate the area
