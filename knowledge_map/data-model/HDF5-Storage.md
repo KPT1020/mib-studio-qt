@@ -46,6 +46,16 @@
   `MIB_HDF5_FLUSH_INTERVAL_MS` (default 5000 ms) so the recorder thread stays
   off synchronous I/O on every batch. A crash loses at most one interval's
   worth of buffered frames; there is no recovery sidecar.
+- **Chunk layout = one frame (or one series image) per chunk.** Image
+  datasets are chunked `{1, H, W[, C]}` and `series_images` is chunked
+  `{1, 1, H, W}`. The append helpers write one frame/series-image per
+  `H5Dwrite`, so each write covers exactly one chunk and HDF5 streams it to
+  disk directly. The old layouts (100 frames or 10 series records per chunk)
+  never fit the 1 MiB HDF5 chunk cache, so every single-frame append
+  re-read + re-wrote the whole multi-frame chunk — up to ~200× disk traffic,
+  the root cause of the multi-image save stall (and LED-trigger jitter) that
+  appeared after the first flush (~100 sets). Do not raise the chunk's first
+  dimension without also batching the append writes to full-chunk boundaries.
 
 ## Read paths (scalable)
 

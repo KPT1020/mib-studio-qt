@@ -5,6 +5,21 @@
 
 ## Features shipped
 
+- **Multi-image save stall / LED-trigger jitter fix** (2026-07-08) — HDF5
+  image datasets are now chunked one frame per chunk (`{1,H,W[,C]}`) and
+  `series_images` one image per chunk (`{1,1,H,W}`). The append helpers write
+  one frame per `H5Dwrite`; with the old 100-frame / 10-series-record chunks
+  (far larger than HDF5's 1 MiB chunk cache) every append re-read + re-wrote
+  the entire chunk — up to ~200× disk amplification. In multi-image mode this
+  saturated the disk starting at the first experiment flush (default flush
+  interval 100 frames ⇒ "delay after ~100 sets"), and the resulting I/O /
+  memory-bandwidth pressure delayed the software-timed trigger path
+  (processing loop → `TriggerService` thread → EGrabber GenICam line write),
+  which is why the LED pulse visibly jittered even though frame capture is
+  hardware-driven. New regression test `recording.multi_image_series_roundtrip`
+  round-trips series images across multiple append batches (including
+  non-continuous Mats).
+
 - **Realtime-performance benchmark parts C/D/E** (2026-07-02, PR1 of
   `docs/exec-plans/active/2026-07-02-realtime-performance.md`) —
   Extended `tests/performance/pipeline_timing_benchmark.cpp` (CTest

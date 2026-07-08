@@ -463,19 +463,25 @@ namespace backend::services
             return false;
         }
 
-        // Create chunked dataset property for extensibility
+        // Create chunked dataset property for extensibility.
+        // Chunk = exactly one frame. appendImageDataset writes one frame per
+        // H5Dwrite; a multi-frame chunk (the old 100-frame layout) larger than
+        // the 1 MiB HDF5 chunk cache forces a read-modify-write of the WHOLE
+        // chunk on every single-frame append (~200x disk traffic). A one-frame
+        // chunk makes each append an exact full-chunk write, which HDF5 sends
+        // straight to disk with no read-back.
         hid_t propId = H5Pcreate(H5P_DATASET_CREATE);
         hsize_t chunkDims[4];
         if (channels == 1)
         {
-            chunkDims[0] = std::min(static_cast<hsize_t>(100), dims[0]); // Chunk size of 100 frames or less
+            chunkDims[0] = 1;
             chunkDims[1] = dims[1];
             chunkDims[2] = dims[2];
             H5Pset_chunk(propId, 3, chunkDims);
         }
         else
         {
-            chunkDims[0] = std::min(static_cast<hsize_t>(100), dims[0]);
+            chunkDims[0] = 1;
             chunkDims[1] = dims[1];
             chunkDims[2] = dims[2];
             chunkDims[3] = dims[3];
@@ -890,9 +896,14 @@ namespace backend::services
             return false;
         }
 
+        // Chunk = exactly one series image. Both write/append paths issue one
+        // H5Dwrite per (record, series-index) image; the old {10, seriesCount,
+        // H, W} chunk never fit the 1 MiB HDF5 chunk cache, so every one-image
+        // write re-read and re-wrote the entire multi-record chunk
+        // (10*seriesCount amplification — the multi-image save stall). A
+        // one-image chunk makes each write an exact full-chunk direct write.
         hid_t propId = H5Pcreate(H5P_DATASET_CREATE);
-        hsize_t chunkDims[4] = {std::min(static_cast<hsize_t>(10), dims[0]),
-                                seriesCount,
+        hsize_t chunkDims[4] = {1, 1,
                                 static_cast<hsize_t>(height),
                                 static_cast<hsize_t>(width)};
         H5Pset_chunk(propId, 4, chunkDims);
@@ -1000,9 +1011,10 @@ namespace backend::services
         std::vector<uint8_t> scratch;
         const size_t seriesFrameBytes = static_cast<size_t>(height) * width;
 
-        // stop-lag diagnostic: this nested loop issues N*seriesCount
-        // H5Dwrite calls, each with its own hyperslab setup. It is the
-        // leading suspect for the stop-lag when multi-image is enabled.
+        // This nested loop issues N*seriesCount H5Dwrite calls. Each write
+        // covers exactly one chunk (see writeSeriesImageDataset's chunk
+        // layout), so HDF5 streams them to disk without the whole-chunk
+        // read-modify-write that used to stall multi-image saves.
         const auto tLoopStart = std::chrono::steady_clock::now();
         size_t writesDone = 0;
 
