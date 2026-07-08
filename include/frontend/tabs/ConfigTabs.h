@@ -8,6 +8,7 @@
 #include <optional>
 
 #include "frontend/system/ProfileManager.h"
+#include "frontend/utils/ProfileConfigReview.h"
 
 namespace backend { class AppBackend; }
 
@@ -25,6 +26,8 @@ class QScrollArea;
 class QGridLayout;
 class QDialog;
 class QTableWidget;
+class QRadioButton;
+class QLineEdit;
 
 namespace frontend { class JsonTableModel; }
 
@@ -69,6 +72,8 @@ private slots:
     void onShowProfileDiff();
     void onDuplicateProfileAsLocal();
     void onIncludeJsToggled(bool checked);
+    void onLoadSelectedProfile();
+    void refreshProfileReviewTable();
 
 private:
     QString appDirIncludePath(const QString& fileName) const;
@@ -79,6 +84,8 @@ private:
     bool loadFileToEditor(const QString& path, QPlainTextEdit* editor, QString* err);
     bool saveEditorToFile(QPlainTextEdit* editor, const QString& path, QString* err);
     void refreshJsonTableModel();
+    void rebuildProfileReview();
+    void clearProfileReview();
 	// Profiles helpers
 	QString profilesBaseDir() const;
 	bool ensureProfilesDirExists(QString* err = nullptr) const;
@@ -106,7 +113,7 @@ private:
 
     // JSON tab
     QPlainTextEdit* jsonEdit_ = nullptr;
-    QStackedWidget* jsonStack_ = nullptr;
+    QTabWidget* configViewTabs_ = nullptr;
     QTableView* jsonTable_ = nullptr;  // Legacy single table (kept for backward compatibility during transition)
     JsonTableModel* jsonModel_ = nullptr;  // Legacy model
     QScrollArea* jsonScrollArea_ = nullptr;  // Scroll area for grouped tables
@@ -123,6 +130,7 @@ private:
 	QLabel* jsonUnsavedLabel_ = nullptr;
 	QLabel* jsonConflictLabel_ = nullptr;
 	QComboBox* profileSelect_ = nullptr;
+	QPushButton* loadProfileBtn_ = nullptr;
 	QPushButton* saveProfileBtn_ = nullptr;
 	QPushButton* deleteProfileBtn_ = nullptr;
 	QPushButton* renameProfileBtn_ = nullptr;
@@ -131,6 +139,12 @@ private:
 	QPushButton* showDiffBtn_ = nullptr;
 	QPushButton* duplicateAsLocalBtn_ = nullptr;
 	QLabel* profileStatusLabel_ = nullptr;
+    QTableWidget* profileReviewTable_ = nullptr;
+    QRadioButton* profileReviewChangedOnlyRadio_ = nullptr;
+    QRadioButton* profileReviewAllSettingsRadio_ = nullptr;
+    QLineEdit* profileReviewSearch_ = nullptr;
+    QLabel* profileReviewSummaryLabel_ = nullptr;
+    QVector<frontend::configreview::ReviewRow> profileReviewRows_;
     QTimer* jsonDebounceTimer_ = nullptr;
 
     // JS tab

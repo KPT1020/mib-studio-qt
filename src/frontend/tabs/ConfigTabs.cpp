@@ -37,6 +37,7 @@
 #include <QTableWidget>
 #include <QHeaderView>
 #include <QLineEdit>
+#include <QRadioButton>
 
 #include <spdlog/spdlog.h>
 #ifdef _WIN32
@@ -49,6 +50,7 @@
 #include "frontend/system/ProfileManager.h"
 #include "frontend/models/JsonTableModel.h"
 #include "frontend/utils/JsonFlatten.h"
+#include "frontend/utils/ProfileConfigReview.h"
 
 namespace frontend {
 
@@ -77,6 +79,10 @@ static QString getUserConfigDir() {
     return QDir(appDir).absoluteFilePath("../include");
 }
 
+constexpr int kReviewTabIndex = 0;
+constexpr int kAllSettingsTabIndex = 1;
+constexpr int kAdvancedJsonTabIndex = 2;
+
 } // namespace
 
 ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
@@ -98,10 +104,6 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         jsonSaveBtn_ = new QPushButton(tr("Save"), page);
         jsonBrowseBtn_ = new QPushButton(tr("Browse..."), page);
         jsonClearBtn_ = new QPushButton(tr("Clear"), page);
-		jsonTableToggle_ = new QToolButton(page);
-		jsonTableToggle_->setText(tr("json/table"));
-        jsonTableToggle_->setToolTip(tr("Toggle table view"));
-        jsonTableToggle_->setCheckable(true);
         jsonPathLabel_ = new QLabel(page);
         jsonPathLabel_->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Preferred);
         jsonPathLabel_->setTextFormat(Qt::PlainText);
@@ -119,6 +121,9 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         jsonConflictLabel_->setStyleSheet("color: #b00020;");
         jsonConflictLabel_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
         profileSelect_ = new QComboBox(page);
+        loadProfileBtn_ = new QPushButton(tr("Load Profile"), page);
+        loadProfileBtn_->setToolTip(tr("Load the selected profile after reviewing the differences."));
+        loadProfileBtn_->setEnabled(false);
         saveProfileBtn_ = new QPushButton(tr("Save Profile"), page);
         deleteProfileBtn_ = new QPushButton(tr("Delete"), page);
         renameProfileBtn_ = new QPushButton(tr("Rename"), page);
@@ -144,6 +149,7 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         row->addSpacing(8);
         row->addWidget(new QLabel(tr("Profile:"), page));
         row->addWidget(profileSelect_);
+        row->addWidget(loadProfileBtn_);
         row->addWidget(saveProfileBtn_);
         row->addWidget(renameProfileBtn_);
         row->addWidget(deleteProfileBtn_);
@@ -152,7 +158,6 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         row->addWidget(showDiffBtn_);
         row->addWidget(duplicateAsLocalBtn_);
         row->addWidget(profileStatusLabel_);
-		row->addWidget(jsonTableToggle_);
         v->addLayout(row);
 
         // Legacy single table (for backward compatibility)
@@ -169,8 +174,43 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
 		jsonTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 		jsonTable_->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
 
-        jsonStack_ = new QStackedWidget(page);
-        
+        configViewTabs_ = new QTabWidget(page);
+
+        auto* reviewPage = new QWidget(configViewTabs_);
+        auto* reviewLayout = new QVBoxLayout(reviewPage);
+        auto* reviewControls = new QHBoxLayout();
+        profileReviewChangedOnlyRadio_ = new QRadioButton(tr("Changed only"), reviewPage);
+        profileReviewAllSettingsRadio_ = new QRadioButton(tr("All settings"), reviewPage);
+        profileReviewChangedOnlyRadio_->setChecked(true);
+        profileReviewSearch_ = new QLineEdit(reviewPage);
+        profileReviewSearch_->setPlaceholderText(tr("Search setting name/path"));
+        profileReviewSummaryLabel_ = new QLabel(tr("Select a profile to review config differences."), reviewPage);
+        profileReviewSummaryLabel_->setTextFormat(Qt::PlainText);
+        profileReviewSummaryLabel_->setWordWrap(false);
+        reviewControls->addWidget(profileReviewChangedOnlyRadio_);
+        reviewControls->addWidget(profileReviewAllSettingsRadio_);
+        reviewControls->addSpacing(12);
+        reviewControls->addWidget(profileReviewSearch_, 1);
+        reviewControls->addSpacing(12);
+        reviewControls->addWidget(profileReviewSummaryLabel_);
+        reviewLayout->addLayout(reviewControls);
+
+        profileReviewTable_ = new QTableWidget(reviewPage);
+        profileReviewTable_->setColumnCount(4);
+        profileReviewTable_->setHorizontalHeaderLabels({tr("Setting"), tr("Current value"), tr("Profile value"), tr("Section")});
+        profileReviewTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        profileReviewTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+        profileReviewTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+        profileReviewTable_->setAlternatingRowColors(true);
+        profileReviewTable_->setWordWrap(true);
+        profileReviewTable_->setSortingEnabled(false);
+        profileReviewTable_->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+        profileReviewTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+        profileReviewTable_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+        profileReviewTable_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+        profileReviewTable_->horizontalHeader()->setStretchLastSection(false);
+        reviewLayout->addWidget(profileReviewTable_, 1);
+
         // New grouped tables layout
         jsonScrollArea_ = new QScrollArea();
         jsonScrollArea_->setWidgetResizable(true);
@@ -187,34 +227,37 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         
         jsonScrollArea_->setWidget(jsonGridContainer_);
 
-        jsonStack_->addWidget(jsonEdit_);
-        jsonStack_->addWidget(jsonScrollArea_);  // Use scroll area instead of single table
-        // Legacy table is not added to stack - it's kept for backward compatibility but hidden
+        configViewTabs_->addTab(reviewPage, tr("Review"));
+        configViewTabs_->addTab(jsonScrollArea_, tr("All settings"));
+        configViewTabs_->addTab(jsonEdit_, tr("Advanced JSON"));
+        configViewTabs_->setCurrentIndex(kReviewTabIndex);
+        // Legacy table is not added to the visible tabs; it is kept for compatibility with existing rebuild code.
         if (jsonTable_) {
             jsonTable_->setParent(nullptr);
             jsonTable_->hide();
         }
-        v->addWidget(jsonStack_, 1);
+        v->addWidget(configViewTabs_, 1);
 
-        // Persist toggle choice
-        {
-            QSettings s;
-            const bool showTable = s.value("Preview/ShowTable", true).toBool();
-            jsonTableToggle_->setChecked(showTable);
-            jsonStack_->setCurrentIndex(showTable ? 1 : 0);
-        }
-
-        connect(jsonTableToggle_, &QToolButton::toggled, this, &ConfigTabs::onJsonTableToggled);
+        connect(configViewTabs_, &QTabWidget::currentChanged, this, [this](int index) {
+            if (index == kAllSettingsTabIndex) {
+                refreshJsonTableModel();
+            } else if (index == kReviewTabIndex) {
+                rebuildProfileReview();
+            }
+        });
+        connect(profileReviewChangedOnlyRadio_, &QRadioButton::toggled, this, &ConfigTabs::refreshProfileReviewTable);
+        connect(profileReviewAllSettingsRadio_, &QRadioButton::toggled, this, &ConfigTabs::refreshProfileReviewTable);
+        connect(profileReviewSearch_, &QLineEdit::textChanged, this, &ConfigTabs::refreshProfileReviewTable);
 		connect(jsonModel_, &QAbstractItemModel::dataChanged, this,
 		        [this](const QModelIndex&, const QModelIndex&, const QVector<int>&) { rebuildJsonFromTable(); });
 
-        // Debounced updates when editing JSON while table is visible
+        // Debounced updates keep the review and grouped table in sync with Advanced JSON edits.
         jsonDebounceTimer_ = new QTimer(this);
         jsonDebounceTimer_->setSingleShot(true);
         jsonDebounceTimer_->setInterval(150);
         connect(jsonDebounceTimer_, &QTimer::timeout, this, &ConfigTabs::onJsonTextChangedDebounced);
         connect(jsonEdit_, &QPlainTextEdit::textChanged, this, [this]() {
-            if (jsonStack_ && jsonStack_->currentIndex() == 1) {
+            if (jsonDebounceTimer_) {
                 jsonDebounceTimer_->start();
             }
             if (jsonUnsavedLabel_) jsonUnsavedLabel_->setVisible(true);
@@ -288,6 +331,7 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
     refreshProfilesList();
     connect(profileSelect_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &ConfigTabs::onProfileSelectionChanged);
+    connect(loadProfileBtn_, &QPushButton::clicked, this, &ConfigTabs::onLoadSelectedProfile);
     connect(saveProfileBtn_, &QPushButton::clicked, this, &ConfigTabs::onSaveProfile);
     connect(deleteProfileBtn_, &QPushButton::clicked, this, &ConfigTabs::onDeleteProfile);
     connect(renameProfileBtn_, &QPushButton::clicked, this, &ConfigTabs::onRenameProfile);
@@ -402,9 +446,10 @@ void ConfigTabs::onReloadJson() {
     }
     jsonPathLabel_->setText(path);
     clearJsonSyncIndicators();
-    if (jsonStack_ && jsonStack_->currentIndex() == 1) {
+    if (configViewTabs_ && configViewTabs_->currentIndex() == kAllSettingsTabIndex) {
         refreshJsonTableModel();
     }
+    rebuildProfileReview();
 }
 
 void ConfigTabs::onSaveJson() {
@@ -417,9 +462,10 @@ void ConfigTabs::onSaveJson() {
     }
     QMessageBox::information(this, tr("Save config.json"), tr("Saved."));
     clearJsonSyncIndicators();
-    if (jsonStack_ && jsonStack_->currentIndex() == 1) {
+    if (configViewTabs_ && configViewTabs_->currentIndex() == kAllSettingsTabIndex) {
         refreshJsonTableModel();
     }
+    rebuildProfileReview();
 }
 
 void ConfigTabs::onReloadJs() {
@@ -531,9 +577,10 @@ void ConfigTabs::onBrowseJson() {
     }
     jsonPathLabel_->setText(selected);
     clearJsonSyncIndicators();
-    if (jsonStack_ && jsonStack_->currentIndex() == 1) {
+    if (configViewTabs_ && configViewTabs_->currentIndex() == kAllSettingsTabIndex) {
         refreshJsonTableModel();
     }
+    rebuildProfileReview();
 }
 
 void ConfigTabs::onClearJson() {
@@ -589,8 +636,8 @@ void ConfigTabs::onClearJs() {
 }
 
 void ConfigTabs::onJsonTableToggled(bool checked) {
-    if (!jsonStack_) return;
-    jsonStack_->setCurrentIndex(checked ? 1 : 0);
+    if (!configViewTabs_) return;
+    configViewTabs_->setCurrentIndex(checked ? kAllSettingsTabIndex : kAdvancedJsonTabIndex);
     QSettings s;
     s.setValue("Preview/ShowTable", checked);
     if (checked) {
@@ -599,9 +646,10 @@ void ConfigTabs::onJsonTableToggled(bool checked) {
 }
 
 void ConfigTabs::onJsonTextChangedDebounced() {
-    if (jsonStack_ && jsonStack_->currentIndex() == 1) {
+    if (configViewTabs_ && configViewTabs_->currentIndex() == kAllSettingsTabIndex) {
         refreshJsonTableModel();
     }
+    rebuildProfileReview();
 }
 
 void ConfigTabs::refreshJsonTableModel() {
@@ -783,9 +831,10 @@ void ConfigTabs::onExternalConfigFileChanged(const QString& path) {
     }
 
     // Refresh the JSON table if it's visible
-    if (jsonStack_ && jsonStack_->currentIndex() == 1) {
+    if (configViewTabs_ && configViewTabs_->currentIndex() == kAllSettingsTabIndex) {
         refreshJsonTableModel();
     }
+    rebuildProfileReview();
 
     SPDLOG_DEBUG("ConfigTabs: reloaded config.json from external change");
 }
@@ -821,6 +870,150 @@ void ConfigTabs::rebuildJsonFromTable() {
 	jsonEdit_->setPlainText(QString::fromUtf8(outDoc.toJson(QJsonDocument::Indented)));
 	jsonEdit_->blockSignals(blocked);
 	if (jsonUnsavedLabel_) jsonUnsavedLabel_->setVisible(true);
+    rebuildProfileReview();
+}
+
+void ConfigTabs::clearProfileReview() {
+    profileReviewRows_.clear();
+    if (profileReviewTable_) {
+        profileReviewTable_->setRowCount(0);
+    }
+    if (profileReviewSummaryLabel_) {
+        profileReviewSummaryLabel_->setText(tr("Select a profile to review config differences."));
+    }
+    if (loadProfileBtn_) {
+        loadProfileBtn_->setEnabled(false);
+    }
+}
+
+void ConfigTabs::rebuildProfileReview() {
+    const QString profileName = selectedProfileName();
+    if (profileName.isEmpty()) {
+        clearProfileReview();
+        return;
+    }
+
+    const QString cfgPath = profileJsonPath(profileName);
+    if (loadProfileBtn_) {
+        loadProfileBtn_->setEnabled(QFile::exists(cfgPath));
+    }
+    if (!QFile::exists(cfgPath)) {
+        profileReviewRows_.clear();
+        if (profileReviewTable_) {
+            profileReviewTable_->setRowCount(0);
+        }
+        if (profileReviewSummaryLabel_) {
+            profileReviewSummaryLabel_->setText(tr("Profile missing config.json."));
+        }
+        return;
+    }
+
+    QJsonParseError currentParse{};
+    const QJsonDocument currentDoc = QJsonDocument::fromJson(jsonEdit_ ? jsonEdit_->toPlainText().toUtf8() : QByteArray(), &currentParse);
+    if (currentParse.error != QJsonParseError::NoError) {
+        profileReviewRows_.clear();
+        if (profileReviewTable_) {
+            profileReviewTable_->setRowCount(0);
+        }
+        if (profileReviewSummaryLabel_) {
+            profileReviewSummaryLabel_->setText(tr("Current config parse error: %1").arg(currentParse.errorString()));
+        }
+        return;
+    }
+
+    QString profileText;
+    QString readErr;
+    if (!readTextFile(cfgPath, &profileText, &readErr)) {
+        profileReviewRows_.clear();
+        if (profileReviewTable_) {
+            profileReviewTable_->setRowCount(0);
+        }
+        if (profileReviewSummaryLabel_) {
+            profileReviewSummaryLabel_->setText(tr("Failed to read profile: %1").arg(readErr));
+        }
+        return;
+    }
+
+    QJsonParseError profileParse{};
+    const QJsonDocument profileDoc = QJsonDocument::fromJson(profileText.toUtf8(), &profileParse);
+    if (profileParse.error != QJsonParseError::NoError) {
+        profileReviewRows_.clear();
+        if (profileReviewTable_) {
+            profileReviewTable_->setRowCount(0);
+        }
+        if (profileReviewSummaryLabel_) {
+            profileReviewSummaryLabel_->setText(tr("Profile config parse error: %1").arg(profileParse.errorString()));
+        }
+        return;
+    }
+
+    const auto result = configreview::buildReviewRows(currentDoc, profileDoc);
+    profileReviewRows_ = result.rows;
+    refreshProfileReviewTable();
+}
+
+void ConfigTabs::refreshProfileReviewTable() {
+    if (!profileReviewTable_) {
+        return;
+    }
+
+    const bool showAll = profileReviewAllSettingsRadio_ && profileReviewAllSettingsRadio_->isChecked();
+    const QString query = profileReviewSearch_ ? profileReviewSearch_->text().trimmed().toLower() : QString();
+
+    int visibleRows = 0;
+    int changedRows = 0;
+    for (const auto& row : profileReviewRows_) {
+        if (row.changed) {
+            ++changedRows;
+        }
+        if (!showAll && !row.changed) {
+            continue;
+        }
+        if (!query.isEmpty() &&
+            !row.setting.toLower().contains(query) &&
+            !row.section.toLower().contains(query)) {
+            continue;
+        }
+        ++visibleRows;
+    }
+
+    profileReviewTable_->setRowCount(visibleRows);
+    int tableRow = 0;
+    for (const auto& row : profileReviewRows_) {
+        if (!showAll && !row.changed) {
+            continue;
+        }
+        if (!query.isEmpty() &&
+            !row.setting.toLower().contains(query) &&
+            !row.section.toLower().contains(query)) {
+            continue;
+        }
+
+        profileReviewTable_->setItem(tableRow, 0, new QTableWidgetItem(row.setting));
+        profileReviewTable_->setItem(tableRow, 1, new QTableWidgetItem(row.currentValue));
+        profileReviewTable_->setItem(tableRow, 2, new QTableWidgetItem(row.profileValue));
+        profileReviewTable_->setItem(tableRow, 3, new QTableWidgetItem(row.section));
+        ++tableRow;
+    }
+
+    if (profileReviewSummaryLabel_) {
+        if (selectedProfileName().isEmpty()) {
+            profileReviewSummaryLabel_->setText(tr("Select a profile to review config differences."));
+        } else if (query.isEmpty()) {
+            profileReviewSummaryLabel_->setText(tr("%1 changed of %2 settings. Showing %3.")
+                                                    .arg(changedRows)
+                                                    .arg(profileReviewRows_.size())
+                                                    .arg(visibleRows));
+        } else {
+            profileReviewSummaryLabel_->setText(tr("%1 changed of %2 settings. Showing %3 matching rows.")
+                                                    .arg(changedRows)
+                                                    .arg(profileReviewRows_.size())
+                                                    .arg(visibleRows));
+        }
+    }
+
+    profileReviewTable_->resizeColumnsToContents();
+    profileReviewTable_->resizeRowsToContents();
 }
 
 // ===== Profiles helpers =====
@@ -873,6 +1066,7 @@ void ConfigTabs::refreshProfilesList() {
         onProfileSelectionChanged(idx);
     } else {
         refreshProfileStatusLabel();
+        clearProfileReview();
     }
 }
 
@@ -1006,8 +1200,8 @@ void ConfigTabs::showDiffDialog(const QString& title, const QVector<frontend::Pr
     dialog.resize(1100, 640);
     auto* layout = new QVBoxLayout(&dialog);
     auto* table = new QTableWidget(&dialog);
-    table->setColumnCount(6);
-    table->setHorizontalHeaderLabels({tr("Path"), tr("Status"), tr("Local value"), tr("Remote value"), tr("Risk"), tr("Source")});
+    table->setColumnCount(5);
+    table->setHorizontalHeaderLabels({tr("Path"), tr("Status"), tr("Local value"), tr("Remote value"), tr("Source")});
     table->setRowCount(rows.size());
     table->setAlternatingRowColors(true);
     table->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -1023,8 +1217,7 @@ void ConfigTabs::showDiffDialog(const QString& title, const QVector<frontend::Pr
         table->setItem(i, 1, new QTableWidgetItem(status));
         table->setItem(i, 2, new QTableWidgetItem(row.localValue));
         table->setItem(i, 3, new QTableWidgetItem(row.remoteValue));
-        table->setItem(i, 4, new QTableWidgetItem(row.risk));
-        table->setItem(i, 5, new QTableWidgetItem(row.source));
+        table->setItem(i, 4, new QTableWidgetItem(row.source));
     }
 
     layout->addWidget(table, 1);
@@ -1064,16 +1257,21 @@ void ConfigTabs::loadSelectedProfileInternal(const QString& profileName) {
 void ConfigTabs::onProfileSelectionChanged(int index) {
     if (!profileSelect_) return;
     const QString profileName = profileSelect_->itemData(index).toString();
+    refreshProfileStatusLabel();
     if (profileName.isEmpty()) {
-        // Switch back to default include path (no active profile)
-        QSettings s;
-        s.remove("Profiles/LastProfileName");
-        s.remove("Config/ExternalAppConfigPath");
-        s.remove("Config/ExternalCameraScriptPath");
-        SPDLOG_INFO("Profiles: cleared active profile; reverting to default include paths");
-        onReloadJson();
-        onReloadJs();
-        refreshProfileStatusLabel();
+        clearProfileReview();
+        return;
+    }
+    if (configViewTabs_) {
+        configViewTabs_->setCurrentIndex(kReviewTabIndex);
+    }
+    rebuildProfileReview();
+}
+
+void ConfigTabs::onLoadSelectedProfile() {
+    const QString profileName = selectedProfileName();
+    if (profileName.isEmpty()) {
+        QMessageBox::information(this, tr("Load Profile"), tr("No profile selected."));
         return;
     }
     loadSelectedProfileInternal(profileName);
@@ -1153,10 +1351,9 @@ void ConfigTabs::onSaveProfile() {
     refreshProfilesList();
     const int idx = profileSelect_ ? profileSelect_->findData(name) : -1;
     if (idx >= 0 && profileSelect_->currentIndex() != idx) {
-        profileSelect_->setCurrentIndex(idx); // will trigger load
-    } else {
-        loadSelectedProfileInternal(name);
+        profileSelect_->setCurrentIndex(idx);
     }
+    loadSelectedProfileInternal(name);
     SPDLOG_INFO("Profiles: saved profile '{}' (json={}, js_included={})",
                 name.toStdString(), cfgPath.toStdString(), includeJs ? 1 : 0);
     refreshProfileStatusLabel();

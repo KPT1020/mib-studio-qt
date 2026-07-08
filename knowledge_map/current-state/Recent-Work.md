@@ -18,6 +18,15 @@
   and `scripts.export_hdf5_paths` coverage for basename, suffix, folder, and
   output-root validation policy.
 
+- **Changed-values-first config profile review** (2026-07-08) —
+  `ConfigTabs` now defaults the profile/config area to a Review view when a
+  profile is selected. The review table shows Setting, Current value, Profile
+  value, and Section; it defaults to changed rows, supports All settings and
+  setting/path search, and requires the explicit `Load Profile` action before
+  applying the selected profile. The existing grouped config tables live under
+  All settings, raw editing remains under Advanced JSON, and the remote diff
+  dialog no longer displays subjective risk labels.
+
 - **Realtime-performance benchmark parts C/D/E** (2026-07-02, PR1 of
   `docs/exec-plans/active/2026-07-02-realtime-performance.md`) —
   Extended `tests/performance/pipeline_timing_benchmark.cpp` (CTest

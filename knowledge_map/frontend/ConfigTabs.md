@@ -24,7 +24,9 @@
   [[../frontend/System-Utilities]] `AppConfigWatcher`.
 - Manage profiles, lazy `profile.meta.json` generation, manual catalog
   checks, checksum-verified updates, and field-level diffing through
-  [[../frontend/System-Utilities]] `ProfileManager`.
+  [[../frontend/System-Utilities]] `ProfileManager`. Profile selection now
+  opens a changed-values-first Review view before `Load Profile` applies the
+  selected config.
 - Profile catalogs for manual remote updates are published outside the app via
   `publish-profiles.py` to
   `https://updates.yofo.bio/profiles/<channel>/catalog.json`; see
@@ -45,6 +47,11 @@
   `profile.meta.json`, remote-managed profiles show update/incompatibility
   state, and the manual update flow stages downloads before replacing local
   files.
+- The profile selector is review-first: choosing a profile compares it with the
+  current editor/config state, defaults to changed rows only, supports All
+  settings plus search, and only applies the profile when `Load Profile` is
+  clicked. The grouped config tables remain under All settings and raw JSON is
+  under Advanced JSON.
 - Some gates require their `enable_*` flag too (e.g.
   `enable_ring_ratio_check`). Editing thresholds alone won't change
   classification.

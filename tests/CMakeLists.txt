@@ -276,6 +276,21 @@ set_target_properties(hdf_review_export_paths_test PROPERTIES
 add_test(NAME frontend.hdf_review_export_paths COMMAND $<TARGET_FILE:hdf_review_export_paths_test>)
 set_tests_properties(frontend.hdf_review_export_paths PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
 
+add_executable(profile_config_review_test
+    ${PROJECT_SOURCE_DIR}/tests/frontend/profile_config_review_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/ProfileConfigReview.cpp
+)
+target_include_directories(profile_config_review_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+)
+target_link_libraries(profile_config_review_test PRIVATE Qt6::Core)
+set_target_properties(profile_config_review_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+)
+add_test(NAME frontend.profile_config_review COMMAND $<TARGET_FILE:profile_config_review_test>)
+set_tests_properties(frontend.profile_config_review PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
+
 add_executable(update_catalog_test
     ${PROJECT_SOURCE_DIR}/tests/frontend/update_catalog_test.cpp
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/UpdateCatalog.cpp
