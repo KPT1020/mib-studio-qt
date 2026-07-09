@@ -1257,11 +1257,20 @@ void ConfigTabs::loadSelectedProfileInternal(const QString& profileName) {
 void ConfigTabs::onProfileSelectionChanged(int index) {
     if (!profileSelect_) return;
     const QString profileName = profileSelect_->itemData(index).toString();
-    refreshProfileStatusLabel();
     if (profileName.isEmpty()) {
+        QSettings s;
+        s.remove("Profiles/LastProfileName");
+        s.remove("Config/ExternalAppConfigPath");
+        s.remove("Config/ExternalCameraScriptPath");
+        SPDLOG_INFO("Profiles: cleared active profile; reverting to default include paths");
+        emit appConfigPathChanged(currentJsonPath());
+        onReloadJson();
+        onReloadJs();
+        refreshProfileStatusLabel();
         clearProfileReview();
         return;
     }
+    refreshProfileStatusLabel();
     if (configViewTabs_) {
         configViewTabs_->setCurrentIndex(kReviewTabIndex);
     }

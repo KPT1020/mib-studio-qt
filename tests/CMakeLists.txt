@@ -291,6 +291,34 @@ set_target_properties(profile_config_review_test PROPERTIES
 add_test(NAME frontend.profile_config_review COMMAND $<TARGET_FILE:profile_config_review_test>)
 set_tests_properties(frontend.profile_config_review PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
 
+if(TARGET Qt6::Widgets)
+    add_executable(config_tabs_profile_selection_test
+        ${PROJECT_SOURCE_DIR}/tests/frontend/config_tabs_profile_selection_test.cpp
+        ${PROJECT_SOURCE_DIR}/include/frontend/tabs/ConfigTabs.h
+        ${PROJECT_SOURCE_DIR}/include/frontend/models/JsonTableModel.h
+        ${PROJECT_SOURCE_DIR}/src/frontend/tabs/ConfigTabs.cpp
+        ${PROJECT_SOURCE_DIR}/src/frontend/models/JsonTableModel.cpp
+        ${PROJECT_SOURCE_DIR}/src/frontend/system/ProfileManager.cpp
+        ${PROJECT_SOURCE_DIR}/src/frontend/utils/ConfigPathManager.cpp
+        ${PROJECT_SOURCE_DIR}/src/frontend/utils/JsonFlatten.cpp
+        ${PROJECT_SOURCE_DIR}/src/frontend/utils/ProfileConfigReview.cpp
+    )
+    target_include_directories(config_tabs_profile_selection_test PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/tests
+    )
+    target_link_libraries(config_tabs_profile_selection_test PRIVATE mib_backend Qt6::Core Qt6::Widgets Qt6::Network Qt6::Test)
+    set_target_properties(config_tabs_profile_selection_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+    )
+    add_test(NAME frontend.config_tabs_profile_selection COMMAND $<TARGET_FILE:config_tabs_profile_selection_test>)
+    set_tests_properties(frontend.config_tabs_profile_selection PROPERTIES
+        LABELS "frontend;widget"
+        TIMEOUT 30
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    )
+endif()
+
 add_executable(update_catalog_test
     ${PROJECT_SOURCE_DIR}/tests/frontend/update_catalog_test.cpp
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/UpdateCatalog.cpp

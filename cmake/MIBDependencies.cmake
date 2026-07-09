@@ -1,7 +1,7 @@
 # Optional sentry-native integration (CMake-managed clone).
 include(Sentry)
 
-set(MIB_QT_COMPONENTS Core Gui SerialPort Network)
+set(MIB_QT_COMPONENTS Core Gui SerialPort Network Test)
 if(NOT MIB_BUILD_BACKEND_ONLY)
     list(APPEND MIB_QT_COMPONENTS Widgets Charts Concurrent)
 endif()

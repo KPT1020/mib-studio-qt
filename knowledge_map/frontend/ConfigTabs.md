@@ -51,7 +51,10 @@
   current editor/config state, defaults to changed rows only, supports All
   settings plus search, and only applies the profile when `Load Profile` is
   clicked. The grouped config tables remain under All settings and raw JSON is
-  under Advanced JSON.
+  under Advanced JSON. Selecting `<no profile>` still clears
+  `Profiles/LastProfileName`, external config/script paths, reloads defaults,
+  and clears the review table; this is covered by
+  `frontend.config_tabs_profile_selection`.
 - Some gates require their `enable_*` flag too (e.g.
   `enable_ring_ratio_check`). Editing thresholds alone won't change
   classification.

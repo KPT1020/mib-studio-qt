@@ -26,6 +26,9 @@
   applying the selected profile. The existing grouped config tables live under
   All settings, raw editing remains under Advanced JSON, and the remote diff
   dialog no longer displays subjective risk labels.
+  Follow-up validation restored the `<no profile>` path so it clears the
+  persisted active profile plus external config/script paths and added
+  `frontend.config_tabs_profile_selection` coverage for that regression.
 
 - **Realtime-performance benchmark parts C/D/E** (2026-07-02, PR1 of
   `docs/exec-plans/active/2026-07-02-realtime-performance.md`) —
