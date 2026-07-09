@@ -23,6 +23,7 @@ This app supports using external files for both the application JSON config and 
 ## Behavior
 - Reset/Save operate on the active path (external when set; otherwise the default include path).
 - Apply to Camera saves the editor to the active JS path, then applies it directly using the Euresys SDK (`EGrabber::runScript`).
+- When no external app config and no active profile are selected, the active bundled/default `config.json` shows `Using default config` in the Config tabs. Experiment start, frame recording start, and camera apply/reset paths are blocked until the displayed default config hash is confirmed, or until an external config/profile is loaded.
 - Logging is via spdlog.
 
 ## Profiles

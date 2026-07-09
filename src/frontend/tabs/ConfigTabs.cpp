@@ -131,6 +131,13 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         profileStatusLabel_->setTextFormat(Qt::PlainText);
         profileStatusLabel_->setWordWrap(false);
         profileStatusLabel_->setMinimumWidth(220);
+        defaultConfigBannerLabel_ = new QLabel(tr("Using default config"), page);
+        defaultConfigBannerLabel_->setTextFormat(Qt::PlainText);
+        defaultConfigBannerLabel_->setStyleSheet("font-weight: 600; color: #6f4e00;");
+        defaultConfigBannerLabel_->setVisible(false);
+        defaultConfigConfirmBtn_ = new QPushButton(tr("Confirm Default"), page);
+        defaultConfigConfirmBtn_->setVisible(false);
+
         row->addWidget(jsonReloadBtn_);
         row->addWidget(jsonSaveBtn_);
         row->addWidget(jsonBrowseBtn_);
@@ -153,6 +160,11 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         row->addWidget(duplicateAsLocalBtn_);
         row->addWidget(profileStatusLabel_);
 		row->addWidget(jsonTableToggle_);
+        auto* defaultConfigRow = new QHBoxLayout();
+        defaultConfigRow->addWidget(defaultConfigBannerLabel_);
+        defaultConfigRow->addWidget(defaultConfigConfirmBtn_);
+        defaultConfigRow->addStretch(1);
+        v->addLayout(defaultConfigRow);
         v->addLayout(row);
 
         // Legacy single table (for backward compatibility)
@@ -226,6 +238,7 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         connect(jsonSaveBtn_, &QPushButton::clicked, this, &ConfigTabs::onSaveJson);
         connect(jsonBrowseBtn_, &QPushButton::clicked, this, &ConfigTabs::onBrowseJson);
         connect(jsonClearBtn_, &QPushButton::clicked, this, &ConfigTabs::onClearJson);
+        connect(defaultConfigConfirmBtn_, &QPushButton::clicked, this, &ConfigTabs::onConfirmDefaultConfig);
     }
 
     // Camera JS script tab
@@ -296,6 +309,7 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
     connect(showDiffBtn_, &QPushButton::clicked, this, &ConfigTabs::onShowProfileDiff);
     connect(duplicateAsLocalBtn_, &QPushButton::clicked, this, &ConfigTabs::onDuplicateProfileAsLocal);
     refreshProfileStatusLabel();
+    updateDefaultConfigTrustUi();
 }
 
 QString ConfigTabs::appDirIncludePath(const QString& fileName) const {
@@ -304,10 +318,7 @@ QString ConfigTabs::appDirIncludePath(const QString& fileName) const {
 }
 
 QString ConfigTabs::currentJsonPath() const {
-    QSettings s;
-    const QString ext = s.value("Config/ExternalAppConfigPath").toString().trimmed();
-    if (!ext.isEmpty()) return ext;
-    return defaultJsonPath();
+    return frontend::DefaultConfigTrustGate::activeConfigPath();
 }
 
 QString ConfigTabs::currentJsPath() const {
@@ -315,6 +326,27 @@ QString ConfigTabs::currentJsPath() const {
     const QString ext = s.value("Config/ExternalCameraScriptPath").toString().trimmed();
     if (!ext.isEmpty()) return ext;
     return defaultJsPath();
+}
+
+void ConfigTabs::updateDefaultConfigTrustUi()
+{
+    if (!defaultConfigBannerLabel_ || !defaultConfigConfirmBtn_) {
+        return;
+    }
+
+    const auto current = defaultConfigTrustGate_.state();
+    const bool show = current.usingDefaultConfig && !current.defaultHashConfirmed;
+    defaultConfigBannerLabel_->setVisible(show);
+    defaultConfigConfirmBtn_->setVisible(show);
+    if (show) {
+        QString tooltip = tr("Active path: %1").arg(current.activeConfigPath);
+        if (!current.activeDefaultHash.isEmpty()) {
+            tooltip += tr("\nHash: %1").arg(current.activeDefaultHash.left(16));
+        }
+        defaultConfigBannerLabel_->setToolTip(tooltip);
+        defaultConfigConfirmBtn_->setToolTip(tr("Confirm this saved default config for production actions."));
+    }
+    emit defaultConfigTrustStateChanged();
 }
 
 void ConfigTabs::clearJsonSyncIndicators()
@@ -405,6 +437,7 @@ void ConfigTabs::onReloadJson() {
     if (jsonStack_ && jsonStack_->currentIndex() == 1) {
         refreshJsonTableModel();
     }
+    updateDefaultConfigTrustUi();
 }
 
 void ConfigTabs::onSaveJson() {
@@ -420,6 +453,7 @@ void ConfigTabs::onSaveJson() {
     if (jsonStack_ && jsonStack_->currentIndex() == 1) {
         refreshJsonTableModel();
     }
+    updateDefaultConfigTrustUi();
 }
 
 void ConfigTabs::onReloadJs() {
@@ -453,6 +487,13 @@ void ConfigTabs::onSaveJs() {
 }
 
 void ConfigTabs::onResetCamera() {
+    QString gateMessage;
+    if (!defaultConfigTrustGate_.isProductionActionAllowed(frontend::DefaultConfigTrustGate::ProductionAction::CameraApply, &gateMessage)) {
+        QMessageBox::warning(this, tr("Reset Camera"), gateMessage);
+        updateDefaultConfigTrustUi();
+        return;
+    }
+
     const auto reply = QMessageBox::question(
         this,
         tr("Reset Camera"),
@@ -487,7 +528,46 @@ void ConfigTabs::onResetCamera() {
         tr("DeviceReset sent. The camera may briefly disconnect and require Refresh in the Connect tab."));
 }
 
+void ConfigTabs::onConfirmDefaultConfig() {
+    if (jsonUnsavedLabel_ && jsonUnsavedLabel_->isVisible()) {
+        QMessageBox::warning(this,
+                             tr("Confirm Default Config"),
+                             tr("Save or reload config.json before confirming the displayed default config."));
+        return;
+    }
+
+    const auto current = defaultConfigTrustGate_.state();
+    if (!current.usingDefaultConfig) {
+        QMessageBox::information(this,
+                                 tr("Confirm Default Config"),
+                                 tr("The active config is a profile or external config."));
+        updateDefaultConfigTrustUi();
+        return;
+    }
+
+    QString err;
+    if (!defaultConfigTrustGate_.confirmActiveDefault(nullptr, &err)) {
+        QMessageBox::warning(this,
+                             tr("Confirm Default Config"),
+                             tr("Failed to confirm default config: %1").arg(err));
+        updateDefaultConfigTrustUi();
+        return;
+    }
+
+    QMessageBox::information(this,
+                             tr("Confirm Default Config"),
+                             tr("Default config confirmed for this config hash."));
+    updateDefaultConfigTrustUi();
+}
+
 void ConfigTabs::onApplyJs() {
+    QString gateMessage;
+    if (!defaultConfigTrustGate_.isProductionActionAllowed(frontend::DefaultConfigTrustGate::ProductionAction::CameraApply, &gateMessage)) {
+        QMessageBox::warning(this, tr("Apply Camera Script"), gateMessage);
+        updateDefaultConfigTrustUi();
+        return;
+    }
+
     const QString path = currentJsPath();
     QString err;
     // Always save first to ensure the latest content is applied
@@ -534,6 +614,7 @@ void ConfigTabs::onBrowseJson() {
     if (jsonStack_ && jsonStack_->currentIndex() == 1) {
         refreshJsonTableModel();
     }
+    updateDefaultConfigTrustUi();
 }
 
 void ConfigTabs::onClearJson() {
@@ -548,6 +629,8 @@ void ConfigTabs::onClearJson() {
                                            QMessageBox::Yes);
     if (ret == QMessageBox::Yes) {
         onReloadJson();
+    } else {
+        updateDefaultConfigTrustUi();
     }
 }
 
@@ -788,6 +871,7 @@ void ConfigTabs::onExternalConfigFileChanged(const QString& path) {
     }
 
     SPDLOG_DEBUG("ConfigTabs: reloaded config.json from external change");
+    updateDefaultConfigTrustUi();
 }
 
 void ConfigTabs::rebuildJsonFromTable() {
@@ -1058,6 +1142,7 @@ void ConfigTabs::loadSelectedProfileInternal(const QString& profileName) {
         onReloadJs();
     }
     refreshProfileStatusLabel();
+    updateDefaultConfigTrustUi();
 }
 
 // ===== Profiles slots =====
@@ -1074,6 +1159,7 @@ void ConfigTabs::onProfileSelectionChanged(int index) {
         onReloadJson();
         onReloadJs();
         refreshProfileStatusLabel();
+        updateDefaultConfigTrustUi();
         return;
     }
     loadSelectedProfileInternal(profileName);
@@ -1184,6 +1270,7 @@ void ConfigTabs::onDeleteProfile() {
         SPDLOG_INFO("Profiles: deleting active profile, reverting to defaults");
         onReloadJson();
         onReloadJs();
+        updateDefaultConfigTrustUi();
     }
     QDir dir(profileDirPath(name));
     bool ok = dir.removeRecursively();

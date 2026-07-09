@@ -24,6 +24,7 @@
 #include "backend/processing/ProcessingService.h"
 #include "backend/services/AutofocusService.h"
 #include "frontend/system/PlaybackPanel.h"
+#include "frontend/system/DefaultConfigTrustGate.h"
 #include "frontend/utils/JsonConfigMerge.h"
 
 namespace frontend
@@ -122,18 +123,13 @@ namespace frontend
 
 	QString AppConfigWatcher::resolveActiveConfigPath() const
 	{
-		QSettings s;
-		const QString ext = s.value("Config/ExternalAppConfigPath").toString().trimmed();
-		if (!ext.isEmpty())
-			return ext;
-		// Use centralized helper to get user-writable config directory
-		return QDir(getUserConfigDir()).absoluteFilePath("config.json");
+		return frontend::DefaultConfigTrustGate::activeConfigPath();
 	}
 
 	void AppConfigWatcher::ensureDefaultConfigExists(const QString &path) const
 	{
 		// Only ensure when path points to app include path
-		const QString defaultPath = QDir(getUserConfigDir()).absoluteFilePath("config.json");
+		const QString defaultPath = frontend::DefaultConfigTrustGate::defaultConfigPath();
 		if (QFileInfo(path).absoluteFilePath() != QFileInfo(defaultPath).absoluteFilePath())
 		{
 			return;

@@ -12,7 +12,10 @@
 #include "support/tempdir.h"
 
 #include <QtGlobal>
+#include <QByteArray>
 #include <QCoreApplication>
+#include <QSettings>
+#include <QString>
 
 #include <fstream>
 #include <string>
@@ -22,11 +25,30 @@ int main(int argc, char* argv[])
     // Route the startup LUT lookup to a file: URL so initialize() does no
     // network I/O (keeps this unit test fast/offline).
     qputenv("MIB_STUDIO_EMODULUS_LUT_MANIFEST_URL", "file:///nonexistent/lut.json");
+    mib::test::TempDir settingsDir("mib_camera_script_settings");
+    qputenv("XDG_CONFIG_HOME", QByteArray::fromStdString(settingsDir.path().string()));
     QCoreApplication app(argc, argv);
+    QCoreApplication::setOrganizationName(QStringLiteral("MIBStudioQtTests"));
+    QCoreApplication::setApplicationName(QStringLiteral("camera_script_apply"));
+    {
+        QSettings settings;
+        settings.clear();
+        settings.sync();
+    }
 
     mib::test::TempDir td("mib_camera_script");
     backend::AppBackend backend;
     MIB_REQUIRE(backend.initialize((td / "data").string()), "AppBackend initialize");
+    const auto externalConfig = td / "external_config.json";
+    {
+        std::ofstream out(externalConfig, std::ios::binary | std::ios::trunc);
+        out << "{\"external\":true}\n";
+    }
+    {
+        QSettings settings;
+        settings.setValue(QStringLiteral("Config/ExternalAppConfigPath"), QString::fromStdString(externalConfig.string()));
+        settings.sync();
+    }
 
     // No camera selected -> clean refusal, no device access.
     {
@@ -49,6 +71,12 @@ int main(int argc, char* argv[])
                    "missing-script error names the problem");
     }
 #endif
+
+    {
+        QSettings settings;
+        settings.remove(QStringLiteral("Config/ExternalAppConfigPath"));
+        settings.sync();
+    }
 
     if (mib::test::exitCode() == 0) {
         std::printf("camera-script (LED) apply guards verified\n");

@@ -5,6 +5,8 @@ add_library(mib_backend STATIC
     ${PROJECT_SOURCE_DIR}/src/backend/app/BackendFacade.cpp
     ${PROJECT_SOURCE_DIR}/include/backend/app/BackendFacade.h
     ${PROJECT_SOURCE_DIR}/include/backend/app/BackgroundFrame.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/system/DefaultConfigTrustGate.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/system/DefaultConfigTrustGate.h
     ${PROJECT_SOURCE_DIR}/src/backend/app/Tools.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/processing/EModulusLut.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/processing/EModulusLutCatalog.cpp

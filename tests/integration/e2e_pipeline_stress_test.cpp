@@ -24,7 +24,10 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include <QByteArray>
 #include <QCoreApplication>
+#include <QSettings>
+#include <QString>
 
 #include <atomic>
 #include <chrono>
@@ -32,6 +35,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
+#include <fstream>
 #include <iostream>
 #include <random>
 #include <string>
@@ -121,7 +125,19 @@ bool generateSyntheticFrames(const fs::path& dir, int count)
 
 int main(int argc, char* argv[])
 {
+    const fs::path scratch = fs::temp_directory_path() /
+                             ("mib_e2e_stress_" + randomTag());
+    std::error_code ec;
+    fs::create_directories(scratch, ec);
+    qputenv("XDG_CONFIG_HOME", QByteArray::fromStdString((scratch / "settings").string()));
     QCoreApplication app(argc, argv);
+    QCoreApplication::setOrganizationName(QStringLiteral("MIBStudioQtTests"));
+    QCoreApplication::setApplicationName(QStringLiteral("e2e_pipeline_stress"));
+    {
+        QSettings settings;
+        settings.clear();
+        settings.sync();
+    }
 
     fs::path frameDir;
     // Light default so CI finishes well under the ctest timeout even on a slow
@@ -129,11 +145,6 @@ int main(int argc, char* argv[])
     // the cost. Pass a larger [cycles] arg for heavy local stress runs.
     int cycles = 8;
     bool synthesized = false;
-
-    const fs::path scratch = fs::temp_directory_path() /
-                             ("mib_e2e_stress_" + randomTag());
-    std::error_code ec;
-    fs::create_directories(scratch, ec);
 
     if (argc >= 2) {
         frameDir = argv[1];
@@ -146,6 +157,17 @@ int main(int argc, char* argv[])
         synthesized = true;
     }
     if (argc >= 3) cycles = std::max(1, std::stoi(argv[2]));
+
+    const fs::path externalConfig = scratch / "external_config.json";
+    {
+        std::ofstream out(externalConfig, std::ios::binary | std::ios::trunc);
+        out << "{\"external\":true}\n";
+    }
+    {
+        QSettings settings;
+        settings.setValue(QStringLiteral("Config/ExternalAppConfigPath"), QString::fromStdString(externalConfig.string()));
+        settings.sync();
+    }
 
     if (!fs::exists(frameDir)) {
         std::cerr << "frame directory does not exist: " << frameDir << "\n";
@@ -287,5 +309,10 @@ int main(int argc, char* argv[])
     }
 
     std::cout << "\nPASS: pipeline survived lifecycle stress.\n";
+    {
+        QSettings settings;
+        settings.remove(QStringLiteral("Config/ExternalAppConfigPath"));
+        settings.sync();
+    }
     return 0;
 }

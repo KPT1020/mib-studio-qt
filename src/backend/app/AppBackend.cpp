@@ -20,6 +20,7 @@
 #include "backend/services/YoloService.h"
 #include "backend/services/SyringePumpService.h"
 #include "backend/processing/EModulusLutCatalog.h"
+#include "frontend/system/DefaultConfigTrustGate.h"
 
 #include <algorithm>
 #include <chrono>
@@ -83,6 +84,23 @@ namespace backend
             std::filesystem::create_directories(dataPath / "logs");
             logPath = (dataPath / "logs" / "app.log").string();
             return logPath;
+        }
+
+        bool productionGateAllows(frontend::DefaultConfigTrustGate::ProductionAction action, std::string* errorOut)
+        {
+            frontend::DefaultConfigTrustGate gate;
+            QString message;
+            if (gate.isProductionActionAllowed(action, &message))
+            {
+                return true;
+            }
+            const std::string text = message.toStdString();
+            if (errorOut)
+            {
+                *errorOut = text;
+            }
+            SPDLOG_WARN("Production action blocked: {}", text);
+            return false;
         }
 
         BackgroundFramePixelFormat pixelFormatForMatType(int type)
@@ -755,6 +773,10 @@ namespace backend
                 *errorOut = "No hardware camera selected";
             return false;
         }
+        if (!productionGateAllows(frontend::DefaultConfigTrustGate::ProductionAction::CameraApply, errorOut))
+        {
+            return false;
+        }
         // Validate the script file before touching the device: a bogus path
         // should fail with a clear message instead of opening the camera (and
         // possibly disrupting acquisition) only to throw a cryptic SDK error.
@@ -784,6 +806,10 @@ namespace backend
         {
             if (errorOut)
                 *errorOut = "No MindVision camera selected";
+            return false;
+        }
+        if (!productionGateAllows(frontend::DefaultConfigTrustGate::ProductionAction::CameraApply, errorOut))
+        {
             return false;
         }
         if (captureService_ && captureService_->isRunning())
@@ -818,6 +844,10 @@ namespace backend
                 *errorOut = "No hardware camera selected";
             return false;
         }
+        if (!productionGateAllows(frontend::DefaultConfigTrustGate::ProductionAction::CameraApply, errorOut))
+        {
+            return false;
+        }
         // Ensure capture thread is stopped
         if (captureService_ && captureService_->isRunning())
         {
@@ -843,6 +873,10 @@ namespace backend
         }
         if (!captureService_ || !captureService_->isRunning()) {
             SPDLOG_ERROR("Cannot start frame recording: camera not running");
+            return false;
+        }
+
+        if (!productionGateAllows(frontend::DefaultConfigTrustGate::ProductionAction::FrameRecordingStart, nullptr)) {
             return false;
         }
 

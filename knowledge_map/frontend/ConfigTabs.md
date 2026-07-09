@@ -22,6 +22,11 @@
   `utils/JsonFlatten.cpp`.
 - Persist config via `utils/ConfigPathManager.cpp` and
   [[../frontend/System-Utilities]] `AppConfigWatcher`.
+- Surface the default-config trust state from
+  `frontend::DefaultConfigTrustGate`: unconfirmed bundled defaults show
+  `Using default config`, confirmation is available only from this config
+  review area, and trust-state changes emit a signal so MainWindow can mirror
+  the same state in its status bar.
 - Manage profiles, lazy `profile.meta.json` generation, manual catalog
   checks, checksum-verified updates, and field-level diffing through
   [[../frontend/System-Utilities]] `ProfileManager`.
@@ -53,3 +58,7 @@
 - Bundled defaults now include top-level `config_schema_version`. Remote
   profile support should treat missing schema as legacy local config rather
   than rejecting existing user profiles at startup.
+- Default-config confirmation is stored by SHA-256 of the active default
+  `config.json`, not as a permanent toggle. Loading a profile or external
+  `config.json` clears the banner automatically; clearing both back to bundled
+  defaults restores the banner unless that exact hash was already confirmed.

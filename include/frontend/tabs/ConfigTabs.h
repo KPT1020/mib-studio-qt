@@ -8,6 +8,7 @@
 #include <optional>
 
 #include "frontend/system/ProfileManager.h"
+#include "frontend/system/DefaultConfigTrustGate.h"
 
 namespace backend { class AppBackend; }
 
@@ -37,6 +38,7 @@ public:
 
 signals:
 	void appConfigPathChanged(const QString& path);
+    void defaultConfigTrustStateChanged();
 
 public:
     QString currentJsPath() const;
@@ -50,6 +52,7 @@ private slots:
     void onSaveJson();
     void onBrowseJson();
     void onClearJson();
+    void onConfirmDefaultConfig();
     void onJsonTableToggled(bool checked);
     void onJsonTextChangedDebounced();
     void rebuildJsonFromTable();
@@ -72,10 +75,11 @@ private slots:
 
 private:
     QString appDirIncludePath(const QString& fileName) const;
-    QString defaultJsonPath() const { return appDirIncludePath("config.json"); }
+    QString defaultJsonPath() const { return frontend::DefaultConfigTrustGate::defaultConfigPath(); }
     QString defaultJsPath() const { return appDirIncludePath("egrabberConfig.js"); }
     QString currentJsonPath() const;
     void clearJsonSyncIndicators();
+    void updateDefaultConfigTrustUi();
     bool loadFileToEditor(const QString& path, QPlainTextEdit* editor, QString* err);
     bool saveEditorToFile(QPlainTextEdit* editor, const QString& path, QString* err);
     void refreshJsonTableModel();
@@ -100,6 +104,7 @@ private:
 
     backend::AppBackend& backend_;
     frontend::ProfileManager profileManager_;
+    frontend::DefaultConfigTrustGate defaultConfigTrustGate_;
     std::optional<frontend::ProfileManager::Catalog> remoteCatalog_;
 
     QTabWidget* tabs_ = nullptr;
@@ -120,6 +125,8 @@ private:
     QPushButton* jsonBrowseBtn_ = nullptr;
     QPushButton* jsonClearBtn_ = nullptr;
     QLabel* jsonPathLabel_ = nullptr;
+    QLabel* defaultConfigBannerLabel_ = nullptr;
+    QPushButton* defaultConfigConfirmBtn_ = nullptr;
 	QLabel* jsonUnsavedLabel_ = nullptr;
 	QLabel* jsonConflictLabel_ = nullptr;
 	QComboBox* profileSelect_ = nullptr;

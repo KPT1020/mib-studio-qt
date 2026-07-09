@@ -7,10 +7,16 @@
 #include <cstdlib>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <random>
 #include <stdexcept>
 #include <thread>
+#include <QByteArray>
+#include <QCoreApplication>
+#include <QSettings>
+#include <QString>
+#include <QtGlobal>
 #include <vector>
 
 namespace
@@ -70,13 +76,33 @@ namespace
     }
 } // namespace
 
-int main()
+int main(int argc, char* argv[])
 {
     namespace bridge = backend::bridge;
 
     const auto dataDir = makeTempDir();
+    qputenv("XDG_CONFIG_HOME", QByteArray::fromStdString((dataDir / "settings").string()));
+    QCoreApplication app(argc, argv);
+    QCoreApplication::setOrganizationName(QStringLiteral("MIBStudioQtTests"));
+    QCoreApplication::setApplicationName(QStringLiteral("backend_facade_boundary"));
+    {
+        QSettings settings;
+        settings.clear();
+        settings.sync();
+    }
+
     const auto mockDir = dataDir / "mock_frames";
     std::filesystem::create_directories(mockDir);
+    const auto externalConfig = dataDir / "external_config.json";
+    {
+        std::ofstream out(externalConfig, std::ios::binary | std::ios::trunc);
+        out << "{\"external\":true}\n";
+    }
+    {
+        QSettings settings;
+        settings.setValue(QStringLiteral("Config/ExternalAppConfigPath"), QString::fromStdString(externalConfig.string()));
+        settings.sync();
+    }
 
     const cv::Mat frame(16, 16, CV_8UC1, cv::Scalar(180));
     const auto mockFramePath = mockDir / "frame_000.tiff";
@@ -226,6 +252,11 @@ int main()
     }();
 
     std::error_code cleanupError;
+    {
+        QSettings settings;
+        settings.remove(QStringLiteral("Config/ExternalAppConfigPath"));
+        settings.sync();
+    }
     std::filesystem::remove_all(dataDir, cleanupError);
     return result;
 }

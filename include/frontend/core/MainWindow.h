@@ -46,10 +46,12 @@ private:
     void stopExperimentServices();
     void setupCornerWidgets();
     void setupSidebar();
+    void refreshDefaultConfigStatusUi();
     
     Ui::MainWindow* ui;
     backend::AppBackend& backend_;
     QLabel* statusLabel_ = nullptr;
+    QLabel* defaultConfigStatusLabel_ = nullptr;
     QTimer* statsTimer_ = nullptr;
     PlaybackPanel* playbackPanel_ = nullptr;
     QTabWidget* experimentTabs_ = nullptr;

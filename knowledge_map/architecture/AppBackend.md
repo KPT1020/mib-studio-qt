@@ -110,10 +110,14 @@ the realtime thread live).
   device (no start)
 - `configureMockCamera(options)` — choose mock folder instead
 - `applyCameraScriptFromFile(path)` — push a GenICam JS config to the selected
-  device (stops capture first, does not restart)
-- `resetSelectedHardwareCamera()` — issue GenICam `DeviceReset`
+  device (stops capture first, does not restart). This production apply path
+  checks `frontend::DefaultConfigTrustGate` after camera selection validation
+  and before file/device/capture mutation.
+- `resetSelectedHardwareCamera()` — issue GenICam `DeviceReset`; also checks
+  the same trust gate before stopping capture or touching hardware.
 - `applyMindVisionConfigFromFile(path)` — apply the selected MindVision JSON
-  config and refresh the capture factory path
+  config and refresh the capture factory path. The default-config trust gate
+  runs before capture stop or SDK apply callbacks.
 
 ### Platform behavior
 
@@ -134,6 +138,9 @@ Separate from experiments: record non-empty raw frames directly to HDF5 with
 no contour processing.
 
 - `startFrameRecording(hdf5Path)`, `stopFrameRecording()`, `isFrameRecording()`
+- `startFrameRecording` checks `frontend::DefaultConfigTrustGate` before
+  closing/opening HDF5 files, initializing recording datasets, setting
+  recording flags, or launching the recording thread.
 - Counters: `frameRecordingCount()`, `frameRecordingFiltered()`
 - Uses a dedicated `frameRecordingThread_`. Empty frames are dropped via
   `ProcessingService::isFrameEmpty` (ROI-only shared_ptr overload) after the

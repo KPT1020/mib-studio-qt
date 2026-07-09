@@ -1,4 +1,5 @@
 #include "frontend/system/PlaybackPanel.h"
+#include "frontend/system/DefaultConfigTrustGate.h"
 
 #include <QPainter>
 #include <QTimer>
@@ -848,6 +849,16 @@ void PlaybackPanel::onToggleRecording()
         return;
     }
 
+    {
+        frontend::DefaultConfigTrustGate gate;
+        QString gateMessage;
+        if (!gate.isProductionActionAllowed(frontend::DefaultConfigTrustGate::ProductionAction::FrameRecordingStart, &gateMessage)) {
+            QMessageBox::warning(this, tr("Recording"), gateMessage);
+            updateRecordingUI();
+            return;
+        }
+    }
+
     // Prompt user for HDF5 file path
     QString defaultDir;
     const QString documentsPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
@@ -872,7 +883,7 @@ void PlaybackPanel::onToggleRecording()
     const std::string path = filePath.toStdString();
     if (!backend_.startFrameRecording(path)) {
         QMessageBox::warning(this, tr("Recording Error"),
-                             tr("Failed to start frame recording. Check that the camera is running."));
+                             tr("Failed to start frame recording. Check that the camera is running and the active config is confirmed or external."));
         return;
     }
     updateRecordingUI();

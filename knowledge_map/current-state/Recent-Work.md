@@ -574,6 +574,17 @@
   out. Workflows now `pip install conan boto3`. Local runs also
   require boto3 (`pip install boto3`).
 
+- **2026-07-09** — Added the default-config trust gate for production actions
+  (`symphony/GH-216-default-config-gate`). `frontend::DefaultConfigTrustGate`
+  now resolves the active/default `config.json` state from QSettings, stores
+  confirmations by SHA-256 hash, and treats external config/profile states as
+  trusted automatically. ConfigTabs shows `Using default config` with a
+  confirm action in the config review area, and MainWindow mirrors the same
+  unconfirmed-default state in the status bar on launch. Experiment start,
+  frame recording start, and camera apply/reset paths check the same helper
+  before HDF5, recording-thread, script-save/capture-stop, or hardware/session
+  mutation.
+
 ## Historical tasks worth knowing about
 
 See [[Task-Log-Index]] for the full list. Highlights:

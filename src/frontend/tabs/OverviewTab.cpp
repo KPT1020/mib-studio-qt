@@ -28,6 +28,7 @@
 #include "backend/app/AppBackend.h"
 #include "backend/playback/PlaybackService.h"
 #include "backend/playback/FrameStore.h"
+#include "frontend/system/DefaultConfigTrustGate.h"
 #include "frontend/utils/ConfigPathManager.h"
 #include "frontend/utils/FileIOUtils.h"
 #include "frontend/utils/SimpleImageCanvas.h"
@@ -258,6 +259,14 @@ namespace frontend
 
     void OverviewTab::onApplyJs()
     {
+        frontend::DefaultConfigTrustGate gate;
+        QString gateMessage;
+        if (!gate.isProductionActionAllowed(frontend::DefaultConfigTrustGate::ProductionAction::CameraApply, &gateMessage))
+        {
+            QMessageBox::warning(this, tr("Apply Camera Script"), gateMessage);
+            return;
+        }
+
         const QString path = currentJsPath();
         QString err;
         // Always save first to ensure the latest content is applied

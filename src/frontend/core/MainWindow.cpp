@@ -50,6 +50,7 @@
 #include "frontend/tabs/ConfigTabs.h"
 #include "frontend/system/AutoUpdater.h"
 #include "frontend/system/DeviceInitManager.h"
+#include "frontend/system/DefaultConfigTrustGate.h"
 #include "frontend/utils/SidebarWidget.h"
 #include "frontend/utils/StatisticsPanel.h"
 #include <spdlog/spdlog.h>
@@ -331,6 +332,11 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     connect(startExperimentAct_, &QAction::triggered, this, &MainWindow::onStartExperiment);
     connect(stopExperimentAct_, &QAction::triggered, this, &MainWindow::onStopExperiment);
 
+    defaultConfigStatusLabel_ = new QLabel(tr("Using default config"));
+    defaultConfigStatusLabel_->setStyleSheet("font-weight: 600; color: #6f4e00;");
+    defaultConfigStatusLabel_->setVisible(false);
+    ui->statusbar->addPermanentWidget(defaultConfigStatusLabel_);
+
     statusLabel_ = new QLabel("Idle");
     ui->statusbar->addPermanentWidget(statusLabel_);
 
@@ -408,6 +414,11 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
             previewPage->getConfigWatcher(), &frontend::AppConfigWatcher::writeBackProcessingConfig);
     connect(previewPage->getConfigWatcher(), &frontend::AppConfigWatcher::configFileChanged,
             monitoringTab, &frontend::ExperimentMonitoringTab::loadCurrentConfig);
+    if (previewPage->getConfigTabs()) {
+        connect(previewPage->getConfigTabs(), &frontend::ConfigTabs::defaultConfigTrustStateChanged,
+                this, &MainWindow::refreshDefaultConfigStatusUi);
+    }
+    refreshDefaultConfigStatusUi();
 
     connect(overviewTab_, &frontend::OverviewTab::roiChanged,
             monitoringTab, &frontend::ExperimentMonitoringTab::updateRoiDisplay);
@@ -516,6 +527,23 @@ void MainWindow::setupSidebar()
 
     // Add splitter to central widget layout
     ui->verticalLayout->addWidget(mainSplitter_);
+}
+
+void MainWindow::refreshDefaultConfigStatusUi()
+{
+    if (!defaultConfigStatusLabel_)
+    {
+        return;
+    }
+
+    frontend::DefaultConfigTrustGate gate;
+    const auto current = gate.state();
+    const bool show = current.usingDefaultConfig && !current.defaultHashConfirmed;
+    defaultConfigStatusLabel_->setVisible(show);
+    if (show)
+    {
+        defaultConfigStatusLabel_->setToolTip(tr("Active path: %1").arg(current.activeConfigPath));
+    }
 }
 
 void MainWindow::setupCornerWidgets() {
@@ -692,6 +720,17 @@ void MainWindow::onStartExperiment()
                              tr("Camera must be running before starting an experiment. Please start the camera first."));
         statusLabel_->setText("Camera not running");
         return;
+    }
+
+    {
+        frontend::DefaultConfigTrustGate gate;
+        QString gateMessage;
+        if (!gate.isProductionActionAllowed(frontend::DefaultConfigTrustGate::ProductionAction::ExperimentStart, &gateMessage))
+        {
+            QMessageBox::warning(this, tr("Start Experiment"), gateMessage);
+            statusLabel_->setText("Using default config");
+            return;
+        }
     }
 
     // Show file dialog to select HDF5 save location

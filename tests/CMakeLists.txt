@@ -75,6 +75,15 @@ mib_add_backend_test_executable(camera_script_apply_test backend/camera_script_a
 add_test(NAME backend.camera_script_apply COMMAND $<TARGET_FILE:camera_script_apply_test>)
 set_tests_properties(backend.camera_script_apply PROPERTIES LABELS "backend;camera" TIMEOUT 30)
 
+mib_add_backend_test_executable(default_config_trust_gate_test backend/default_config_trust_gate_test.cpp)
+add_test(NAME backend.default_config_trust_gate COMMAND $<TARGET_FILE:default_config_trust_gate_test>)
+set_tests_properties(backend.default_config_trust_gate PROPERTIES LABELS "backend;config" TIMEOUT 30)
+
+mib_add_backend_test_executable(default_config_backend_gate_test backend/default_config_backend_gate_test.cpp)
+target_link_libraries(default_config_backend_gate_test PRIVATE Threads::Threads)
+add_test(NAME backend.default_config_backend_gate COMMAND $<TARGET_FILE:default_config_backend_gate_test>)
+set_tests_properties(backend.default_config_backend_gate PROPERTIES LABELS "backend;config;recording;camera" TIMEOUT 60)
+
 mib_add_backend_test_executable(frame_store_resize_under_load_test backend/frame_store_resize_under_load_test.cpp)
 target_link_libraries(frame_store_resize_under_load_test PRIVATE Threads::Threads)
 add_test(NAME backend.frame_store_resize_under_load COMMAND $<TARGET_FILE:frame_store_resize_under_load_test>)
