@@ -165,8 +165,7 @@ namespace frontend
         size_t recordingMultiImageCount_ = 1;
         backend::services::ProcessingService::Roi roi_{0, 0, 0, 0};
         QString loadedHdfFilePath_;
-        QString lastMetricsExportDir_;
-        QString lastExportAllRootDir_;
+        QString lastExportDir_;
 
         static constexpr int THUMBNAIL_SIZE = 128;
         static constexpr int GRID_COLUMNS = 5;

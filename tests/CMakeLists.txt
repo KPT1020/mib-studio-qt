@@ -293,3 +293,14 @@ set_target_properties(update_catalog_test PROPERTIES
 )
 add_test(NAME frontend.update_catalog COMMAND $<TARGET_FILE:update_catalog_test>)
 set_tests_properties(frontend.update_catalog PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
+
+if(Python3_Interpreter_FOUND)
+    add_test(
+        NAME scripts.export_hdf5_paths
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/test_export_hdf5_paths.py
+    )
+    set_tests_properties(scripts.export_hdf5_paths PROPERTIES
+        LABELS "scripts;hdf5"
+        TIMEOUT 30
+    )
+endif()

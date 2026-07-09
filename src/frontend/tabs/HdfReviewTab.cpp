@@ -69,8 +69,7 @@
 
 namespace {
 
-constexpr const char* kMetricsExportDirSetting = "HdfReviewTab/lastMetricsExportDir";
-constexpr const char* kExportAllRootDirSetting = "HdfReviewTab/lastExportAllRootDir";
+constexpr const char* kLastExportDirSetting = "HdfReviewTab/lastExportDir";
 
 struct HdfReviewLoadData {
     std::unique_ptr<backend::services::Hdf5Service> reader;
@@ -355,8 +354,7 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
     ui->setupUi(this);
 
     QSettings settings;
-    lastMetricsExportDir_ = settings.value(kMetricsExportDirSetting, QDir::homePath()).toString();
-    lastExportAllRootDir_ = settings.value(kExportAllRootDirSetting, QDir::homePath()).toString();
+    lastExportDir_ = settings.value(kLastExportDirSetting, QDir::homePath()).toString();
 
     // Configure thumbnail cache (store up to ~2048 thumbnails)
     thumbnailCache_.setMaxCost(2048);
@@ -2251,8 +2249,8 @@ bool HdfReviewTab::exportAllData(const QString& baseDir, bool showCompletionMess
 
 
 QString HdfReviewTab::metricsExportDir() const {
-    if (!lastMetricsExportDir_.isEmpty()) {
-        return lastMetricsExportDir_;
+    if (!lastExportDir_.isEmpty()) {
+        return lastExportDir_;
     }
     if (!loadedHdfFilePath_.isEmpty()) {
         return QFileInfo(loadedHdfFilePath_).absolutePath();
@@ -2261,31 +2259,20 @@ QString HdfReviewTab::metricsExportDir() const {
 }
 
 QString HdfReviewTab::exportAllRootDir() const {
-    if (!lastExportAllRootDir_.isEmpty()) {
-        return lastExportAllRootDir_;
-    }
-    if (!loadedHdfFilePath_.isEmpty()) {
-        return QFileInfo(loadedHdfFilePath_).absolutePath();
-    }
-    return QDir::homePath();
+    return metricsExportDir();
 }
 
 void HdfReviewTab::rememberMetricsExportDir(const QString& dirPath) {
     if (dirPath.isEmpty()) {
         return;
     }
-    lastMetricsExportDir_ = dirPath;
+    lastExportDir_ = dirPath;
     QSettings settings;
-    settings.setValue(kMetricsExportDirSetting, dirPath);
+    settings.setValue(kLastExportDirSetting, dirPath);
 }
 
 void HdfReviewTab::rememberExportAllRootDir(const QString& dirPath) {
-    if (dirPath.isEmpty()) {
-        return;
-    }
-    lastExportAllRootDir_ = dirPath;
-    QSettings settings;
-    settings.setValue(kExportAllRootDirSetting, dirPath);
+    rememberMetricsExportDir(dirPath);
 }
 
 void HdfReviewTab::updateCharts() {
