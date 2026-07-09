@@ -17,6 +17,16 @@
   `readImageByIndex` / `readImagesRange` (hyperslab reads — bounded memory).
 - Display metrics in a `QTableView` backed by `HdfMetricsModel`.
 - Optional charts: scatter + histograms over the saved dataset.
+- Metrics exports default to `<loaded-h5-basename>_metrics.csv` and suffix
+  `_2`, `_3`, etc. before the save dialog opens when files already exist.
+- `Export All` writes into a source-specific folder under the selected root
+  (for example `<root>/<loaded-h5-basename>/metrics.csv` plus TIFF/chart
+  outputs) instead of writing `metrics.csv` directly in a shared export root.
+- Batch Metrics and Batch Export All let the user select multiple `.h5` /
+  `.hdf5` files. Batch exports reserve output names/folders within the run,
+  continue after per-file failures, and show a final success/failure summary.
+- Metrics, Export All, and their batch flows remember their last successful
+  output directory via `QSettings`.
 - `Export All` now prompts how to export multi-image series frames:
   all frames, a custom 1-based range (for example `9-15`), or skip.
 

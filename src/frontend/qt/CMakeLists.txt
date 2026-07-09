@@ -80,6 +80,8 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/JsonConfigMerge.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/UpdateCatalog.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/UpdateCatalog.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/HdfReviewExportPaths.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/utils/HdfReviewExportPaths.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/RoiManager.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/RoiManager.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/RoiDrawCanvas.cpp

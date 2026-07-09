@@ -5,6 +5,15 @@
 
 ## Features shipped
 
+- **HDF review export naming and batch export** (2026-07-09) -
+  `HdfReviewTab` now suggests source-derived metrics filenames
+  (`<h5-basename>_metrics.csv`) with collision suffixes, writes Export All
+  output into source-specific folders, adds batch Metrics and batch Export All
+  actions for multiple `.h5` / `.hdf5` files, remembers successful output
+  directories with `QSettings`, and reports per-file batch failures in a final
+  summary. Added `frontend.hdf_review_export_paths` coverage for basename,
+  suffix, folder, and batch uniqueness policy.
+
 - **Realtime-performance benchmark parts C/D/E** (2026-07-02, PR1 of
   `docs/exec-plans/active/2026-07-02-realtime-performance.md`) —
   Extended `tests/performance/pipeline_timing_benchmark.cpp` (CTest
