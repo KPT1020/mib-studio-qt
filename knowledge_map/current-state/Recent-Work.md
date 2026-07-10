@@ -583,7 +583,9 @@
   unconfirmed-default state in the status bar on launch. Experiment start,
   frame recording start, and camera apply/reset paths check the same helper
   before HDF5, recording-thread, script-save/capture-stop, or hardware/session
-  mutation.
+  mutation. `ExperimentController::startExperiment` also checks the same gate
+  before entering `Starting` or opening HDF5, so controller callers share the
+  MainWindow experiment-start protection.
 
 ## Historical tasks worth knowing about
 

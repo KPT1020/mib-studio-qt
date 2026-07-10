@@ -22,6 +22,9 @@ machine and the HDF5 file path for the current run.
 - `enum class State { Idle, Starting, Active, Stopping }`
 - `startExperiment(hdf5FilePath, errorMsg)`,
   `stopExperiment(errorMsg)`
+- `startExperiment` checks `frontend::DefaultConfigTrustGate` after confirming
+  capture is running and before entering `Starting` or opening HDF5, so callers
+  cannot bypass the bundled-default config review gate.
 - `startTimeNs()`, `endTimeNs()` accessors for metadata
 - Signals: `stateChanged(State)`,
   `experimentStarted(startTimeNs)`,

@@ -1,7 +1,5 @@
 #include "frontend/controllers/ExperimentController.h"
 
-#include <QFileDialog>
-#include <QMessageBox>
 #include <QString>
 #include <chrono>
 #include <spdlog/spdlog.h>
@@ -10,6 +8,7 @@
 #include "backend/services/CaptureService.h"
 #include "backend/recording/Hdf5Service.h"
 #include "backend/processing/ProcessingService.h"
+#include "frontend/system/DefaultConfigTrustGate.h"
 
 namespace frontend
 {
@@ -34,6 +33,19 @@ namespace frontend
             if (errorMsg)
                 *errorMsg = "Camera must be running before starting an experiment";
             return false;
+        }
+
+        {
+            DefaultConfigTrustGate gate;
+            QString gateMessage;
+            if (!gate.isProductionActionAllowed(DefaultConfigTrustGate::ProductionAction::ExperimentStart,
+                                                &gateMessage))
+            {
+                if (errorMsg)
+                    *errorMsg = gateMessage;
+                SPDLOG_WARN("ExperimentController: experiment start blocked by default-config trust gate");
+                return false;
+            }
         }
 
         state_ = State::Starting;

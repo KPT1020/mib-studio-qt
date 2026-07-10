@@ -237,6 +237,22 @@ mib_add_backend_test_executable(hw_egrabber_script_test hardware/hw_egrabber_scr
 add_test(NAME hardware.egrabber_script COMMAND $<TARGET_FILE:hw_egrabber_script_test>)
 set_tests_properties(hardware.egrabber_script PROPERTIES LABELS "hardware;camera" SKIP_RETURN_CODE 77 TIMEOUT 60)
 
+add_executable(experiment_controller_default_gate_test
+    ${PROJECT_SOURCE_DIR}/tests/frontend/experiment_controller_default_gate_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/frontend/controllers/ExperimentController.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/controllers/ExperimentController.h
+)
+target_include_directories(experiment_controller_default_gate_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+)
+target_link_libraries(experiment_controller_default_gate_test PRIVATE mib_backend Threads::Threads Qt6::Core)
+set_target_properties(experiment_controller_default_gate_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+)
+add_test(NAME frontend.experiment_controller_default_gate COMMAND $<TARGET_FILE:experiment_controller_default_gate_test>)
+set_tests_properties(frontend.experiment_controller_default_gate PROPERTIES LABELS "frontend;config;recording" TIMEOUT 60)
+
 add_executable(json_flatten_roundtrip_test
     ${PROJECT_SOURCE_DIR}/tests/frontend/json_flatten_roundtrip_test.cpp
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/JsonFlatten.cpp
