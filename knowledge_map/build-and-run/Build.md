@@ -33,6 +33,9 @@ Backend-only builds set `MIB_BUILD_BACKEND_ONLY=ON` and skip frontend target
 generation entirely, but still require Qt `Core+Gui+SerialPort+Network`
 because the backend now fetches the LUT manifest directly at startup.
 
+The top-level CMake project enables both C and CXX so Ubuntu system-package
+HDF5 discovery can run its C probe while the application code remains C++17.
+
 ## Commands
 
 ```bash
