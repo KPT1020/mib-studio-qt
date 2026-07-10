@@ -6,6 +6,7 @@
 #include <vector>
 #include <cstdint>
 #include <memory>
+#include <QString>
 
 namespace cv
 {
@@ -17,6 +18,7 @@ namespace backend
 }
 namespace backend::services
 {
+    class Hdf5Service;
     struct ProcessedFrame;
 }
 
@@ -68,6 +70,8 @@ namespace frontend
         void onCloseFile();
         void onExportMetrics();
         void onExportAll();
+        void onBatchExportMetrics();
+        void onBatchExportAll();
         void onExportCharts();
         void onOverlayModeChanged(int index);
         void onToggleRoiOverlay(bool enabled);
@@ -90,7 +94,7 @@ namespace frontend
         QImage matToQImage(const cv::Mat &mat) const;
         void setSelectedFrame(int frameIndex);
         void onScrollValueChanged(int value);
-        void exportMetricsToCsv(const QString &filePath);
+        bool exportMetricsToCsv(const QString &filePath, bool showCompletionMessage = true);
         QImage drawRoiOverlay(const QImage &image, int imgWidth, int imgHeight) const;
         void showFrameViewer(int frameIndex);
         // Carousel/refresh helpers
@@ -106,12 +110,16 @@ namespace frontend
         std::string masksPath(bool isValid) const;
         void exportAllImagesToTiff(const QString& baseDir);
         bool exportChartFromHdf5(const std::string& datasetPath, const QString& filePath);
-        void exportAllData(const QString& baseDir);
+        bool exportAllData(const QString& baseDir, bool showCompletionMessage = true);
         void updateCharts();
         void generateScatterPlot(const std::vector<backend::services::ProcessedFrame>& validFrames);
         void generateHistogram(const std::vector<backend::services::ProcessedFrame>& validFrames);
         void loadIsoelasticCurves();
         QPixmap chartToPixmap(QChartView* chartView) const;
+        QString metricsExportDir() const;
+        QString exportAllRootDir() const;
+        void rememberMetricsExportDir(const QString& dirPath);
+        void rememberExportAllRootDir(const QString& dirPath);
 
         Ui::HdfReviewTab* ui;
         backend::AppBackend &backend_;
@@ -156,6 +164,8 @@ namespace frontend
         bool recordingMultiImageEnabled_ = false;
         size_t recordingMultiImageCount_ = 1;
         backend::services::ProcessingService::Roi roi_{0, 0, 0, 0};
+        QString loadedHdfFilePath_;
+        QString lastExportDir_;
 
         static constexpr int THUMBNAIL_SIZE = 128;
         static constexpr int GRID_COLUMNS = 5;

@@ -260,6 +260,22 @@ set_target_properties(json_config_merge_test PROPERTIES
 add_test(NAME frontend.json_config_merge COMMAND $<TARGET_FILE:json_config_merge_test>)
 set_tests_properties(frontend.json_config_merge PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
 
+
+add_executable(hdf_review_export_paths_test
+    ${PROJECT_SOURCE_DIR}/tests/frontend/hdf_review_export_paths_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/HdfReviewExportPaths.cpp
+)
+target_include_directories(hdf_review_export_paths_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+)
+target_link_libraries(hdf_review_export_paths_test PRIVATE Qt6::Core)
+set_target_properties(hdf_review_export_paths_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+)
+add_test(NAME frontend.hdf_review_export_paths COMMAND $<TARGET_FILE:hdf_review_export_paths_test>)
+set_tests_properties(frontend.hdf_review_export_paths PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
+
 add_executable(update_catalog_test
     ${PROJECT_SOURCE_DIR}/tests/frontend/update_catalog_test.cpp
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/UpdateCatalog.cpp
@@ -277,3 +293,14 @@ set_target_properties(update_catalog_test PROPERTIES
 )
 add_test(NAME frontend.update_catalog COMMAND $<TARGET_FILE:update_catalog_test>)
 set_tests_properties(frontend.update_catalog PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
+
+if(Python3_Interpreter_FOUND)
+    add_test(
+        NAME scripts.export_hdf5_paths
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/test_export_hdf5_paths.py
+    )
+    set_tests_properties(scripts.export_hdf5_paths PROPERTIES
+        LABELS "scripts;hdf5"
+        TIMEOUT 30
+    )
+endif()

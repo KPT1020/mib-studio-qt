@@ -5,6 +5,19 @@
 
 ## Features shipped
 
+- **HDF review export naming and batch export** (2026-07-09) -
+  `HdfReviewTab` now suggests source-derived metrics filenames
+  (`<h5-basename>_metrics.csv`) with collision suffixes, writes Export All
+  output into source-specific folders, adds batch Metrics and batch Export All
+  actions for multiple `.h5` / `.hdf5` files, remembers one shared successful
+  output directory with `QSettings`, and reports per-file batch failures in a final
+  summary. The standalone Python exporter and PySide wrapper now share the
+  source-derived output policy: CSV-only writes `<h5-basename>_metrics.csv`,
+  image/all exports write under a collision-safe `<h5-basename>/` folder, and
+  `--output` remains directory-only. Added `frontend.hdf_review_export_paths`
+  and `scripts.export_hdf5_paths` coverage for basename, suffix, folder, and
+  output-root validation policy.
+
 - **Realtime-performance benchmark parts C/D/E** (2026-07-02, PR1 of
   `docs/exec-plans/active/2026-07-02-realtime-performance.md`) —
   Extended `tests/performance/pipeline_timing_benchmark.cpp` (CTest
