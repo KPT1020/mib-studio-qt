@@ -16,9 +16,7 @@ class QTabWidget;
 class QPlainTextEdit;
 class QPushButton;
 class QLabel;
-class QStackedWidget;
 class QTableView;
-class QToolButton;
 class QTimer;
 class QComboBox;
 class QCheckBox;
@@ -53,7 +51,6 @@ private slots:
     void onSaveJson();
     void onBrowseJson();
     void onClearJson();
-    void onJsonTableToggled(bool checked);
     void onJsonTextChangedDebounced();
     void rebuildJsonFromTable();
     void onReloadJs();
@@ -121,7 +118,6 @@ private:
     QGridLayout* jsonGridLayout_ = nullptr;  // Grid layout (3 columns) for grouped tables
     QMap<QString, QTableView*> jsonSectionTables_;  // Map of section name -> table widget
     QMap<QString, JsonTableModel*> jsonSectionModels_;  // Map of section name -> table model
-    QToolButton* jsonTableToggle_ = nullptr;
     QPushButton* jsonReloadBtn_ = nullptr;
     QPushButton* jsonSaveBtn_ = nullptr;
     QPushButton* jsonBrowseBtn_ = nullptr;

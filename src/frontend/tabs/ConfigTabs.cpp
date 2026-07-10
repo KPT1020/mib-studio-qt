@@ -635,16 +635,6 @@ void ConfigTabs::onClearJs() {
     }
 }
 
-void ConfigTabs::onJsonTableToggled(bool checked) {
-    if (!configViewTabs_) return;
-    configViewTabs_->setCurrentIndex(checked ? kAllSettingsTabIndex : kAdvancedJsonTabIndex);
-    QSettings s;
-    s.setValue("Preview/ShowTable", checked);
-    if (checked) {
-        refreshJsonTableModel();
-    }
-}
-
 void ConfigTabs::onJsonTextChangedDebounced() {
     if (configViewTabs_ && configViewTabs_->currentIndex() == kAllSettingsTabIndex) {
         refreshJsonTableModel();
