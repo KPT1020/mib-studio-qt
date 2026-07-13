@@ -32,6 +32,11 @@ target defined in `src/frontend/qt/CMakeLists.txt`
   action is triggered.
 - CLI: `--out` (default `docs/manual/images`), `--frames`, `--width`,
   `--height`. Run headless with `QT_QPA_PLATFORM=offscreen`.
+- Builds and runs on Linux via the `linux-system-release` preset (system Qt
+  packages, `docs/howto/linux-build.md`) — the committed screenshots were
+  first generated that way. UI sources compile once into the
+  `mib_frontend_common` static library shared with `mib_studio_qt` (see
+  [[../build-and-run/Build]] for the AUTOUIC/qrc constraints).
 
 ## CI wiring
 

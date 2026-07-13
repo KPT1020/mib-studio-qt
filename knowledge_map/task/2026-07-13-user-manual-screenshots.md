@@ -1,6 +1,6 @@
 # 2026-07-13 — User manual + generated screenshots (issue #229)
 
-Status: completed (pending first CI screenshot generation)
+Status: completed
 
 ## What shipped
 
@@ -25,10 +25,16 @@ Status: completed (pending first CI screenshot generation)
 
 ## Decisions
 
-- Screenshots are **not** hand-captured or checked in from this task; the
-  first real set lands when `build-windows.yml` next runs. `check_docs.py`
-  ignores image links (its `MD_LINK_RE` skips `![...]`), so pages don't
-  break the link checker before generation.
+- The initial screenshot set **is** committed, generated on Linux via the
+  `linux-system-release` preset (`QT_QPA_PLATFORM=offscreen`); the release
+  workflow keeps it fresh from then on. `check_docs.py` ignores image links
+  (its `MD_LINK_RE` skips `![...]`), so pages never depend on the images
+  existing.
+- UI sources moved into a `mib_frontend_common` STATIC library so the app
+  and the tour compile them once. AUTOUIC must be `OFF` on the executables
+  (duplicate `ui_*.h` ninja rules otherwise) and the `.qrc` is listed per
+  executable (Qt resources in a static library are dropped without
+  `Q_INIT_RESOURCE`).
 - Repo-root `tools/` is reserved for the standalone Python/packaged tools,
   so the harness lives under `src/frontend/tools/`.
 - Stale `mock_studio_qt` references were fixed in passing (`AGENTS.md`,

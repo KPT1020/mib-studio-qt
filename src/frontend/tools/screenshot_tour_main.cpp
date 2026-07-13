@@ -35,6 +35,7 @@
 
 #include "backend/app/AppBackend.h"
 #include "frontend/core/MainWindow.h"
+#include "frontend/tabs/OverviewTab.h"
 
 namespace {
 
@@ -316,6 +317,15 @@ int main(int argc, char* argv[])
     });
     tour.addStep(2000, [&]() {
         tabs->setCurrentIndex(1);
+        // Show the ROI rectangle the manual describes (normally enabled by
+        // the ConnectTab connected signal, which the mock path skips), and
+        // move it to the origin — the configured default position targets a
+        // full-size sensor and would fall outside the small mock frames.
+        if (auto* overview = window.findChild<frontend::OverviewTab*>()) {
+            overview->setRoiOverlayVisible(true);
+            QMetaObject::invokeMethod(overview, "onRoiPositionChanged", Qt::DirectConnection,
+                                      Q_ARG(QPointF, QPointF(0, 0)));
+        }
     });
     tour.addStep(kSettleMs, [&]() {
         sink.save(QStringLiteral("overview-live"), window.grab());

@@ -27,7 +27,16 @@ them on each release, so the images always match the released UI — if your
 screen does not look like the manual for your version, that difference is
 itself a debugging clue worth including in a bug report.
 
-Regenerate locally (from a built checkout):
+Regenerate locally (from a built checkout). On Linux (system Qt packages,
+see `docs/howto/linux-build.md`):
+
+```bash
+cmake --preset linux-system-release
+cmake --build build/linux-system --target screenshot_tour
+QT_QPA_PLATFORM=offscreen ./build/linux-system/screenshot_tour --out docs/manual/images
+```
+
+On Windows:
 
 ```powershell
 cmake --build build --config Release --target screenshot_tour
