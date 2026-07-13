@@ -4,6 +4,7 @@
 #include <vector>
 
 namespace cv { class Mat; }
+namespace backend::processing { struct ProcessingCoreIdentity; }
 
 namespace backend::services {
 
@@ -62,6 +63,7 @@ bool saveMasksToHdf5(const std::vector<ProcessedFrame>& frames,
                      const ProcessingConfig& config,
                      int roiX, int roiY, int roiW, int roiH,
                      const cv::Mat& background,
-                     bool useFrameTimestamps = false);
+                     bool useFrameTimestamps = false,
+                     const backend::processing::ProcessingCoreIdentity* processingCore = nullptr);
 
 } // namespace backend::services::batch_masks

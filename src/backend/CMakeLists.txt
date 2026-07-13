@@ -1,5 +1,19 @@
 include(MIBLinkHelpers)
 
+# The Python wheel version is the processing-core release identity. Keep a
+# configure-time fallback so source archives without bindings still build;
+# the consistency test/bump tool guards the literals in release branches.
+set(MIB_PROCESSING_CORE_VERSION "")
+if(EXISTS "${PROJECT_SOURCE_DIR}/bindings/python/pyproject.toml")
+    file(READ "${PROJECT_SOURCE_DIR}/bindings/python/pyproject.toml" _mib_processing_pyproject)
+    string(REGEX MATCH "version[ \t]*=[ \t]*\"([^\"]+)\"" _mib_processing_version_match
+                 "${_mib_processing_pyproject}")
+    set(MIB_PROCESSING_CORE_VERSION "${CMAKE_MATCH_1}")
+endif()
+if(MIB_PROCESSING_CORE_VERSION STREQUAL "")
+    set(MIB_PROCESSING_CORE_VERSION "0.1.0")
+endif()
+
 # mib_processing: the Qt-free deformability-cytometry processing core plus
 # its I/O adapters (HDF5 read/write, frame buffering). Depends only on
 # OpenCV, HDF5, spdlog, and the standard library -- no Qt, no camera SDKs,
@@ -11,6 +25,10 @@ include(MIBLinkHelpers)
 # any portable consumer share one implementation.
 add_library(mib_processing STATIC
     ${PROJECT_SOURCE_DIR}/src/backend/processing/EModulusLut.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/processing/BundledProcessingKernel.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingCoreLoader.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingCoreCache.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingCoreSha256.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingService.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/processing/BatchMaskSources.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/recording/Hdf5Service.cpp
@@ -39,7 +57,15 @@ target_include_directories(mib_processing PUBLIC
 
 target_link_libraries(mib_processing PUBLIC
     spdlog::spdlog
+    ${CMAKE_DL_LIBS}
 )
+
+target_compile_definitions(mib_processing PUBLIC
+    MIB_PROCESSING_CORE_VERSION="${MIB_PROCESSING_CORE_VERSION}"
+)
+if(WIN32)
+    target_link_libraries(mib_processing PUBLIC wintrust crypt32)
+endif()
 
 if(TARGET nlohmann_json::nlohmann_json)
     target_link_libraries(mib_processing PUBLIC nlohmann_json::nlohmann_json)
@@ -47,6 +73,45 @@ endif()
 
 mib_link_opencv(mib_processing PUBLIC)
 mib_link_hdf5(mib_processing PUBLIC)
+
+# Native hot-swap artifact. It deliberately links only the mask kernel and
+# OpenCV/spdlog, not Qt/HDF5 or the desktop service graph. Release CI signs the
+# Windows DLL before the registry publisher hashes it.
+add_library(mib_processing_core MODULE
+    ${PROJECT_SOURCE_DIR}/src/backend/processing/BundledProcessingKernel.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingCorePlugin.cpp
+)
+target_include_directories(mib_processing_core PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(mib_processing_core PRIVATE spdlog::spdlog)
+mib_link_opencv(mib_processing_core PRIVATE)
+target_compile_definitions(mib_processing_core PRIVATE
+    MIB_PROCESSING_CORE_PLUGIN_EXPORTS=1
+    MIB_PROCESSING_CORE_VERSION="${MIB_PROCESSING_CORE_VERSION}"
+)
+set_target_properties(mib_processing_core PROPERTIES
+    PREFIX ""
+    AUTOMOC OFF
+    AUTOUIC OFF
+    AUTORCC OFF
+    POSITION_INDEPENDENT_CODE ON
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/$<CONFIG>"
+    LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/$<CONFIG>"
+)
+if(WIN32)
+    set(_mib_processing_native_basename
+        "mib_processing_core-${MIB_PROCESSING_CORE_VERSION}-windows_x86_64")
+    set_target_properties(mib_processing_core PROPERTIES
+        OUTPUT_NAME "${_mib_processing_native_basename}")
+    if(MSVC)
+        set(_mib_processing_runtime_fingerprint
+            "windows-x86_64-msvc${MSVC_VERSION}-md-cxx17")
+    else()
+        set(_mib_processing_runtime_fingerprint "windows-x86_64-unknown-cxx17")
+    endif()
+    file(GENERATE
+        OUTPUT "${PROJECT_BINARY_DIR}/$<CONFIG>/${_mib_processing_native_basename}.json"
+        CONTENT "{\n  \"schema_version\": 1,\n  \"version\": \"${MIB_PROCESSING_CORE_VERSION}\",\n  \"filename\": \"$<TARGET_FILE_NAME:mib_processing_core>\",\n  \"os\": \"windows\",\n  \"arch\": \"x86_64\",\n  \"engine_abi_version\": 1,\n  \"contract_version\": 1,\n  \"entrypoint\": \"mib_processing_get_api\",\n  \"runtime_fingerprint\": \"${_mib_processing_runtime_fingerprint}\",\n  \"app_min_version\": \"${PROJECT_VERSION}\",\n  \"app_max_version\": \"${PROJECT_VERSION}\",\n  \"signing\": {\"required\": true, \"format\": \"authenticode\"}\n}\n")
+endif()
 
 add_library(mib_backend STATIC
     ${PROJECT_SOURCE_DIR}/src/backend/app/AppBackend.cpp

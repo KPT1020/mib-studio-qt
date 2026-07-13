@@ -13,9 +13,11 @@
 #endif
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
+#include <cstdlib>
 #include <iterator>
 #include <limits>
 #include <tuple>
+#include <utility>
 #include <cmath>
 
 #ifndef M_PI
@@ -159,7 +161,41 @@ int findMatchingTrack(const std::vector<BatchTrack>& tracks,
 
 } // namespace
 
-ProcessingService::ProcessingService() = default;
+ProcessingService::ProcessingService()
+    : processingKernel_(backend::processing::makeBundledProcessingKernel()) {
+    if (const char* pin = std::getenv("MIB_STUDIO_PROCESSING_CORE_VERSION")) {
+        requiredProcessingCoreVersion_ = pin;
+    }
+}
+
+ProcessingService::CoreOperationLease::CoreOperationLease(
+    ProcessingService* owner,
+    backend::processing::ProcessingCoreIdentity identity)
+    : owner_(owner), identity_(std::move(identity)) {}
+
+ProcessingService::CoreOperationLease::~CoreOperationLease() {
+    release();
+}
+
+ProcessingService::CoreOperationLease::CoreOperationLease(CoreOperationLease&& other) noexcept
+    : owner_(std::exchange(other.owner_, nullptr)), identity_(std::move(other.identity_)) {}
+
+ProcessingService::CoreOperationLease& ProcessingService::CoreOperationLease::operator=(
+    CoreOperationLease&& other) noexcept {
+    if (this != &other) {
+        release();
+        owner_ = std::exchange(other.owner_, nullptr);
+        identity_ = std::move(other.identity_);
+    }
+    return *this;
+}
+
+void ProcessingService::CoreOperationLease::release() noexcept {
+    if (!owner_) return;
+    owner_->releaseProcessingCoreOperation();
+    owner_ = nullptr;
+}
+
 ProcessingService::~ProcessingService() {
     // A joinable realtimeThread_ at destruction would std::terminate; do not
     // rely on the GUI teardown path having called stopRealtime() first.
@@ -245,7 +281,14 @@ void ProcessingService::workerLoop() {
 }
 
 void ProcessingService::startRealtime(std::shared_ptr<backend::playback::FrameStore> store) {
+    std::unique_lock coreLock(processingKernelMutex_);
     if (rtRunning_.load()) return;
+    if (realtimeThread_.joinable()) {
+        coreLock.unlock();
+        realtimeThread_.join();
+        coreLock.lock();
+        if (rtRunning_.load()) return;
+    }
     rtStore_ = std::move(store);
     rtRunning_.store(true);
     consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
@@ -259,9 +302,105 @@ void ProcessingService::startRealtime(std::shared_ptr<backend::playback::FrameSt
     SPDLOG_INFO("ProcessingService: realtime processing started");
 }
 
+bool ProcessingService::activateProcessingKernel(
+    std::shared_ptr<backend::processing::IProcessingKernel> kernel, std::string* error) {
+    if (!kernel) {
+        if (error) *error = "processing kernel is null";
+        return false;
+    }
+    if (!requiredProcessingCoreVersion_.empty() &&
+        kernel->identity().version != requiredProcessingCoreVersion_) {
+        if (error) {
+            *error = "administrator pin requires processing core " +
+                     requiredProcessingCoreVersion_;
+        }
+        return false;
+    }
+    std::string resetError;
+    if (!kernel->reset(&resetError)) {
+        if (error) *error = "processing kernel reset failed: " + resetError;
+        return false;
+    }
+
+    std::unique_lock coreLock(processingKernelMutex_);
+    if (rtRunning_.load(std::memory_order_acquire)) {
+        if (error) *error = "realtime processing is running";
+        return false;
+    }
+    if (experimentActive_.load(std::memory_order_acquire)) {
+        if (error) *error = "an experiment is active";
+        return false;
+    }
+    if (batchRunning_.load(std::memory_order_acquire)) {
+        if (error) *error = "a batch pipeline is running";
+        return false;
+    }
+    if (activeSynchronousCoreOperations_.load(std::memory_order_acquire) != 0) {
+        if (error) *error = "an offline processing operation is active";
+        return false;
+    }
+
+    const auto previous = processingKernel_ ? processingKernel_->identity()
+                                            : backend::processing::ProcessingCoreIdentity{};
+    const auto next = kernel->identity();
+    processingKernel_ = std::move(kernel);
+    processingCoreSelectionAvailable_.store(true, std::memory_order_release);
+
+    {
+        std::scoped_lock snapshotLock(snapshotMutex_);
+        latestSnapshot_.reset();
+    }
+    clearMonitoringFrames();
+    {
+        std::scoped_lock previousFrameLock(previousFrameMutex_);
+        previousFrameForAutoCapture_.release();
+    }
+    consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
+    lastAutoBackgroundFrame_.store(0, std::memory_order_relaxed);
+    coreLock.unlock();
+    SPDLOG_INFO("ProcessingService: activated processing core {} (contract={}, abi={}, source={}); "
+                "previous core was {}",
+                next.version, next.contractVersion, next.engineAbiVersion, next.source,
+                previous.version);
+    return true;
+}
+
+bool ProcessingService::activateBundledProcessingKernel(std::string* error) {
+    return activateProcessingKernel(backend::processing::makeBundledProcessingKernel(), error);
+}
+
+backend::processing::ProcessingCoreIdentity ProcessingService::activeProcessingCoreIdentity() const {
+    std::shared_lock lock(processingKernelMutex_);
+    return processingKernel_ ? processingKernel_->identity()
+                             : backend::processing::bundledProcessingCoreIdentity();
+}
+
+bool ProcessingService::isProcessingCorePinSatisfied() const {
+    const auto identity = activeProcessingCoreIdentity();
+    return processingCoreSelectionAvailable_.load(std::memory_order_acquire) &&
+           (requiredProcessingCoreVersion_.empty() ||
+            identity.version == requiredProcessingCoreVersion_);
+}
+
+void ProcessingService::markProcessingCoreSelectionUnavailable() {
+    processingCoreSelectionAvailable_.store(false, std::memory_order_release);
+}
+
+ProcessingService::CoreOperationLease ProcessingService::acquireProcessingCoreOperation() {
+    std::shared_lock coreLock(processingKernelMutex_);
+    activeSynchronousCoreOperations_.fetch_add(1, std::memory_order_acq_rel);
+    return CoreOperationLease(
+        this, processingKernel_ ? processingKernel_->identity()
+                                : backend::processing::bundledProcessingCoreIdentity());
+}
+
+void ProcessingService::releaseProcessingCoreOperation() noexcept {
+    activeSynchronousCoreOperations_.fetch_sub(1, std::memory_order_acq_rel);
+}
+
 void ProcessingService::stopRealtime() {
-    if (!rtRunning_.load()) return;
-    rtRunning_.store(false);
+    const bool wasRunning = rtRunning_.exchange(false, std::memory_order_acq_rel);
+    if (!wasRunning && !realtimeThread_.joinable()) return;
     if (realtimeThread_.joinable()) realtimeThread_.join();
     backend::diagnostics::CrashStateMirror::instance().processing.realtimeRunning.store(false);
     SPDLOG_INFO("ProcessingService: realtime processing stopped");
@@ -398,6 +537,7 @@ bool ProcessingService::getLatestSnapshot(RealtimeSnapshot& out) {
 }
 
 void ProcessingService::startExperiment() {
+    std::unique_lock coreLock(processingKernelMutex_);
     {
         // Tear down any prior flush queue (dtor drains + joins) so a new
         // experiment starts with a clean, non-errored writer.
@@ -649,11 +789,104 @@ bool ProcessingService::isFrameEmpty(const backend::playback::Frame& frame,
     return cv::countNonZero(thresh) < config.empty_frame_pixel_threshold;
 }
 
+bool ProcessingService::isFrameEmptyWithActiveKernel(
+    const backend::playback::Frame& frame,
+    const ProcessingConfig& config,
+    const Roi& roi,
+    const std::shared_ptr<const cv::Mat>& background) const {
+    if (frame.width == 0 || frame.height == 0 || frame.data.empty()) return true;
+    const size_t stride = frame.linePitch == 0 ? static_cast<size_t>(frame.width) : frame.linePitch;
+    if (stride < frame.width) return true;
+    const uint64_t required = (frame.height - 1u) * static_cast<uint64_t>(stride) + frame.width;
+    if (required > frame.data.size()) return true;
+
+    cv::Mat gray(static_cast<int>(frame.height), static_cast<int>(frame.width), CV_8UC1,
+                 const_cast<uint8_t*>(frame.data.data()), stride);
+    const cv::Mat backgroundView = background ? *background : cv::Mat{};
+    bool empty = true;
+    std::string detail;
+    if (!isImageEmptyWithActiveKernel(gray, backgroundView, config, roi, false, empty, &detail)) {
+        SPDLOG_WARN("ProcessingService: active core empty-frame check failed: {}", detail);
+        return true;
+    }
+    return empty;
+}
+
+bool ProcessingService::isImageEmptyWithActiveKernel(
+    const cv::Mat& gray,
+    const cv::Mat& background,
+    const ProcessingConfig& config,
+    const Roi& roi,
+    bool absoluteBackgroundDifference,
+    bool& empty,
+    std::string* error) const {
+    const backend::processing::KernelConfig kernelConfig{
+        config.gaussian_blur_size,
+        config.bg_subtract_threshold,
+        config.morph_kernel_size,
+        config.morph_iterations,
+        config.empty_frame_pixel_threshold,
+        absoluteBackgroundDifference};
+    const backend::processing::KernelRoi kernelRoi{roi.x, roi.y, roi.w, roi.h};
+    std::shared_lock lock(processingKernelMutex_);
+    if (!processingCoreSelectionAvailable_.load(std::memory_order_acquire)) {
+        if (error) *error = "selected processing core is unavailable";
+        return false;
+    }
+    if (!requiredProcessingCoreVersion_.empty() &&
+        (!processingKernel_ || processingKernel_->identity().version != requiredProcessingCoreVersion_)) {
+        if (error) {
+            *error = "required processing core " + requiredProcessingCoreVersion_ +
+                     " is not active";
+        }
+        return false;
+    }
+    if (!processingKernel_ ||
+        !processingKernel_->isEmpty(gray, background, kernelConfig, kernelRoi, empty, error)) {
+        return false;
+    }
+    return true;
+}
+
+bool ProcessingService::processMaskWithActiveKernel(const cv::Mat& gray,
+                                                    const cv::Mat& background,
+                                                    const ProcessingConfig& config,
+                                                    const Roi& roi,
+                                                    cv::Mat& mask,
+                                                    std::string* error) const {
+    const backend::processing::KernelConfig kernelConfig{
+        config.gaussian_blur_size,
+        config.bg_subtract_threshold,
+        config.morph_kernel_size,
+        config.morph_iterations,
+        config.empty_frame_pixel_threshold};
+    const backend::processing::KernelRoi kernelRoi{roi.x, roi.y, roi.w, roi.h};
+    std::shared_lock lock(processingKernelMutex_);
+    if (!processingCoreSelectionAvailable_.load(std::memory_order_acquire)) {
+        if (error) *error = "selected processing core is unavailable";
+        return false;
+    }
+    if (!processingKernel_) {
+        if (error) *error = "no active processing kernel";
+        return false;
+    }
+    if (!requiredProcessingCoreVersion_.empty() &&
+        processingKernel_->identity().version != requiredProcessingCoreVersion_) {
+        if (error) {
+            *error = "required processing core " + requiredProcessingCoreVersion_ +
+                     " is not active";
+        }
+        return false;
+    }
+    return processingKernel_->processMask(gray, background, kernelConfig, kernelRoi, mask, error);
+}
+
 ProcessedFrame ProcessingService::computeProcessedFrame(const cv::Mat& grayInput,
                                                         const cv::Mat& backgroundGray,
                                                         const ProcessingConfig& config,
                                                         const Roi& roiIn, uint64_t index,
                                                         uint64_t timestampNs) {
+    auto operation = acquireProcessingCoreOperation();
 
     ProcessedFrame out;
     out.index = index;
@@ -689,39 +922,12 @@ ProcessedFrame ProcessingService::computeProcessedFrame(const cv::Mat& grayInput
     roi.h = std::max(1, std::min(roi.h, gray.rows - roi.y));
     const cv::Rect cvRoi(roi.x, roi.y, roi.w, roi.h);
 
-    // Kernel sizing (same rules as realtimeLoop)
-    auto toOdd = [](int v) -> int {
-        if (v < 1) v = 1;
-        if ((v % 2) == 0) v += 1;
-        return v;
-    };
-    const int blurK = toOdd(config.gaussian_blur_size);
-    const int morphK = toOdd(config.morph_kernel_size);
-    const int morphIter = std::max(1, config.morph_iterations);
-    const int threshVal = std::max(0, config.bg_subtract_threshold);
-
-    // Full-size mask; process inside ROI only
-    cv::Mat mask(gray.rows, gray.cols, CV_8UC1, cv::Scalar(0));
-    cv::Mat roiCurr = gray(cvRoi);
-    cv::Mat roiDst = mask(cvRoi);
-
-    cv::Mat blurredCurr, diffForProcessing, thresh;
-    cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(blurK, blurK), 0);
-
-    const bool hasBackground = (!backgroundGray.empty() && backgroundGray.size() == gray.size() &&
-                                backgroundGray.type() == CV_8UC1);
-    if (hasBackground) {
-        cv::Mat blurredBg;
-        cv::GaussianBlur(backgroundGray(cvRoi), blurredBg, cv::Size(blurK, blurK), 0);
-        cv::subtract(blurredCurr, blurredBg, diffForProcessing);
-    } else {
-        diffForProcessing = blurredCurr;
+    cv::Mat mask;
+    std::string kernelError;
+    if (!processMaskWithActiveKernel(gray, backgroundGray, config, roi, mask, &kernelError)) {
+        SPDLOG_ERROR("computeProcessedFrame: active processing core failed: {}", kernelError);
+        return out;
     }
-
-    cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
-    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
-    cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
-    cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
     // Validation + contour/metric extraction (same helper as realtime)
     out.validation = filterProcessedImage(mask, cvRoi, config, gray);
@@ -733,7 +939,11 @@ std::vector<ProcessedFrame> ProcessingService::processBatch(const std::vector<cv
                                                             const ProcessingConfig& config,
                                                             const cv::Mat& background,
                                                             const Roi& roi,
-                                                            BatchProgressCallback progress) {
+                                                            BatchProgressCallback progress,
+                                                            backend::processing::ProcessingCoreIdentity* processingCore) {
+
+    auto operation = acquireProcessingCoreOperation();
+    if (processingCore) *processingCore = operation.identity();
 
     std::vector<ProcessedFrame> results;
     results.reserve(grayImages.size());
@@ -857,6 +1067,7 @@ std::vector<ProcessedFrame> ProcessingService::processBatch(const std::vector<cv
 
 bool ProcessingService::startBatchPipeline(BatchPipelineConfig config,
                                            BatchResultCallback callback) {
+    std::unique_lock coreLock(processingKernelMutex_);
     if (batchRunning_.load(std::memory_order_acquire)) {
         SPDLOG_WARN("Batch pipeline already running");
         return false;
@@ -1006,6 +1217,7 @@ ProcessingService::BatchPipelineStats ProcessingService::getBatchPipelineStats()
 }
 
 void ProcessingService::batchWorkerLoop() {
+    auto operation = acquireProcessingCoreOperation();
     while (true) {
         std::vector<QueuedBatchFrame> inputs;
         BatchPipelineConfig config;
@@ -2097,6 +2309,7 @@ void ProcessingService::realtimeBatchLoop() {
 }
 
 void ProcessingService::realtimeLoop() {
+    auto operation = acquireProcessingCoreOperation();
     // An exception escaping a std::thread entry function is std::terminate —
     // the whole process dies on one bad frame. Catch, log, and restart the
     // loop instead (same policy as CaptureService::run).
@@ -2253,8 +2466,6 @@ void ProcessingService::realtimeInlineLoop() {
                     return v;
                 };
                 const int blurK = toOdd(config.gaussian_blur_size);
-                const int morphK = toOdd(config.morph_kernel_size);
-                const int morphIter = std::max(1, config.morph_iterations);
                 const int threshVal = std::max(0, config.bg_subtract_threshold);
 
                 cv::GaussianBlur(grayROI, blurredCurr, cv::Size(blurK, blurK), 0);
@@ -2276,11 +2487,13 @@ void ProcessingService::realtimeInlineLoop() {
 
                 // For auto-capture detection: always use frame-to-frame difference when enabled
                 cv::Mat diffForAutoCapture;
+                cv::Mat autoCaptureBackground;
                 if (config.auto_background_enabled && !experimentActive_.load()) {
                     std::scoped_lock prevFrameLk(previousFrameMutex_);
                     if (!previousFrameForAutoCapture_.empty() &&
                         previousFrameForAutoCapture_.size() == blurredCurr.size() &&
                         previousFrameForAutoCapture_.type() == blurredCurr.type()) {
+                        autoCaptureBackground = previousFrameForAutoCapture_;
                         cv::absdiff(blurredCurr, previousFrameForAutoCapture_, diffForAutoCapture);
                     } else {
                         // First frame or size mismatch: store current frame and skip auto-capture
@@ -2302,7 +2515,25 @@ void ProcessingService::realtimeInlineLoop() {
 
                 // Check for empty frame: count non-zero pixels after binary threshold
                 int pixelCount = cv::countNonZero(thresh);
-                if (pixelCount < config.empty_frame_pixel_threshold) {
+                const bool autoCaptureEmptyCheck =
+                    config.auto_background_enabled && !experimentActive_.load();
+                ProcessingConfig emptyConfig = config;
+                if (autoCaptureEmptyCheck) emptyConfig.gaussian_blur_size = 1;
+                bool emptyFrame = true;
+                std::string emptyError;
+                const cv::Mat emptyBackground = autoCaptureEmptyCheck
+                    ? autoCaptureBackground
+                    : (hasBackground
+                           ? (*bgShared)(cv::Rect(roi.x, roi.y, roi.w, roi.h))
+                           : cv::Mat{});
+                if (!isImageEmptyWithActiveKernel(
+                        autoCaptureEmptyCheck ? blurredCurr : grayROI, emptyBackground,
+                        emptyConfig, Roi{0, 0, roi.w, roi.h}, autoCaptureEmptyCheck,
+                        emptyFrame, &emptyError)) {
+                    SPDLOG_ERROR("Realtime processing core empty check failed for frame {}: {}",
+                                 idx, emptyError);
+                }
+                if (emptyFrame) {
                     SPDLOG_TRACE("Empty frame detected (idx={}, pixel_count={}, threshold={}), "
                                  "skipping further processing",
                                  idx, pixelCount, config.empty_frame_pixel_threshold);
@@ -2379,11 +2610,17 @@ void ProcessingService::realtimeInlineLoop() {
                 // Use background subtraction diff for actual processing (morphology, contours,
                 // etc.)
                 cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
-                cv::Mat kernel =
-                    cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
-                cv::morphologyEx(thresh, mask, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1),
-                                 morphIter);
-                cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
+                const cv::Mat kernelBackground =
+                    hasBackground ? (*bgShared)(cv::Rect(roi.x, roi.y, roi.w, roi.h)) : cv::Mat{};
+                std::string kernelError;
+                if (!processMaskWithActiveKernel(grayROI, kernelBackground, config,
+                                                 Roi{0, 0, roi.w, roi.h}, mask,
+                                                 &kernelError)) {
+                    SPDLOG_ERROR("Realtime processing core failed for frame {}: {}", idx,
+                                 kernelError);
+                    rtLastProcessed_.store(idx);
+                    continue;
+                }
 
                 // Always run validation for monitoring (even without experiment)
                 // mask is ROI-sized so contour coords are 0-based; use local roi for border check
@@ -2643,7 +2880,6 @@ void ProcessingService::realtimeInlineLoop() {
                 // Build full-size mask
                 cv::Mat mask(gray.rows, gray.cols, CV_8UC1, cv::Scalar(0));
                 cv::Mat roiCurr = gray(cvRoi);
-                cv::Mat roiDst = mask(cvRoi);
                 cv::Mat blurredCurr, blurredBg, thresh;
                 const auto algoStart = clock::now();
                 auto toOdd = [](int v) -> int {
@@ -2652,8 +2888,6 @@ void ProcessingService::realtimeInlineLoop() {
                     return v;
                 };
                 const int blurK = toOdd(config.gaussian_blur_size);
-                const int morphK = toOdd(config.morph_kernel_size);
-                const int morphIter = std::max(1, config.morph_iterations);
                 const int threshVal = std::max(0, config.bg_subtract_threshold);
 
                 cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(blurK, blurK), 0);
@@ -2672,11 +2906,13 @@ void ProcessingService::realtimeInlineLoop() {
 
                 // For auto-capture detection: always use frame-to-frame difference when enabled
                 cv::Mat diffForAutoCapture;
+                cv::Mat autoCaptureBackground;
                 if (config.auto_background_enabled && !experimentActive_.load()) {
                     std::scoped_lock prevFrameLk(previousFrameMutex_);
                     if (!previousFrameForAutoCapture_.empty() &&
                         previousFrameForAutoCapture_.size() == blurredCurr.size() &&
                         previousFrameForAutoCapture_.type() == blurredCurr.type()) {
+                        autoCaptureBackground = previousFrameForAutoCapture_;
                         cv::absdiff(blurredCurr, previousFrameForAutoCapture_, diffForAutoCapture);
                     } else {
                         // First frame or size mismatch: store current frame and skip auto-capture
@@ -2698,7 +2934,23 @@ void ProcessingService::realtimeInlineLoop() {
 
                 // Check for empty frame: count non-zero pixels after binary threshold
                 int pixelCount = cv::countNonZero(thresh);
-                if (pixelCount < config.empty_frame_pixel_threshold) {
+                const bool autoCaptureEmptyCheck =
+                    config.auto_background_enabled && !experimentActive_.load();
+                ProcessingConfig emptyConfig = config;
+                if (autoCaptureEmptyCheck) emptyConfig.gaussian_blur_size = 1;
+                bool emptyFrame = true;
+                std::string emptyError;
+                const cv::Mat emptyBackground = autoCaptureEmptyCheck
+                    ? autoCaptureBackground
+                    : (hasBackground ? (*bgShared)(cvRoi) : cv::Mat{});
+                if (!isImageEmptyWithActiveKernel(
+                        autoCaptureEmptyCheck ? blurredCurr : roiCurr, emptyBackground,
+                        emptyConfig, Roi{0, 0, roi.w, roi.h}, autoCaptureEmptyCheck,
+                        emptyFrame, &emptyError)) {
+                    SPDLOG_ERROR("Realtime processing core empty check failed for frame {}: {}",
+                                 idx, emptyError);
+                }
+                if (emptyFrame) {
                     SPDLOG_TRACE("Empty frame detected (idx={}, pixel_count={}, threshold={}), "
                                  "skipping further processing",
                                  idx, pixelCount, config.empty_frame_pixel_threshold);
@@ -2784,12 +3036,15 @@ void ProcessingService::realtimeInlineLoop() {
                         blurredCurr; // share refcount; blurredCurr reallocs next iter
                 }
 
-                cv::Mat kernel =
-                    cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
-                cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1),
-                                 morphIter);
-                cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1),
-                                 morphIter);
+                std::string kernelError;
+                if (!processMaskWithActiveKernel(
+                        gray, hasBackground ? *bgShared : cv::Mat{}, config, roi, mask,
+                        &kernelError)) {
+                    SPDLOG_ERROR("Realtime processing core failed for frame {}: {}", idx,
+                                 kernelError);
+                    rtLastProcessed_.store(idx);
+                    continue;
+                }
 
                 auto validations = filterProcessedObjects(mask, cvRoi, config, gray);
                 if (validations.empty()) {
@@ -3010,7 +3265,6 @@ void ProcessingService::realtimeInlineLoop() {
                 // Build full-size mask
                 cv::Mat mask(gray.rows, gray.cols, CV_8UC1, cv::Scalar(0));
                 cv::Mat roiCurr = gray(cvRoi);
-                cv::Mat roiDst = mask(cvRoi);
                 cv::Mat blurredCurr, blurredBg, thresh;
                 const auto algoStart = clock::now();
                 auto toOdd = [](int v) -> int {
@@ -3019,8 +3273,6 @@ void ProcessingService::realtimeInlineLoop() {
                     return v;
                 };
                 const int blurK = toOdd(config.gaussian_blur_size);
-                const int morphK = toOdd(config.morph_kernel_size);
-                const int morphIter = std::max(1, config.morph_iterations);
                 const int threshVal = std::max(0, config.bg_subtract_threshold);
 
                 cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(blurK, blurK), 0);
@@ -3039,11 +3291,13 @@ void ProcessingService::realtimeInlineLoop() {
 
                 // For auto-capture detection: always use frame-to-frame difference when enabled
                 cv::Mat diffForAutoCapture;
+                cv::Mat autoCaptureBackground;
                 if (config.auto_background_enabled && !experimentActive_.load()) {
                     std::scoped_lock prevFrameLk(previousFrameMutex_);
                     if (!previousFrameForAutoCapture_.empty() &&
                         previousFrameForAutoCapture_.size() == blurredCurr.size() &&
                         previousFrameForAutoCapture_.type() == blurredCurr.type()) {
+                        autoCaptureBackground = previousFrameForAutoCapture_;
                         cv::absdiff(blurredCurr, previousFrameForAutoCapture_, diffForAutoCapture);
                     } else {
                         // First frame or size mismatch: store current frame and skip auto-capture
@@ -3065,7 +3319,23 @@ void ProcessingService::realtimeInlineLoop() {
 
                 // Check for empty frame: count non-zero pixels after binary threshold
                 int pixelCount = cv::countNonZero(thresh);
-                if (pixelCount < config.empty_frame_pixel_threshold) {
+                const bool autoCaptureEmptyCheck =
+                    config.auto_background_enabled && !experimentActive_.load();
+                ProcessingConfig emptyConfig = config;
+                if (autoCaptureEmptyCheck) emptyConfig.gaussian_blur_size = 1;
+                bool emptyFrame = true;
+                std::string emptyError;
+                const cv::Mat emptyBackground = autoCaptureEmptyCheck
+                    ? autoCaptureBackground
+                    : (hasBackground ? (*bgShared)(cvRoi) : cv::Mat{});
+                if (!isImageEmptyWithActiveKernel(
+                        autoCaptureEmptyCheck ? blurredCurr : roiCurr, emptyBackground,
+                        emptyConfig, Roi{0, 0, roi.w, roi.h}, autoCaptureEmptyCheck,
+                        emptyFrame, &emptyError)) {
+                    SPDLOG_ERROR("Realtime processing core empty check failed for frame {}: {}",
+                                 idx, emptyError);
+                }
+                if (emptyFrame) {
                     SPDLOG_TRACE("Empty frame detected (idx={}, pixel_count={}, threshold={}), "
                                  "skipping further processing",
                                  idx, pixelCount, config.empty_frame_pixel_threshold);
@@ -3170,12 +3440,15 @@ void ProcessingService::realtimeInlineLoop() {
                         blurredCurr; // share refcount; blurredCurr reallocs next iter
                 }
 
-                cv::Mat kernel =
-                    cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
-                cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1),
-                                 morphIter);
-                cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1),
-                                 morphIter);
+                std::string kernelError;
+                if (!processMaskWithActiveKernel(
+                        gray, hasBackground ? *bgShared : cv::Mat{}, config, roi, mask,
+                        &kernelError)) {
+                    SPDLOG_ERROR("Realtime processing core failed for frame {}: {}", idx,
+                                 kernelError);
+                    rtLastProcessed_.store(idx);
+                    continue;
+                }
 
                 // Always run validation for monitoring (even without experiment)
                 // Use ROI-only data for validation (avoids O(frame_size) findContours/brightness

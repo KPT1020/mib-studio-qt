@@ -27,6 +27,48 @@
   `knowledge_map/task/2026-07-13-user-manual-screenshots.md` and
   [[../frontend/Screenshot-Tour]].
 
+- **Native processing-core selector foundation** (2026-07-13,
+  [A7 #242](https://github.com/KPT1020/mib-studio-qt/issues/242),
+  [A8 #239](https://github.com/KPT1020/mib-studio-qt/issues/239),
+  [A10 #241](https://github.com/KPT1020/mib-studio-qt/issues/241), and
+  [A11 #243](https://github.com/KPT1020/mib-studio-qt/issues/243)) — Added a
+  POD-only C engine ABI, independently built versioned native module, strict
+  hash/Authenticode/identity/self-test loader, per-call context pool, resident
+  module policy, and atomically prepared content-addressed cache. The new
+  [[../frontend/ProcessingCoreDialog]] enumerates stable/beta history,
+  derives channel-active state only from independently fetched `latest.json`
+  (never the ahead-of-pointer index field), cross-checks immutable manifests,
+  respects app ranges and administrator
+  pins, restores verified selections at startup, and activates only between
+  operations. Live/offline/playback mask paths plus recording/buffer empty
+  filtering use the selected core; HDF5 stores exact operation provenance.
+  ABI v1 deliberately leaves contour metrics, tracking, target decisions, and
+  orchestration host-owned, so A7 remains open rather than claiming full
+  pipeline replacement. Production signing/R2/Windows hardware proof remains
+  the A12 live gate. Task record:
+  `knowledge_map/task/2026-07-13-hot-swappable-processing-core-native.md`.
+
+- **Versioned processing-core registry and automatic release publication**
+  (2026-07-13, [A6 #238](https://github.com/KPT1020/mib-studio-qt/issues/238)
+  + [A9 #237](https://github.com/KPT1020/mib-studio-qt/issues/237), under the
+  [hot-swap epic #236](https://github.com/KPT1020/mib-studio-qt/issues/236)) —
+  Extended the existing full `processing-core/latest.json` into an enumerable,
+  rollback-safe registry: immutable `versions/<version>.json`, short-cache
+  `index.json` with an independent `active_version`, and a channel-scoped PEP
+  503 page with SHA-qualified links. Schema v2 adds canonical identity,
+  filename/size metadata, and optional native plugin descriptors while
+  retaining every schema-v1 consumer field. `--from-release` now derives and
+  hashes the actual GitHub Release assets, validates wheel/tag/sidecar identity,
+  refuses conflicting immutable keys or unreadable catalogs, and promotes
+  `latest.json` last. Added atomic wheel/package version bump tooling with a
+  post-commit tag guard and 27 unit tests across manifest/index/native/PEP 503,
+  verifier shape, dry-run release derivation, bump/tag, and consistency
+  behavior. The existing
+  conformance workflow now covers CPython 3.10–3.13, gates a Windows native
+  artifact and Authenticode signing, attaches one release set, and publishes
+  R2 automatically. Real certificate/R2 execution remains the explicit A12
+  live gate; it is not claimed from sandbox tests.
+
 - **Installed-wheel full-parity conformance harness** (2026-07-13, issue #225,
   the final planned anti-drift stage of the [Biowork portability epic
   #220](https://github.com/KPT1020/mib-studio-qt/issues/220)) —

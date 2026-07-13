@@ -101,6 +101,34 @@ mib_add_backend_test_executable(processing_pipeline_smoke_test processing/proces
 add_test(NAME processing.pipeline_smoke COMMAND $<TARGET_FILE:processing_pipeline_smoke_test>)
 set_tests_properties(processing.pipeline_smoke PROPERTIES LABELS "processing;backend")
 
+add_executable(processing_core_abi_c_test
+    ${PROJECT_SOURCE_DIR}/tests/processing/processing_core_abi_c_test.c
+)
+target_include_directories(processing_core_abi_c_test PRIVATE ${PROJECT_SOURCE_DIR}/include)
+set_target_properties(processing_core_abi_c_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+)
+add_test(NAME processing.core_abi_c COMMAND $<TARGET_FILE:processing_core_abi_c_test>)
+set_tests_properties(processing.core_abi_c PROPERTIES LABELS "processing;backend" TIMEOUT 30)
+
+mib_add_backend_test_executable(processing_core_loader_test processing/processing_core_loader_test.cpp)
+add_dependencies(processing_core_loader_test mib_processing_core)
+add_test(NAME processing.core_loader
+    COMMAND $<TARGET_FILE:processing_core_loader_test> $<TARGET_FILE:mib_processing_core>)
+set_tests_properties(processing.core_loader PROPERTIES LABELS "processing;backend" TIMEOUT 30)
+
+mib_add_backend_test_executable(processing_core_cache_test processing/processing_core_cache_test.cpp)
+add_dependencies(processing_core_cache_test mib_processing_core)
+target_link_libraries(processing_core_cache_test PRIVATE Threads::Threads)
+add_test(NAME processing.core_cache
+    COMMAND $<TARGET_FILE:processing_core_cache_test> $<TARGET_FILE:mib_processing_core>)
+set_tests_properties(processing.core_cache PROPERTIES LABELS "processing;backend" TIMEOUT 30)
+
+mib_add_backend_test_executable(processing_core_activation_test processing/processing_core_activation_test.cpp)
+target_link_libraries(processing_core_activation_test PRIVATE Threads::Threads)
+add_test(NAME processing.core_activation COMMAND $<TARGET_FILE:processing_core_activation_test>)
+set_tests_properties(processing.core_activation PROPERTIES LABELS "processing;backend" TIMEOUT 30)
+
 mib_add_backend_test_executable(processing_batch_pipeline_test processing/processing_batch_pipeline_test.cpp)
 add_test(NAME backend.processing_batch_pipeline COMMAND $<TARGET_FILE:processing_batch_pipeline_test>)
 set_tests_properties(backend.processing_batch_pipeline PROPERTIES LABELS "processing;backend")
@@ -260,6 +288,21 @@ set_target_properties(json_config_merge_test PROPERTIES
 add_test(NAME frontend.json_config_merge COMMAND $<TARGET_FILE:json_config_merge_test>)
 set_tests_properties(frontend.json_config_merge PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
 
+add_executable(processing_core_catalog_test
+    ${PROJECT_SOURCE_DIR}/tests/frontend/processing_core_catalog_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/ProcessingCoreCatalog.cpp
+)
+target_include_directories(processing_core_catalog_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+)
+target_link_libraries(processing_core_catalog_test PRIVATE Qt6::Core)
+set_target_properties(processing_core_catalog_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+)
+add_test(NAME frontend.processing_core_catalog COMMAND $<TARGET_FILE:processing_core_catalog_test>)
+set_tests_properties(frontend.processing_core_catalog PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
+
 
 add_executable(hdf_review_export_paths_test
     ${PROJECT_SOURCE_DIR}/tests/frontend/hdf_review_export_paths_test.cpp
@@ -327,6 +370,24 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/test_contract_version_consistency.py
     )
     set_tests_properties(scripts.contract_version_consistency PROPERTIES
+        LABELS "scripts;contract"
+        TIMEOUT 30
+    )
+
+    add_test(
+        NAME scripts.bump_mib_processing_version
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/test_bump_mib_processing_version.py
+    )
+    set_tests_properties(scripts.bump_mib_processing_version PROPERTIES
+        LABELS "scripts;contract"
+        TIMEOUT 30
+    )
+
+    add_test(
+        NAME scripts.verify_processing_core_manifest
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/test_verify_processing_core_manifest.py
+    )
+    set_tests_properties(scripts.verify_processing_core_manifest PROPERTIES
         LABELS "scripts;contract"
         TIMEOUT 30
     )

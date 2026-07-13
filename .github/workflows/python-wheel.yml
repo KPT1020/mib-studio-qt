@@ -20,6 +20,13 @@ on:
       - 'scripts/z_adjustment_50v_reference.json'
       - 'scripts/test_compare_metrics.py'
       - 'scripts/test_run_processing_conformance.py'
+      - 'scripts/bump_mib_processing_version.py'
+      - 'publish-processing-core.py'
+      - 'test_publish_processing_core.py'
+      - 'test_bump_mib_processing_version.py'
+      - 'test_contract_version_consistency.py'
+      - 'test_verify_processing_core_manifest.py'
+      - 'verify-processing-core-manifest.py'
       - 'docs/gold_standard_metrics.schema.json'
       - 'cmake/MIBOptions.cmake'
       - 'cmake/MIBLinkHelpers.cmake'
@@ -43,6 +50,13 @@ on:
       - 'scripts/z_adjustment_50v_reference.json'
       - 'scripts/test_compare_metrics.py'
       - 'scripts/test_run_processing_conformance.py'
+      - 'scripts/bump_mib_processing_version.py'
+      - 'publish-processing-core.py'
+      - 'test_publish_processing_core.py'
+      - 'test_bump_mib_processing_version.py'
+      - 'test_contract_version_consistency.py'
+      - 'test_verify_processing_core_manifest.py'
+      - 'verify-processing-core-manifest.py'
       - 'docs/gold_standard_metrics.schema.json'
       - '.github/workflows/python-wheel.yml'
   workflow_dispatch:
@@ -55,13 +69,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  validate-source-version:
+    name: Validate source/release identity
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Require release tag to match the wheel version
+        env:
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/mib-processing-v') && github.ref_name || '' }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+
+          tag = os.environ.get("RELEASE_TAG", "")
+          version = tomllib.loads(
+              Path("bindings/python/pyproject.toml").read_text(encoding="utf-8")
+          )["project"]["version"]
+          if tag and tag != f"mib-processing-v{version}":
+              raise SystemExit(
+                  f"release tag {tag!r} does not match source wheel version {version!r}"
+              )
+          print(f"source mib-processing version: {version}")
+          PY
+
   build-and-test:
     name: Build + test wheel (Python ${{ matrix.python-version }})
+    needs: validate-source-version
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.10', '3.11', '3.12']
+        python-version: ['3.10', '3.11', '3.12', '3.13']
 
     steps:
       - name: Checkout
@@ -106,11 +149,20 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install dist/*.whl
-          python -m pip install "pytest>=7" "opencv-python-headless>=4.9" "jsonschema>=4"
+          python -m pip install "pytest>=7" "opencv-python-headless>=4.9" "jsonschema>=4" \
+            "tomli>=2; python_version < '3.11'"
 
       - name: Run pytest
         working-directory: bindings/python
         run: python -m pytest tests/ -v
+
+      - name: Verify registry publisher and version tooling
+        run: |
+          python -m unittest -v \
+            test_publish_processing_core.py \
+            test_bump_mib_processing_version.py \
+            test_contract_version_consistency.py \
+            test_verify_processing_core_manifest.py
 
       - name: Verify importable version + contract
         run: |
@@ -137,13 +189,156 @@ jobs:
           path: bindings/python/dist/*.whl
           if-no-files-found: error
 
+  build-native-plugin:
+    name: Build native processing core (Windows x64)
+    needs: validate-source-version
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install Conan and configure MSVC profile
+        shell: pwsh
+        env:
+          CONAN_REMOTE_URL: ${{ secrets.CONAN_REMOTE_URL }}
+          CONAN_REMOTE_USER: ${{ secrets.CONAN_REMOTE_USER }}
+          CONAN_REMOTE_PASSWORD: ${{ secrets.CONAN_REMOTE_PASSWORD }}
+        run: |
+          python -m pip install --upgrade pip conan
+          conan profile detect --force
+          @"
+          [settings]
+          os=Windows
+          arch=x86_64
+          compiler=msvc
+          compiler.version=194
+          compiler.cppstd=17
+          compiler.runtime=dynamic
+          build_type=Release
+          "@ | Out-File -FilePath "$env:USERPROFILE\.conan2\profiles\ci" -Encoding UTF8
+          if ($env:CONAN_REMOTE_URL) {
+            conan remote add team-conan $env:CONAN_REMOTE_URL --index 0 --force
+            conan remote login team-conan $env:CONAN_REMOTE_USER -p $env:CONAN_REMOTE_PASSWORD
+          }
+
+      - name: Restore Conan cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.conan2/p
+            ~/.conan2/dl
+          key: conan-${{ runner.os }}-processing-core-msvc194-${{ hashFiles('conanfile.py', 'conanfile.txt') }}
+          restore-keys: conan-${{ runner.os }}-processing-core-msvc194-
+
+      - name: Install dependencies
+        shell: pwsh
+        run: conan install . -of build --build=missing -s build_type=Release -pr ci
+
+      - name: Configure and build native plugin
+        shell: pwsh
+        run: |
+          cmake --preset windows-default `
+            -DMIB_BUILD_BACKEND_ONLY=ON `
+            -DMIB_ENABLE_HARDWARE_SDKS=OFF `
+            -DMIB_ENABLE_WINDOWS_PACKAGING=OFF `
+            -DMIB_USE_SENTRY=OFF
+          cmake --build build --config Release --target `
+            mib_processing_core `
+            processing_core_abi_c_test `
+            processing_core_loader_test `
+            processing_core_cache_test
+
+      - name: Verify native ABI, loader, and cache
+        shell: pwsh
+        run: |
+          $command = 'call build\conanrun.bat && ctest --test-dir build -C Release -R "processing\.core_(abi_c|loader|cache)" --output-on-failure'
+          & cmd.exe /d /s /c $command
+          if ($LASTEXITCODE -ne 0) {
+            throw "Native processing-core tests failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Locate and validate release assets
+        id: native-assets
+        shell: pwsh
+        run: |
+          $pyproject = Get-Content bindings/python/pyproject.toml -Raw
+          if ($pyproject -notmatch '(?m)^version\s*=\s*"([^"]+)"\s*$') {
+            throw 'Could not read mib-processing version from pyproject.toml'
+          }
+          $version = $matches[1]
+          $stem = "mib_processing_core-$version-windows_x86_64"
+          $dll = Get-ChildItem build -Recurse -File -Filter "$stem.dll" | Select-Object -First 1
+          $descriptor = Get-ChildItem build -Recurse -File -Filter "$stem.json" | Select-Object -First 1
+          if (-not $dll -or -not $descriptor) {
+            throw "Expected release assets $stem.dll and $stem.json under build/"
+          }
+          $metadata = Get-Content $descriptor.FullName -Raw | ConvertFrom-Json
+          if ($metadata.filename -ne $dll.Name -or $metadata.version -ne $version) {
+            throw 'Native sidecar identity does not match the built DLL/version'
+          }
+          "dll=$($dll.FullName)" >> $env:GITHUB_OUTPUT
+          "descriptor=$($descriptor.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Sign release-tag native plugin
+        if: startsWith(github.ref, 'refs/tags/mib-processing-v')
+        shell: pwsh
+        env:
+          SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
+          SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not $env:SIGNING_CERTIFICATE_BASE64 -or -not $env:SIGNING_CERTIFICATE_PASSWORD) {
+            throw 'Release tags require WINDOWS_SIGNING_CERTIFICATE_BASE64 and WINDOWS_SIGNING_CERTIFICATE_PASSWORD'
+          }
+          $certificate = Join-Path $env:RUNNER_TEMP 'mib-processing-signing.pfx'
+          try {
+            [IO.File]::WriteAllBytes(
+              $certificate,
+              [Convert]::FromBase64String($env:SIGNING_CERTIFICATE_BASE64)
+            )
+            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" `
+              -Recurse -File -Filter signtool.exe |
+              Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1
+            if (-not $signtool) { throw 'signtool.exe (x64) was not found' }
+            & $signtool.FullName sign /fd SHA256 /td SHA256 `
+              /tr http://timestamp.digicert.com `
+              /f $certificate /p $env:SIGNING_CERTIFICATE_PASSWORD `
+              '${{ steps.native-assets.outputs.dll }}'
+            if ($LASTEXITCODE -ne 0) { throw "signtool failed with exit code $LASTEXITCODE" }
+            $signature = Get-AuthenticodeSignature '${{ steps.native-assets.outputs.dll }}'
+            if ($signature.Status -ne 'Valid') {
+              throw "Authenticode verification failed: $($signature.Status) $($signature.StatusMessage)"
+            }
+          } finally {
+            Remove-Item $certificate -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Upload native plugin artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: mib_processing-native-windows-x86_64
+          path: |
+            ${{ steps.native-assets.outputs.dll }}
+            ${{ steps.native-assets.outputs.descriptor }}
+          if-no-files-found: error
+
   release:
-    name: Attach wheels to GitHub Release
-    needs: build-and-test
+    name: Publish processing-core GitHub Release and registry
+    needs: [build-and-test, build-native-plugin]
     if: startsWith(github.ref, 'refs/tags/mib-processing-v')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+    concurrency:
+      group: processing-core-registry-stable
+      cancel-in-progress: false
 
     steps:
       - name: Download all wheel artifacts
@@ -153,19 +348,100 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: List wheels
+      - name: Download native plugin artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: mib_processing-native-windows-x86_64
+          path: dist
+
+      - name: List processing-core release assets
         run: ls -la dist/
 
-      - name: Create/update release with wheel assets
+      - name: Create or verify immutable processing-core release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           tag="${GITHUB_REF#refs/tags/}"
-          gh release create "$tag" \
+          if gh release view "$tag" --repo "${{ github.repository }}" \
+              --json assets > /tmp/existing-release.json 2>/dev/null; then
+            # The GitHub Release is the immutable source of truth. Rebuilds are
+            # not byte-reproducible (especially timestamped Authenticode), so a
+            # retry after an R2 outage validates and reuses the original assets.
+            python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          tag = os.environ["GITHUB_REF"].removeprefix("refs/tags/")
+          version = tag.removeprefix("mib-processing-v")
+          names = {
+              asset["name"]
+              for asset in json.loads(Path("/tmp/existing-release.json").read_text())["assets"]
+          }
+          wheels = sorted(name for name in names if name.endswith(".whl"))
+          expected_native = {
+              f"mib_processing_core-{version}-windows_x86_64.dll",
+              f"mib_processing_core-{version}-windows_x86_64.json",
+          }
+          wheel_pattern = re.compile(
+              rf"mib_processing-{re.escape(version)}-cp(310|311|312|313)-cp\1-"
+              r"linux_x86_64\.whl"
+          )
+          python_tags = {
+              match.group(1)
+              for name in wheels
+              if (match := wheel_pattern.fullmatch(name))
+          }
+          unexpected = sorted(names - set(wheels) - expected_native)
+          if (
+              len(wheels) != 4
+              or python_tags != {"310", "311", "312", "313"}
+              or not expected_native.issubset(names)
+              or unexpected
+          ):
+              raise SystemExit(
+                  "existing release does not have the complete canonical asset set; "
+                  f"wheels={wheels}, native_missing={sorted(expected_native - names)}, "
+                  f"unexpected={unexpected}"
+              )
+          print("Existing immutable release asset set is complete; reusing it for R2 publish.")
+          PY
+          else
+            gh release create "$tag" \
+              --repo "${{ github.repository }}" \
+              --verify-tag \
+              --title "$tag" \
+              --notes "mib-processing wheels and signed Windows processing-core plugin for tag $tag. See bindings/python/README.md and docs/portable-processing-sync.md for compatibility notes." \
+              --generate-notes \
+              dist/*
+          fi
+
+      - name: Checkout publisher
+        uses: actions/checkout@v6
+
+      - name: Set up registry publisher
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Publish immutable registry, indexes, then active pointer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          MIB_STUDIO_R2_ENDPOINT: ${{ secrets.MIB_STUDIO_R2_ENDPOINT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ] || [ -z "${MIB_STUDIO_R2_ENDPOINT:-}" ]; then
+            echo "R2 registry publication requires R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and MIB_STUDIO_R2_ENDPOINT" >&2
+            exit 1
+          fi
+          python -m pip install --upgrade pip boto3
+          tag="${GITHUB_REF#refs/tags/}"
+          python publish-processing-core.py \
+            --from-release "$tag" \
             --repo "${{ github.repository }}" \
-            --title "$tag" \
-            --notes "mib-processing wheels for tag $tag. Install with: pip install <asset-url>. See bindings/python/README.md for platform/compatibility notes (these are Ubuntu-linked wheels, not auditwheel manylinux-portable)." \
-            --generate-notes \
-            dist/*.whl \
-            || gh release upload "$tag" dist/*.whl --repo "${{ github.repository }}" --clobber
+            --channel stable \
+            --upload-method s3

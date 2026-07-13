@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <queue>
 #include <thread>
 #include <vector>
@@ -13,6 +14,7 @@
 #include <deque>
 #include <cmath>
 #include "backend/processing/EModulusLut.h"
+#include "backend/processing/IProcessingKernel.h"
 #include "backend/recording/HdfWriteQueue.h"
 
 namespace backend { namespace playback { class FrameStore; struct Frame; } }
@@ -163,12 +165,54 @@ public:
     ProcessingService();
     ~ProcessingService();
 
+    class CoreOperationLease {
+    public:
+        CoreOperationLease() = default;
+        ~CoreOperationLease();
+        CoreOperationLease(const CoreOperationLease&) = delete;
+        CoreOperationLease& operator=(const CoreOperationLease&) = delete;
+        CoreOperationLease(CoreOperationLease&& other) noexcept;
+        CoreOperationLease& operator=(CoreOperationLease&& other) noexcept;
+
+        explicit operator bool() const noexcept { return owner_ != nullptr; }
+        const backend::processing::ProcessingCoreIdentity& identity() const noexcept {
+            return identity_;
+        }
+
+    private:
+        friend class ProcessingService;
+        CoreOperationLease(
+            ProcessingService* owner,
+            backend::processing::ProcessingCoreIdentity identity);
+        void release() noexcept;
+
+        ProcessingService* owner_{nullptr};
+        backend::processing::ProcessingCoreIdentity identity_;
+    };
+
     void start(size_t workerCount = std::thread::hardware_concurrency());
     void stop();
 
     void submit(Job job);
 
     const ProcessingStats& stats() const { return stats_; }
+
+    // Processing-core selection. Activation is transactional and is rejected
+    // while realtime, an experiment, or the async batch pipeline is active.
+    // Callers prepare and validate a plugin with ProcessingCoreLoader first.
+    bool activateProcessingKernel(std::shared_ptr<backend::processing::IProcessingKernel> kernel,
+                                  std::string* error = nullptr);
+    bool activateBundledProcessingKernel(std::string* error = nullptr);
+    backend::processing::ProcessingCoreIdentity activeProcessingCoreIdentity() const;
+    std::string requiredProcessingCoreVersion() const { return requiredProcessingCoreVersion_; }
+    bool isProcessingCorePinSatisfied() const;
+    // Startup selection restoration failures fail closed until a verified
+    // candidate is activated successfully.
+    void markProcessingCoreSelectionUnavailable();
+    // Pins the current core identity and prevents activation for the lifetime
+    // of the returned lease. Long-running non-ProcessingService owners (for
+    // example raw recording) must hold one for their whole operation.
+    CoreOperationLease acquireProcessingCoreOperation();
 
     // Realtime processing API
     void startRealtime(std::shared_ptr<backend::playback::FrameStore> store);
@@ -274,6 +318,14 @@ public:
                             const Roi& roi,
                             const std::shared_ptr<const cv::Mat>& background);
 
+    // Selected-core variant used by runtime paths. The static overloads above
+    // remain as compatibility helpers and use bundled behavior.
+    bool isFrameEmptyWithActiveKernel(
+        const backend::playback::Frame& frame,
+        const ProcessingConfig& config,
+        const Roi& roi,
+        const std::shared_ptr<const cv::Mat>& background) const;
+
     // ---- Batch mask generation ----
     // Pure pipeline: Gaussian blur -> (optional) background subtract -> binary
     // threshold -> morphology -> contour validation. Produces a full-frame mask
@@ -313,7 +365,8 @@ public:
         const ProcessingConfig& config,
         const cv::Mat& background = cv::Mat{},
         const Roi& roi = Roi{0, 0, 0, 0},
-        BatchProgressCallback progress = {});
+        BatchProgressCallback progress = {},
+        backend::processing::ProcessingCoreIdentity* processingCore = nullptr);
 
     struct BatchPipelineConfig {
         size_t batchSize{64};
@@ -437,6 +490,20 @@ private:
                                             const ProcessingConfig& config,
                                             const cv::Mat& originalImage);
     ContourAnalysis findContours(const cv::Mat& processedImage);
+    bool processMaskWithActiveKernel(const cv::Mat& gray,
+                                     const cv::Mat& background,
+                                     const ProcessingConfig& config,
+                                     const Roi& roi,
+                                     cv::Mat& mask,
+                                     std::string* error = nullptr) const;
+    bool isImageEmptyWithActiveKernel(const cv::Mat& gray,
+                                      const cv::Mat& background,
+                                      const ProcessingConfig& config,
+                                      const Roi& roi,
+                                      bool absoluteBackgroundDifference,
+                                      bool& empty,
+                                      std::string* error = nullptr) const;
+    void releaseProcessingCoreOperation() noexcept;
 
     std::vector<std::thread> workers_;
     std::queue<Job> queue_;
@@ -445,6 +512,15 @@ private:
     std::atomic<bool> running_{false};
 
     ProcessingStats stats_{};
+
+    // Shared for calls, exclusive for activation/start transitions. A shared
+    // pointer additionally keeps a loaded module resident for any in-flight
+    // call even during service teardown.
+    mutable std::shared_mutex processingKernelMutex_;
+    std::shared_ptr<backend::processing::IProcessingKernel> processingKernel_;
+    std::string requiredProcessingCoreVersion_;
+    std::atomic<bool> processingCoreSelectionAvailable_{true};
+    std::atomic<uint32_t> activeSynchronousCoreOperations_{0};
 
     // Async batch processing state
     std::vector<std::thread> batchWorkers_;

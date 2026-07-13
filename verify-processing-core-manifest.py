@@ -31,8 +31,8 @@ def fetch(url: str, *, method: str = "GET", headers: dict[str, str] | None = Non
 
 def require_absolute_url(value: str, field_name: str) -> None:
     parsed = urlparse(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ValueError(f"{field_name} is not an absolute HTTP(S) URL: {value}")
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise ValueError(f"{field_name} is not an absolute HTTPS URL: {value}")
 
 
 def check_reachable(url: str, *, timeout: int) -> tuple[bool, str]:
@@ -113,6 +113,21 @@ def main(argv: list[str] | None = None) -> int:
         print("ERROR: manifest.wheel.wheels must be a non-empty list", file=sys.stderr)
         return 1
 
+    schema_version = manifest["processing_core_manifest_schema_version"]
+    if schema_version not in (1, 2):
+        print(f"ERROR: unsupported processing-core manifest schema: {schema_version!r}", file=sys.stderr)
+        return 1
+    if schema_version >= 2:
+        if not isinstance(manifest.get("version"), str) or not manifest["version"]:
+            print("ERROR: schema-v2 manifest requires a non-empty canonical version", file=sys.stderr)
+            return 1
+        if manifest["version"] != wheel["version"]:
+            print("ERROR: manifest.version must equal manifest.wheel.version", file=sys.stderr)
+            return 1
+        if not isinstance(manifest.get("native_plugins"), list):
+            print("ERROR: schema-v2 manifest.native_plugins must be a list", file=sys.stderr)
+            return 1
+
     referenced_urls: list[tuple[str, str]] = []
     for entry in wheel["wheels"]:
         for field in ("platform_tag", "url", "sha256"):
@@ -122,12 +137,47 @@ def main(argv: list[str] | None = None) -> int:
         if not SHA256_RE.fullmatch(str(entry["sha256"])):
             print(f"ERROR: wheel entry sha256 is not a 64-character hex string: {entry['platform_tag']}", file=sys.stderr)
             return 1
+        if schema_version >= 2:
+            if not entry.get("filename"):
+                print("ERROR: schema-v2 wheel entry is missing filename", file=sys.stderr)
+                return 1
+            if not isinstance(entry.get("size_bytes"), int) or entry["size_bytes"] <= 0:
+                print(f"ERROR: wheel entry has invalid size_bytes: {entry.get('filename')}", file=sys.stderr)
+                return 1
         try:
             require_absolute_url(str(entry["url"]), f"wheel[{entry['platform_tag']}].url")
         except ValueError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
         referenced_urls.append((f"wheel {entry['platform_tag']}", str(entry["url"])))
+
+    for entry in manifest.get("native_plugins", []):
+        required = (
+            "filename", "os", "arch", "version", "contract_version",
+            "engine_abi_version", "runtime_fingerprint", "entrypoint", "url", "sha256", "size_bytes",
+        )
+        missing = [field for field in required if entry.get(field) in (None, "")]
+        if missing:
+            print(f"ERROR: native plugin entry is missing: {', '.join(missing)}", file=sys.stderr)
+            return 1
+        if entry["version"] != manifest.get("version"):
+            print("ERROR: native plugin version does not match manifest.version", file=sys.stderr)
+            return 1
+        if entry["contract_version"] != manifest["contract_version"]:
+            print("ERROR: native plugin contract_version does not match manifest", file=sys.stderr)
+            return 1
+        if not SHA256_RE.fullmatch(str(entry["sha256"])):
+            print(f"ERROR: native plugin sha256 is invalid: {entry['filename']}", file=sys.stderr)
+            return 1
+        if not isinstance(entry["size_bytes"], int) or entry["size_bytes"] <= 0:
+            print(f"ERROR: native plugin size_bytes is invalid: {entry['filename']}", file=sys.stderr)
+            return 1
+        try:
+            require_absolute_url(str(entry["url"]), f"native_plugins[{entry['filename']}].url")
+        except ValueError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+        referenced_urls.append((f"native plugin {entry['filename']}", str(entry["url"])))
 
     for field_name, url_field in (
         ("profile_catalog_url", "profile_catalog_url"),
@@ -143,6 +193,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Channel: {manifest['channel']}")
     print(f"Contract version: {manifest['contract_version']}")
     print(f"Wheel: {wheel['package']} {wheel['version']} ({wheel['release_tag']}, {len(wheel['wheels'])} platform(s))")
+    if schema_version >= 2:
+        print(f"Native plugins: {len(manifest['native_plugins'])}")
     print(f"Profile catalog: {manifest['profile_catalog_url']}")
     print(f"Emodulus LUT manifest: {manifest['emodulus_lut_manifest_url']}")
 

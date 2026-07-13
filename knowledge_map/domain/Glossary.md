@@ -37,11 +37,22 @@
   config schema, or LUT format changes incompatibly. Currently declared
   independently in six places (`test_contract_version_consistency.py` guards
   against drift until/unless that's folded into one source of truth).
-- **Processing core manifest** — `{channel}/processing-core/latest.json`,
-  published by `publish-processing-core.py`. Pins the `mib-processing` wheel
-  version + `contract_version` together and cross-links the profile catalog
-  and emodulus LUT manifest, so a consumer resolves config + LUT + engine as
-  one set. See `docs/portable-processing-sync.md`.
+- **Processing core registry** — versioned engine metadata published by
+  `publish-processing-core.py`: a complete short-cache active pointer at
+  `{channel}/processing-core/latest.json`, immutable manifests under
+  `versions/<version>.json`, and an enumerable `index.json`. Schema v2 pins
+  the canonical core/contract version, hash-qualified Python wheels, optional
+  signed native plugins, profile catalog, and emodulus LUT as one reproducible
+  set. The generated PEP 503 page supports baked `mib-processing==<version>`
+  dependencies. See `docs/portable-processing-sync.md`.
+- **Processing core active version** — the full manifest named by both
+  `latest.json` and `index.json.active_version`. Publishing or rolling back a
+  channel changes these mutable pointers; it never rewrites immutable version
+  history, and clients with an explicit version pin ignore the pointer.
+- **Native processing core** — a versioned, Authenticode-approved Windows DLL
+  selected by [[../frontend/ProcessingCoreDialog]] and loaded through the
+  POD-only C engine ABI. ABI v1 owns mask generation and empty-frame
+  classification; host metrics/tracking/orchestration remain outside it.
 - **Processing conformance reference** —
   `scripts/gold_standard_dataset.json`, a deterministic full-parity output from
   the installed wheel. `scripts/run_processing_conformance.py` fails on metric,

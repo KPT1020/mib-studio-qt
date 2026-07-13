@@ -1,6 +1,9 @@
 include(MIBLinkHelpers)
 include(MIBWindowsDeployment)
 
+set(MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256 "" CACHE STRING
+    "Approved Authenticode signer SubjectPublicKeyInfo SHA-256 for native processing cores")
+
 set(FRONTEND_COMMON_SOURCES
     # Core
     ${PROJECT_SOURCE_DIR}/src/frontend/qt/BackgroundFrameQtAdapter.cpp
@@ -55,6 +58,8 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/src/frontend/dialogs/ProcessingSettingsDialog.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/dialogs/ProcessingSettingsDialog.h
     ${PROJECT_SOURCE_DIR}/resources/ui/ProcessingSettingsDialog.ui
+    ${PROJECT_SOURCE_DIR}/src/frontend/dialogs/ProcessingCoreDialog.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/dialogs/ProcessingCoreDialog.h
     ${PROJECT_SOURCE_DIR}/src/frontend/dialogs/SyringePumpSettingsDialog.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/dialogs/SyringePumpSettingsDialog.h
     ${PROJECT_SOURCE_DIR}/resources/ui/SyringePumpSettingsDialog.ui
@@ -80,6 +85,8 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/JsonConfigMerge.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/UpdateCatalog.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/UpdateCatalog.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/ProcessingCoreCatalog.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/utils/ProcessingCoreCatalog.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/HdfReviewExportPaths.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/HdfReviewExportPaths.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/RoiManager.cpp
@@ -150,6 +157,7 @@ target_link_libraries(mib_frontend_common PUBLIC
 target_compile_definitions(mib_frontend_common PUBLIC
     MIB_STUDIO_QT_VERSION="${PROJECT_VERSION}"
     MIB_STUDIO_QT_VERSION_FULL="${PROJECT_VERSION_FULL}"
+    MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256="${MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256}"
 )
 
 mib_link_opencv(mib_frontend_common PUBLIC)

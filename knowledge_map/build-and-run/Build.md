@@ -21,6 +21,7 @@ From `CMakePresets.json`:
 | Target | Kind | Purpose |
 |---|---|---|
 | `mib_processing` | STATIC library | Qt-free processing core: `ProcessingService`, `EModulusLut`, `BatchMaskSources`, `Hdf5Service`, `FrameStore`, `Tools`, `CrashStateMirror`. Links only OpenCV + HDF5 + spdlog + STL. |
+| `mib_processing_core` | MODULE library | Native hot-swap plugin exposing the C engine ABI. Release Windows output is `build/Release/mib_processing_core-<version>-windows_x86_64.dll` plus the same-stem descriptor JSON. |
 | `mib_backend` | STATIC library | Core: services, camera abstraction; links `mib_processing` publicly |
 | `mib_frontend_common` | STATIC library | All UI sources (tabs, dialogs, `.ui` files) compiled once and linked by both frontend executables. AUTOUIC runs only here — it is `OFF` on the executables because CMake would emit duplicate `ui_*.h` generation rules per target; the `.qrc` is compiled per-executable so the Qt resources survive static linking |
 | `mib_studio_qt` | executable (`WIN32` on Windows) | Production app (mock camera reachable via ConnectTab "Configure Mock…" or `MIB_CAMERA_MODE=mock`) |
@@ -77,6 +78,47 @@ then runs the full-parity conformance harness before publishing wheels as
 GitHub Release assets on `mib-processing-v*` tags
 (a separate tag namespace from the app's own `v*.*.*` releases,
 `.github/workflows/release.yml`).
+
+The same workflow is the processing-core release gate. Its wheel matrix covers
+CPython 3.10–3.13, a Windows x64 job builds the native core artifact, and a tag
+release attaches all assets before `publish-processing-core.py --from-release`
+updates the R2 registry. Publication order is immutable
+`processing-core/versions/<version>.json`, merged `index.json`, generated PEP
+503 page, then the backward-compatible full `latest.json` pointer. A tag build
+fails when production Authenticode or R2 secrets are absent; local/PR builds
+may exercise the unsigned fixture path but cannot publish it.
+
+Use `python scripts/bump_mib_processing_version.py <version>` to update both
+the authoritative pyproject and package wrapper literal. After committing,
+rerun with `--create-tag`; the script verifies that `HEAD` contains the version
+before creating `mib-processing-v<version>`.
+
+## Native processing-core plugin
+
+`mib_processing_core` compiles only the bundled mask/empty-frame kernel and C
+ABI adapter; it does not link Qt, HDF5, or the desktop service graph. Its
+version comes from the same `bindings/python/pyproject.toml` literal as the
+wheel. On Windows, CMake emits a same-stem descriptor containing the exact
+version, ABI/contract, `mib_processing_get_api` entrypoint, runtime
+fingerprint, compatible app range, and required Authenticode scheme.
+
+Release CI runs the ABI, loader, cache, and activation tests, signs the DLL,
+attaches the signed DLL/descriptor beside the wheels, then lets the registry
+publisher calculate the final byte size and SHA-256. The desktop rechecks the
+registry digest and compiled Authenticode signer-SPKI allowlist immediately
+before `LoadLibraryExW`; unsigned debug fixtures are never publishable.
+
+The C ABI contract is in
+`include/backend/processing/ProcessingCoreAbi.h`. Keep it POD-only and
+append-compatible: no STL/OpenCV/Qt objects, exceptions, RTTI, or ownership
+transfer may cross this boundary. `tests/processing/processing_core_abi_c_test.c`
+is deliberately compiled as C, while loader parity and cache/concurrency tests
+exercise the dynamic artifact.
+
+Production desktop builds must configure
+`-DMIB_PROCESSING_CORE_SIGNER_SPKI_SHA256=<64-hex>` with the approved signer's
+DER SubjectPublicKeyInfo SHA-256. A Release build with no compiled value cannot
+load a native core; environment overrides are limited to Debug builds.
 
 The top-level CMake project enables both C and CXX so Ubuntu system-package
 HDF5 discovery can run its C probe while the application code remains C++17.

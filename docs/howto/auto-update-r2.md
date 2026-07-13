@@ -168,17 +168,94 @@ Full schema, field-by-field: [`docs/portable-processing-sync.md`](../portable-pr
 Public object layout:
 
 - `stable/processing-core/latest.json`
-- `beta/processing-core/...` for a separate track if needed
+- `stable/processing-core/versions/<version>.json`
+- `stable/processing-core/index.json`
+- `stable/processing-core/simple/mib-processing/index.html`
+- `stable/processing-core/simple/mib-processing/` (the exact pip request route)
+- `beta/processing-core/...` for a separate track
 
-Publishing (wheel files must already be built, e.g. via `python -m build`
-in `bindings/python/`, and uploaded as GitHub Release assets before running
-this — the manifest only records their URLs/hashes, it does not build or
-upload the wheels themselves):
+Configure pip/uv with the directory
+`https://updates.yofo.bio/<channel>/processing-core/simple/` as the index base;
+clients append the normalized `mib-processing/` package path themselves. The
+publisher stores the package HTML at both `index.html` and the trailing-slash
+route because an R2 custom domain does not generate directory indexes.
+
+Normal publication is automatic. Pushing `mib-processing-v<version>` runs
+wheel/native conformance, creates the GitHub Release, then derives and hashes
+the release assets before updating R2:
 
 ```bash
 python publish-processing-core.py \
-  --wheel bindings/python/dist/mib_processing-0.1.0-cp311-cp311-linux_x86_64.whl
+  --from-release mib-processing-v0.1.0 \
+  --channel stable \
+  --upload-method s3
 ```
+
+The release job requires `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and
+`MIB_STUDIO_R2_ENDPOINT`. A release tag also requires
+`WINDOWS_SIGNING_CERTIFICATE_BASE64` and
+`WINDOWS_SIGNING_CERTIFICATE_PASSWORD`; missing production signing or R2
+credentials fail the release job instead of silently publishing an incomplete
+registry.
+
+To preview already-downloaded release assets without GitHub or R2:
+
+```bash
+python publish-processing-core.py \
+  --from-release mib-processing-v0.1.0 \
+  --release-assets-dir ./dist \
+  --published-at 2026-07-13T00:00:00Z \
+  --dry-run \
+  --manifest-out ./tmp/processing-core/latest.json \
+  --version-manifest-out ./tmp/processing-core/versions/0.1.0.json \
+  --index-out ./tmp/processing-core/index.json \
+  --pep503-out ./tmp/processing-core/simple/mib-processing/index.html
+```
+
+The publisher enforces this order: read/check immutable history and the
+catalog; upload a new immutable manifest (or accept identical content);
+conditionally merge `index.json`; regenerate the PEP 503 page; upload
+`latest.json` last. It refuses to overwrite a version with different content
+or to replace a catalog it could not read. Mutable documents use a short cache;
+version manifests use `max-age=31536000, immutable`.
+
+Mutating processing-core publication requires `--upload-method s3` plus
+`MIB_STUDIO_R2_ENDPOINT`. The publisher must read immutable/catalog state
+directly from R2 before merging; a public-CDN or Wrangler fallback can be
+stale and is therefore limited to non-mutating dry runs.
+
+`latest.json` is the canonical channel-active pointer and is written last.
+`index.active_version` mirrors it after a complete publication, but selectors
+must consult `latest.json` before labeling a catalog entry Active.
+
+Promote or roll back by copying an existing immutable manifest byte-for-byte:
+
+```bash
+python publish-processing-core.py \
+  --promote-version 0.1.0 \
+  --channel stable \
+  --published-at 2026-07-13T01:02:03Z \
+  --upload-method s3
+```
+
+History remains newest-first while the mutable pointer moves to the chosen
+version. Never edit an object under `versions/` in place or reconstruct an old
+manifest with a newer publisher. Manual real publication and promotion require
+`--published-at`; release-driven publication derives the stable timestamp from
+GitHub.
+
+Version bump/tag sequence:
+
+```bash
+python scripts/bump_mib_processing_version.py 0.2.0
+git add bindings/python/pyproject.toml bindings/python/python/mib_processing/__init__.py
+git commit -m "chore(processing): bump mib-processing to 0.2.0"
+python scripts/bump_mib_processing_version.py 0.2.0 --create-tag
+git push origin HEAD --follow-tags
+```
+
+The tag step verifies both version files are clean and already present at
+`HEAD`; it cannot tag the pre-bump commit accidentally.
 
 Verification:
 
@@ -223,6 +300,8 @@ Configure these outside the repo:
    - `stable/latest.json`, `beta/latest.json`, and `*/tools/tools-latest.json`: short TTL or bypass cache because manifests are mutable.
    - `profiles/*/catalog.json`: short TTL or bypass cache because profile catalogs are mutable.
    - `profiles/*/<profile-id>/{profile.meta.json,config.json,egrabberConfig.js,CHANGELOG.md}`: moderate TTL because current profile revisions are mutable.
+   - `*/processing-core/{latest.json,index.json,simple/**}`: short TTL because active selection and package history are mutable.
+   - `*/processing-core/versions/*.json`: one-year immutable caching; these keys are never overwritten with different content.
    - Versioned `.exe` and `.zip` artifacts: long TTL because filenames are immutable.
 5. Create least-privilege write credentials for release publishing. Credentials need object write access to the updater bucket only.
 6. Store credentials in a local AWS profile such as `mib-studio-r2`, environment variables, or CI secrets.

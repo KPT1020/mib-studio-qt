@@ -23,7 +23,7 @@
 │  Trigger · SyringePump · Yolo · Recorder · Sqlite                   │
 ├───────────────────────────────────────────────────────────────────────┤
 │  mib_processing (Qt-free static lib, linked by mib_backend):        │
-│    Processing · Hdf5 · FrameStore · Tools · CrashStateMirror        │
+│    Processing · selected kernel/ABI loader · Hdf5 · FrameStore      │
 │  — the portable core; see [[../services/ProcessingService]]         │
 └────────────────────────────┬────────────────────────────────────────┘
                              │ grabFrame / config
@@ -56,6 +56,12 @@ Contract").
 (package `mib_processing`, importable as `import mib_processing`), so a
 Python consumer gets the exact same algorithm without linking C++ directly.
 See [[../build-and-run/Build]] ("Python bindings").
+
+On Windows, the desktop can select an Authenticode-approved
+`mib_processing_core-<version>-windows_x86_64.dll` at a between-operation
+boundary. [[../frontend/ProcessingCoreDialog]] resolves the channel registry,
+prepares a content-addressed cache entry, and hands a verified module to
+`ProcessingService`; the bundled kernel remains the startup fallback.
 
 ## Reading order
 

@@ -50,7 +50,8 @@ a macro). Unit-tested by `tests/backend/hdf_write_queue_test.cpp`.
 - Writes valid/invalid frames as bulk (`saveFrames`) or incrementally
   (`initializeDatasets` + `appendFrames`).
 - Stores experiment metadata: start/end time (ns), totals, `ProcessingConfig`,
-  ROI, optional background image; plus raw config JSON via `writeConfigJson`.
+  ROI, optional background image, and the exact `ProcessingCoreIdentity` used;
+  plus raw config JSON via `writeConfigJson`.
 - Append hot paths (`appendFrames`, `appendRecordingFrames`) flush via
   `maybeIntervalFlush()`: an `H5Fflush(H5F_SCOPE_GLOBAL)` at most once per
   `MIB_HDF5_FLUSH_INTERVAL_MS` (default 5000 ms). This keeps the recorder
@@ -88,6 +89,28 @@ Blocking I/O on whichever thread calls it. In practice:
 - Experiment flush: called from `ProcessingService::flushBufferedFrames`.
 - Review reads: called from Qt main thread via [[../frontend/HdfReviewTab]].
 - Frame recording writes: called from `AppBackend`'s recording thread.
+
+## Processing-core provenance
+
+`writeExperimentInfo(..., processingCore)` and
+`writeRecordingInfo(..., processingCore)` write the selected core identity as
+attributes on `/experiment_info` and `/recording_info`, respectively:
+
+- `processing_core_version`, `processing_contract_version`,
+  `processing_engine_abi_version`
+- `processing_core_sha256`, `processing_manifest_sha256`,
+  `processing_release_tag`
+- `processing_core_source`, `processing_core_build_id`,
+  `processing_runtime_fingerprint`
+
+Callers hold a `ProcessingService::CoreOperationLease` and pass its identity,
+so a core cannot be swapped between processing/empty classification and final
+metadata. Offline mask regeneration uses the identity captured by
+`processBatch`. `readProcessingCoreIdentity` reads either group (with scalar,
+bounded variable/fixed-string handling) and returns `false` for a legacy file
+that predates provenance. The writer records the bundled identity when no
+explicit identity is supplied, preserving deterministic metadata for older
+call sites.
 
 ## Gotchas
 

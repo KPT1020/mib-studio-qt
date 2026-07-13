@@ -1005,7 +1005,8 @@ void BatchMaskDialog::onRun() {
         }
     };
 
-    results_ = proc.processBatch(images, config, background, roi, progressCb);
+    backend::processing::ProcessingCoreIdentity processingCore;
+    results_ = proc.processBatch(images, config, background, roi, progressCb, &processingCore);
     applySourceMetadata();
 
     size_t validCount = 0;
@@ -1017,7 +1018,7 @@ void BatchMaskDialog::onRun() {
     const bool ok = backend::services::batch_masks::saveMasksToHdf5(
         results_, outputPath.toStdString(), config,
         roi.x, roi.y, roi.w, roi.h, background,
-        srcHdf5_->isChecked());
+        srcHdf5_->isChecked(), &processingCore);
 
     if (ok) {
         savedHdf5Path_ = outputPath;

@@ -6,7 +6,11 @@
 > [[TriggerService]].
 
 **Source:** `src/backend/processing/ProcessingService.cpp`,
-`include/backend/processing/ProcessingService.h`
+`src/backend/processing/BundledProcessingKernel.cpp`,
+`src/backend/processing/ProcessingCoreLoader.cpp`,
+`src/backend/processing/ProcessingCoreCache.cpp`,
+`include/backend/processing/ProcessingService.h`,
+`include/backend/processing/ProcessingCoreAbi.h`
 **Related:** [[CaptureService]], [[Hdf5Service]], [[AutofocusService]],
 [[TriggerService]], [[../architecture/Data-Flow]],
 [[../domain/Microscopy-Pipeline]]
@@ -17,6 +21,36 @@ links `mib_processing` publicly, so nothing about consuming this service from
 the desktop app changes. This is the portable core a non-Qt consumer (e.g.
 Biowork's `services/mib-processing`) can build and link standalone — see
 `docs/gold_standard_metrics.md` ("Portable Processing Contract").
+
+The desktop can also load a signed, versioned `mib_processing_core` native
+plugin through the stable C ABI in `ProcessingCoreAbi.h`. The ABI contains no
+C++, Qt, OpenCV containers, exceptions, RTTI, or cross-module allocation: the
+host supplies borrowed Gray8 image views and owns the output buffer. The
+bundled implementation and plugin adapter share `IProcessingKernel`, so the
+same mask/empty-frame algorithm is used on both sides of the boundary.
+
+## Processing-core selection
+
+- `activateProcessingKernel(kernel)` swaps the selected kernel only at a safe
+  between-operation boundary. It resets the candidate first, then rejects the
+  swap while realtime, an experiment, recording/export, the async batch
+  pipeline, or a synchronous offline batch owns an operation lease.
+- `activeProcessingCoreIdentity()` returns the exact selected version,
+  contract, engine ABI, artifact/manifest hashes, release tag, build ID,
+  runtime fingerprint, and source. `processBatch(..., processingCore)` captures
+  that identity under the same selection lock for provenance.
+- `MIB_STUDIO_PROCESSING_CORE_VERSION` is an administrator hard pin. A
+  different candidate cannot activate, and experiment/mask/empty-frame paths
+  fail closed while the pin is unsatisfied.
+- `CoreOperationLease` holds the selected kernel and exact identity for the
+  whole realtime, async/synchronous batch, raw-recording, or buffer-export
+  operation. Activation cannot interleave after work starts and before its
+  provenance is finalized.
+- Loaded modules remain resident until process exit. A dynamic kernel leases a
+  single-owner ABI context per call from a protected pool; parallel workers do
+  not invoke one plugin context concurrently.
+- Registry, cache, signature, and UI behavior live in
+  [[../frontend/ProcessingCoreDialog]].
 
 ## Threads
 
@@ -45,15 +79,16 @@ restarts the loop (same policy as `CaptureService::run`). Verified by
 
 ## Pipeline (per frame)
 
-1. Optional background subtraction (`setRealtimeBackgroundGray`).
-2. Gaussian blur → threshold → morphological ops → contour find.
-3. `filterProcessedImage` produces a `FilterResult`:
+1. The selected `IProcessingKernel` performs optional background subtraction,
+   Gaussian blur, threshold, and morphology and returns the mask.
+2. Host-owned `filterProcessedImage` finds contours and produces a
+   `FilterResult`:
    - `deformability`, `area` (μm² via `pixelToMicronFactor_`),
      `areaRatio`, `ringRatio`, `youngsModulus` (LUT lookup)
    - `brightness` quantiles (Q1/Q2/Q3/Q4)
    - border check, single-inner-contour check, range gates
    - `isTargetGroup` (second gate for trigger-worthy frames)
-4. Emits:
+3. Emits:
    - **Ring ratio** via `RingRatioCallback` → [[AutofocusService]].
    - **Target-group** event via `TargetGroupCallback` carrying owner identity
      (`objectId`, `trackId`) → [[TriggerService]].
@@ -75,10 +110,15 @@ Two getters exist for the current background:
 and `setRealtimeRoi`. Hot loops can compare against a cached version to skip
 per-frame config reads.
 
-`isFrameEmpty(frame, config, roi, shared_ptr<const cv::Mat>)` — ROI-only
-overload: extracts only the ROI pixels (no full-frame copy) and uses the
-background directly via shared_ptr. Classifies identically to the full-frame
-overload (`recording_isframeempty_roi_test` is the invariant test).
+`isFrameEmptyWithActiveKernel(frame, config, roi, shared_ptr<const cv::Mat>)`
+extracts only the ROI pixels (no full-frame copy) and delegates the decision
+to the selected kernel. Recording and buffer-save filtering use this path, so
+they cannot silently drift from the active core.
+
+Realtime empty-frame/auto-background decisions also call the selected kernel.
+For the bundled legacy semantics the host supplies its pre-blurred current and
+previous images with the ABI's absolute-difference flag, so the kernel owns the
+final classification without changing the established result.
 
 ## Config — `ProcessingConfig`
 
@@ -156,10 +196,13 @@ TIFFs — use:
   morphology → `filterProcessedImage`. Zero side-effects (no monitoring
   rings, no experiment accumulation, no callbacks, no auto-background).
   Returns a `ProcessedFrame` with a full-size mask (zero outside ROI).
-- `ProcessingService::processBatch(grayImages, config, background, roi, progressCb)`
+- `ProcessingService::processBatch(grayImages, config, background, roi, progressCb,
+  processingCore)`
   — wraps `computeProcessedFrame` over a vector of grayscale `cv::Mat`
   inputs, returns `std::vector<ProcessedFrame>`. Progress is reported via
-  `BatchProgressCallback(BatchProgress{done, total})`.
+  `BatchProgressCallback(BatchProgress{done, total})`. The optional identity
+  output records the exact core held for the whole operation; activation is
+  blocked until the call returns.
 
   When `multi_image_enabled` and `multi_image_count > 1`, each newly retained
   valid track also carries the trigger image plus the available following
@@ -180,7 +223,8 @@ Input/output adapters live in [[BatchMaskSources]] —
 button that drives this via `BatchMaskDialog`.
 
 Batch calls do **not** touch realtime state or monitoring buffers, so
-they're safe to run concurrently with live capture.
+they're safe to run concurrently with live capture. Dynamic cores allocate or
+reuse separate ABI contexts for concurrent calls.
 
 ## Async batch processing (capture decoupling)
 
@@ -208,6 +252,16 @@ current/max queue depth, batch size, worker count, and running state. See
 
 ## Gotchas
 
+- **The v1 native engine boundary owns mask generation and empty-frame
+  classification only.** Contour extraction, metrics, object tracking,
+  target-group classification, callbacks, and HDF5 orchestration remain in the
+  host and consume the selected mask. A processing release that needs to
+  change those semantics cannot yet be fully hot-swapped; this residual scope
+  remains tracked in GitHub issue #242 (A7).
+- Activating a core is intentionally not an in-flight migration. Stop capture,
+  experiment, recording, and offline/async batch work before switching.
+- Plugin modules are intentionally never unloaded. Repeatedly preparing many
+  versions in one app process grows resident code until restart.
 - Realtime drop-frames mode is ignored while an experiment is active.
 - **Live-view overlay backlog / `rtDropFrames_` defaults ON:** the inline
   realtime loop consumes `FrameStore` sequentially via `rtLastProcessed_`. If

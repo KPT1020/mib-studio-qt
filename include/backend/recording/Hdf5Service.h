@@ -65,10 +65,15 @@ public:
                              size_t totalValidFrames, size_t totalInvalidFrames,
                              const ProcessingConfig& processingConfig,
                              const ProcessingService::Roi& roi,
-                             const cv::Mat* background = nullptr);
+                             const cv::Mat* background = nullptr,
+                             const backend::processing::ProcessingCoreIdentity* processingCore = nullptr);
     bool readExperimentInfo(uint64_t& startTimeNs, uint64_t& endTimeNs,
                              size_t& totalValidFrames, size_t& totalInvalidFrames,
                              ProcessingService::Roi* roi = nullptr);
+    // Reads /experiment_info, or /recording_info for raw recordings. Returns
+    // false for legacy files that predate processing-core provenance.
+    bool readProcessingCoreIdentity(
+        backend::processing::ProcessingCoreIdentity& processingCore) const;
 
     // Save raw config JSON as a string attribute on /experiment_info.
     // Precondition: writeExperimentInfo() must have been called first.
@@ -137,7 +142,8 @@ public:
     bool writeRecordingInfo(uint64_t startTimeNs, uint64_t endTimeNs,
                             uint64_t totalFrames, uint64_t filteredFrames,
                             bool multiImageEnabled = false,
-                            uint64_t multiImageCount = 1);
+                            uint64_t multiImageCount = 1,
+                            const backend::processing::ProcessingCoreIdentity* processingCore = nullptr);
 
     // Recording-mode readers (counterparts to the write* functions above).
     // isRecordingFile() detects a recording-mode file via the presence of
