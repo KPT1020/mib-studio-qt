@@ -1,0 +1,54 @@
+{
+    "appVersion": "1.0.3",
+    "generator": "screenshot_tour",
+    "shots": [
+        {
+            "captured": true,
+            "file": "connect-tab.png",
+            "id": "connect-tab",
+            "title": "Connect tab on startup (mock camera configured)"
+        },
+        {
+            "captured": true,
+            "file": "overview-live.png",
+            "id": "overview-live",
+            "title": "Overview tab with the live camera view and ROI overlay"
+        },
+        {
+            "captured": true,
+            "file": "experiment-preview.png",
+            "id": "experiment-preview",
+            "title": "Experiment > Preview page with playback panel and config editor"
+        },
+        {
+            "captured": true,
+            "file": "experiment-monitoring.png",
+            "id": "experiment-monitoring",
+            "title": "Experiment > Monitoring page with realtime metric charts"
+        },
+        {
+            "captured": true,
+            "file": "review-tab.png",
+            "id": "review-tab",
+            "title": "Review tab for browsing recorded HDF5 experiments"
+        },
+        {
+            "captured": true,
+            "file": "dialog-processing-settings.png",
+            "id": "dialog-processing-settings",
+            "title": "Settings > Processing Settings dialog"
+        },
+        {
+            "captured": true,
+            "file": "dialog-monitoring-settings.png",
+            "id": "dialog-monitoring-settings",
+            "title": "Settings > Monitoring Settings dialog"
+        },
+        {
+            "captured": true,
+            "file": "dialog-pixel-to-micron.png",
+            "id": "dialog-pixel-to-micron",
+            "title": "Settings > Pixel to Micron Conversion dialog"
+        }
+    ]
+}

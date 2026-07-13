@@ -22,5 +22,7 @@
   Conversion factor, Frame viewer, Syringe pump)
 - [[System-Utilities]] — `AppConfigWatcher`, `AutoUpdater`,
   `DeviceInitManager`, `PlaybackPanel`, notifier bridges
+- [[Screenshot-Tour]] — headless harness that regenerates the user-manual
+  screenshots (`docs/manual/`)
 
 **Up**: [[../README|Vault home]] · **See also**: [[../services/_MOC]]

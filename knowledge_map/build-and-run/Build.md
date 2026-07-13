@@ -21,12 +21,13 @@ From `CMakePresets.json`:
 | Target | Kind | Purpose |
 |---|---|---|
 | `mib_backend` | STATIC library | Core: services, camera abstraction, processing |
-| `mib_studio_qt` | executable (`WIN32` on Windows) | Production app |
-| `mock_studio_qt` | executable | Dev app with mock-camera GUI selector |
+| `mib_frontend_common` | STATIC library | All UI sources (tabs, dialogs, `.ui` files) compiled once and linked by both frontend executables. AUTOUIC runs only here — it is `OFF` on the executables because CMake would emit duplicate `ui_*.h` generation rules per target; the `.qrc` is compiled per-executable so the Qt resources survive static linking |
+| `mib_studio_qt` | executable (`WIN32` on Windows) | Production app (mock camera reachable via ConnectTab "Configure Mock…" or `MIB_CAMERA_MODE=mock`) |
+| `screenshot_tour` | executable | Headless UI tour that regenerates the user-manual screenshots (`docs/manual/images`); builds on Linux too (`linux-system-release`); see [[../frontend/Screenshot-Tour]] |
 | `mib_backend_smoke_test` | executable test | Backend-only HDF5/open/flush smoke test (`ctest -L backend`) |
 | `emodulus_lut_catalog_test` | executable test | Backend-only LUT manifest/cache smoke test (`ctest -L backend`) |
 
-`mib_backend` is linked by both executables. Source is in
+`mib_backend` is linked by every executable. Source is in
 `src/backend/`, `src/camera/`, and `src/backend/playback/`.
 
 Backend-only builds set `MIB_BUILD_BACKEND_ONLY=ON` and skip frontend target

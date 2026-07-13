@@ -5,6 +5,18 @@
 
 ## Features shipped
 
+- **User manual + generated screenshots** (2026-07-13, issue #229) —
+  New operator manual under `docs/manual/` (connect, acquire & record,
+  review & post-process, troubleshooting) whose screenshots are generated
+  by a new `screenshot_tour` executable
+  (`src/frontend/tools/screenshot_tour_main.cpp`) that drives the real UI
+  headless in mock-camera mode. `scripts/check_screenshots.py` (run by
+  `docs-ci.yml`) fails when manual image references drift from the harness
+  registry; `build-windows.yml` regenerates the PNGs each release and
+  commits them back to `main`. Details:
+  `knowledge_map/task/2026-07-13-user-manual-screenshots.md` and
+  [[../frontend/Screenshot-Tour]].
+
 - **HDF review export naming and batch export** (2026-07-09) -
   `HdfReviewTab` now suggests source-derived metrics filenames
   (`<h5-basename>_metrics.csv`) with collision suffixes, writes Export All

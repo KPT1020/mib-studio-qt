@@ -303,6 +303,52 @@ jobs:
           sentry-cli releases finalize $release
         shell: pwsh
 
+      # ── User-manual screenshots ────────────────────────────────
+      # screenshot_tour drives the real UI headless in mock-camera mode and
+      # regenerates docs/manual/images (see docs/manual/README.md). Failures
+      # warn instead of blocking the release, but they are never silent.
+      - name: Build screenshot tour
+        run: cmake --build build --config Release --target screenshot_tour
+
+      - name: Generate user-manual screenshots
+        id: screenshots
+        env:
+          QT_QPA_PLATFORM: offscreen
+          MIB_MOCK_CAMERA_DIR: ${{ github.workspace }}\data\mock_frames
+        run: |
+          & build\Release\screenshot_tour.exe --out docs\manual\images
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning::screenshot_tour failed (exit $LASTEXITCODE) - user-manual screenshots were NOT refreshed for this build"
+            "ok=false" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+          "ok=true" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Upload manual screenshots
+        if: steps.screenshots.outputs.ok == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: manual-screenshots-${{ steps.version.outputs.version }}
+          path: docs/manual/images/
+          if-no-files-found: error
+
+      - name: Commit refreshed screenshots (release only)
+        if: steps.screenshots.outputs.ok == 'true' && inputs.mode == 'release'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/manual/images
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "User-manual screenshots unchanged; nothing to commit"
+          } else {
+            git commit -m "docs: refresh user-manual screenshots for v${{ steps.version.outputs.version }}"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          }
+        shell: pwsh
+
       - name: Install InnoSetup
         run: choco install innosetup -y --no-progress
         shell: pwsh
