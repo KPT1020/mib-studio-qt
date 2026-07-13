@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Trigger-path hardening** (2026-07-13, issue #227) — the
+  [[../services/TriggerService]] thread elevates itself to
+  `THREAD_PRIORITY_TIME_CRITICAL` on Windows (best-effort `SCHED_FIFO`
+  elsewhere) so experiment-flush I/O load cannot preempt a pending LED/sort
+  pulse, and `EGrabberCamera::setTriggerOutput` now caches the `LineSelector`
+  selection per camera session (`triggerLineApplied_`, reset on start /
+  reconfigure / write failure) so each pulse edge is a single `LineSource`
+  register write instead of two — halving per-pulse PCIe transactions.
+  Hardware-shaped pulse width via the Coaxlink I/O toolbox remains open as
+  issue #228.
+
 - **Multi-image save stall / LED-trigger jitter fix** (2026-07-08) — HDF5
   image datasets are now chunked one frame per chunk (`{1,H,W[,C]}`) and
   `series_images` one image per chunk (`{1,1,H,W}`). The append helpers write

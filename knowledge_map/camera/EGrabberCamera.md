@@ -52,3 +52,14 @@
   trigger pulse racing a camera stop fails cleanly instead of dereferencing a
   destroyed grabber. `running_` is `std::atomic<bool>` for the same reason
   (read lock-free by the trigger thread and `isRunning()`).
+- **One register write per pulse edge:** `LineSelector` is GenApi nodemap
+  state owned by this `grabber_` instance, so `setTriggerOutput` selects the
+  line once (tracked by `triggerLineApplied_`, reset on `start()` /
+  `configureTriggerOutput()` / any write failure) and then writes only
+  `LineSource` per edge — halving the PCIe control transactions per pulse.
+  The profile config script (`egrabberConfig.js`, which also touches
+  `LineSelector`) runs through a **separate** short-lived `EGrabber` handle in
+  [[../services/CameraControlService]] `applyScriptToDevice`, so it cannot
+  disturb this instance's selection; a fresh `start()` re-selects anyway.
+  Do not add other `LineSelector` writes on *this* grabber handle without
+  clearing `triggerLineApplied_`.
