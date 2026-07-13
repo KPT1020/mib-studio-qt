@@ -48,6 +48,11 @@ shape**, and the **Young's-modulus LUT format**. `contract_version` is a single
 number that names one frozen combination of all three, so a consumer can
 check compatibility with one comparison instead of three.
 
+For how a consumer actually *fetches* the pinned config, LUT, and processing
+engine (the `mib-processing` Python wheel from `bindings/python/`) over
+HTTPS with no Qt/app dependency, see
+[portable-processing-sync.md](portable-processing-sync.md).
+
 **`contract_version: 1`** (current) bundles:
 
 | Piece | Version field | Defined by |

@@ -157,6 +157,35 @@ https://updates.yofo.bio/profiles/stable/lab-default/egrabberConfig.js
 
 The public URL is `https://updates.yofo.bio/<object-key>`. Do not include the bucket name in public manifest URLs when using the R2 custom domain.
 
+### Processing Core Manifest
+
+Pins the current `mib-processing` Python wheel version (`bindings/python/`,
+issue #223) and `contract_version` together, and cross-links the profile
+catalog and Young's-modulus LUT manifest above — the single manifest a
+non-Qt consumer (e.g. Biowork's `services/mib-processing`) resolves first.
+Full schema, field-by-field: [`docs/portable-processing-sync.md`](../portable-processing-sync.md).
+
+Public object layout:
+
+- `stable/processing-core/latest.json`
+- `beta/processing-core/...` for a separate track if needed
+
+Publishing (wheel files must already be built, e.g. via `python -m build`
+in `bindings/python/`, and uploaded as GitHub Release assets before running
+this — the manifest only records their URLs/hashes, it does not build or
+upload the wheels themselves):
+
+```bash
+python publish-processing-core.py \
+  --wheel bindings/python/dist/mib_processing-0.1.0-cp311-cp311-linux_x86_64.whl
+```
+
+Verification:
+
+```bash
+python verify-processing-core-manifest.py
+```
+
 ### Manifest Format
 
 `stable/latest.json` must be JSON with these fields:

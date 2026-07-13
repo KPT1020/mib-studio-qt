@@ -27,6 +27,30 @@
   `knowledge_map/task/2026-07-13-user-manual-screenshots.md` and
   [[../frontend/Screenshot-Tour]].
 
+- **Processing-core sync manifest (`publish-processing-core.py`)** (2026-07-13,
+  issue #224, part of the [Biowork portability epic
+  #220](https://github.com/KPT1020/mib-studio-qt/issues/220)) — New
+  `{channel}/processing-core/latest.json` manifest pinning the
+  `mib-processing` wheel version (#223) + `contract_version` together and
+  cross-linking the existing profile-catalog and emodulus-LUT manifests, so
+  a non-Qt consumer (Biowork's `services/mib-processing`) resolves config +
+  LUT + engine as one set from a single GET. `publish-processing-core.py`
+  (uploads via the existing `scripts/s3_upload.py`, supports `--dry-run`)
+  and `verify-processing-core-manifest.py` (stdlib-only reachability +
+  shape check, mirrors `verify-emodulus-lut-manifest.py`) both live at repo
+  root alongside their siblings. New doc
+  `docs/portable-processing-sync.md` documents all three manifest schemas
+  together; `docs/howto/auto-update-r2.md` gets the operational
+  publish/verify runbook. Added `test_contract_version_consistency.py` as a
+  drift guard: `contract_version`/`CONTRACT_VERSION` is currently declared
+  independently in six places (surfaced while adding this manifest's own
+  `DEFAULT_CONTRACT_VERSION` as a seventh candidate for drift) with no single
+  source of truth; the test fails CI if any declaration is bumped without
+  the others. Verified against live infrastructure: the manifest, wheel
+  sha256 computation, and reachability checks (including a real 404 vs.
+  real 200 on `updates.yofo.bio`) were exercised directly, not just unit
+  tested; 6/6 new Python tests pass.
+
 - **Python bindings for `mib_processing` (`bindings/python/`)** (2026-07-13,
   issue #223, part of the [Biowork portability epic
   #220](https://github.com/KPT1020/mib-studio-qt/issues/220)) — pybind11

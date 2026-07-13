@@ -34,7 +34,14 @@
   and `docs/gold_standard_metrics.schema.json`.
 - **`contract_version`** — single integer naming one frozen version of the
   portable processing contract above. Bump it whenever the metrics schema,
-  config schema, or LUT format changes incompatibly.
+  config schema, or LUT format changes incompatibly. Currently declared
+  independently in six places (`test_contract_version_consistency.py` guards
+  against drift until/unless that's folded into one source of truth).
+- **Processing core manifest** — `{channel}/processing-core/latest.json`,
+  published by `publish-processing-core.py`. Pins the `mib-processing` wheel
+  version + `contract_version` together and cross-links the profile catalog
+  and emodulus LUT manifest, so a consumer resolves config + LUT + engine as
+  one set. See `docs/portable-processing-sync.md`.
 
 ## Protocols & SDKs
 

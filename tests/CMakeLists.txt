@@ -312,4 +312,22 @@ if(Python3_Interpreter_FOUND)
         LABELS "scripts;hdf5"
         TIMEOUT 30
     )
+
+    add_test(
+        NAME scripts.publish_processing_core
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/test_publish_processing_core.py
+    )
+    set_tests_properties(scripts.publish_processing_core PROPERTIES
+        LABELS "scripts;contract"
+        TIMEOUT 30
+    )
+
+    add_test(
+        NAME scripts.contract_version_consistency
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/test_contract_version_consistency.py
+    )
+    set_tests_properties(scripts.contract_version_consistency PROPERTIES
+        LABELS "scripts;contract"
+        TIMEOUT 30
+    )
 endif()
