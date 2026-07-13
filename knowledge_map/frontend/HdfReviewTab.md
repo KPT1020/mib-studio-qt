@@ -15,10 +15,17 @@
   `readValidMetadata` / `readInvalidMetadata`.
 - On scroll/selection, fetch image payloads by index using
   `readImageByIndex` / `readImagesRange` (hyperslab reads — bounded memory).
-- Display metrics in a `QTableView` backed by `HdfMetricsModel`.
+- Display metrics in a `QTableView` backed by `HdfMetricsModel` (includes a
+  **Young's Modulus (kPa)** column; a NaN value — query outside LUT coverage —
+  shows as blank).
 - Optional charts: scatter + histograms over the saved dataset.
 - Metrics exports default to `<loaded-h5-basename>_metrics.csv` and suffix
   `_2`, `_3`, etc. before the save dialog opens when files already exist.
+  The CSV header/row are produced by `frontend::hdfreviewexport::metricsCsvHeader`
+  / `metricsCsvRow` (`utils/HdfReviewExportPaths.{h,cpp}`), so the exported
+  column set — including **Young's Modulus (kPa)** — is unit-tested
+  (`tests/frontend/hdf_review_metrics_csv_test.cpp`) rather than hand-written
+  inline in the tab.
 - `Export All` writes into a source-specific folder under the selected root
   (for example `<root>/<loaded-h5-basename>/metrics.csv` plus TIFF/chart
   outputs) instead of writing `metrics.csv` directly in a shared export root.

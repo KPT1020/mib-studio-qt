@@ -13,7 +13,11 @@
   `startTimeNs`, `endTimeNs`, `totalValidFrames`, `totalInvalidFrames`,
   serialized `ProcessingConfig`, ROI, optional `background` image,
   `config_json` (raw JSON string).
-- `/valid_frames/` — per-field datasets (images, masks, metrics).
+- `/valid_frames/` — per-field datasets (images, masks, metrics). The metrics
+  compound record (`ProcessedFrameMetadataRecord`) carries the per-object
+  `youngsModulus` (LUT lookup result, kPa) alongside area/deformability/etc.; it
+  round-trips through write and read (guarded by
+  `tests/recording/experiment_roundtrip_test.cpp`).
 - `/invalid_frames/` — same shape; populated only at
   `invalidFrameSamplingRate` sampling.
 - `/series_images` — 4D `(N, seriesCount, H, W)` for multi-image mode.

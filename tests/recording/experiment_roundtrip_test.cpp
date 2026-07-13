@@ -37,6 +37,10 @@ ProcessedFrame makeFrame(uint64_t idx, unsigned char value, bool valid,
     f.validation.objectCount = 1;
     f.validation.area = area;
     f.validation.deformability = deform;
+    // Young's modulus (LUT lookup result) must survive the HDF5 round-trip so it
+    // can be surfaced in the review table / CSV export. Derive a distinct value
+    // per frame so a dropped or mis-mapped field is caught.
+    f.validation.youngsModulus = area * 0.1 + deform;
     return f;
 }
 
@@ -93,6 +97,10 @@ int main()
             MIB_EXPECT(near(meta[0].validation.area, 100.0), "area[0] round-trips");
             MIB_EXPECT(near(meta[1].validation.deformability, 0.30),
                        "deformability[1] round-trips");
+            MIB_EXPECT(near(meta[0].validation.youngsModulus, 100.0 * 0.1 + 0.20),
+                       "youngsModulus[0] round-trips");
+            MIB_EXPECT(near(meta[1].validation.youngsModulus, 150.0 * 0.1 + 0.30),
+                       "youngsModulus[1] round-trips");
         }
 
         std::vector<ProcessedFrame> full;
