@@ -1,8 +1,6 @@
 #include "backend/recording/Hdf5Service.h"
 #include "backend/diagnostics/CrashStateMirror.h"
-#include "backend/services/CrashReporter.h"
 #include "backend/processing/ProcessingService.h"
-#include "backend/services/Logger.h"
 
 #include <spdlog/spdlog.h>
 #include <opencv2/core.hpp>
@@ -23,6 +21,22 @@
 
 namespace backend::services
 {
+    namespace
+    {
+        PerformanceTraceFn g_performanceTraceHook;
+
+        void tracePerformance(std::string_view name, std::string_view operation,
+                               double durationMs, std::string_view jsonData)
+        {
+            if (g_performanceTraceHook)
+                g_performanceTraceHook(name, operation, durationMs, jsonData);
+        }
+    }
+
+    void setHdf5PerformanceTraceHook(PerformanceTraceFn fn)
+    {
+        g_performanceTraceHook = std::move(fn);
+    }
 
     struct Hdf5Service::Impl
     {
@@ -360,8 +374,7 @@ namespace backend::services
                 data << "{\"status\":" << status
                      << ",\"final_flush_ok\":" << (flushOk ? "true" : "false")
                      << ",\"open_objects_before_close\":" << openObjects << "}";
-                CrashReporter::capturePerformanceTransaction(
-                    "hdf5.close_file", "hdf5.close", ms, data.str());
+                tracePerformance("hdf5.close_file", "hdf5.close", ms, data.str());
             }
             impl_->fileId_ = H5I_INVALID_HID;
             impl_->isOpen_ = false;
@@ -1241,8 +1254,7 @@ namespace backend::services
                  << ",\"series_ms\":" << msSeries
                  << ",\"invalid_ms\":" << msInvalid
                  << "}";
-            CrashReporter::capturePerformanceTransaction(
-                "hdf5.append_frames", "hdf5.write", msTotal, data.str());
+            tracePerformance("hdf5.append_frames", "hdf5.write", msTotal, data.str());
         }
 
         if (!validFrames.empty() || !invalidFrames.empty())

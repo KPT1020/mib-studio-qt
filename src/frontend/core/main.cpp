@@ -9,6 +9,7 @@
 
 #include "backend/app/AppBackend.h"
 #include "backend/diagnostics/CrashStateMirror.h"
+#include "backend/recording/Hdf5Service.h"
 #include "backend/services/CrashReporter.h"
 #include "frontend/core/MainWindow.h"
 
@@ -137,6 +138,13 @@ namespace {
         }
 
         backend::services::CrashReporter::init(cfg);
+
+        // Wire Hdf5Service's optional performance-trace hook to the real
+        // crash reporter. Hdf5Service itself has no CrashReporter (or Qt)
+        // dependency -- it lives in the Qt-free mib_processing target; this
+        // is the only place the two are connected, and only in the real app.
+        backend::services::setHdf5PerformanceTraceHook(
+            &backend::services::CrashReporter::capturePerformanceTransaction);
 
         // Register the state mirror as the source of crash-time JSON.
         backend::services::CrashReporter::registerStateMirror([]() {

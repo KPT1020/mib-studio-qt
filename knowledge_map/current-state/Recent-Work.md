@@ -27,6 +27,25 @@
   `knowledge_map/task/2026-07-13-user-manual-screenshots.md` and
   [[../frontend/Screenshot-Tour]].
 
+- **Extracted the Qt-free `mib_processing` core library** (2026-07-13, issue
+  #221, part of the [Biowork portability epic
+  #220](https://github.com/KPT1020/mib-studio-qt/issues/220)) — New CMake
+  target `mib_processing` (`src/backend/CMakeLists.txt`) compiling
+  `ProcessingService`, `EModulusLut`, `BatchMaskSources`, `Hdf5Service`,
+  `FrameStore`, `Tools`, and `CrashStateMirror`, linking only OpenCV + HDF5 +
+  spdlog + STL (`AUTOMOC`/`AUTOUIC`/`AUTORCC` explicitly off). `mib_backend`
+  now links `mib_processing` publicly instead of compiling those sources
+  itself, so the desktop app is unaffected. Severed the one real Qt leak in
+  the closure: `Hdf5Service`'s optional performance-trace calls to
+  `CrashReporter::capturePerformanceTransaction` (which pulls in
+  `QtGlobal`/`QString` via `CrashReporter.cpp`'s `qInstallMessageHandler`)
+  became an injectable `setHdf5PerformanceTraceHook`, wired to the real
+  `CrashReporter` from `src/frontend/core/main.cpp` at startup — the only
+  place the two are connected. `backend-ci.yml` now builds `mib_processing`
+  explicitly and greps its symbols to fail CI on any Qt regression. Verified
+  locally: full `linux-backend-only` test suite (47 tests) and the full GUI
+  build (`linux-system-release`, `mib_studio_qt`) both pass unchanged.
+
 - **Portable processing contract frozen (`contract_version: 1`)** (2026-07-13,
   issue #222, part of the [Biowork portability epic
   #220](https://github.com/KPT1020/mib-studio-qt/issues/220)) — Committed

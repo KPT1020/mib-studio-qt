@@ -9,6 +9,22 @@
 **Related:** [[ProcessingService]], [[../data-model/HDF5-Storage]],
 [[../frontend/HdfReviewTab]], [[../architecture/AppBackend]]
 
+**Build target:** compiled into `mib_processing`, the Qt-free static library
+`mib_backend` links publicly (`src/backend/CMakeLists.txt`). `Hdf5Service`
+itself has no `CrashReporter` (or Qt) dependency — see "Performance telemetry
+hook" below.
+
+## Performance telemetry hook
+
+`setHdf5PerformanceTraceHook(PerformanceTraceFn)` (free function, same
+header) is an optional sink for HDF5 I/O performance events (`hdf5.close_file`,
+`hdf5.append_frames`). It defaults to a no-op so `Hdf5Service` stays Qt-free;
+`src/frontend/core/main.cpp` wires it to
+`CrashReporter::capturePerformanceTransaction` during startup
+(`installCrashReporter`), right after `CrashReporter::init`. This is the only
+place `Hdf5Service` and `CrashReporter` are connected, and only in the real
+desktop app — tests and portable consumers may leave it unset.
+
 ## Async write decoupling — `HdfWriteQueue`
 
 `include/backend/recording/HdfWriteQueue.h` is a header-only, bounded (3-slot)

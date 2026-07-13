@@ -21,6 +21,10 @@
 │                       Services (src/backend/services/)              │
 │  Capture · Processing · Hdf5 · Playback · Autofocus · CameraControl │
 │  Trigger · SyringePump · Yolo · Recorder · Sqlite                   │
+├───────────────────────────────────────────────────────────────────────┤
+│  mib_processing (Qt-free static lib, linked by mib_backend):        │
+│    Processing · Hdf5 · FrameStore · Tools · CrashStateMirror        │
+│  — the portable core; see [[../services/ProcessingService]]         │
 └────────────────────────────┬────────────────────────────────────────┘
                              │ grabFrame / config
 ┌────────────────────────────▼────────────────────────────────────────┐
@@ -40,6 +44,13 @@
 See [[../build-and-run/Dependencies]]. Key libs: Qt6, OpenCV, HDF5, spdlog,
 ONNX Runtime, nlohmann_json, Euresys EGrabber SDK (hardware camera), Coremor
 DLL (nanopositioner).
+
+`mib_processing` (the processing/HDF5 core above) depends only on OpenCV,
+HDF5, spdlog, and the standard library — no Qt. This is the portable
+boundary a non-Qt consumer (e.g. Biowork's `services/mib-processing`) can
+build and link standalone; CI (`backend-ci.yml`) fails if a Qt symbol leaks
+into it. See `docs/gold_standard_metrics.md` ("Portable Processing
+Contract").
 
 ## Reading order
 

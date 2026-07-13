@@ -5,11 +5,18 @@
 > ring-ratio to [[AutofocusService]] and target-group events to
 > [[TriggerService]].
 
-**Source:** `src/backend/services/ProcessingService.cpp`,
-`include/backend/services/ProcessingService.h`
+**Source:** `src/backend/processing/ProcessingService.cpp`,
+`include/backend/processing/ProcessingService.h`
 **Related:** [[CaptureService]], [[Hdf5Service]], [[AutofocusService]],
 [[TriggerService]], [[../architecture/Data-Flow]],
 [[../domain/Microscopy-Pipeline]]
+
+**Build target:** compiled into `mib_processing` (Qt-free static library;
+see `src/backend/CMakeLists.txt`), not `mib_backend` directly. `mib_backend`
+links `mib_processing` publicly, so nothing about consuming this service from
+the desktop app changes. This is the portable core a non-Qt consumer (e.g.
+Biowork's `services/mib-processing`) can build and link standalone — see
+`docs/gold_standard_metrics.md` ("Portable Processing Contract").
 
 ## Threads
 

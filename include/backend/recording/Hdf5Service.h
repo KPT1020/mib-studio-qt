@@ -4,6 +4,8 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
+#include <functional>
+#include <string_view>
 
 namespace cv {
     class Mat;
@@ -17,6 +19,19 @@ namespace backend::services {
 #include "backend/processing/ProcessingService.h"
 
 namespace backend::services {
+
+// Optional telemetry hook for HDF5 I/O performance events (file close,
+// frame append). No-op until set, so Hdf5Service carries no CrashReporter
+// (and therefore no Qt) dependency -- it lives in the Qt-free mib_processing
+// target. The desktop app wires this to
+// CrashReporter::capturePerformanceTransaction during startup
+// (src/frontend/core/main.cpp); tests and portable consumers may leave it
+// unset or set their own sink.
+using PerformanceTraceFn = std::function<void(std::string_view name,
+                                              std::string_view operation,
+                                              double durationMs,
+                                              std::string_view jsonData)>;
+void setHdf5PerformanceTraceHook(PerformanceTraceFn fn);
 
 class Hdf5Service {
 public:

@@ -3,7 +3,7 @@
 > CMake + Conan. Windows (VS2022 x64) is the primary target, with Linux
 > cloud builds supported for non-hardware paths.
 
-**Source:** `CMakeLists.txt`, `CMakePresets.json`, `conanfile.txt`
+**Source:** `CMakeLists.txt`, `CMakePresets.json`, `conanfile.py`
 
 ## Presets
 
@@ -20,7 +20,8 @@ From `CMakePresets.json`:
 
 | Target | Kind | Purpose |
 |---|---|---|
-| `mib_backend` | STATIC library | Core: services, camera abstraction, processing |
+| `mib_processing` | STATIC library | Qt-free processing core: `ProcessingService`, `EModulusLut`, `BatchMaskSources`, `Hdf5Service`, `FrameStore`, `Tools`, `CrashStateMirror`. Links only OpenCV + HDF5 + spdlog + STL. |
+| `mib_backend` | STATIC library | Core: services, camera abstraction; links `mib_processing` publicly |
 | `mib_frontend_common` | STATIC library | All UI sources (tabs, dialogs, `.ui` files) compiled once and linked by both frontend executables. AUTOUIC runs only here — it is `OFF` on the executables because CMake would emit duplicate `ui_*.h` generation rules per target; the `.qrc` is compiled per-executable so the Qt resources survive static linking |
 | `mib_studio_qt` | executable (`WIN32` on Windows) | Production app (mock camera reachable via ConnectTab "Configure Mock…" or `MIB_CAMERA_MODE=mock`) |
 | `screenshot_tour` | executable | Headless UI tour that regenerates the user-manual screenshots (`docs/manual/images`); builds on Linux too (`linux-system-release`); see [[../frontend/Screenshot-Tour]] |
@@ -29,6 +30,15 @@ From `CMakePresets.json`:
 
 `mib_backend` is linked by every executable. Source is in
 `src/backend/`, `src/camera/`, and `src/backend/playback/`.
+
+`mib_processing` is defined first in `src/backend/CMakeLists.txt` and has
+`AUTOMOC`/`AUTOUIC`/`AUTORCC` explicitly off — it must not require the Qt
+`moc` toolchain to build standalone. `backend-ci.yml` builds it explicitly
+and greps its symbols to fail CI if a Qt dependency leaks back in. This is
+the artifact a non-Qt consumer (Biowork's `services/mib-processing`) is
+meant to build/bind against — see `docs/gold_standard_metrics.md` ("Portable
+Processing Contract") and the [Biowork portability
+epic](https://github.com/KPT1020/mib-studio-qt/issues/220).
 
 Backend-only builds set `MIB_BUILD_BACKEND_ONLY=ON` and skip frontend target
 generation entirely, but still require Qt `Core+Gui+SerialPort+Network`

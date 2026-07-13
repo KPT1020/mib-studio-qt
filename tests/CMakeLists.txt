@@ -303,4 +303,13 @@ if(Python3_Interpreter_FOUND)
         LABELS "scripts;hdf5"
         TIMEOUT 30
     )
+
+    add_test(
+        NAME scripts.convert_legacy_csv_to_json
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/test_convert_legacy_csv_to_json.py
+    )
+    set_tests_properties(scripts.convert_legacy_csv_to_json PROPERTIES
+        LABELS "scripts;hdf5"
+        TIMEOUT 30
+    )
 endif()
