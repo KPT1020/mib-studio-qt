@@ -27,6 +27,18 @@
   `knowledge_map/task/2026-07-13-user-manual-screenshots.md` and
   [[../frontend/Screenshot-Tour]].
 
+- **Added `youngs_modulus` to the gold-standard metrics contract** (2026-07-13,
+  amendment to issue #222/`contract_version: 1`) — `FilterResult::youngsModulus`
+  is persisted per-frame in HDF5 metadata (`Hdf5Service.cpp`) but was missing
+  from `docs/gold_standard_metrics.schema.json` entirely; surfaced while
+  implementing the A3 Python bindings, whose whole point is exposing
+  deformability + area + Young's modulus. Added as an **optional** field
+  (schema + `docs/gold_standard_metrics.md` + `export_hdf5.py --format json`,
+  omitted rather than emitted as non-JSON `NaN` when the LUT lookup misses
+  coverage or an older HDF5 file lacks the field). Not yet wired into
+  `compare_metrics.py`'s comparison set — left for A5, which needs to decide
+  optional-field skip semantics rather than hard-failing on absence.
+
 - **Extracted the Qt-free `mib_processing` core library** (2026-07-13, issue
   #221, part of the [Biowork portability epic
   #220](https://github.com/KPT1020/mib-studio-qt/issues/220)) — New CMake

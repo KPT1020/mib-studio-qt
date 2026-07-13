@@ -41,6 +41,7 @@ class _FakeDType:
         "brightness_q2",
         "brightness_q3",
         "brightness_q4",
+        "youngsModulus",
     )
 
 
@@ -79,6 +80,7 @@ class _FakeH5File:
             brightness_q2=2.0,
             brightness_q3=3.0,
             brightness_q4=4.0,
+            youngsModulus=5.5,
         )
         self._datasets = {
             "/valid_frames/metadata": _FakeDataset([row]),
@@ -251,7 +253,7 @@ class ExportHdf5PathPolicyTest(unittest.TestCase):
                 "deformability", "area", "area_um2", "area_ratio", "ring_ratio",
                 "is_valid", "touches_border", "has_single_inner_contour", "in_range",
                 "inner_contour_count", "brightness_q1", "brightness_q2",
-                "brightness_q3", "brightness_q4",
+                "brightness_q3", "brightness_q4", "youngs_modulus",
             }
             self.assertEqual(set(frame.keys()), required_keys)
             self.assertIn(frame["frame_type"], ("valid", "invalid"))
@@ -262,8 +264,25 @@ class ExportHdf5PathPolicyTest(unittest.TestCase):
             self.assertEqual(frame["object_count"], 1)
             self.assertAlmostEqual(frame["area"], 42.0)
             self.assertAlmostEqual(frame["area_um2"], 42.0 * 0.5 * 0.5)
+            self.assertAlmostEqual(frame["youngs_modulus"], 5.5)
             self.assertIs(frame["is_valid"], True)
             self.assertIs(frame["touches_border"], False)
+
+    def test_youngs_modulus_omitted_when_absent_from_older_hdf5_files(self) -> None:
+        class _OlderFakeDType:
+            names = tuple(n for n in _FakeDType.names if n != "youngsModulus")
+
+        class _OlderFakeRow(dict):
+            dtype = _OlderFakeDType()
+
+        row = _OlderFakeRow(
+            index=1, timestampNs=1, objectId=1, objectCount=1, deformability=0.1,
+            area=10.0, areaRatio=1.0, ringRatio=1.0, isValid=True, touchesBorder=False,
+            hasSingleInnerContour=True, inRange=True, innerContourCount=1,
+            brightness_q1=0.0, brightness_q2=0.0, brightness_q3=0.0, brightness_q4=0.0,
+        )
+        frame = export_hdf5._frame_to_gold_standard_dict(row, "valid", 0.5)
+        self.assertNotIn("youngs_modulus", frame)
 
     def test_cli_still_requires_output_argument(self) -> None:
         result = subprocess.run(

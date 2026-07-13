@@ -342,7 +342,7 @@ def export_metrics_to_csv(
 def _frame_to_gold_standard_dict(row: "np.void", frame_type: str, pixel_to_micron: float) -> Dict[str, Any]:
     """Map one metadata row to a gold-standard JSON frame object (schema v1)."""
     area = float(row['area'])
-    return {
+    document: Dict[str, Any] = {
         "frame_type": frame_type,
         "index": int(row['index']),
         "timestamp_ns": int(row['timestampNs']),
@@ -363,6 +363,12 @@ def _frame_to_gold_standard_dict(row: "np.void", frame_type: str, pixel_to_micro
         "brightness_q3": float(row['brightness_q3']),
         "brightness_q4": float(row['brightness_q4']),
     }
+    # youngsModulus is only present in HDF5 metadata written by newer builds;
+    # omit (rather than emit non-JSON NaN) when absent or out of LUT coverage.
+    youngs_modulus = float(metadata_value(row, 'youngsModulus', float('nan')))
+    if youngs_modulus == youngs_modulus:  # not NaN
+        document["youngs_modulus"] = youngs_modulus
+    return document
 
 
 def export_metrics_to_json(

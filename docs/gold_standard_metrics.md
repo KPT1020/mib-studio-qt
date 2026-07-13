@@ -25,6 +25,7 @@ Uniform JSON format for processing pipeline metrics so **mib-studio-qt** pipelin
 | `area_um2` | number | Area in **µm²** (optional; = area × pixel_to_micron²). |
 | `area_ratio` | number | Hull area / contour area; dimensionless. |
 | `ring_ratio` | number | sqrt(outer_area − inner_area); ring metric. |
+| `youngs_modulus` | number | Young's modulus (kPa) from `EModulusLut` bilinear lookup on (area_um, deformability) (optional; omitted when the lookup falls outside LUT coverage or no LUT was loaded). |
 | `is_valid` | boolean | True if frame passed all validation checks. |
 | `touches_border` | boolean | True if contour touches image border. |
 | `has_single_inner_contour` | boolean | True if exactly one inner contour (informational; acceptance uses at least one nested contour). |

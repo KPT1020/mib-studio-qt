@@ -90,6 +90,10 @@
           "minimum": 0,
           "description": "Area in um^2 = area * pixel_to_micron^2. Optional; derivable from area and pixel_to_micron."
         },
+        "youngs_modulus": {
+          "type": "number",
+          "description": "Young's modulus (kPa) from EModulusLut bilinear lookup on (area_um, deformability). Optional: omitted when the query point falls outside LUT coverage (lookup returns NaN) or when the producer has no LUT loaded (e.g. a legacy CSV conversion)."
+        },
         "area_ratio": {
           "type": "number",
           "minimum": 0,
