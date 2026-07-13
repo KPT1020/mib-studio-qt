@@ -27,6 +27,34 @@
   `knowledge_map/task/2026-07-13-user-manual-screenshots.md` and
   [[../frontend/Screenshot-Tour]].
 
+- **Python bindings for `mib_processing` (`bindings/python/`)** (2026-07-13,
+  issue #223, part of the [Biowork portability epic
+  #220](https://github.com/KPT1020/mib-studio-qt/issues/220)) — pybind11
+  module (`_mib_processing`) wrapping `process_batch`, `compute_processed_frame`,
+  `EModulusLut`, and the `BatchMaskSources` load/save functions over the
+  Qt-free `mib_processing` core, all speaking the gold-standard metrics dict
+  shape (`docs/gold_standard_metrics.md`). Packaged via scikit-build-core
+  (`bindings/python/pyproject.toml`), which drives the *same* root
+  `CMakeLists.txt` via a new `MIB_BUILD_PYTHON_BINDINGS` option
+  (`cmake/MIBOptions.cmake`) rather than a separate CMake project. Required
+  making `mib_processing` `POSITION_INDEPENDENT_CODE ON` (a static library
+  linked into a shared `.so` needs `-fPIC`) and fixing a real bug caught by
+  testing: `save_masks_to_hdf5` needs both the source image *and* the mask
+  per record (`Hdf5Service::saveFrames` writes both `<group>/images` and
+  `<group>/masks`); the binding originally only forwarded the mask, leaving
+  `originalImage` empty and making HDF5 reject the zero-dimension dataset.
+  Verified end-to-end: full pytest suite (14 tests) against a real compiled
+  wheel, built three ways (editable install, `python -m build` with real PEP
+  517 build isolation, and a from-scratch venv install) — all pass, plus the
+  existing 48-test C++ suite and full GUI build re-verified unaffected. CI:
+  `.github/workflows/python-wheel.yml` builds + tests on relevant PRs and
+  publishes wheels to GitHub Releases (not a native GitHub Packages registry
+  type; see `bindings/python/README.md`) on `mib-processing-v*` tags. Not
+  yet auditwheel/manylinux-portable — the wheel dynamically links the same
+  apt-installed OpenCV/HDF5/spdlog as `backend-ci.yml`, so a consumer's
+  runtime (e.g. Biowork's `services/mib-processing` container) needs matching
+  system packages, not just `pip install`.
+
 - **Added `youngs_modulus` to the gold-standard metrics contract** (2026-07-13,
   amendment to issue #222/`contract_version: 1`) — `FilterResult::youngsModulus`
   is persisted per-frame in HDF5 metadata (`Hdf5Service.cpp`) but was missing

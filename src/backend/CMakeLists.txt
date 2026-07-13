@@ -21,12 +21,16 @@ add_library(mib_processing STATIC
 
 # No Q_OBJECT usage in this target, and it must not require the Qt moc
 # toolchain to build standalone (e.g. for a Qt-less Python wheel build --
-# see the Biowork portability epic #220).
+# see the Biowork portability epic #220). POSITION_INDEPENDENT_CODE is
+# required because bindings/python/CMakeLists.txt links this static library
+# into a shared pybind11 extension module (.so); a non-PIC static archive
+# cannot be linked into a shared object.
 set_target_properties(mib_processing PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
     AUTOMOC OFF
     AUTOUIC OFF
     AUTORCC OFF
+    POSITION_INDEPENDENT_CODE ON
 )
 
 target_include_directories(mib_processing PUBLIC

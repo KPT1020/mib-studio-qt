@@ -1,0 +1,136 @@
+name: Python Wheel (mib_processing)
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['mib-processing-v*']
+    paths:
+      - 'bindings/python/**'
+      - 'src/backend/processing/**'
+      - 'src/backend/recording/Hdf5Service.*'
+      - 'src/backend/diagnostics/CrashStateMirror.*'
+      - 'src/backend/playback/FrameStore.*'
+      - 'src/backend/app/Tools.*'
+      - 'src/backend/CMakeLists.txt'
+      - 'include/backend/processing/**'
+      - 'include/backend/recording/**'
+      - 'cmake/MIBOptions.cmake'
+      - '.github/workflows/python-wheel.yml'
+  pull_request:
+    paths:
+      - 'bindings/python/**'
+      - 'src/backend/processing/**'
+      - 'src/backend/recording/Hdf5Service.*'
+      - 'src/backend/CMakeLists.txt'
+      - 'include/backend/processing/**'
+      - '.github/workflows/python-wheel.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build + test wheel (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Linux system packages
+        # Same dependency set as backend-ci.yml's linux-backend-only build.
+        # The shipped wheel is Qt-free (it only links mib_processing), but
+        # qt6-base-dev/qt6-serialport-dev are still required at CONFIGURE
+        # time: bindings/python/pyproject.toml drives the repo root
+        # CMakeLists.txt, which unconditionally configures mib_backend
+        # alongside mib_processing (src/backend/CMakeLists.txt) even though
+        # this build only installs the mib_processing extension into the
+        # wheel. This is also NOT an auditwheel/manylinux-portable wheel --
+        # the resulting linux_x86_64 wheel is dynamically linked against
+        # these libraries' SONAMEs and requires a compatible runtime with
+        # matching OpenCV/HDF5/spdlog shared libraries (e.g. Biowork's own
+        # services/mib-processing container installing the same apt
+        # packages). See bindings/python/README.md.
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config git \
+            qt6-base-dev qt6-serialport-dev \
+            libopencv-dev libhdf5-dev libspdlog-dev nlohmann-json3-dev libsqlite3-dev
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Build wheel
+        working-directory: bindings/python
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip build
+          python -m build --wheel --outdir dist
+
+      - name: Install wheel + test dependencies
+        working-directory: bindings/python
+        run: |
+          set -euo pipefail
+          python -m pip install dist/*.whl
+          python -m pip install "pytest>=7" "opencv-python-headless>=4.9"
+
+      - name: Run pytest
+        working-directory: bindings/python
+        run: python -m pytest tests/ -v
+
+      - name: Verify importable version + contract
+        run: |
+          python -c "import mib_processing as mp; print('version', mp.__version__); print('contract_version', mp.CONTRACT_VERSION); assert mp.CONTRACT_VERSION == 1"
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: mib_processing-wheel-py${{ matrix.python-version }}
+          path: bindings/python/dist/*.whl
+          if-no-files-found: error
+
+  release:
+    name: Attach wheels to GitHub Release
+    needs: build-and-test
+    if: startsWith(github.ref, 'refs/tags/mib-processing-v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all wheel artifacts
+        uses: actions/download-artifact@v6
+        with:
+          pattern: mib_processing-wheel-py*
+          path: dist
+          merge-multiple: true
+
+      - name: List wheels
+        run: ls -la dist/
+
+      - name: Create/update release with wheel assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          gh release create "$tag" \
+            --repo "${{ github.repository }}" \
+            --title "$tag" \
+            --notes "mib-processing wheels for tag $tag. Install with: pip install <asset-url>. See bindings/python/README.md for platform/compatibility notes (these are Ubuntu-linked wheels, not auditwheel manylinux-portable)." \
+            --generate-notes \
+            dist/*.whl \
+            || gh release upload "$tag" dist/*.whl --repo "${{ github.repository }}" --clobber

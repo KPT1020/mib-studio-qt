@@ -31,6 +31,10 @@ scripts/kedro_frame_detection/data/
 scripts/kedro_frame_detection/conf/local/
 **/__pycache__/
 **/*.egg-info/
+**/.pytest_cache/
+
+# Python wheel build output (published to GitHub Releases, not committed)
+bindings/python/dist/
 
 # MCU firmware subproject (not part of Qt app release)
 mcu/

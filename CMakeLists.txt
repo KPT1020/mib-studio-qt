@@ -24,6 +24,10 @@ if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 
+if(MIB_BUILD_PYTHON_BINDINGS)
+    add_subdirectory(bindings/python)
+endif()
+
 if(NOT MIB_BUILD_BACKEND_ONLY)
     add_subdirectory(src/frontend/qt)
 

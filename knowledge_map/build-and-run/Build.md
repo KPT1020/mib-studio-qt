@@ -44,6 +44,37 @@ Backend-only builds set `MIB_BUILD_BACKEND_ONLY=ON` and skip frontend target
 generation entirely, but still require Qt `Core+Gui+SerialPort+Network`
 because the backend now fetches the LUT manifest directly at startup.
 
+## Python bindings (`bindings/python/`)
+
+`_mib_processing` is a pybind11 extension module (`bindings/python/src/`)
+linking `mib_processing`; the importable package is `mib_processing`
+(`bindings/python/python/mib_processing/`, thin re-export layer). Built via
+[scikit-build-core](https://scikit-build-core.readthedocs.io), driven by
+`bindings/python/pyproject.toml`, which points `cmake.source-dir` at the
+repo root so it configures the *same* root `CMakeLists.txt` (option
+`MIB_BUILD_PYTHON_BINDINGS=ON`, set automatically by the wheel build) rather
+than a separate CMake project:
+
+```bash
+cd bindings/python
+pip install .              # or: pip install -e . --no-build-isolation (dev loop)
+python -m pytest tests/
+```
+
+Requires the same system packages as `linux-backend-only`/
+`linux-system-release` (`docs/howto/linux-build.md`) — including Qt, since
+`add_subdirectory(src/backend)` still configures `mib_backend` alongside
+`mib_processing` even though the wheel only installs the latter. `mib_processing`
+has `POSITION_INDEPENDENT_CODE ON` (needed to link a static library into a
+shared `.so` extension module); this has no effect on the desktop static/
+executable link.
+
+Not an auditwheel/manylinux-portable wheel — see `bindings/python/README.md`.
+CI: `.github/workflows/python-wheel.yml` builds + tests on every relevant PR
+and publishes wheels as GitHub Release assets on `mib-processing-v*` tags
+(a separate tag namespace from the app's own `v*.*.*` releases,
+`.github/workflows/release.yml`).
+
 The top-level CMake project enables both C and CXX so Ubuntu system-package
 HDF5 discovery can run its C probe while the application code remains C++17.
 

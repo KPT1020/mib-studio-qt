@@ -52,6 +52,11 @@ build and link standalone; CI (`backend-ci.yml`) fails if a Qt symbol leaks
 into it. See `docs/gold_standard_metrics.md` ("Portable Processing
 Contract").
 
+`bindings/python/` wraps `mib_processing` in a pybind11 extension module
+(package `mib_processing`, importable as `import mib_processing`), so a
+Python consumer gets the exact same algorithm without linking C++ directly.
+See [[../build-and-run/Build]] ("Python bindings").
+
 ## Reading order
 
 See [[../Agent-Onboarding]].
