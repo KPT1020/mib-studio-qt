@@ -22,7 +22,10 @@
 ## Threading
 
 Dedicated thread waiting on `triggerCV_`. Pulse duration is configurable in
-microseconds (default 1 µs).
+microseconds (default 1 µs). On entry the loop elevates its own scheduling
+priority (`THREAD_PRIORITY_TIME_CRITICAL` on Windows; best-effort `SCHED_FIFO`
+elsewhere, silently unavailable without privileges) so background load — e.g.
+the HDF5 writer draining an experiment flush — cannot preempt a pending pulse.
 
 ## Manual & periodic test paths
 
@@ -80,6 +83,11 @@ microseconds (default 1 µs).
   `capture.stop`); that test is the regression guard.
 - **Known limitation:** `triggerRequested_` is a single bool, so multiple
   target-group results arriving while the thread is mid-pulse coalesce into
-  one fire. Residual latency jitter (tens to ~hundreds of µs under load)
-  is inherent to OS scheduling of the busy-wait thread; sub-10 µs
-  determinism would require real-time thread priority.
+  one fire. The trigger thread now runs at elevated priority (see Threading)
+  and each pulse edge is a single GenICam `LineSource` write (`LineSelector`
+  is cached per camera session — see [[../camera/EGrabberCamera]]), but some
+  residual onset jitter remains from PCIe register-write latency itself.
+  The actual pulse *width* is dominated by that write latency too (the 1 µs
+  busy-wait is shorter than a PCIe control round-trip); hardware-exact width
+  would need the Coaxlink I/O toolbox to shape the pulse — tracked in
+  issue #228.

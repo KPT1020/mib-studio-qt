@@ -75,6 +75,18 @@ Blocking I/O on whichever thread calls it. In practice:
 
 ## Gotchas
 
+- **Chunk-per-frame dataset layout (performance-critical):** image datasets
+  are chunked one frame per chunk and `series_images` one image per chunk,
+  because the append helpers issue one `H5Dwrite` per frame/series image. A
+  multi-frame chunk bigger than HDF5's 1 MiB chunk cache turns every such
+  append into a whole-chunk read-modify-write (~200× disk amplification with
+  the old 100-frame / 10-record chunks). This saturated the disk from the
+  first flush onward in multi-image mode — the "delay + LED trigger jitter
+  after ~100 sets" bug: the flush's writer thread flooded the machine with
+  I/O and the software-timed trigger path ([[TriggerService]]) jittered.
+  Regression guard: `recording.multi_image_series_roundtrip` (round-trip),
+  `recording.hdf5_save_performance` (timing ceiling). See
+  [[../data-model/HDF5-Storage]] before touching chunk dims.
 - `openFile(path)` creates the destination's parent directory tree
   (`std::filesystem::create_directories`) before `H5Fcreate`. HDF5 cannot
   create intermediate directories, so without this a save to a folder that

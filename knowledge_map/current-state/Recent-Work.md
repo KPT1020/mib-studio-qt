@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Trigger-path hardening** (2026-07-13, issue #227) — the
+  [[../services/TriggerService]] thread elevates itself to
+  `THREAD_PRIORITY_TIME_CRITICAL` on Windows (best-effort `SCHED_FIFO`
+  elsewhere) so experiment-flush I/O load cannot preempt a pending LED/sort
+  pulse, and `EGrabberCamera::setTriggerOutput` now caches the `LineSelector`
+  selection per camera session (`triggerLineApplied_`, reset on start /
+  reconfigure / write failure) so each pulse edge is a single `LineSource`
+  register write instead of two — halving per-pulse PCIe transactions.
+  Hardware-shaped pulse width via the Coaxlink I/O toolbox remains open as
+  issue #228.
+
 - **HDF review export naming and batch export** (2026-07-09) -
   `HdfReviewTab` now suggests source-derived metrics filenames
   (`<h5-basename>_metrics.csv`) with collision suffixes, writes Export All
@@ -17,6 +28,21 @@
   `--output` remains directory-only. Added `frontend.hdf_review_export_paths`
   and `scripts.export_hdf5_paths` coverage for basename, suffix, folder, and
   output-root validation policy.
+
+- **Multi-image save stall / LED-trigger jitter fix** (2026-07-08) — HDF5
+  image datasets are now chunked one frame per chunk (`{1,H,W[,C]}`) and
+  `series_images` one image per chunk (`{1,1,H,W}`). The append helpers write
+  one frame per `H5Dwrite`; with the old 100-frame / 10-series-record chunks
+  (far larger than HDF5's 1 MiB chunk cache) every append re-read + re-wrote
+  the entire chunk — up to ~200× disk amplification. In multi-image mode this
+  saturated the disk starting at the first experiment flush (default flush
+  interval 100 frames ⇒ "delay after ~100 sets"), and the resulting I/O /
+  memory-bandwidth pressure delayed the software-timed trigger path
+  (processing loop → `TriggerService` thread → EGrabber GenICam line write),
+  which is why the LED pulse visibly jittered even though frame capture is
+  hardware-driven. New regression test `recording.multi_image_series_roundtrip`
+  round-trips series images across multiple append batches (including
+  non-continuous Mats).
 
 - **Realtime-performance benchmark parts C/D/E** (2026-07-02, PR1 of
   `docs/exec-plans/active/2026-07-02-realtime-performance.md`) —
