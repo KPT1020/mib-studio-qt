@@ -4,7 +4,7 @@ Uniform JSON format for processing pipeline metrics so **mib-studio-qt** pipelin
 
 ## File format
 
-- **Schema**: `gold_standard_metrics.schema.json` (referenced but never committed; see tech debt TD-6 in [exec-plans/tech-debt-tracker.md](exec-plans/tech-debt-tracker.md))
+- **Schema**: [gold_standard_metrics.schema.json](gold_standard_metrics.schema.json) (JSON Schema draft 2020-12; machine-checkable version of this document).
 - **Top-level fields**:
   - `version`: Schema version (currently `1`).
   - `pixel_to_micron`: Conversion factor (1 pixel = X microns). Required for area in µm².
@@ -37,6 +37,69 @@ Uniform JSON format for processing pipeline metrics so **mib-studio-qt** pipelin
 
 Field names align with `FilterResult` and `BrightnessQuantiles` in [ProcessingService.h](../include/backend/processing/ProcessingService.h) and with the CSV header used by `export_hdf5.py` (snake_case in JSON).
 
+## Portable Processing Contract (`contract_version`)
+
+Any consumer that ports or reimplements the mib-studio-qt processing pipeline
+(for example, Biowork's `services/mib-processing` runtime — see the
+[Biowork portability epic](https://github.com/KPT1020/mib-studio-qt/issues/220))
+must agree on three things: the **input config**, the **output metrics
+shape**, and the **Young's-modulus LUT format**. `contract_version` is a single
+number that names one frozen combination of all three, so a consumer can
+check compatibility with one comparison instead of three.
+
+**`contract_version: 1`** (current) bundles:
+
+| Piece | Version field | Defined by |
+|---|---|---|
+| Metrics JSON shape | `version: 1` (this document) | [gold_standard_metrics.schema.json](gold_standard_metrics.schema.json) |
+| Processing config shape | `config_schema_version: 1` | [resources/defaults/config.json](../resources/defaults/config.json), `image_processing` block |
+| Young's-modulus LUT format | tab-separated `area_um  deform  emodulus`, optional `# BEGIN METADATA` JSON header (`channel_width`, `flow_rate`, `fluid_viscosity`) | `EModulusLut::loadFromFile` ([EModulusLut.h](../include/backend/processing/EModulusLut.h)); example file under `resources/isoelastic_curve/` |
+
+Bump `contract_version` whenever any of the three pieces changes in a way
+that is not backward compatible (new required metric field, renamed config
+key, changed LUT column order, etc.), and update all three version markers
+together in the same change.
+
+### `ProcessingConfig` contract (input)
+
+The `image_processing` block of the app config JSON (`config_schema_version: 1`)
+maps directly onto the C++ `ProcessingConfig` struct
+([ProcessingService.h](../include/backend/processing/ProcessingService.h)).
+A portable engine that wants byte-identical results must apply the same
+fields with the same semantics:
+
+| JSON key (`image_processing.*`) | `ProcessingConfig` field | Type | Meaning |
+|---|---|---|---|
+| `gaussian_blur_size` | `gaussian_blur_size` | int | Gaussian blur kernel size (pre-threshold smoothing). |
+| `bg_subtract_threshold` | `bg_subtract_threshold` | int | Background-subtraction difference threshold. |
+| `morph_kernel_size` | `morph_kernel_size` | int | Morphological close kernel size (`MORPH_CROSS`). |
+| `morph_iterations` | `morph_iterations` | int | Morphological close iteration count. |
+| `area_threshold_min` | `area_threshold_min` | int (µm²) | Minimum accepted hull area. |
+| `area_threshold_max` | `area_threshold_max` | int (µm²) | Maximum accepted hull area. |
+| `deformability_threshold_min` | `deformability_threshold_min` | double | Minimum accepted deformability. |
+| `deformability_threshold_max` | `deformability_threshold_max` | double | Maximum accepted deformability. |
+| `filters.enable_border_check` | `enable_border_check` | bool | Reject contours touching the ROI border. |
+| `filters.enable_area_range_check` | `enable_area_range_check` | bool | Gate on `area_threshold_min/max`. |
+| `filters.enable_deformability_range_check` | `enable_deformability_range_check` | bool | Gate on `deformability_threshold_min/max`. |
+| `area_ratio_threshold_max` | `area_ratio_threshold_max` | double | Maximum accepted hull-area / contour-area ratio. |
+| `filters.enable_area_ratio_check` | `enable_area_ratio_check` | bool | Gate on `area_ratio_threshold_max`. |
+| `ring_ratio_min` | `ring_ratio_min` | double | Minimum accepted ring ratio (focus gate). |
+| `ring_ratio_max` | `ring_ratio_max` | double | Maximum accepted ring ratio. |
+| `filters.enable_ring_ratio_check` | `enable_ring_ratio_check` | bool | Gate on `ring_ratio_min/max`. |
+| `filters.require_single_inner_contour` | `require_single_inner_contour` | bool | Require at least one nested (inner) contour. |
+| `empty_frame_pixel_threshold` | `empty_frame_pixel_threshold` | int | Pixel-count threshold used to detect empty frames (auto-background). |
+| `auto_background_enabled` | `auto_background_enabled` | bool | Auto-capture background after N empty frames. |
+| `auto_background_empty_frames` | `auto_background_empty_frames` | int | Empty-frame count before auto-capturing background. |
+| `auto_background_cooldown_frames` | `auto_background_cooldown_frames` | int | Frames to wait before re-arming auto-background capture. |
+| `target_group.enabled` | `enable_target_group` | bool | Enable the second (target-group) gate within valid frames. |
+| `target_group.area_min` / `area_max` | `target_group_area_min` / `target_group_area_max` | int (µm²) | Target-group area range. |
+| `target_group.deformability_min` / `deformability_max` | `target_group_deformability_min` / `target_group_deformability_max` | double | Target-group deformability range. |
+| `target_group.emodulus_enabled` | `enable_target_group_emodulus` | bool | Gate target-group membership on Young's-modulus LUT lookup. |
+| `target_group.emodulus_min` / `emodulus_max` | `target_group_emodulus_min` / `target_group_emodulus_max` | double | Target-group Young's-modulus range (kPa). |
+| `multi_image.enabled` | `multi_image_enabled` | bool | Capture a series of frames per valid detection. |
+| `multi_image.count` | `multi_image_count` | int | Frames per series (1 = disabled). |
+| `pixel_to_micron_factor` (top-level, not under `image_processing`) | passed separately to `computeProcessedFrame`/`processBatch` | double | Pixel→micron conversion; default `0.4886`. Also the `pixel_to_micron` field of this metrics format. |
+
 ### Processing pipeline (nested contours)
 
 When `require_single_inner_contour` (or equivalent) is enabled, the pipeline keeps any object that has **at least one** nested (inner) contour. Batch metrics are computed per nested contour/object candidate. Frame-level realtime snapshots still expose the first selected object for compatibility. The field `has_single_inner_contour` is informational: it is true only when there is exactly one inner contour; acceptance is based on having at least one nested contour.
@@ -52,7 +115,7 @@ Known failure modes:
 
 ## Workflow (summary)
 
-1. **Gold standard**: Run MIB-Studio pipeline → export CSV from saved data → convert CSV to gold-standard JSON with `scripts/convert_legacy_csv_to_json.py` (referenced but never committed; see tech debt TD-6).
+1. **Gold standard**: Run MIB-Studio pipeline → export CSV from saved data → convert CSV to gold-standard JSON with [scripts/convert_legacy_csv_to_json.py](../scripts/convert_legacy_csv_to_json.py).
 2. **Qt pipeline**: Run mib-studio-qt → save experiment to HDF5 → export to gold-standard JSON with `export_hdf5.py --format json`.
 3. **Compare**: Run [compare_metrics.py](../scripts/compare_metrics.py) on the two JSON files (with optional per-field tolerances).
 
@@ -69,10 +132,13 @@ The designated gold standard test dataset for quality-control and regression tes
 python scripts/export_hdf5.py -i "path/to/PANC1 PDE3A CONTROL.h5" -o data/gold_standard_export --format json -p 0.4886
 ```
 
+This writes `data/gold_standard_export/PANC1 PDE3A CONTROL_metrics.json` (collision-safe,
+source-derived filename — same `<h5-basename>_metrics.<ext>` policy as `--format csv`).
+
 **Compare a candidate** to the committed reference:
 
 ```bash
-python scripts/compare_metrics.py data/gold_standard_export/metrics.json path/to/candidate_metrics.json
+python scripts/compare_metrics.py "data/gold_standard_export/PANC1 PDE3A CONTROL_metrics.json" path/to/candidate_metrics.json
 ```
 
 Or, if [compare_metrics.py](../scripts/compare_metrics.py) is configured with the default gold path, pass only the candidate:
@@ -100,7 +166,8 @@ python scripts/compare_metrics.py path/to/candidate_metrics.json
   ```bash
   python scripts/export_hdf5.py -i path/to/experiment.h5 -o path/to/qt_export --format json -p 0.4886
   ```
-  This writes `path/to/qt_export/metrics.json` in the same gold-standard format.
+  This writes `path/to/qt_export/experiment_metrics.json` (source-derived filename) in the
+  same gold-standard format.
 
 ### 3. Compare gold vs Qt output
 

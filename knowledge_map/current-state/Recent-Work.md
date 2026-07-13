@@ -27,6 +27,21 @@
   `knowledge_map/task/2026-07-13-user-manual-screenshots.md` and
   [[../frontend/Screenshot-Tour]].
 
+- **Portable processing contract frozen (`contract_version: 1`)** (2026-07-13,
+  issue #222, part of the [Biowork portability epic
+  #220](https://github.com/KPT1020/mib-studio-qt/issues/220)) — Committed
+  `docs/gold_standard_metrics.schema.json` (closes TD-6). Added
+  `export_hdf5.py --format json`, producing schema-conformant gold-standard
+  metrics JSON with a collision-safe `<h5-basename>_metrics.json` filename.
+  Added `scripts/convert_legacy_csv_to_json.py` to convert legacy MIB-Studio
+  metrics CSV exports to the same JSON contract, with configurable column
+  names and documented defaults for fields the legacy CSV never carried
+  (`area_ratio`, brightness quantiles, `touches_border`, `object_id`,
+  `object_count`). Documented the `ProcessingConfig` JSON ↔ struct field
+  mapping and introduced `contract_version` in `docs/gold_standard_metrics.md`
+  to bundle the metrics schema, config schema, and Young's-modulus LUT format
+  under one version number for portable (non-Qt) consumers.
+
 - **HDF review export naming and batch export** (2026-07-09) -
   `HdfReviewTab` now suggests source-derived metrics filenames
   (`<h5-basename>_metrics.csv`) with collision suffixes, writes Export All

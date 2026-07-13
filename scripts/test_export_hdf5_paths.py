@@ -221,6 +221,50 @@ class ExportHdf5PathPolicyTest(unittest.TestCase):
                 1,
             )
 
+    def test_json_export_matches_gold_standard_contract(self) -> None:
+        """Lightweight structural check mirroring docs/gold_standard_metrics.schema.json.
+
+        Avoids a hard dependency on the `jsonschema` package; asserts the same
+        required keys, enum values, and field types the committed schema enforces.
+        """
+        import json as json_module
+
+        with tempfile.TemporaryDirectory() as temp_dir, self._hdf5_dependency_patch():
+            root = Path(temp_dir)
+            source = root / "cell run.v1.h5"
+            source.write_text("fake hdf5", encoding="utf-8")
+
+            self.assertEqual(export_hdf5.export_hdf5(source, root, "json", pixel_to_micron=0.5), 0)
+
+            json_path = root / "cell run.v1_metrics.json"
+            self.assertTrue(json_path.is_file())
+            document = json_module.loads(json_path.read_text(encoding="utf-8"))
+
+            self.assertEqual(document["version"], 1)
+            self.assertEqual(document["pixel_to_micron"], 0.5)
+            self.assertEqual(document["source"], "cell run.v1")
+            self.assertEqual(len(document["frames"]), 1)
+
+            frame = document["frames"][0]
+            required_keys = {
+                "frame_type", "index", "timestamp_ns", "object_id", "object_count",
+                "deformability", "area", "area_um2", "area_ratio", "ring_ratio",
+                "is_valid", "touches_border", "has_single_inner_contour", "in_range",
+                "inner_contour_count", "brightness_q1", "brightness_q2",
+                "brightness_q3", "brightness_q4",
+            }
+            self.assertEqual(set(frame.keys()), required_keys)
+            self.assertIn(frame["frame_type"], ("valid", "invalid"))
+            self.assertEqual(frame["frame_type"], "valid")
+            self.assertEqual(frame["index"], 7)
+            self.assertEqual(frame["timestamp_ns"], 1234)
+            self.assertEqual(frame["object_id"], 2)
+            self.assertEqual(frame["object_count"], 1)
+            self.assertAlmostEqual(frame["area"], 42.0)
+            self.assertAlmostEqual(frame["area_um2"], 42.0 * 0.5 * 0.5)
+            self.assertIs(frame["is_valid"], True)
+            self.assertIs(frame["touches_border"], False)
+
     def test_cli_still_requires_output_argument(self) -> None:
         result = subprocess.run(
             [sys.executable, str(SCRIPT_DIR / "export_hdf5.py"), "-i", "experiment.h5"],

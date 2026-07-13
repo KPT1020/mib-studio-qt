@@ -24,6 +24,18 @@
 - **ROI** — rectangular region of interest; applied pre-analysis by
   [[../services/ProcessingService]] and by display in [[../frontend/PreviewPage]].
 
+## Portability
+
+- **Portable processing contract** — the frozen combination of the
+  gold-standard metrics JSON shape, `ProcessingConfig` JSON shape, and
+  Young's-modulus LUT text format that a non-Qt consumer (e.g. Biowork's
+  `services/mib-processing`) must match to get identical results. Defined in
+  `docs/gold_standard_metrics.md` ("Portable Processing Contract" section)
+  and `docs/gold_standard_metrics.schema.json`.
+- **`contract_version`** — single integer naming one frozen version of the
+  portable processing contract above. Bump it whenever the metrics schema,
+  config schema, or LUT format changes incompatibly.
+
 ## Protocols & SDKs
 
 - **GenICam** — standard camera control API.

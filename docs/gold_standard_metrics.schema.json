@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://updates.yofo.bio/schemas/gold_standard_metrics.schema.json",
+  "title": "MIB Studio gold-standard processing metrics",
+  "description": "Uniform JSON format for per-object deformability-cytometry metrics, used to compare mib-studio-qt pipeline output against the MIB-Studio legacy pipeline and against any portable reimplementation of the pipeline (see docs/gold_standard_metrics.md). Field names align with FilterResult and BrightnessQuantiles in include/backend/processing/ProcessingService.h.",
+  "type": "object",
+  "required": ["version", "pixel_to_micron", "frames"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema version of this metrics document."
+    },
+    "pixel_to_micron": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Conversion factor: 1 pixel = pixel_to_micron microns. Required to derive area_um2 from area."
+    },
+    "source": {
+      "type": "string",
+      "description": "Optional label identifying the producer, e.g. 'mib-studio-qt', 'MIB-Studio-gold'."
+    },
+    "frames": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/frame" }
+    }
+  },
+  "$defs": {
+    "frame": {
+      "type": "object",
+      "required": [
+        "frame_type",
+        "index",
+        "timestamp_ns",
+        "object_id",
+        "object_count",
+        "deformability",
+        "area",
+        "area_ratio",
+        "ring_ratio",
+        "is_valid",
+        "touches_border",
+        "has_single_inner_contour",
+        "in_range",
+        "inner_contour_count",
+        "brightness_q1",
+        "brightness_q2",
+        "brightness_q3",
+        "brightness_q4"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "frame_type": {
+          "type": "string",
+          "enum": ["valid", "invalid"],
+          "description": "Whether the source frame/ROI passed validation."
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Frame index from acquisition (monotonic)."
+        },
+        "timestamp_ns": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Timestamp in nanoseconds."
+        },
+        "object_id": {
+          "type": "integer",
+          "minimum": -1,
+          "description": "One-based object candidate within the source frame/ROI, ordered left-to-right then top-to-bottom; -1 when no object candidate was selected."
+        },
+        "object_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of object candidates emitted for the source frame/ROI."
+        },
+        "deformability": {
+          "type": "number",
+          "description": "1.0 minus circularity; dimensionless."
+        },
+        "area": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Hull area in pixels."
+        },
+        "area_um2": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Area in um^2 = area * pixel_to_micron^2. Optional; derivable from area and pixel_to_micron."
+        },
+        "area_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Hull area / contour area; dimensionless."
+        },
+        "ring_ratio": {
+          "type": "number",
+          "description": "sqrt(outer_area - inner_area); ring metric used for focus feedback."
+        },
+        "is_valid": {
+          "type": "boolean",
+          "description": "True if frame passed all validation checks."
+        },
+        "touches_border": {
+          "type": "boolean",
+          "description": "True if the contour touches the image border."
+        },
+        "has_single_inner_contour": {
+          "type": "boolean",
+          "description": "True only when there is exactly one inner contour. Informational; acceptance uses at least one nested contour."
+        },
+        "in_range": {
+          "type": "boolean",
+          "description": "True if area is within the configured min/max range."
+        },
+        "inner_contour_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of inner (nested) contours."
+        },
+        "brightness_q1": { "type": "number", "description": "25th percentile brightness in the masked region." },
+        "brightness_q2": { "type": "number", "description": "50th percentile (median) brightness." },
+        "brightness_q3": { "type": "number", "description": "75th percentile brightness." },
+        "brightness_q4": { "type": "number", "description": "100th percentile (max) brightness." }
+      }
+    }
+  }
+}
