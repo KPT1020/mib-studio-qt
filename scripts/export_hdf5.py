@@ -35,10 +35,13 @@ try:
     import h5py
     import numpy as np
 except ImportError as e:
-    print("ERROR: Required dependencies not installed.", file=sys.stderr)
-    print("Install with: pip install h5py numpy", file=sys.stderr)
-    print(f"Details: {e}", file=sys.stderr)
-    sys.exit(1)
+    h5py = None
+    np = None
+    HDF5_IMPORT_ERROR = e
+    HAS_HDF5_DEPS = False
+else:
+    HDF5_IMPORT_ERROR = None
+    HAS_HDF5_DEPS = True
 
 
 # Try to import cv2 only if needed for image export
@@ -47,6 +50,77 @@ try:
     HAS_CV2 = True
 except ImportError:
     HAS_CV2 = False
+
+
+def source_base_name(input_path: Path) -> str:
+    """Return the HDF5 source filename without only its final suffix."""
+    base = input_path.stem.strip()
+    return base if base else "hdf_export"
+
+
+def unique_path(parent_dir: Path, first_name: str, numbered_pattern: str) -> Path:
+    """Return a deterministic non-existing path under parent_dir."""
+    candidate = parent_dir / first_name
+    if not candidate.exists():
+        return candidate
+
+    for suffix in range(2, 1_000_000):
+        candidate = parent_dir / numbered_pattern.format(suffix=suffix)
+        if not candidate.exists():
+            return candidate
+
+    return candidate
+
+
+def validate_output_root(output_root: Path) -> Tuple[bool, str]:
+    """Validate that --output is an output directory path, not a file path."""
+    if output_root.suffix.lower() == ".csv":
+        return False, f"Output path must be a directory, not a CSV file: {output_root}"
+
+    if output_root.exists() and not output_root.is_dir():
+        return False, f"Output path exists and is not a directory: {output_root}"
+
+    return True, ""
+
+
+def ensure_output_root(output_root: Path) -> Tuple[bool, str]:
+    """Create the output root if needed after validating directory semantics."""
+    valid, error = validate_output_root(output_root)
+    if not valid:
+        return False, error
+
+    try:
+        output_root.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        return False, f"Failed to create output directory {output_root}: {e}"
+
+    return True, ""
+
+
+def metrics_csv_path(input_path: Path, output_root: Path) -> Path:
+    """Return the collision-safe CSV path for a metrics-only export."""
+    base = source_base_name(input_path)
+    return unique_path(
+        output_root,
+        f"{base}_metrics.csv",
+        f"{base}_metrics_{{suffix}}.csv",
+    )
+
+
+def export_folder_path(input_path: Path, output_root: Path) -> Path:
+    """Return the collision-safe source-specific folder path for image/all exports."""
+    base = source_base_name(input_path)
+    return unique_path(output_root, base, f"{base}_{{suffix}}")
+
+
+def resolve_export_targets(input_path: Path, output_root: Path, format_type: str) -> Tuple[Optional[Path], Path]:
+    """Resolve generated output paths for the selected export format."""
+    if format_type == "csv":
+        return metrics_csv_path(input_path, output_root), output_root
+
+    data_output_dir = export_folder_path(input_path, output_root)
+    csv_path = data_output_dir / "metrics.csv" if format_type == "all" else None
+    return csv_path, data_output_dir
 
 
 def parse_args() -> argparse.Namespace:
@@ -393,18 +467,31 @@ def export_hdf5(
         print(f"ERROR: Input path is not a file: {input_path}", file=sys.stderr)
         return 1
     
-    # Create output directory
-    try:
-        output_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        print(f"ERROR: Failed to create output directory {output_dir}: {e}", file=sys.stderr)
+    ok, error = ensure_output_root(output_dir)
+    if not ok:
+        print(f"ERROR: {error}", file=sys.stderr)
         return 1
-    
+
+    if not HAS_HDF5_DEPS:
+        print("ERROR: Required dependencies not installed.", file=sys.stderr)
+        print("Install with: pip install h5py numpy", file=sys.stderr)
+        print(f"Details: {HDF5_IMPORT_ERROR}", file=sys.stderr)
+        return 1
+
+    csv_path, data_output_dir = resolve_export_targets(input_path, output_dir, format_type)
+
     # Check if cv2 is needed
     if format_type in ("images", "all") and not HAS_CV2:
         print("ERROR: opencv-python (cv2) is required for image export.", file=sys.stderr)
         print("Install with: pip install opencv-python", file=sys.stderr)
         return 1
+
+    if format_type in ("images", "all"):
+        try:
+            data_output_dir.mkdir(parents=True, exist_ok=False)
+        except OSError as e:
+            print(f"ERROR: Failed to create export directory {data_output_dir}: {e}", file=sys.stderr)
+            return 1
     
     # Open HDF5 file
     try:
@@ -430,7 +517,9 @@ def export_hdf5(
             
             # Export CSV if requested
             if format_type in ("csv", "all"):
-                csv_path = output_dir / "metrics.csv"
+                if csv_path is None:
+                    print("ERROR: CSV output path was not resolved", file=sys.stderr)
+                    return 1
                 valid_count, invalid_count = export_metrics_to_csv(
                     metadata_valid,
                     metadata_invalid,
@@ -453,7 +542,7 @@ def export_hdf5(
                         exported = export_images_to_tiff(
                             images_valid,
                             metadata_valid,
-                            output_dir,
+                            data_output_dir,
                             "valid"
                         )
                         total_exported += exported
@@ -463,7 +552,7 @@ def export_hdf5(
 
                     # Export multi-image series if present
                     series_exported = export_series_images_to_tiff(
-                        h5_file, metadata_valid, output_dir
+                        h5_file, metadata_valid, data_output_dir
                     )
                     if series_exported > 0:
                         total_exported += series_exported
@@ -476,7 +565,7 @@ def export_hdf5(
                         exported = export_images_to_tiff(
                             images_invalid,
                             metadata_invalid,
-                            output_dir,
+                            data_output_dir,
                             "invalid"
                         )
                         total_exported += exported
@@ -502,7 +591,8 @@ def export_hdf5(
         traceback.print_exc()
         return 1
     
-    print(f"\nExport complete. Output directory: {output_dir}")
+    final_output = data_output_dir if format_type in ("images", "all") else output_dir
+    print(f"\nExport complete. Output directory: {final_output}")
     return 0
 
 
