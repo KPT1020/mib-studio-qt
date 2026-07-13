@@ -34,3 +34,6 @@ scripts/kedro_frame_detection/conf/local/
 
 # MCU firmware subproject (not part of Qt app release)
 mcu/
+
+# MkDocs user-guide site build output (docs-site.yml / mkdocs build)
+site/

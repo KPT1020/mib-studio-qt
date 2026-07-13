@@ -5,6 +5,16 @@
 
 ## Features shipped
 
+- **User-guide website** (2026-07-13, issue #233) — `docs/manual/` is now
+  published as a searchable site at
+  <https://kpt1020.github.io/mib-studio-qt/>: new `mkdocs.yml` (Material,
+  `docs_dir: docs/manual`), a visual-tour landing page
+  (`docs/manual/index.md`) built from the generated screenshots, and
+  `.github/workflows/docs-site.yml` deploying to GitHub Pages on pushes to
+  `main` that touch `docs/manual/**` — including the screenshot-refresh
+  commits from `build-windows.yml`, so the site tracks each release.
+  Details: `knowledge_map/task/2026-07-13-user-guide-website.md`.
+
 - **User manual + generated screenshots** (2026-07-13, issue #229) —
   New operator manual under `docs/manual/` (connect, acquire & record,
   review & post-process, troubleshooting) whose screenshots are generated

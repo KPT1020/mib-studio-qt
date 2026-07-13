@@ -4,6 +4,12 @@ Operator-facing documentation for MIB Studio Qt, organized by workflow.
 No build tools or developer setup required — everything here assumes you
 are running the installed Windows application.
 
+**Prefer a website?** This manual is published as a searchable user-guide
+site at <https://kpt1020.github.io/mib-studio-qt/> — same pages, plus a
+visual tour landing page ([index.md](index.md)). The site is built by
+[`docs-site.yml`](../../.github/workflows/docs-site.yml) from `mkdocs.yml`
+and redeploys whenever these pages or the generated screenshots change.
+
 ## Workflows
 
 1. [Getting started](getting-started.md) — install, update, and find your

@@ -59,7 +59,8 @@ ctest --preset linux-backend-only-test         # backend unit tests
 CI: [`backend-ci.yml`](.github/workflows/backend-ci.yml) builds and tests the
 backend on Linux; [`docs-ci.yml`](.github/workflows/docs-ci.yml) runs the
 knowledge checks; [`ci.yml`](.github/workflows/ci.yml) validates Windows
-packaging scripts.
+packaging scripts; [`docs-site.yml`](.github/workflows/docs-site.yml)
+publishes `docs/manual/` as the user-guide website (`mkdocs.yml`).
 
 ## Testing framework (safeguards)
 
