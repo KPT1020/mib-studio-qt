@@ -12,7 +12,7 @@ license = { text = "Proprietary" }
 dependencies = ["numpy>=1.21"]
 
 [project.optional-dependencies]
-test = ["pytest>=7", "opencv-python-headless>=4.9"]
+test = ["pytest>=7", "opencv-python-headless>=4.9", "jsonschema>=4"]
 
 [project.urls]
 Source = "https://github.com/KPT1020/mib-studio-qt"

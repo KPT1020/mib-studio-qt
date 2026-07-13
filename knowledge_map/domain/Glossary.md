@@ -42,6 +42,10 @@
   version + `contract_version` together and cross-links the profile catalog
   and emodulus LUT manifest, so a consumer resolves config + LUT + engine as
   one set. See `docs/portable-processing-sync.md`.
+- **Processing conformance reference** —
+  `scripts/gold_standard_dataset.json`, a deterministic full-parity output from
+  the installed wheel. `scripts/run_processing_conformance.py` fails on metric,
+  mask, series-image, target-group, tracking, or record-accounting drift.
 
 ## Protocols & SDKs
 

@@ -44,6 +44,7 @@ class ConvertLegacyCsvToJsonTest(unittest.TestCase):
         document = self._run_convert(LEGACY_CSV)
 
         self.assertEqual(document["version"], 1)
+        self.assertEqual(document["contract_version"], 1)
         self.assertAlmostEqual(document["pixel_to_micron"], 0.4886)
         self.assertEqual(document["source"], "MIB-Studio-gold:1:PANC1")
         self.assertEqual(len(document["frames"]), 2)

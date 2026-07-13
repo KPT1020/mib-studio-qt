@@ -51,6 +51,8 @@ GOLD_STANDARD_KEYS = {
     "is_valid", "touches_border", "has_single_inner_contour", "in_range",
     "inner_contour_count", "brightness_q1", "brightness_q2", "brightness_q3",
     "brightness_q4",
+    "is_target_group", "track_id", "track_first_frame", "track_last_frame",
+    "track_observation_count",
 }
 
 
@@ -102,6 +104,38 @@ class TestProcessBatch:
         assert isinstance(mask, np.ndarray)
         assert mask.dtype == np.uint8
         assert mask.shape == frame.shape
+
+    def test_target_group_and_tracking_metadata_are_exposed(self) -> None:
+        config = make_smoke_config()
+        config.update(
+            enable_target_group=True,
+            target_group_area_min=0,
+            target_group_area_max=100000,
+            target_group_deformability_min=0.0,
+            target_group_deformability_max=1.0,
+        )
+        results = mp.process_batch([make_ring_frame()], config)
+
+        assert len(results) == 1
+        assert results[0]["is_target_group"] is True
+        assert results[0]["track_id"] == 1
+        assert results[0]["track_first_frame"] == 0
+        assert results[0]["track_last_frame"] == 0
+        assert results[0]["track_observation_count"] == 1
+
+    def test_include_series_images_returns_trigger_and_following_frames(self) -> None:
+        frames = [make_ring_frame(), np.full((80, 80), 17, dtype=np.uint8),
+                  np.full((80, 80), 23, dtype=np.uint8)]
+        config = make_smoke_config()
+        config.update(multi_image_enabled=True, multi_image_count=3)
+
+        results = mp.process_batch(frames, config, include_series_images=True)
+
+        valid = next(result for result in results if result["is_valid"])
+        assert len(valid["series_images"]) == 3
+        assert np.array_equal(valid["series_images"][0], frames[0])
+        assert np.array_equal(valid["series_images"][1], frames[1])
+        assert np.array_equal(valid["series_images"][2], frames[2])
 
     def test_index_and_timestamp_preserved_via_compute_processed_frame(self) -> None:
         frame = make_ring_frame()

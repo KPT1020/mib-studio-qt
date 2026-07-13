@@ -14,15 +14,36 @@ on:
       - 'src/backend/CMakeLists.txt'
       - 'include/backend/processing/**'
       - 'include/backend/recording/**'
+      - 'scripts/compare_metrics.py'
+      - 'scripts/run_processing_conformance.py'
+      - 'scripts/gold_standard_dataset.json'
+      - 'scripts/z_adjustment_50v_reference.json'
+      - 'scripts/test_compare_metrics.py'
+      - 'scripts/test_run_processing_conformance.py'
+      - 'docs/gold_standard_metrics.schema.json'
       - 'cmake/MIBOptions.cmake'
+      - 'cmake/MIBLinkHelpers.cmake'
       - '.github/workflows/python-wheel.yml'
   pull_request:
     paths:
       - 'bindings/python/**'
       - 'src/backend/processing/**'
       - 'src/backend/recording/Hdf5Service.*'
+      - 'src/backend/diagnostics/CrashStateMirror.*'
+      - 'src/backend/playback/FrameStore.*'
+      - 'src/backend/app/Tools.*'
       - 'src/backend/CMakeLists.txt'
       - 'include/backend/processing/**'
+      - 'include/backend/recording/**'
+      - 'cmake/MIBOptions.cmake'
+      - 'cmake/MIBLinkHelpers.cmake'
+      - 'scripts/compare_metrics.py'
+      - 'scripts/run_processing_conformance.py'
+      - 'scripts/gold_standard_dataset.json'
+      - 'scripts/z_adjustment_50v_reference.json'
+      - 'scripts/test_compare_metrics.py'
+      - 'scripts/test_run_processing_conformance.py'
+      - 'docs/gold_standard_metrics.schema.json'
       - '.github/workflows/python-wheel.yml'
   workflow_dispatch:
 
@@ -85,7 +106,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install dist/*.whl
-          python -m pip install "pytest>=7" "opencv-python-headless>=4.9"
+          python -m pip install "pytest>=7" "opencv-python-headless>=4.9" "jsonschema>=4"
 
       - name: Run pytest
         working-directory: bindings/python
@@ -94,6 +115,20 @@ jobs:
       - name: Verify importable version + contract
         run: |
           python -c "import mib_processing as mp; print('version', mp.__version__); print('contract_version', mp.CONTRACT_VERSION); assert mp.CONTRACT_VERSION == 1"
+
+      - name: Run full-parity conformance harness
+        run: |
+          set -euo pipefail
+          python scripts/run_processing_conformance.py \
+            --candidate-out artifacts/mib-processing-conformance.json
+
+      - name: Upload conformance candidate
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: mib-processing-conformance-py${{ matrix.python-version }}
+          path: artifacts/mib-processing-conformance.json
+          if-no-files-found: ignore
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v5

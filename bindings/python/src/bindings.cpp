@@ -54,8 +54,8 @@ cv::Mat backgroundFromObject(const py::object& background) {
     return numpyToGrayMat(background.cast<py::array>());
 }
 
-py::dict processedFrameToPyDict(const ProcessedFrame& frame, double pixelToMicron,
-                                 bool includeMask, bool includeSeriesImages) {
+py::dict processedFrameToPyDict(const ProcessedFrame& frame, double pixelToMicron, bool includeMask,
+                                bool includeSeriesImages) {
     py::dict d = processedFrameToDict(frame, pixelToMicron);
     if (includeMask) {
         d["mask"] = matToNumpy(frame.processedImage);
@@ -71,8 +71,8 @@ py::dict processedFrameToPyDict(const ProcessedFrame& frame, double pixelToMicro
 }
 
 py::list processBatch(const std::vector<py::array>& frames, const py::dict& configDict,
-                       const py::object& background, const py::tuple& roiTuple,
-                       double pixelToMicron, bool includeMasks, bool includeSeriesImages) {
+                      const py::object& background, const py::tuple& roiTuple, double pixelToMicron,
+                      bool includeMasks, bool includeSeriesImages) {
     std::vector<cv::Mat> grayImages;
     grayImages.reserve(frames.size());
     for (const auto& arr : frames) {
@@ -98,9 +98,9 @@ py::list processBatch(const std::vector<py::array>& frames, const py::dict& conf
 }
 
 py::dict computeProcessedFrame(const py::array& grayInput, const py::object& background,
-                                const py::dict& configDict, const py::tuple& roiTuple,
-                                uint64_t index, uint64_t timestampNs, double pixelToMicron,
-                                bool includeMask) {
+                               const py::dict& configDict, const py::tuple& roiTuple,
+                               uint64_t index, uint64_t timestampNs, double pixelToMicron,
+                               bool includeMask) {
     const cv::Mat gray = numpyToGrayMat(grayInput);
     const cv::Mat bg = backgroundFromObject(background);
     const ProcessingConfig config = configFromDict(configDict);
@@ -119,9 +119,11 @@ py::tuple loadFromFolder(const std::string& folderPath) {
     std::vector<cv::Mat> outGray;
     std::vector<std::string> outFilenames;
     std::vector<std::string> errors;
-    const bool ok = backend::services::batch_masks::loadFromFolder(folderPath, outGray, outFilenames, errors);
+    const bool ok =
+        backend::services::batch_masks::loadFromFolder(folderPath, outGray, outFilenames, errors);
     py::list images;
-    for (const auto& mat : outGray) images.append(matToNumpy(mat));
+    for (const auto& mat : outGray)
+        images.append(matToNumpy(mat));
     return py::make_tuple(ok, images, outFilenames, errors);
 }
 
@@ -129,29 +131,33 @@ py::tuple loadFromAvi(const std::string& aviPath) {
     std::vector<cv::Mat> outGray;
     std::vector<std::string> outFilenames;
     std::vector<std::string> errors;
-    const bool ok = backend::services::batch_masks::loadFromAvi(aviPath, outGray, outFilenames, errors);
+    const bool ok =
+        backend::services::batch_masks::loadFromAvi(aviPath, outGray, outFilenames, errors);
     py::list images;
-    for (const auto& mat : outGray) images.append(matToNumpy(mat));
+    for (const auto& mat : outGray)
+        images.append(matToNumpy(mat));
     return py::make_tuple(ok, images, outFilenames, errors);
 }
 
 py::tuple loadImagesFromHdf5(const std::string& hdf5Path, const std::string& datasetPath,
-                              size_t startIndex, size_t count) {
+                             size_t startIndex, size_t count) {
     Hdf5Service hdf5;
     if (!hdf5.loadFile(hdf5Path)) {
         return py::make_tuple(false, py::list());
     }
     std::vector<cv::Mat> outGray;
-    const bool ok = backend::services::batch_masks::loadFromHdf5(hdf5, datasetPath, startIndex, count, outGray);
+    const bool ok =
+        backend::services::batch_masks::loadFromHdf5(hdf5, datasetPath, startIndex, count, outGray);
     py::list images;
-    for (const auto& mat : outGray) images.append(matToNumpy(mat));
+    for (const auto& mat : outGray)
+        images.append(matToNumpy(mat));
     return py::make_tuple(ok, images);
 }
 
 bool saveMasksToHdf5(const std::vector<py::dict>& frameDicts, const std::vector<py::array>& images,
-                      const std::vector<py::array>& masks, const std::string& outputPath,
-                      const py::dict& configDict, const py::tuple& roiTuple, const py::object& background,
-                      bool useFrameTimestamps) {
+                     const std::vector<py::array>& masks, const std::string& outputPath,
+                     const py::dict& configDict, const py::tuple& roiTuple,
+                     const py::object& background, bool useFrameTimestamps) {
     if (frameDicts.size() != images.size() || frameDicts.size() != masks.size()) {
         throw std::invalid_argument("frame_dicts, images, and masks must be the same length");
     }
@@ -172,11 +178,11 @@ bool saveMasksToHdf5(const std::vector<py::dict>& frameDicts, const std::vector<
     const cv::Mat bg = backgroundFromObject(background);
 
     py::gil_scoped_release release;
-    return backend::services::batch_masks::saveMasksToHdf5(
-        frames, outputPath, config, roi.x, roi.y, roi.w, roi.h, bg, useFrameTimestamps);
+    return backend::services::batch_masks::saveMasksToHdf5(frames, outputPath, config, roi.x, roi.y,
+                                                           roi.w, roi.h, bg, useFrameTimestamps);
 }
 
-}  // namespace
+} // namespace
 
 PYBIND11_MODULE(_mib_processing, m) {
     m.doc() = "pybind11 bindings over the Qt-free mib_processing core "
@@ -184,17 +190,19 @@ PYBIND11_MODULE(_mib_processing, m) {
               "docs/gold_standard_metrics.md in mib-studio-qt for the "
               "field-name contract.";
 
-    m.def("process_batch", &processBatch,
-          py::arg("frames"), py::arg("config"), py::arg("background") = py::none(),
-          py::arg("roi") = py::make_tuple(0, 0, 0, 0), py::arg("pixel_to_micron") = 0.4886,
-          py::arg("include_masks") = false, py::arg("include_series_images") = false,
+    m.def("process_batch", &processBatch, py::arg("frames"), py::arg("config"),
+          py::arg("background") = py::none(), py::arg("roi") = py::make_tuple(0, 0, 0, 0),
+          py::arg("pixel_to_micron") = 0.4886, py::arg("include_masks") = false,
+          py::arg("include_series_images") = false,
           "Run the batch pipeline over a list of 2D uint8 grayscale numpy "
           "arrays. Returns a list of dicts (one per detected object "
           "candidate, gold-standard-metrics shaped); pass include_masks=True "
-          "to add a 'mask' numpy array to each dict.");
+          "to add a 'mask' numpy array to each dict. With multi-image mode "
+          "enabled in config, include_series_images=True adds the trigger "
+          "image and available following frames to each retained valid record.");
 
-    m.def("compute_processed_frame", &computeProcessedFrame,
-          py::arg("gray"), py::arg("background") = py::none(), py::arg("config") = py::dict(),
+    m.def("compute_processed_frame", &computeProcessedFrame, py::arg("gray"),
+          py::arg("background") = py::none(), py::arg("config") = py::dict(),
           py::arg("roi") = py::make_tuple(0, 0, 0, 0), py::arg("index") = 0,
           py::arg("timestamp_ns") = 0, py::arg("pixel_to_micron") = 0.4886,
           py::arg("include_mask") = false,
@@ -203,10 +211,11 @@ PYBIND11_MODULE(_mib_processing, m) {
           "frame's first selected object (see docs/gold_standard_metrics.md "
           "on has_single_inner_contour / multi-object semantics).");
 
-    m.def("config_from_dict", [](const py::dict& d) { return configToDict(configFromDict(d)); },
-          py::arg("config"),
-          "Round-trip a ProcessingConfig dict through the C++ struct, filling in "
-          "any missing fields with the struct's own defaults.");
+    m.def(
+        "config_from_dict", [](const py::dict& d) { return configToDict(configFromDict(d)); },
+        py::arg("config"),
+        "Round-trip a ProcessingConfig dict through the C++ struct, filling in "
+        "any missing fields with the struct's own defaults.");
 
     m.def("load_from_folder", &loadFromFolder, py::arg("folder_path"),
           "Load all TIFF/PNG/JPEG/BMP files in folder_path as grayscale "
@@ -216,15 +225,14 @@ PYBIND11_MODULE(_mib_processing, m) {
           "Decode all frames from an AVI file as grayscale images. Returns "
           "(ok, images, filenames, errors).");
 
-    m.def("load_images_from_hdf5", &loadImagesFromHdf5,
-          py::arg("hdf5_path"), py::arg("dataset_path"), py::arg("start_index") = 0,
-          py::arg("count") = 0,
+    m.def("load_images_from_hdf5", &loadImagesFromHdf5, py::arg("hdf5_path"),
+          py::arg("dataset_path"), py::arg("start_index") = 0, py::arg("count") = 0,
           "Load a contiguous range of images from an HDF5 dataset (e.g. "
           "'/valid_frames/images'). Returns (ok, images).");
 
-    m.def("save_masks_to_hdf5", &saveMasksToHdf5,
-          py::arg("frame_dicts"), py::arg("images"), py::arg("masks"), py::arg("output_path"),
-          py::arg("config"), py::arg("roi") = py::make_tuple(0, 0, 0, 0), py::arg("background") = py::none(),
+    m.def("save_masks_to_hdf5", &saveMasksToHdf5, py::arg("frame_dicts"), py::arg("images"),
+          py::arg("masks"), py::arg("output_path"), py::arg("config"),
+          py::arg("roi") = py::make_tuple(0, 0, 0, 0), py::arg("background") = py::none(),
           py::arg("use_frame_timestamps") = false,
           "Write frame_dicts (as returned by process_batch) plus their "
           "source images and masks to a fresh HDF5 file, partitioned into "

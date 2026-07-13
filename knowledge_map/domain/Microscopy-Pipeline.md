@@ -54,5 +54,8 @@ piezo nanopositioner to keep the cell in focus across the channel.
   `docs/gold_standard_metrics.schema.json`, `scripts/export_hdf5.py
   --format json`, `scripts/convert_legacy_csv_to_json.py`, and
   `scripts/compare_metrics.py`.
+- `scripts/run_processing_conformance.py` — always-on installed-wheel parity
+  check. It compares metrics, target/tracking metadata, and SHA-256 evidence for
+  masks + multi-image series against `scripts/gold_standard_dataset.json`.
 - `scripts/empty_frame_detection.py` — offline Python pipeline (Kedro +
   MLflow at `mlflow.yofo.bio`). Not part of the Qt app's runtime.

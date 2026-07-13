@@ -214,6 +214,11 @@ def metadata_value(row: np.void, field: str, default):
     return row[field] if field in names else default
 
 
+def metadata_has(row: np.void, field: str) -> bool:
+    """Return whether an HDF5 compound metadata row carries ``field``."""
+    return field in (row.dtype.names or ())
+
+
 def read_hdf5_images(h5_file: h5py.File, dataset_path: str) -> Optional[np.ndarray]:
     """
     Read images from HDF5 dataset.
@@ -368,6 +373,13 @@ def _frame_to_gold_standard_dict(row: "np.void", frame_type: str, pixel_to_micro
     youngs_modulus = float(metadata_value(row, 'youngsModulus', float('nan')))
     if youngs_modulus == youngs_modulus:  # not NaN
         document["youngs_modulus"] = youngs_modulus
+    if metadata_has(row, "isTargetGroup"):
+        document["is_target_group"] = bool(row["isTargetGroup"])
+    if metadata_has(row, "trackId"):
+        document["track_id"] = int(row["trackId"])
+        document["track_first_frame"] = int(metadata_value(row, "trackFirstFrame", 0))
+        document["track_last_frame"] = int(metadata_value(row, "trackLastFrame", 0))
+        document["track_observation_count"] = int(metadata_value(row, "trackObservationCount", 0))
     return document
 
 
@@ -410,6 +422,7 @@ def export_metrics_to_json(
 
     document = {
         "version": GOLD_STANDARD_SCHEMA_VERSION,
+        "contract_version": GOLD_STANDARD_SCHEMA_VERSION,
         "pixel_to_micron": pixel_to_micron,
         "source": source_label,
         "frames": frames,

@@ -229,6 +229,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     document = {
         "version": GOLD_STANDARD_SCHEMA_VERSION,
+        "contract_version": GOLD_STANDARD_SCHEMA_VERSION,
         "pixel_to_micron": args.pixel_to_micron,
         "source": resolve_source_label(args.source, rows, args.batch_column, args.condition_column),
         "frames": frames,

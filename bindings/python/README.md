@@ -56,3 +56,24 @@ results = mp.process_batch(frames, config, pixel_to_micron=0.4886)
 for r in results:
     print(r["frame_type"], r["deformability"], r.get("youngs_modulus"))
 ```
+
+## Conformance / anti-drift
+
+From the repository root, verify the installed wheel against the committed
+full-parity reference:
+
+```bash
+python scripts/run_processing_conformance.py
+```
+
+The check covers numeric metrics, validity, target-group and tracking metadata,
+mask bytes, and ordered multi-image-series bytes. It is the same command run by
+the wheel CI and is intended to be called by downstream consumers such as
+Biowork after installing a pinned wheel. Install the package's `test` extra (or
+`jsonschema>=4`) so the candidate is validated against the committed JSON
+Schema before comparison.
+
+The same runner accepts a bounded grayscale dataset directly from an HDF5
+recording with `--hdf5`, `--hdf5-dataset`, `--frame-offset`, and
+`--frame-limit`. See `docs/gold_standard_metrics.md` for the pinned
+`gavinlouuu/z_adjustment-data` real-corpus command and reference provenance.

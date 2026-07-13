@@ -330,4 +330,22 @@ if(Python3_Interpreter_FOUND)
         LABELS "scripts;contract"
         TIMEOUT 30
     )
+
+    add_test(
+        NAME scripts.compare_metrics
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/test_compare_metrics.py
+    )
+    set_tests_properties(scripts.compare_metrics PROPERTIES
+        LABELS "scripts;contract;processing"
+        TIMEOUT 30
+    )
+
+    add_test(
+        NAME scripts.run_processing_conformance_input
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/test_run_processing_conformance.py
+    )
+    set_tests_properties(scripts.run_processing_conformance_input PROPERTIES
+        LABELS "scripts;contract;processing;hdf5"
+        TIMEOUT 30
+    )
 endif()

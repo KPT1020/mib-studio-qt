@@ -28,6 +28,10 @@ inline py::dict processedFrameToDict(const ProcessedFrame& frame, double pixelTo
     d["timestamp_ns"] = frame.timestampNs;
     d["object_id"] = v.objectId;
     d["object_count"] = v.objectCount;
+    d["track_id"] = v.trackId;
+    d["track_first_frame"] = v.trackFirstFrame;
+    d["track_last_frame"] = v.trackLastFrame;
+    d["track_observation_count"] = v.trackObservationCount;
     d["deformability"] = v.deformability;
     d["area"] = v.area;
     d["area_um2"] = v.area * pixelToMicron * pixelToMicron;
@@ -40,6 +44,7 @@ inline py::dict processedFrameToDict(const ProcessedFrame& frame, double pixelTo
     d["touches_border"] = v.touchesBorder;
     d["has_single_inner_contour"] = v.hasSingleInnerContour;
     d["in_range"] = v.inRange;
+    d["is_target_group"] = v.isTargetGroup;
     d["inner_contour_count"] = v.innerContourCount;
     d["brightness_q1"] = v.brightness.q1;
     d["brightness_q2"] = v.brightness.q2;
@@ -68,10 +73,15 @@ inline ProcessedFrame processedFrameFromDict(const py::dict& d) {
     v.innerContourCount = dictGet(d, "inner_contour_count", 0);
     v.objectId = dictGet(d, "object_id", -1);
     v.objectCount = dictGet(d, "object_count", 0);
+    v.trackId = dictGet(d, "track_id", -1);
+    v.trackFirstFrame = dictGet<uint64_t>(d, "track_first_frame", 0);
+    v.trackLastFrame = dictGet<uint64_t>(d, "track_last_frame", 0);
+    v.trackObservationCount = dictGet(d, "track_observation_count", 0);
     v.deformability = dictGet(d, "deformability", 0.0);
     v.area = dictGet(d, "area", 0.0);
     v.areaRatio = dictGet(d, "area_ratio", 0.0);
     v.ringRatio = dictGet(d, "ring_ratio", 0.0);
+    v.isTargetGroup = dictGet(d, "is_target_group", false);
     v.youngsModulus = dictGet(d, "youngs_modulus", std::numeric_limits<double>::quiet_NaN());
     v.brightness.q1 = dictGet(d, "brightness_q1", 0.0);
     v.brightness.q2 = dictGet(d, "brightness_q2", 0.0);
@@ -80,4 +90,4 @@ inline ProcessedFrame processedFrameFromDict(const py::dict& d) {
     return f;
 }
 
-}  // namespace mib_processing_bindings
+} // namespace mib_processing_bindings

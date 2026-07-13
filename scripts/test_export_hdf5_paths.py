@@ -28,6 +28,10 @@ class _FakeDType:
         "timestampNs",
         "objectId",
         "objectCount",
+        "trackId",
+        "trackFirstFrame",
+        "trackLastFrame",
+        "trackObservationCount",
         "deformability",
         "area",
         "areaRatio",
@@ -42,6 +46,7 @@ class _FakeDType:
         "brightness_q3",
         "brightness_q4",
         "youngsModulus",
+        "isTargetGroup",
     )
 
 
@@ -67,6 +72,10 @@ class _FakeH5File:
             timestampNs=1234,
             objectId=2,
             objectCount=1,
+            trackId=3,
+            trackFirstFrame=5,
+            trackLastFrame=7,
+            trackObservationCount=3,
             deformability=0.125,
             area=42.0,
             areaRatio=0.75,
@@ -81,6 +90,7 @@ class _FakeH5File:
             brightness_q3=3.0,
             brightness_q4=4.0,
             youngsModulus=5.5,
+            isTargetGroup=True,
         )
         self._datasets = {
             "/valid_frames/metadata": _FakeDataset([row]),
@@ -243,6 +253,7 @@ class ExportHdf5PathPolicyTest(unittest.TestCase):
             document = json_module.loads(json_path.read_text(encoding="utf-8"))
 
             self.assertEqual(document["version"], 1)
+            self.assertEqual(document["contract_version"], 1)
             self.assertEqual(document["pixel_to_micron"], 0.5)
             self.assertEqual(document["source"], "cell run.v1")
             self.assertEqual(len(document["frames"]), 1)
@@ -254,6 +265,8 @@ class ExportHdf5PathPolicyTest(unittest.TestCase):
                 "is_valid", "touches_border", "has_single_inner_contour", "in_range",
                 "inner_contour_count", "brightness_q1", "brightness_q2",
                 "brightness_q3", "brightness_q4", "youngs_modulus",
+                "is_target_group", "track_id", "track_first_frame",
+                "track_last_frame", "track_observation_count",
             }
             self.assertEqual(set(frame.keys()), required_keys)
             self.assertIn(frame["frame_type"], ("valid", "invalid"))
@@ -265,12 +278,20 @@ class ExportHdf5PathPolicyTest(unittest.TestCase):
             self.assertAlmostEqual(frame["area"], 42.0)
             self.assertAlmostEqual(frame["area_um2"], 42.0 * 0.5 * 0.5)
             self.assertAlmostEqual(frame["youngs_modulus"], 5.5)
+            self.assertIs(frame["is_target_group"], True)
+            self.assertEqual(frame["track_id"], 3)
             self.assertIs(frame["is_valid"], True)
             self.assertIs(frame["touches_border"], False)
 
     def test_youngs_modulus_omitted_when_absent_from_older_hdf5_files(self) -> None:
         class _OlderFakeDType:
-            names = tuple(n for n in _FakeDType.names if n != "youngsModulus")
+            names = tuple(
+                n for n in _FakeDType.names
+                if n not in {
+                    "youngsModulus", "isTargetGroup", "trackId",
+                    "trackFirstFrame", "trackLastFrame", "trackObservationCount",
+                }
+            )
 
         class _OlderFakeRow(dict):
             dtype = _OlderFakeDType()
@@ -283,6 +304,8 @@ class ExportHdf5PathPolicyTest(unittest.TestCase):
         )
         frame = export_hdf5._frame_to_gold_standard_dict(row, "valid", 0.5)
         self.assertNotIn("youngs_modulus", frame)
+        self.assertNotIn("is_target_group", frame)
+        self.assertNotIn("track_id", frame)
 
     def test_cli_still_requires_output_argument(self) -> None:
         result = subprocess.run(

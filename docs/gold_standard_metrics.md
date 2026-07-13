@@ -7,6 +7,12 @@ Uniform JSON format for processing pipeline metrics so **mib-studio-qt** pipelin
 - **Schema**: [gold_standard_metrics.schema.json](gold_standard_metrics.schema.json) (JSON Schema draft 2020-12; machine-checkable version of this document).
 - **Top-level fields**:
   - `version`: Schema version (currently `1`).
+  - `contract_version`: Optional explicit portable-processing contract version
+    (required in conformance references; currently `1`).
+  - `wheel_version`: Optional `mib-processing` package version that produced a
+    conformance candidate.
+  - `fixture` / `input_frame_count`: Optional conformance-fixture identity and
+    source-frame accounting.
   - `pixel_to_micron`: Conversion factor (1 pixel = X microns). Required for area in µm².
   - `source`: Optional label (e.g. `mib-studio-qt`, `MIB-Studio-gold`).
   - `frames`: Array of per-frame metric objects.
@@ -20,6 +26,9 @@ Uniform JSON format for processing pipeline metrics so **mib-studio-qt** pipelin
 | `timestamp_ns` | integer | Timestamp in nanoseconds. |
 | `object_id` | integer | One-based object candidate within the source frame/ROI, ordered left-to-right then top-to-bottom; `-1` when no object candidate was selected. |
 | `object_count` | integer | Number of object candidates emitted for the source frame/ROI. |
+| `track_id` | integer | Stable batch track ID; `-1` for invalid/untracked records (optional). |
+| `track_first_frame` / `track_last_frame` | integer | Source-frame span merged into the retained track (optional). |
+| `track_observation_count` | integer | Number of detections merged into the retained track (optional). |
 | `deformability` | number | 1.0 − circularity; dimensionless. |
 | `area` | number | Hull area in **pixels**. |
 | `area_um2` | number | Area in **µm²** (optional; = area × pixel_to_micron²). |
@@ -27,6 +36,7 @@ Uniform JSON format for processing pipeline metrics so **mib-studio-qt** pipelin
 | `ring_ratio` | number | sqrt(outer_area − inner_area); ring metric. |
 | `youngs_modulus` | number | Young's modulus (kPa) from `EModulusLut` bilinear lookup on (area_um, deformability) (optional; omitted when the lookup falls outside LUT coverage or no LUT was loaded). |
 | `is_valid` | boolean | True if frame passed all validation checks. |
+| `is_target_group` | boolean | Target-group/trigger classification (optional). |
 | `touches_border` | boolean | True if contour touches image border. |
 | `has_single_inner_contour` | boolean | True if exactly one inner contour (informational; acceptance uses at least one nested contour). |
 | `in_range` | boolean | True if area within configured min/max. |
@@ -35,6 +45,8 @@ Uniform JSON format for processing pipeline metrics so **mib-studio-qt** pipelin
 | `brightness_q2` | number | 50th percentile (median) brightness. |
 | `brightness_q3` | number | 75th percentile brightness. |
 | `brightness_q4` | number | 100th percentile (max) brightness. |
+| `mask_sha256` | string | SHA-256 over mask dtype + shape + bytes for exact conformance (optional). |
+| `series_images_sha256` | string[] | Ordered SHA-256 values for trigger + following multi-image-series frames (optional). |
 
 Field names align with `FilterResult` and `BrightnessQuantiles` in [ProcessingService.h](../include/backend/processing/ProcessingService.h) and with the CSV header used by `export_hdf5.py` (snake_case in JSON).
 
@@ -125,14 +137,91 @@ Known failure modes:
 2. **Qt pipeline**: Run mib-studio-qt → save experiment to HDF5 → export to gold-standard JSON with `export_hdf5.py --format json`.
 3. **Compare**: Run [compare_metrics.py](../scripts/compare_metrics.py) on the two JSON files (with optional per-field tolerances).
 
-## Gold standard test dataset
+## Always-on wheel conformance
 
-The designated gold standard test dataset for quality-control and regression testing is **PANC1 PDE3A CONTROL.h5**.
+Issue #225's anti-drift check is a standalone command:
+
+```bash
+python scripts/run_processing_conformance.py
+```
+
+It runs the **installed** `mib-processing` wheel over a deterministic
+three-frame nested-contour fixture, hashes every output mask and multi-image
+series frame, and compares metrics + hashes + target/tracking metadata against
+[`scripts/gold_standard_dataset.json`](../scripts/gold_standard_dataset.json).
+The command exits non-zero for missing/extra records or any value/hash drift;
+`.github/workflows/python-wheel.yml` runs it after building and installing each
+wheel. Fixture identity and input-frame count are also exact, so a candidate
+from the wrong corpus window cannot pass. Biowork can invoke the same
+entrypoint after installing its pinned wheel.
+
+The reference uses a small generated fixture because experiment HDF5 files are
+runtime data and must not be committed. After an intentional, reviewed
+algorithm or contract change, regenerate it with:
+
+```bash
+python scripts/run_processing_conformance.py --update-reference
+python scripts/run_processing_conformance.py
+```
+
+For an external frame corpus, either store an `N x H x W` uint8 array named
+`frames` in an NPZ, or point the runner directly at a grayscale `N x H x W`
+uint8 HDF5 dataset. HDF5 reads are bounded so a multi-gigabyte recording is not
+loaded into memory:
+
+```bash
+python scripts/run_processing_conformance.py \
+  --hdf5 path/to/recording.h5 \
+  --hdf5-dataset /recorded_frames/images \
+  --frame-offset 0 --frame-limit 3 \
+  --fixture-id "stable-corpus-provenance" \
+  --reference path/to/reference.json
+```
+
+Use `--frames-npz path/to/frames.npz` instead for an NPZ corpus. These are the
+cross-repository hooks for local/Biowork data without checking recordings into
+git.
+
+## Z-adjustment real-corpus verification
+
+The available real-corpus evidence is the private Hugging Face dataset
+[`gavinlouuu/z_adjustment-data`](https://huggingface.co/datasets/gavinlouuu/z_adjustment-data),
+approved as the replacement for issue #225's unavailable PANC1 recording. The
+committed [`scripts/z_adjustment_50v_reference.json`](../scripts/z_adjustment_50v_reference.json)
+pins eight frames starting at offset 500 of the in-focus recording at Hub revision
+`fc62e3147fb0237e46e6eebd0fb09e669abef12f`; the source file's LFS SHA-256 is
+`7ed2a721c85adc600688e32d4c4dbb7a58f0c725e351559ebc946eddab311bdc`.
+
+After downloading `50V_in_focus/recording_20260511_160006.h5` with authorized
+Hub access to `data/conformance/z-adjustment-50v-in-focus.h5`, verify the
+installed wheel with:
+
+```bash
+python scripts/run_processing_conformance.py \
+  --hdf5 data/conformance/z-adjustment-50v-in-focus.h5 \
+  --hdf5-dataset /recorded_frames/images \
+  --frame-offset 500 --frame-limit 8 \
+  --fixture-id "hf:gavinlouuu/z_adjustment-data@fc62e3147fb0237e46e6eebd0fb09e669abef12f:50V_in_focus/recording_20260511_160006.h5#sha256=7ed2a721c85adc600688e32d4c4dbb7a58f0c725e351559ebc946eddab311bdc:/recorded_frames/images[500:508]" \
+  --reference scripts/z_adjustment_50v_reference.json
+```
+
+The recording stays under ignored `data/conformance/`; only metrics and exact
+mask/series hashes are committed. The private corpus is therefore a local
+release-evidence lane, while the generated ring fixture remains the always-on
+CI lane. Offset 500 was selected because this bounded window contains valid,
+multi-object tracked detections and non-empty series payloads. Add
+`--update-reference` only for an intentional reviewed refresh.
+
+## Original PANC1 dataset
+
+Issue #225 originally designated **PANC1 PDE3A CONTROL.h5** for quality-control
+and regression testing. It was not available during implementation, but the
+existing export path remains supported:
 
 - **HDF5 path**: `c:\Users\gavin\data\2026_jan_chengdu\PANC1 PDE3A CONTROL.h5` (or set your copy path in [scripts/gold_standard_dataset.json](../scripts/gold_standard_dataset.json)).
 - **Pixel-to-micron**: Use `-p 0.4886` (script default) unless the experiment uses a different value.
 
-**Generate reference JSON** from this HDF5:
+**Generate a metrics reference JSON** from a local copy of this HDF5:
 
 ```bash
 python scripts/export_hdf5.py -i "path/to/PANC1 PDE3A CONTROL.h5" -o data/gold_standard_export --format json -p 0.4886
@@ -141,13 +230,14 @@ python scripts/export_hdf5.py -i "path/to/PANC1 PDE3A CONTROL.h5" -o data/gold_s
 This writes `data/gold_standard_export/PANC1 PDE3A CONTROL_metrics.json` (collision-safe,
 source-derived filename — same `<h5-basename>_metrics.<ext>` policy as `--format csv`).
 
-**Compare a candidate** to the committed reference:
+**Compare a candidate** to that local PANC1 reference:
 
 ```bash
 python scripts/compare_metrics.py "data/gold_standard_export/PANC1 PDE3A CONTROL_metrics.json" path/to/candidate_metrics.json
 ```
 
-Or, if [compare_metrics.py](../scripts/compare_metrics.py) is configured with the default gold path, pass only the candidate:
+To compare against the committed deterministic wheel-conformance reference,
+pass only the candidate:
 
 ```bash
 python scripts/compare_metrics.py path/to/candidate_metrics.json

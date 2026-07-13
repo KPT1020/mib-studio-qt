@@ -161,6 +161,19 @@ TIFFs — use:
   inputs, returns `std::vector<ProcessedFrame>`. Progress is reported via
   `BatchProgressCallback(BatchProgress{done, total})`.
 
+  When `multi_image_enabled` and `multi_image_count > 1`, each newly retained
+  valid track also carries the trigger image plus the available following
+  source frames in `seriesImages`. The Python binding exposes these with
+  `include_series_images=True`; issue #225's conformance harness hashes the
+  ordered payloads so an empty or reordered series fails CI.
+
+The Python result dict also preserves `isTargetGroup` and batch tracking
+identity/span/count. `scripts/run_processing_conformance.py` locks these fields,
+all metrics, and mask/series bytes to the committed reference. Its optional
+bounded HDF5 input mode also validates the installed wheel against the pinned
+private `gavinlouuu/z_adjustment-data` 50V in-focus corpus without loading or
+committing the multi-gigabyte recording.
+
 Input/output adapters live in [[BatchMaskSources]] —
 `loadFromHdf5` / `loadFromFolder` (input), `saveMaskImages` /
 `saveMasksToHdf5` (output). `HdfReviewTab` exposes a "Regenerate masks…"

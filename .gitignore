@@ -5,6 +5,7 @@ export/
 data/logs/app.log
 data/logs/symphony-*.log
 data/empty_detection_results/
+data/conformance/
 review_artifacts/
 .cache/
 .python_deps/

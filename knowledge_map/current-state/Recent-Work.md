@@ -27,6 +27,30 @@
   `knowledge_map/task/2026-07-13-user-manual-screenshots.md` and
   [[../frontend/Screenshot-Tour]].
 
+- **Installed-wheel full-parity conformance harness** (2026-07-13, issue #225,
+  the final planned anti-drift stage of the [Biowork portability epic
+  #220](https://github.com/KPT1020/mib-studio-qt/issues/220)) —
+  `scripts/run_processing_conformance.py` runs the installed
+  `mib-processing` wheel over a deterministic nested-contour/multi-image
+  sequence and compares it with the committed
+  `scripts/gold_standard_dataset.json`. `compare_metrics.py` now uses
+  `(index, frame_type, object_id)` identities (so multi-object records cannot
+  be silently collapsed), rejects extra candidate records, compares
+  `youngs_modulus`, contract metadata, target-group/tracking fields, and exact
+  SHA-256 evidence for every mask and ordered series image. The wheel's
+  previously exposed `include_series_images=True` option is now functional:
+  `ProcessingService::processBatch` attaches the trigger + available following
+  frames for retained valid tracks, and binding dicts expose target/tracking
+  metadata. `.github/workflows/python-wheel.yml` runs the harness against each
+  wheel it builds and uploads the candidate for failure diagnosis. Local wheel
+  verification also added conditional compatibility for OpenCV 5's new
+  `opencv_geometry` split and upstream/Homebrew HDF5 2.x's un-namespaced CMake
+  targets. The unavailable PANC1 input was replaced, with user approval, by a
+  revision- and SHA-pinned eight-frame detection window from the private
+  `gavinlouuu/z_adjustment-data` 50V in-focus HDF5 recording. The runner reads
+  bounded HDF5 windows directly; only its metrics/output-hash reference is
+  committed, while the 1.52 GB input remains ignored runtime data.
+
 - **Processing-core sync manifest (`publish-processing-core.py`)** (2026-07-13,
   issue #224, part of the [Biowork portability epic
   #220](https://github.com/KPT1020/mib-studio-qt/issues/220)) — New

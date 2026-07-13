@@ -59,6 +59,8 @@ than a separate CMake project:
 cd bindings/python
 pip install .              # or: pip install -e . --no-build-isolation (dev loop)
 python -m pytest tests/
+cd ../..
+python scripts/run_processing_conformance.py  # installed-wheel anti-drift check
 ```
 
 Requires the same system packages as `linux-backend-only`/
@@ -71,12 +73,17 @@ executable link.
 
 Not an auditwheel/manylinux-portable wheel — see `bindings/python/README.md`.
 CI: `.github/workflows/python-wheel.yml` builds + tests on every relevant PR
-and publishes wheels as GitHub Release assets on `mib-processing-v*` tags
+then runs the full-parity conformance harness before publishing wheels as
+GitHub Release assets on `mib-processing-v*` tags
 (a separate tag namespace from the app's own `v*.*.*` releases,
 `.github/workflows/release.yml`).
 
 The top-level CMake project enables both C and CXX so Ubuntu system-package
 HDF5 discovery can run its C probe while the application code remains C++17.
+`cmake/MIBLinkHelpers.cmake` accepts both the namespaced HDF5 targets used by
+Conan/Linux packages and the un-namespaced `hdf5-shared` / `hdf5-static`
+targets exported by upstream/Homebrew HDF5 2.x. With OpenCV 5 it additionally
+links `opencv_geometry`; OpenCV 4 keeps the existing imgproc-only path.
 
 ## Commands
 

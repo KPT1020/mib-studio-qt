@@ -12,6 +12,24 @@
       "const": 1,
       "description": "Schema version of this metrics document."
     },
+    "contract_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Optional explicit portable-processing contract version. Required by conformance references; omitted by older metrics-only exports."
+    },
+    "wheel_version": {
+      "type": "string",
+      "description": "Optional mib-processing wheel version that produced a conformance candidate."
+    },
+    "fixture": {
+      "type": "string",
+      "description": "Optional stable identifier for the input fixture used by a conformance run."
+    },
+    "input_frame_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional number of source frames consumed. Output records may differ because batch processing deduplicates tracked objects."
+    },
     "pixel_to_micron": {
       "type": "number",
       "exclusiveMinimum": 0,
@@ -76,6 +94,26 @@
           "minimum": 0,
           "description": "Number of object candidates emitted for the source frame/ROI."
         },
+        "track_id": {
+          "type": "integer",
+          "minimum": -1,
+          "description": "Optional stable batch track identifier; -1 for untracked or invalid records."
+        },
+        "track_first_frame": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Optional first source-frame index observed for this retained track."
+        },
+        "track_last_frame": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Optional last source-frame index observed for this retained track."
+        },
+        "track_observation_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Optional number of source-frame detections merged into this track."
+        },
         "deformability": {
           "type": "number",
           "description": "1.0 minus circularity; dimensionless."
@@ -107,6 +145,10 @@
           "type": "boolean",
           "description": "True if frame passed all validation checks."
         },
+        "is_target_group": {
+          "type": "boolean",
+          "description": "Optional target-group classification used by the trigger path."
+        },
         "touches_border": {
           "type": "boolean",
           "description": "True if the contour touches the image border."
@@ -127,7 +169,17 @@
         "brightness_q1": { "type": "number", "description": "25th percentile brightness in the masked region." },
         "brightness_q2": { "type": "number", "description": "50th percentile (median) brightness." },
         "brightness_q3": { "type": "number", "description": "75th percentile brightness." },
-        "brightness_q4": { "type": "number", "description": "100th percentile (max) brightness." }
+        "brightness_q4": { "type": "number", "description": "100th percentile (max) brightness." },
+        "mask_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Optional SHA-256 of the typed, shaped uint8 mask payload for byte-parity conformance."
+        },
+        "series_images_sha256": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "description": "Optional ordered SHA-256 digests of the trigger image and following multi-image-series frames."
+        }
       }
     }
   }
