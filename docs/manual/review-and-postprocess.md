@@ -66,4 +66,5 @@ processing pipeline outside the app, saving per-frame intermediate images
 `metrics.csv`, and an optional reanalysis HDF5. Run it with `--help` for
 the full flag list; defaults match the app's processing defaults.
 
-See [`docs/howto/tools.md`](../howto/tools.md) for the full tool reference.
+See [`docs/howto/tools.md`](https://github.com/KPT1020/mib-studio-qt/blob/main/docs/howto/tools.md)
+for the full tool reference (developer docs, hosted in the repository).
