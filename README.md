@@ -4,6 +4,10 @@
 See `docs/README.md` for structure and links. Active tasks live in `knowledge_map/task/`.
 Agents start at [AGENTS.md](AGENTS.md), then the knowledge vault (`knowledge_map/`).
 
+**Operators:** the user manual lives at [docs/manual/README.md](docs/manual/README.md)
+— workflow guides (connect, acquire & record, review, troubleshooting) with
+screenshots regenerated from the app itself on every release.
+
 
 ## Algorithm Experiments & MLflow
 

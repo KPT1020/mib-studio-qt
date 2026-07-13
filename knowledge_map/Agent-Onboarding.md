@@ -30,6 +30,7 @@ Jump to the notes that match your task:
 | Syringe pumps | [[services/SyringePumpService]] + [[frontend/SyringePumpTab]] |
 | Crashes / observability | [[services/CrashReporter]] + [[diagnostics/CrashStateMirror]] |
 | Build / deploy | [[build-and-run/Build]], [[build-and-run/Run-Modes]] |
+| User manual / generated screenshots | [[frontend/Screenshot-Tour]] + `docs/manual/README.md` |
 
 ## Step 4 — Before you write code
 

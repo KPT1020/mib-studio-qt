@@ -42,15 +42,17 @@ cmake --preset linux-backend-only         # Linux, backend lib + tests only
 cmake --build --preset linux-backend-only-build
 ```
 
-- `mib_studio_qt` — production app (hardware camera)
-- `mock_studio_qt` — dev app with GUI mock camera selector
-  (`MIB_CAMERA_MODE=mock`, `MIB_MOCK_CAMERA_DIR=<path>`; see
+- `mib_studio_qt` — the app; mock camera via ConnectTab "Configure Mock…" or
+  `MIB_CAMERA_MODE=mock` + `MIB_MOCK_CAMERA_DIR=<path>` (see
   [`knowledge_map/build-and-run/Run-Modes.md`](knowledge_map/build-and-run/Run-Modes.md))
+- `screenshot_tour` — headless UI tour regenerating the user-manual
+  screenshots ([`docs/manual/README.md`](docs/manual/README.md))
 
 ## Verification
 
 ```bash
 python3 scripts/check_docs.py                  # docs + vault wikilink integrity
+python3 scripts/check_screenshots.py           # user manual <-> screenshot harness sync
 ctest --preset linux-backend-only-test         # backend unit tests
 ```
 

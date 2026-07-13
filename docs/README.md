@@ -3,6 +3,7 @@
 This folder hosts living documentation as we build functionality. Keep content concise and actionable; link to source where applicable.
 
 ## Structure
+- `manual/` — user-facing operator manual with generated screenshots ([index](manual/README.md))
 - `architecture/` — system and component overviews
 - `integration/` — external integrations (e.g., Euresys EGrabber)
 - `decisions/` — Architecture Decision Records ([index](decisions/README.md))
@@ -16,6 +17,9 @@ This folder hosts living documentation as we build functionality. Keep content c
 - When adding a guide, consider if a brief ADR is needed in `decisions/`.
 
 ## Quick Links
+- User manual (operators) — see [manual/README.md](manual/README.md);
+  screenshots regenerate via `screenshot_tour`
+  (`python3 scripts/check_screenshots.py` keeps pages and images in sync)
 - Integration: EGrabber — see `integration/egrabber.md`
 - Tasks/issues live in `knowledge_map/task/`
 - Cloudflare R2 app updates and profile catalogs — see

@@ -166,6 +166,48 @@ target_compile_definitions(mib_studio_qt PRIVATE
 mib_link_opencv(mib_studio_qt PRIVATE)
 mib_configure_windows_deployment(mib_studio_qt)
 
+# screenshot_tour: console app that drives the UI in mock-camera mode and
+# regenerates the user-manual screenshots under docs/manual/images (see
+# docs/manual/README.md). Runs headless with QT_QPA_PLATFORM=offscreen.
+add_executable(screenshot_tour
+    ${PROJECT_SOURCE_DIR}/src/frontend/tools/screenshot_tour_main.cpp
+    ${FRONTEND_COMMON_SOURCES}
+)
+
+set_target_properties(screenshot_tour PROPERTIES
+    AUTOUIC_SEARCH_PATHS "${PROJECT_SOURCE_DIR}/resources/ui"
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+)
+
+target_include_directories(screenshot_tour PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+)
+if(MIB_HAS_EGRABBER)
+    target_include_directories(screenshot_tour PRIVATE
+        "C:/Program Files/Euresys/eGrabber/include"
+    )
+endif()
+
+target_link_libraries(screenshot_tour PRIVATE
+    Qt6::Widgets
+    Qt6::Charts
+    Qt6::Network
+    Qt6::Concurrent
+    mib_backend
+    spdlog::spdlog
+)
+
+target_compile_definitions(screenshot_tour PRIVATE
+    MIB_STUDIO_QT_VERSION="${PROJECT_VERSION}"
+    MIB_STUDIO_QT_VERSION_FULL="${PROJECT_VERSION_FULL}"
+)
+
+mib_link_opencv(screenshot_tour PRIVATE)
+
+# Reuse the Qt/Conan runtime DLLs that mib_studio_qt's deployment step copies
+# next to the executables instead of running windeployqt a second time.
+add_dependencies(screenshot_tour mib_studio_qt)
+
 # Ensure the .pdb for the application ends up next to the .exe so it can
 # be archived per release for later symbolication of remote crashes.
 if(MSVC)
