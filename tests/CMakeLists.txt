@@ -1,5 +1,7 @@
 find_package(Python3 COMPONENTS Interpreter QUIET)
 
+include(MIBLinkHelpers)
+
 function(mib_add_backend_test_executable target source)
     add_executable(${target}
         ${PROJECT_SOURCE_DIR}/tests/${source}
@@ -270,11 +272,30 @@ target_include_directories(hdf_review_export_paths_test PRIVATE
     ${PROJECT_SOURCE_DIR}/tests
 )
 target_link_libraries(hdf_review_export_paths_test PRIVATE Qt6::Core)
+# HdfReviewExportPaths.cpp includes ProcessingService.h (for the metrics CSV
+# serialization helpers), which pulls in OpenCV headers.
+mib_link_opencv(hdf_review_export_paths_test PRIVATE)
 set_target_properties(hdf_review_export_paths_test PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
 )
 add_test(NAME frontend.hdf_review_export_paths COMMAND $<TARGET_FILE:hdf_review_export_paths_test>)
 set_tests_properties(frontend.hdf_review_export_paths PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
+
+add_executable(hdf_review_metrics_csv_test
+    ${PROJECT_SOURCE_DIR}/tests/frontend/hdf_review_metrics_csv_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/HdfReviewExportPaths.cpp
+)
+target_include_directories(hdf_review_metrics_csv_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+)
+target_link_libraries(hdf_review_metrics_csv_test PRIVATE Qt6::Core)
+mib_link_opencv(hdf_review_metrics_csv_test PRIVATE)
+set_target_properties(hdf_review_metrics_csv_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+)
+add_test(NAME frontend.hdf_review_metrics_csv COMMAND $<TARGET_FILE:hdf_review_metrics_csv_test>)
+set_tests_properties(frontend.hdf_review_metrics_csv PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
 
 add_executable(update_catalog_test
     ${PROJECT_SOURCE_DIR}/tests/frontend/update_catalog_test.cpp

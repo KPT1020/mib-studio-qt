@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Young's modulus surfaced in metrics outputs** (2026-07-13, issue
+  KPT1020/mib-studio-qt#230) — The per-object Young's modulus (elastic modulus,
+  kPa) computed from the `EModulusLut` lookup was already stored in HDF5 but
+  never reached the user. Added a **Young's Modulus (kPa)** column to the HDF
+  Review metrics table (`HdfMetricsModel`) and the metrics CSV export. The CSV
+  header/row formatting moved into `frontend::hdfreviewexport::metricsCsvHeader`
+  / `metricsCsvRow` so the exported columns are unit-tested. A NaN value
+  (query outside LUT coverage) renders as a blank field, never the literal
+  `nan`. Coverage: new `frontend.hdf_review_metrics_csv` test, plus a
+  `youngsModulus` round-trip assertion added to `recording.experiment_roundtrip`.
+
 - **HDF review export naming and batch export** (2026-07-09) -
   `HdfReviewTab` now suggests source-derived metrics filenames
   (`<h5-basename>_metrics.csv`) with collision suffixes, writes Export All

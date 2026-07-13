@@ -95,39 +95,16 @@ bool writeMetricsCsvData(const QString& filePath,
     }
 
     QTextStream out(&file);
-    const double areaConversionFactor = conversionFactor * conversionFactor;
 
-    out << "Frame Type,Index,Timestamp,Object Id,Object Count,Track Id,Track First,Track Last,Track Observations,"
-        << "Deformability,Area,Area (um²),Area Ratio,Ring Ratio,"
-        << "Valid,Touches Border,Single Inner,In Range,Inner Count,"
-        << "Bright Q1,Bright Q2,Bright Q3,Bright Q4\n";
+    out << frontend::hdfreviewexport::metricsCsvHeader() << "\n";
 
     auto writeFrame = [&](const char* frameType, const backend::services::ProcessedFrame& frame) {
-        const auto& val = frame.validation;
-        const double areaMicrons = val.area * areaConversionFactor;
-        out << frameType << ",";
-        out << frame.index << ",";
-        out << frame.timestampNs << ",";
-        out << val.objectId << ",";
-        out << val.objectCount << ",";
-        out << val.trackId << ",";
-        out << val.trackFirstFrame << ",";
-        out << val.trackLastFrame << ",";
-        out << val.trackObservationCount << ",";
-        out << QString::number(val.deformability, 'f', 3) << ",";
-        out << QString::number(val.area, 'f', 2) << ",";
-        out << QString::number(areaMicrons, 'f', 2) << ",";
-        out << QString::number(val.areaRatio, 'f', 3) << ",";
-        out << QString::number(val.ringRatio, 'f', 3) << ",";
-        out << (val.isValid ? "Yes" : "No") << ",";
-        out << (val.touchesBorder ? "Yes" : "No") << ",";
-        out << (val.hasSingleInnerContour ? "Yes" : "No") << ",";
-        out << (val.inRange ? "Yes" : "No") << ",";
-        out << val.innerContourCount << ",";
-        out << QString::number(val.brightness.q1, 'f', 2) << ",";
-        out << QString::number(val.brightness.q2, 'f', 2) << ",";
-        out << QString::number(val.brightness.q3, 'f', 2) << ",";
-        out << QString::number(val.brightness.q4, 'f', 2) << "\n";
+        out << frontend::hdfreviewexport::metricsCsvRow(QString::fromLatin1(frameType),
+                                                        frame.validation,
+                                                        frame.index,
+                                                        frame.timestampNs,
+                                                        conversionFactor)
+            << "\n";
     };
 
     for (const auto& frame : validFrames) {
