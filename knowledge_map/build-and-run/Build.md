@@ -127,6 +127,39 @@ The requirement defaults off so local and fork CI builds remain possible, but
 an unpinned Release build cannot load a native core and is not distributable;
 environment overrides are limited to Debug builds.
 
+## Desktop release safety
+
+The desktop has three maintained publishers: local `release.ps1`, manual
+`.github/workflows/build-windows.yml`, and tag-triggered
+`.github/workflows/release.yml`. Each cleans `build/dist`, derives the numeric
+installer artifact version separately from a possible `-beta.*` release tag,
+and requires the exact Setup and Update filenames before hashing or publishing.
+Wildcards are limited to cleanup/unexpected-output detection; GitHub Release,
+Actions artifact, and R2 inputs are exact paths.
+
+`scripts/resolve_desktop_release_version.py` resolves the greater of the
+fallback literal and all reachable stable/beta tag numeric versions before any
+bump. Publishers pass paired one-configure
+`MIB_RELEASE_VERSION_{,FULL_}OVERRIDE` values; `MIBVersion.cmake` validates that
+they share one numeric identity, removes them from the cache, and writes
+`build/mib-release-identity.txt` for a pre-build readback gate. This prevents a
+stale fallback or prior beta tag from changing the tested binary identity.
+Inno Setup and GitHub retain numeric filenames; `publish-update.py` maps beta
+bytes to an immutable full-version R2 object key and orders equal numeric SHA
+betas by publication time.
+
+Manual stable CI prepares the version in its workspace, then runs build, CTest,
+installer, validation, and artifact-upload gates before creating the commit and
+tag. It verifies `origin/main` is still the tested dispatch SHA and atomically
+pushes both refs. The tag workflow validates its requested tag, checks out that
+exact ref, compares the resolved tag commit with `HEAD` before configure, and
+runs CTest before Sentry publication. The local publisher also builds the full
+default target set, runs CTest before installers, atomically pushes branch/tag,
+and treats GitHub/R2 failures as fatal. It requires a clean named branch, and a
+pushed stable release is restricted to `main` (beta may use a feature branch).
+The local publisher reports a prospective dry-run version, treats installer
+failures/missing exact outputs as fatal, and refuses to move an existing tag.
+
 The top-level CMake project enables both C and CXX so Ubuntu system-package
 HDF5 discovery can run its C probe while the application code remains C++17.
 `cmake/MIBLinkHelpers.cmake` accepts both the namespaced HDF5 targets used by

@@ -5,6 +5,24 @@
 
 ## Features shipped
 
+- **Desktop release identity/artifact gates** (2026-07-14,
+  [A12 #240](https://github.com/KPT1020/mib-studio-qt/issues/240)) — Hardened
+  every desktop publisher against mismatched source refs and stale installer
+  reuse. Manual tag dispatch validates and checks out the exact tag; manual
+  stable CI defers commit/tag/push until tests, installer builds, exact-file
+  checks, and artifact upload pass, then atomically pushes the tested main and
+  tag. Local and Actions publishers clear old outputs and consume only the
+  exact numeric-version Setup/Update files (including beta releases). One
+  resolver now bumps from the highest reachable release line, and paired CMake
+  overrides/readback keep the binary's numeric/full identity equal to its tag.
+  Every entrypoint builds all tests and runs CTest before external publication;
+  the local path requires a clean tree/main for stable, atomically pushes refs,
+  and treats GitHub/R2 errors as fatal.
+  Beta R2 keys include the full prerelease identity, and equal numeric SHA
+  betas sort by publication time. Focused resolver/CMake/publisher regressions
+  cover these invariants. Real PowerShell/Windows execution, production
+  signing, GitHub/R2 publication, and hardware proof remain A12 gates.
+
 - **Offline processing-core identity visibility** (2026-07-14,
   [A11 #243](https://github.com/KPT1020/mib-studio-qt/issues/243)) — Fixed the
   selector E2E defect where its active-core label remained blank until both

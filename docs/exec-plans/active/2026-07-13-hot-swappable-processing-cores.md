@@ -106,7 +106,11 @@ the resolver and remain independent of desktop activation internals.
 - Realtime boundary: steady-state median/p95 ratio against the bundled adapter;
   no loading, hashing, signature work, or context creation per frame.
 - Release: workflow parse, Windows x64 build/import audit, valid Authenticode
-  signature, descriptor/manifest equality, then live R2/hardware proof in A12.
+  signature, descriptor/manifest equality, exact desktop installer artifacts,
+  then live R2/hardware proof in A12. Stable manual CI may publish refs only
+  after build/test/package gates; manual tag dispatch must build the exact tag.
+  Every desktop publisher must read back the configured numeric/full identity,
+  run CTest before external mutation, and preserve full beta identity in R2.
 
 ## Decision log
 
@@ -136,6 +140,15 @@ the resolver and remain independent of desktop activation internals.
   variable. Native release CI independently derives the signed DLL's DER-SPKI
   hash and rejects a mismatch before upload; ordinary development/fork builds
   keep the requirement disabled.
+- 2026-07-14: Desktop releases publish only exact, freshly built numeric-version
+  installer paths. Manual stable CI defers and atomically publishes its version
+  commit/tag after all build gates; tag dispatch validates, checks out, and
+  resolves the requested tag rather than inheriting the workflow branch tip.
+- 2026-07-14: Desktop version bumps start from the highest reachable release
+  tag line, not only the fallback literal. Paired one-configure CMake overrides
+  make numeric/full binary identity explicit and reviewable. Beta installer
+  bytes retain numeric Inno/GitHub names but use full-version immutable R2 keys;
+  equal numeric SHA betas order by publication time.
 
 ## Residual infrastructure gates
 
@@ -144,6 +157,10 @@ the resolver and remain independent of desktop activation internals.
   but no real value was invented or live release attempted.
 - The real GitHub tag/release, conditional R2 reads/writes, and package-page
   installation must be demonstrated in A12.
+- PowerShell and the Windows packaging toolchain are unavailable in this Linux
+  sandbox. Static regression tests and YAML parsing cover the release wiring,
+  but both stable and beta entrypoints still require a real Windows-runner
+  rehearsal before production release.
 - Windows microscopy hardware and a published v2 do not exist here. A local
   Docker daemon can validate Biowork's image/UI wiring, but cannot prove the
   release-driven version swap without that signed release; unit/conformance

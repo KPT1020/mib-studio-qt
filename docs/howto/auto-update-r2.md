@@ -19,8 +19,8 @@ Keep objects at the root of the public custom domain:
 
 - `stable/latest.json`
 - `stable/index.json` — full version history for the channel (see below)
-- `stable/MIB_Studio_Qt_Update_v<version>.exe`
-- `stable/MIB_Studio_Qt_Setup_v<version>.exe` (optional, full installer for manual downloads)
+- `stable/MIB_Studio_Qt_Update_v<full-version>.exe`
+- `stable/MIB_Studio_Qt_Setup_v<full-version>.exe` (optional, full installer for manual downloads)
 - `stable/tools/tools-latest.json`
 - `stable/tools/MIB_Studio_Tools_v<version>_windows.zip`
 - `profiles/stable/catalog.json`
@@ -54,8 +54,10 @@ auto-check; `index.json` is additive.
 }
 ```
 
-Newest-first; a release sorts above its own betas. `publish-update.py` maintains
-it automatically on every publish (see *Publishing a New App Version*). The app
+Newest-first; a release sorts above its own betas. Equal numeric SHA betas use
+`published_utc` newest-first, then their version string as a deterministic
+tie-break. `publish-update.py` maintains it automatically on every publish (see
+*Publishing a New App Version*). The app
 parses it with `UpdateCatalog`; entries missing `version`/`installer_url`/
 `installer_sha256` are skipped, and a missing/invalid `index.json` degrades to
 "use Check for Latest" without affecting the auto-check.
@@ -290,7 +292,12 @@ Example:
 }
 ```
 
-The `installer_url` should point to `MIB_Studio_Qt_Update_v<version>.exe` for auto-updates. Publish the full setup installer separately only when manual first-time downloads need it.
+The `installer_url` should point to
+`MIB_Studio_Qt_Update_v<full-version>.exe` for auto-updates. Inno Setup emits a
+numeric local/GitHub filename, but `publish-update.py --version
+X.Y.Z-beta.<identifier>` stores beta bytes under the full-version R2 key so a
+later beta never overwrites a one-year-cached object. Publish the full setup
+installer separately only when manual first-time downloads need it.
 
 ### Cloudflare Configuration
 
@@ -348,6 +355,7 @@ Publish the update package:
 ```bash
 python publish-update.py \
   --installer "build/dist/MIB_Studio_Qt_Update_v0.2.0.exe" \
+  --version "0.2.0" \
   --release-notes-url "https://github.com/gavinlouuu-kpt/mib-studio-qt/releases/tag/v0.2.0"
 ```
 
@@ -357,7 +365,7 @@ Publish the optional full installer:
 python publish-update.py --installer "build/dist/MIB_Studio_Qt_Setup_v0.2.0.exe"
 ```
 
-`publish-update.py` uploads to `s3://mib-studio-qt-updates/<channel>/...`, generates `<channel>/latest.json`, **updates `<channel>/index.json`** (reads the current index, inserts the new version via `merge_index` — dedupe by version, newest-first — and re-uploads), and prints final public URLs under `https://updates.yofo.bio`. It uses S3/boto3 when `MIB_STUDIO_R2_ENDPOINT` is set, otherwise Wrangler. `publish-update.ps1` is a Windows compatibility wrapper around the Python command.
+`publish-update.py` uploads to `s3://mib-studio-qt-updates/<channel>/...`, generates `<channel>/latest.json`, **updates `<channel>/index.json`** (reads the current index, inserts the new version via `merge_index` — dedupe by version, newest-first — and re-uploads), and prints final public URLs under `https://updates.yofo.bio`. An explicit beta `--version` must share the numeric version in the local installer filename and becomes the immutable object filename. It uses S3/boto3 when `MIB_STUDIO_R2_ENDPOINT` is set, otherwise Wrangler. `publish-update.ps1` is a Windows compatibility wrapper around the Python command.
 
 **Reading the existing index** uses the **S3 API** (same endpoint/credentials as the upload), not the public `updates.yofo.bio` URL — the public CDN can block/cache reads from CI runners (Cloudflare challenges the default `Python-urllib` user agent), which previously caused every release to *replace* the index with a single entry instead of growing it. If the existing index cannot be read (a genuine read error, distinct from "no index yet"), the publish **skips** the index update rather than clobber a good catalog. The `index.json` accumulates from each publish onward; older releases predating index maintenance need a one-time backfill (re-publish their update packages — `merge_index` dedupes — or build the index and upload it via the S3 API).
 

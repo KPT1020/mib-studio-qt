@@ -432,6 +432,24 @@ if(Python3_Interpreter_FOUND)
     )
 
     add_test(
+        NAME scripts.desktop_release_version
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/test_desktop_release_version.py
+    )
+    set_tests_properties(scripts.desktop_release_version PROPERTIES
+        LABELS "scripts;release"
+        TIMEOUT 30
+    )
+
+    add_test(
+        NAME scripts.publish_update_index
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/tools/test_publish_index_merge.py
+    )
+    set_tests_properties(scripts.publish_update_index PROPERTIES
+        LABELS "scripts;release"
+        TIMEOUT 30
+    )
+
+    add_test(
         NAME scripts.compare_metrics
         COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/test_compare_metrics.py
     )

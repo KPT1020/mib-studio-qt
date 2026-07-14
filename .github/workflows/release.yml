@@ -23,21 +23,43 @@ jobs:
     timeout-minutes: 90
 
     steps:
-      - name: Checkout
+      - name: Validate requested release tag
+        id: release-ref
+        shell: bash
+        env:
+          REQUESTED_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          TAG="$REQUESTED_TAG"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "Release tag must be vX.Y.Z or vX.Y.Z-beta.<identifier>; got '$TAG'" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "ref=refs/tags/$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout requested release tag
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ steps.release-ref.outputs.ref }}
 
-      - name: Extract version from tag
+      - name: Extract version from checked-out tag
         id: version
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ github.event.inputs.tag }}"
-          else
-            TAG="${GITHUB_REF#refs/tags/}"
+          set -euo pipefail
+          TAG="${{ steps.release-ref.outputs.tag }}"
+          TAG_COMMIT=$(git rev-list -n 1 "$TAG")
+          HEAD_COMMIT=$(git rev-parse HEAD)
+          if [ "$TAG_COMMIT" != "$HEAD_COMMIT" ]; then
+            echo "Checked-out commit $HEAD_COMMIT does not match $TAG ($TAG_COMMIT)" >&2
+            exit 1
           fi
           VERSION="${TAG#v}"
+          # Inno Setup uses CMake's numeric PROJECT_VERSION even when the
+          # release identity carries a beta suffix.
+          ARTIFACT_VERSION="${VERSION%%-*}"
           if [[ "$TAG" == *-beta.* ]]; then
             CHANNEL="beta"
           else
@@ -45,6 +67,7 @@ jobs:
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "artifact_version=$ARTIFACT_VERSION" >> "$GITHUB_OUTPUT"
           echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
           echo "Building release: $TAG (version $VERSION)"
 
@@ -167,7 +190,9 @@ jobs:
             "windows-default",
             "-DMIB_ENABLE_MINDVISION=OFF",
             "-DMIB_REQUIRE_PROCESSING_CORE_SIGNER_SPKI=ON",
-            "-DMIB_PROCESSING_CORE_SIGNER_SPKI_SHA256=$env:PROCESSING_CORE_SIGNER_SPKI_SHA256"
+            "-DMIB_PROCESSING_CORE_SIGNER_SPKI_SHA256=$env:PROCESSING_CORE_SIGNER_SPKI_SHA256",
+            "-DMIB_RELEASE_VERSION_OVERRIDE=${{ steps.version.outputs.artifact_version }}",
+            "-DMIB_RELEASE_VERSION_FULL_OVERRIDE=${{ steps.version.outputs.version }}"
           )
           if ($env:MIB_SENTRY_DSN) {
             $cmakeArgs += "-DMIB_SENTRY_DSN=$env:MIB_SENTRY_DSN"
@@ -177,8 +202,24 @@ jobs:
           }
           cmake @cmakeArgs
 
+      - name: Validate configured release identity
+        shell: pwsh
+        run: |
+          $identity = @{}
+          Get-Content -LiteralPath build\mib-release-identity.txt | ForEach-Object {
+            $parts = $_ -split '=', 2
+            if ($parts.Count -eq 2) { $identity[$parts[0]] = $parts[1] }
+          }
+          if ($identity.version -ne '${{ steps.version.outputs.artifact_version }}' -or
+              $identity.full_version -ne '${{ steps.version.outputs.version }}') {
+            throw "Configured release identity diverged: numeric=$($identity.version), full=$($identity.full_version)"
+          }
+
       - name: Build Release
         run: cmake --build build --config Release
+
+      - name: Run tests
+        run: ctest --test-dir build --build-config Release --output-on-failure --timeout 30
 
       # Without uploaded debug symbols a captured minidump is unsymbolicated
       # (= "not useful"). This was missing from the release path, so shipped
@@ -210,8 +251,14 @@ jobs:
           sentry-cli releases set-commits $release --auto --ignore-missing
           sentry-cli releases finalize $release
 
-      - name: Run tests
-        run: ctest --test-dir build --build-config Release --output-on-failure --timeout 30
+      - name: Clean installer output directory
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build\dist | Out-Null
+          Get-ChildItem -LiteralPath build\dist -Filter 'MIB_Studio_Qt_*' -File `
+            -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^MIB_Studio_Qt_(Setup|Update)_v.+\.exe$' } |
+            Remove-Item -Force
 
       - name: Build full installer
         run: cmake --build build --config Release --target package_installer
@@ -219,25 +266,37 @@ jobs:
       - name: Build update package
         run: cmake --build build --config Release --target package_installer_update
 
-      - name: Compute checksums
+      - name: Validate exact installer artifacts and compute checksums
         id: checksums
         shell: pwsh
         run: |
-          $setupExe = Get-ChildItem "build/dist/MIB_Studio_Qt_Setup_v*.exe" | Select-Object -First 1
-          $updateExe = Get-ChildItem "build/dist/MIB_Studio_Qt_Update_v*.exe" | Select-Object -First 1
-
-          if ($setupExe) {
-            $setupHash = (Get-FileHash -Algorithm SHA256 $setupExe.FullName).Hash.ToLower()
-            "setup_hash=$setupHash" | Out-File -Append $env:GITHUB_OUTPUT
-            "setup_file=$($setupExe.Name)" | Out-File -Append $env:GITHUB_OUTPUT
-            Write-Host "Setup: $($setupExe.Name) SHA256: $setupHash"
+          $artifactVersion = '${{ steps.version.outputs.artifact_version }}'
+          $setupPath = Join-Path $PWD "build\dist\MIB_Studio_Qt_Setup_v$artifactVersion.exe"
+          $updatePath = Join-Path $PWD "build\dist\MIB_Studio_Qt_Update_v$artifactVersion.exe"
+          foreach ($path in @($setupPath, $updatePath)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Expected exact installer artifact was not produced: $path"
+            }
           }
-          if ($updateExe) {
-            $updateHash = (Get-FileHash -Algorithm SHA256 $updateExe.FullName).Hash.ToLower()
-            "update_hash=$updateHash" | Out-File -Append $env:GITHUB_OUTPUT
-            "update_file=$($updateExe.Name)" | Out-File -Append $env:GITHUB_OUTPUT
-            Write-Host "Update: $($updateExe.Name) SHA256: $updateHash"
+          $expected = @($setupPath, $updatePath)
+          $unexpected = Get-ChildItem -LiteralPath build\dist -Filter 'MIB_Studio_Qt_*' -File |
+            Where-Object {
+              $_.Name -match '^MIB_Studio_Qt_(Setup|Update)_v.+\.exe$' -and
+              $_.FullName -notin $expected
+            }
+          if ($unexpected) {
+            throw "Unexpected installer artifacts were produced: $($unexpected.Name -join ', ')"
           }
+          $setupExe = Get-Item -LiteralPath $setupPath
+          $updateExe = Get-Item -LiteralPath $updatePath
+          $setupHash = (Get-FileHash -Algorithm SHA256 $setupExe.FullName).Hash.ToLowerInvariant()
+          $updateHash = (Get-FileHash -Algorithm SHA256 $updateExe.FullName).Hash.ToLowerInvariant()
+          "setup_hash=$setupHash" | Out-File -Append $env:GITHUB_OUTPUT
+          "setup_file=$($setupExe.Name)" | Out-File -Append $env:GITHUB_OUTPUT
+          "update_hash=$updateHash" | Out-File -Append $env:GITHUB_OUTPUT
+          "update_file=$($updateExe.Name)" | Out-File -Append $env:GITHUB_OUTPUT
+          Write-Host "Setup: $($setupExe.Name) SHA256: $setupHash"
+          Write-Host "Update: $($updateExe.Name) SHA256: $updateHash"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -257,8 +316,8 @@ jobs:
             ${{ steps.checksums.outputs.update_hash }}  ${{ steps.checksums.outputs.update_file }}
             ```
           files: |
-            build/dist/MIB_Studio_Qt_Setup_v*.exe
-            build/dist/MIB_Studio_Qt_Update_v*.exe
+            build/dist/MIB_Studio_Qt_Setup_v${{ steps.version.outputs.artifact_version }}.exe
+            build/dist/MIB_Studio_Qt_Update_v${{ steps.version.outputs.artifact_version }}.exe
           draft: false
           prerelease: ${{ steps.version.outputs.channel == 'beta' }}
 
@@ -278,14 +337,11 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           MIB_STUDIO_R2_ENDPOINT: ${{ secrets.MIB_STUDIO_R2_ENDPOINT }}
         run: |
-          $updateExe = Get-ChildItem "build/dist/MIB_Studio_Qt_Update_v*.exe" | Select-Object -First 1
-          if ($updateExe) {
-            python publish-update.py `
-              --installer $updateExe.FullName `
-              --version "${{ steps.version.outputs.version }}" `
-              --channel "${{ steps.version.outputs.channel }}" `
-              --upload-method s3 `
-              --release-notes-url "https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }}"
-          } else {
-            Write-Host "WARNING: Update package not found, skipping Cloudflare R2 publish"
-          }
+          $artifactVersion = '${{ steps.version.outputs.artifact_version }}'
+          $updateExe = Get-Item -LiteralPath "build\dist\MIB_Studio_Qt_Update_v$artifactVersion.exe"
+          python publish-update.py `
+            --installer $updateExe.FullName `
+            --version "${{ steps.version.outputs.version }}" `
+            --channel "${{ steps.version.outputs.channel }}" `
+            --upload-method s3 `
+            --release-notes-url "https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }}"

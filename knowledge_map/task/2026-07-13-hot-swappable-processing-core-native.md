@@ -46,6 +46,20 @@
   before bumping. Native release CI derives DER-SPKI SHA-256 from the signed
   DLL and rejects a certificate/pin mismatch before upload; development and
   fork builds remain default-off.
+- Hardened those desktop publishers against release/source/artifact mismatch.
+  Tag dispatch validates and checks out the exact requested tag; manual stable
+  CI changes no refs until build, CTest, installer, exact-artifact, and upload
+  gates pass, then pushes main/tag atomically. All paths clear stale installer
+  outputs and hash/publish only exact numeric-version Setup/Update files. A
+  shared resolver bumps beyond reachable stable/beta tags even when the CMake
+  fallback is stale; paired CMake overrides plus identity-file readback prove
+  the binary's numeric/full version matches the release. All entrypoints build
+  the full target set and run CTest before external publication. Local pushes
+  require a clean tree (`main` for stable), are atomic, and GitHub/R2 failures
+  are fatal. Beta R2 object keys retain the
+  full prerelease identity and same-line SHA betas sort by publication time.
+  Local dry-run calculates the prospective version, installer failures are
+  fatal, and existing release tags are immutable.
 
 ## Deliberate residual scope
 
@@ -69,7 +83,9 @@ gates. The selector's production trust root is the signer public key's DER
 SPKI SHA-256 compiled into the application; production environment variables
 cannot replace it. The release gate is wired, but the real certificate secrets
 and repository pin still need provisioning and remain an A12 release
-configuration gate. No live release was loaded in the sandbox.
+configuration gate. The Linux sandbox also has no PowerShell/Windows packaging
+toolchain, so the static release regressions and YAML checks still require a
+real stable+beta Windows rehearsal. No live release was loaded in the sandbox.
 
 **Related:** [[../frontend/ProcessingCoreDialog]] ·
 [[../services/ProcessingService]] · [[../services/Hdf5Service]] ·
