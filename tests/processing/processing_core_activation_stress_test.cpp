@@ -109,7 +109,18 @@ int main() {
     }
     MIB_REQUIRE(ready.load(std::memory_order_acquire) == kWorkers,
                 "all activation-stress workers reached the start barrier");
+
+    watchdog.mark("deterministic lease rejection");
+    auto heldLease = service.acquireProcessingCoreOperation();
+    MIB_REQUIRE(static_cast<bool>(heldLease),
+                "activation-stress test acquires an explicit operation lease");
     start.store(true, std::memory_order_release);
+    error.clear();
+    MIB_EXPECT(!service.activateProcessingKernel(coreB, &error),
+               "activation is rejected while the synchronized lease is held");
+    MIB_EXPECT(error == "an offline processing operation is active",
+               "synchronized lease rejection reports the operation guard");
+    heldLease = {};
 
     watchdog.mark("contended activation attempts");
     uint64_t successfulSwaps = 0;
@@ -135,8 +146,6 @@ int main() {
                "every offered frame completes under activation contention");
     MIB_EXPECT(coreA->processCalls.load() + coreB->processCalls.load() == completed.load(),
                "frame accounting is conserved across resident cores");
-    MIB_EXPECT(rejectedSwaps > 0,
-               "outstanding operation leases reject at least one activation attempt");
 
     watchdog.mark("deterministic A to B to A");
     MIB_REQUIRE(service.activateProcessingKernel(coreA, &error), error);

@@ -73,6 +73,13 @@
   stale state after a committed swap, and passes concurrent A→B→A stress.
   Profiles carry optional processing-contract compatibility, downgrades require
   explicit confirmation, and HDF regeneration warns on recorded/active drift.
+- Made the activation stress assertion scheduler-independent by holding an
+  explicit synchronized operation lease for the mandatory rejection check;
+  the concurrent 300-swap phase still verifies frame accounting and accepts
+  either quiescent success or lease-guard rejection for every attempt.
+- Bounded the Windows Authenticode regression helper with a 60-second child
+  watchdog and a version-directory SDK lookup, avoiding an unbounded recursive
+  SDK scan or process wait while retaining the real WinVerifyTrust/SPKI checks.
 - Added a Production promotion/rollback action, stable/beta tag-derived
   channels, and explicit app compatibility bounds. Published and publicly
   verified stable LUT revision `2026.07.14-1`, removing the registry's missing

@@ -41,6 +41,7 @@ Copy-Item -LiteralPath $unsignedPath -Destination $signedPath -Force
 $certificate = $null
 $rootStore = $null
 try {
+    Write-Host 'Creating ephemeral Authenticode signer'
     $certificate = New-SelfSignedCertificate `
         -Type CodeSigningCert `
         -Subject 'CN=MIB Processing Core Ephemeral CI Fixture' `
@@ -57,8 +58,11 @@ try {
     $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
     $rootStore.Add($certificate)
 
-    $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" `
-        -Recurse -File -Filter signtool.exe |
+    Write-Host 'Locating the x64 Windows SDK signtool'
+    $signtoolPattern = Join-Path `
+        "${env:ProgramFiles(x86)}\Windows Kits\10\bin" `
+        '*\x64\signtool.exe'
+    $signtool = Get-ChildItem -Path $signtoolPattern -File -ErrorAction SilentlyContinue |
         Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
         Sort-Object FullName -Descending |
         Select-Object -First 1
@@ -66,19 +70,35 @@ try {
         throw 'signtool.exe (x64) was not found'
     }
 
+    Write-Host 'Signing the fixture with the ephemeral certificate'
     & $signtool.FullName sign /fd SHA256 /sha1 $certificate.Thumbprint /s My $signedPath
     if ($LASTEXITCODE -ne 0) {
         throw "Ephemeral signtool failed with exit code $LASTEXITCODE"
     }
-    $signature = Get-AuthenticodeSignature -LiteralPath $signedPath
-    if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate) {
-        throw "Ephemeral Authenticode signature is not valid: $($signature.Status) $($signature.StatusMessage)"
-    }
-    $spki = Get-SignerSpkiSha256 $signature.SignerCertificate
+    $spki = Get-SignerSpkiSha256 $certificate
 
-    & $testPath $unsignedPath $signedPath $spki
-    if ($LASTEXITCODE -ne 0) {
-        throw "Processing-core Authenticode regression test failed with exit code $LASTEXITCODE"
+    Write-Host 'Running the processing-core Authenticode verifier'
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $testPath
+    $startInfo.UseShellExecute = $false
+    foreach ($argument in @($unsignedPath, $signedPath, $spki)) {
+        [void]$startInfo.ArgumentList.Add($argument)
+    }
+    $testProcess = [System.Diagnostics.Process]::new()
+    $testProcess.StartInfo = $startInfo
+    if (-not $testProcess.Start()) {
+        throw 'Processing-core Authenticode regression test did not start'
+    }
+    try {
+        if (-not $testProcess.WaitForExit(60000)) {
+            $testProcess.Kill($true)
+            throw 'Processing-core Authenticode regression test exceeded its 60-second watchdog'
+        }
+        if ($testProcess.ExitCode -ne 0) {
+            throw "Processing-core Authenticode regression test failed with exit code $($testProcess.ExitCode)"
+        }
+    } finally {
+        $testProcess.Dispose()
     }
 } finally {
     if ($rootStore) {
