@@ -114,6 +114,22 @@ variable. A certificate renewal that keeps the public key keeps the same pin;
 a new key requires a coordinated desktop/core rollout because the current
 desktop accepts one SPKI.
 
+The native signing step is isolated in the GitHub `Production` environment.
+The Windows build job uploads only an unsigned, already-tested artifact; the
+tag-only signing job consumes `WINDOWS_SIGNING_CERTIFICATE_BASE64` and
+`WINDOWS_SIGNING_CERTIFICATE_PASSWORD`, timestamps the DLL, verifies
+Authenticode and the DER-SPKI pin, and only then exposes the canonical signed
+artifact to the release job. CI separately signs an independent fixture with
+an ephemeral certificate to test unsigned/wrong-signer/tamper rejection
+without production secrets.
+
+Native sidecars also require explicit repository variables
+`MIB_PROCESSING_CORE_APP_MIN_VERSION` and
+`MIB_PROCESSING_CORE_APP_MAX_VERSION`. Release CMake rejects absent,
+non-numeric, or reversed bounds. The current supported loader range is
+`1.0.6` through `1.0.99`; update it deliberately when desktop compatibility
+is requalified.
+
 ### Crash reporting (Sentry) in the tagged release
 
 The tag-triggered CI release (`.github/workflows/release.yml`) also wires up
@@ -165,8 +181,10 @@ Before starting a release, ensure you have:
      - `MIB_STUDIO_R2_ENDPOINT`
      - `WINDOWS_SIGNING_CERTIFICATE_BASE64`
      - `WINDOWS_SIGNING_CERTIFICATE_PASSWORD`
-   - GitHub Actions repository variable (public trust identity, not a secret):
+   - GitHub Actions repository variables (public compatibility/trust data):
      - `MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256`
+     - `MIB_PROCESSING_CORE_APP_MIN_VERSION`
+     - `MIB_PROCESSING_CORE_APP_MAX_VERSION`
    - GitHub Actions publish step maps to AWS env vars:
      - `AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}`
      - `AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }}`
@@ -226,6 +244,13 @@ ctest --test-dir build --build-config Release --output-on-failure --timeout 30
 The generic `windows-default` preset intentionally leaves the requirement off
 for local development and fork CI. Such an unpinned Release executable fails
 closed when asked to load a native core and is not eligible for distribution.
+
+Processing-core release tags derive their registry channel from the wheel
+version: plain `X.Y.Z` publishes stable, while a PEP 440 prerelease such as
+`X.Y.Zrc1` publishes beta and creates a GitHub prerelease. Channel publication
+is serialized independently. Rollback/promotion uses **Actions → Promote or
+roll back processing core**; it accepts only an existing immutable version and
+verifies the public pointer and every referenced artifact after the change.
 
 Verify the build:
 

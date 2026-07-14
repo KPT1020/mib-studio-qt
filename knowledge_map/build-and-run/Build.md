@@ -66,15 +66,16 @@ python scripts/run_processing_conformance.py  # installed-wheel anti-drift check
 ```
 
 Requires the same system packages as `linux-backend-only`/
-`linux-system-release` (`docs/howto/linux-build.md`) — including Qt, since
-`add_subdirectory(src/backend)` still configures `mib_backend` alongside
-`mib_processing` even though the wheel only installs the latter. `mib_processing`
+`linux-system-release` (`docs/howto/linux-build.md`). Wheel builds set
+`MIB_BUILD_PROCESSING_ONLY=ON`, which stops after the Qt-free library and
+bindings; Qt, cameras, and desktop services are not configured. `mib_processing`
 has `POSITION_INDEPENDENT_CODE ON` (needed to link a static library into a
 shared `.so` extension module); this has no effect on the desktop static/
 executable link.
 
-Not an auditwheel/manylinux-portable wheel — see `bindings/python/README.md`.
-CI: `.github/workflows/python-wheel.yml` builds + tests on every relevant PR
+CI produces repaired `manylinux_2_28_x86_64` wheels for CPython 3.10–3.13 and
+imports CPython 3.12 in a clean slim production base. See
+`bindings/python/README.md`. `.github/workflows/python-wheel.yml` builds + tests on every relevant PR
 then runs the full-parity conformance harness before publishing wheels as
 GitHub Release assets on `mib-processing-v*` tags
 (a separate tag namespace from the app's own `v*.*.*` releases,
@@ -132,6 +133,14 @@ also compares it with the signer certificate extracted from the signed DLL.
 The requirement defaults off so local and fork CI builds remain possible, but
 an unpinned Release build cannot load a native core and is not distributable;
 environment overrides are limited to Debug builds.
+
+The Windows native job builds pure C/C++ good, truncated, incompatible,
+malformed, and exception-containing modules from a separately configured
+fixture project. It audits the production DLL for exactly one exported ABI
+entrypoint and rejects Qt/HDF5/OpenCV/Python/app imports. OpenCV is linked
+statically for that artifact. Tag releases require explicit app bounds through
+`MIB_PROCESSING_CORE_APP_{MIN,MAX}_VERSION`; development defaults both to the
+current desktop version.
 
 ## Desktop release safety
 

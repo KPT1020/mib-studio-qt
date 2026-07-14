@@ -74,6 +74,13 @@ endif()
 mib_link_opencv(mib_processing PUBLIC)
 mib_link_hdf5(mib_processing PUBLIC)
 
+# A wheel build needs only the portable library above. Stopping here keeps Qt,
+# camera services, desktop backends, and the native Windows module out of the
+# manylinux configuration and makes its dependency surface auditable.
+if(MIB_BUILD_PROCESSING_ONLY)
+    return()
+endif()
+
 # Native hot-swap artifact. It deliberately links only the mask kernel and
 # OpenCV/spdlog, not Qt/HDF5 or the desktop service graph. Release CI signs the
 # Windows DLL before the registry publisher hashes it.
@@ -110,7 +117,7 @@ if(WIN32)
     endif()
     file(GENERATE
         OUTPUT "${PROJECT_BINARY_DIR}/$<CONFIG>/${_mib_processing_native_basename}.json"
-        CONTENT "{\n  \"schema_version\": 1,\n  \"version\": \"${MIB_PROCESSING_CORE_VERSION}\",\n  \"filename\": \"$<TARGET_FILE_NAME:mib_processing_core>\",\n  \"os\": \"windows\",\n  \"arch\": \"x86_64\",\n  \"engine_abi_version\": 1,\n  \"contract_version\": 1,\n  \"entrypoint\": \"mib_processing_get_api\",\n  \"runtime_fingerprint\": \"${_mib_processing_runtime_fingerprint}\",\n  \"app_min_version\": \"${PROJECT_VERSION}\",\n  \"app_max_version\": \"${PROJECT_VERSION}\",\n  \"signing\": {\"required\": true, \"format\": \"authenticode\"}\n}\n")
+        CONTENT "{\n  \"schema_version\": 1,\n  \"version\": \"${MIB_PROCESSING_CORE_VERSION}\",\n  \"filename\": \"$<TARGET_FILE_NAME:mib_processing_core>\",\n  \"os\": \"windows\",\n  \"arch\": \"x86_64\",\n  \"engine_abi_version\": 1,\n  \"contract_version\": 1,\n  \"entrypoint\": \"mib_processing_get_api\",\n  \"runtime_fingerprint\": \"${_mib_processing_runtime_fingerprint}\",\n  \"app_min_version\": \"${MIB_PROCESSING_CORE_APP_MIN_VERSION}\",\n  \"app_max_version\": \"${MIB_PROCESSING_CORE_APP_MAX_VERSION}\",\n  \"signing\": {\"required\": true, \"format\": \"authenticode\"}\n}\n")
 endif()
 
 add_library(mib_backend STATIC

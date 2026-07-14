@@ -767,7 +767,8 @@ bool FrameStore::saveFrameAsTiff(const Frame& frame, const std::string& filepath
     } catch (const cv::Exception& ex) {
         SPDLOG_ERROR("FrameStore: OpenCV exception while saving frame to {}: {} (code={}, func={}, "
                      "file={}, line={})",
-                     filepath, ex.what(), static_cast<int>(ex.code), ex.func, ex.file, ex.line);
+                     filepath, ex.what(), static_cast<int>(ex.code), ex.func.c_str(),
+                     ex.file.c_str(), ex.line);
         return false;
     } catch (const std::exception& ex) {
         SPDLOG_ERROR("FrameStore: Exception while saving frame to {}: {}", filepath, ex.what());

@@ -48,7 +48,10 @@
 - **`ProfileManager`** — profile catalog/metadata helper for
   `ConfigTabs`. Scans local profiles, lazily generates `profile.meta.json`,
   parses public R2 catalogs, computes SHA-256, stages/installs updates, and
-  produces field-level JSON diffs for manual update review.
+  produces field-level JSON diffs for manual update review. An optional
+  `processing_contract_version` is round-tripped through catalog/local
+  metadata and marks the profile incompatible when it differs from the active
+  core; it never selects a core.
 - **`DeviceInitManager`** — runs [[../services/CameraControlService]]
   `discoverCameras()` off the UI thread. Emits a signal when discovery
   completes (including "no cameras found").

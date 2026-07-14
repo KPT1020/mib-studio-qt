@@ -63,5 +63,8 @@ const NativePluginEntry* findNativePlugin(const VersionEntry& version,
                                           const QString& os,
                                           const QString& arch);
 bool isAppCompatible(const NativePluginEntry& plugin, const QString& appVersion);
+bool isProcessingContractCompatible(int requiredContractVersion,
+                                    int activeContractVersion);
+bool isVersionDowngrade(const QString& candidate, const QString& current);
 
 } // namespace frontend::processingcorecatalog

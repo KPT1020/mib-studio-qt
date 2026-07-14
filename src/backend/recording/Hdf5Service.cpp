@@ -92,8 +92,12 @@ namespace backend::services
                 return H5P_DEFAULT;
             }
 
-            // Best-effort: ignored gracefully if the build doesn't support it.
+            // H5Pset_file_locking was added after the HDF5 1.10.5 baseline
+            // used by manylinux_2_28. Keep portable wheel builds compatible;
+            // older runtimes retain their default locking behavior.
+#if H5_VERSION_GE(1, 10, 7)
             H5Pset_file_locking(fileAccessId, /*use_file_locking=*/0, /*ignore_when_disabled=*/1);
+#endif
 
             return fileAccessId;
         }

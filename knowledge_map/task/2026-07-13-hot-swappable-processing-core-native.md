@@ -62,6 +62,18 @@
   full prerelease identity and same-line SHA betas sort by publication time.
   Local dry-run calculates the prospective version, installer failures are
   fatal, and existing release tags are immutable.
+- Closed the local A8/A10/A11 release-quality gaps: repaired manylinux wheels
+  import in a clean production base; Windows uses independently configured
+  good/truncated/incompatible/malformed/throwing modules, export/import audits,
+  an ephemeral Authenticode matrix, flat release assets, and a separate
+  Production signing job. Activation rejects leases before reset, clears all
+  stale state after a committed swap, and passes concurrent A→B→A stress.
+  Profiles carry optional processing-contract compatibility, downgrades require
+  explicit confirmation, and HDF regeneration warns on recorded/active drift.
+- Added a Production promotion/rollback action, stable/beta tag-derived
+  channels, and explicit app compatibility bounds. Published and publicly
+  verified stable LUT revision `2026.07.14-1`, removing the registry's missing
+  cross-link prerequisite.
 
 ## Deliberate residual scope
 
@@ -70,18 +82,18 @@ processing pipeline. Host code still computes contours, metrics, tracking,
 target groups, callbacks, and orchestration from the selected mask. A core
 that changes those semantics is not fully replaceable; A7/#242 remains open.
 
-A8/#239 still needs an independently built/precompiled Windows ABI fixture and
-import/signature audit beyond the in-tree dynamic-module parity fixture.
-A10/#241 still needs A→B→A/reset and TSan/concurrency stress coverage; settings
-sync failure rollback is now covered before activation, so there is no
-post-activation persistence failure state.
-A11/#243 still needs profile-contract coupling, explicit scientific-review
-warnings, richer cached/ready state, downgrade confirmation, and final selector
-polish. These issues are not closed by this foundation.
+A8/#239 now has independent-source fixtures, import/export audit, a secret-free
+signature matrix, and isolated production signing wiring; a real signed runner
+execution still belongs to A12. A10/#241 now has A→B→A/reset and concurrent
+stress coverage; the remaining live proof is the Windows production path.
+A11/#243 now includes profile-contract coupling, downgrade confirmation, and
+recorded-vs-active regeneration warnings; live signed Windows selector and
+restart rehearsal remain.
 
-Production Authenticode signing, R2 publication, release promotion/rollback,
-and Windows hardware proof need live secrets/infrastructure and remain A12
-gates. The selector's production trust root is the signer public key's DER
+Production Authenticode signing and Windows hardware proof need the real
+certificate/infrastructure and remain A12 gates. R2 access is present, the
+stable LUT is live, and promotion/rollback is wired but cannot run until a
+first immutable core exists. The selector's production trust root is the signer public key's DER
 SPKI SHA-256 compiled into the application; production environment variables
 cannot replace it. The release gate is wired, but the real certificate secrets
 and repository pin still need provisioning and remain an A12 release

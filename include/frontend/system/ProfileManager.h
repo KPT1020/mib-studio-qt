@@ -29,6 +29,7 @@ public:
         QString cameraScriptSha256;
         QString appMinVersion;
         QString appMaxVersion;
+        int processingContractVersion = 0;
         QDateTime lastCheckedUtc;
         QDateTime lastUpdatedUtc;
     };
@@ -45,6 +46,7 @@ public:
         QString cameraScriptSha256;
         QString appMinVersion;
         QString appMaxVersion;
+        int processingContractVersion = 0;
     };
 
     struct Catalog {
@@ -98,7 +100,10 @@ public:
     QString catalogUrlForChannel(const QString& channel = QStringLiteral("stable")) const;
     QUrl catalogUrlFromEnvOrDefault(const QString& channel = QStringLiteral("stable")) const;
 
-    QVector<LocalProfile> scanLocalProfiles(bool ensureMetadata = true, const Catalog* catalog = nullptr, QString* errorOut = nullptr) const;
+    QVector<LocalProfile> scanLocalProfiles(bool ensureMetadata = true,
+                                            const Catalog* catalog = nullptr,
+                                            QString* errorOut = nullptr,
+                                            int activeProcessingContractVersion = 0) const;
     std::optional<Catalog> fetchCatalog(const QUrl& url, QString* errorOut = nullptr) const;
     std::optional<CatalogEntry> findCatalogEntry(const Catalog& catalog, const QString& profileId) const;
 

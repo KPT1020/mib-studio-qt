@@ -13,6 +13,9 @@ REPO_ROOT = Path(__file__).resolve().parent
 OPTIONS_FILE = REPO_ROOT / "cmake" / "MIBOptions.cmake"
 PIN_NAME = "MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256"
 REQUIRE_NAME = "MIB_REQUIRE_PROCESSING_CORE_SIGNER_SPKI"
+APP_MIN_NAME = "MIB_PROCESSING_CORE_APP_MIN_VERSION"
+APP_MAX_NAME = "MIB_PROCESSING_CORE_APP_MAX_VERSION"
+APP_REQUIRE_NAME = "MIB_REQUIRE_PROCESSING_CORE_APP_COMPAT"
 
 
 class ProcessingCoreSignerCMakeTest(unittest.TestCase):
@@ -22,6 +25,9 @@ class ProcessingCoreSignerCMakeTest(unittest.TestCase):
         pin: str = "",
         required: bool = False,
         expected: str | None = None,
+        app_min: str = "",
+        app_max: str = "",
+        require_app_compat: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as temporary_directory:
             script = Path(temporary_directory) / "check.cmake"
@@ -39,8 +45,12 @@ endif()
             return subprocess.run(
                 [
                     "cmake",
+                    "-DPROJECT_VERSION=1.0.0",
                     f"-D{PIN_NAME}={pin}",
                     f"-D{REQUIRE_NAME}={'ON' if required else 'OFF'}",
+                    f"-D{APP_MIN_NAME}={app_min}",
+                    f"-D{APP_MAX_NAME}={app_max}",
+                    f"-D{APP_REQUIRE_NAME}={'ON' if require_app_compat else 'OFF'}",
                     "-P",
                     str(script),
                 ],
@@ -68,6 +78,20 @@ endif()
     def test_valid_pin_is_normalized_to_lowercase(self) -> None:
         result = self.run_options(pin="ABCDEF12" * 8, required=True, expected="abcdef12" * 8)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_release_requires_explicit_ordered_app_compatibility_bounds(self) -> None:
+        missing = self.run_options(require_app_compat=True)
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("explicit app compatibility bounds", missing.stdout + missing.stderr)
+
+        reversed_bounds = self.run_options(app_min="2.0.0", app_max="1.0.0")
+        self.assertNotEqual(reversed_bounds.returncode, 0)
+        self.assertIn("minimum version must not exceed", reversed_bounds.stdout + reversed_bounds.stderr)
+
+        valid = self.run_options(
+            app_min="1.0.6", app_max="1.0.99", require_app_compat=True,
+        )
+        self.assertEqual(valid.returncode, 0, valid.stdout + valid.stderr)
 
 
 class ProcessingCoreSignerReleaseWiringTest(unittest.TestCase):
@@ -109,6 +133,63 @@ class ProcessingCoreSignerReleaseWiringTest(unittest.TestCase):
         self.assertIn("ExportSubjectPublicKeyInfo", content)
         self.assertIn("Get-AuthenticodeSignature", content)
         self.assertIn("actualSignerSpki -ne $approvedSignerSpki", content)
+
+    def test_native_release_assets_are_staged_flat_from_release_configuration(self) -> None:
+        content = self.read(".github/workflows/python-wheel.yml")
+        self.assertIn("build\\Release\\$stem.dll", content)
+        self.assertIn("build\\Release\\$stem.json", content)
+        self.assertIn("mib-processing-native-dist", content)
+        self.assertIn("${{ runner.temp }}/mib-processing-native-dist/*", content)
+        self.assertIn("Validate flat release asset set", content)
+        self.assertIn("nested release asset", content)
+        self.assertNotIn("Get-ChildItem build -Recurse -File -Filter \"$stem.dll\"", content)
+
+    def test_linux_release_wheels_are_manylinux_and_imported_in_biowork_base(self) -> None:
+        content = self.read(".github/workflows/python-wheel.yml")
+        self.assertIn("pypa/cibuildwheel@v2.22.0", content)
+        self.assertIn("CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28", content)
+        self.assertIn("MIB_BUILD_PROCESSING_ONLY", self.read("bindings/python/pyproject.toml"))
+        self.assertIn("python:3.12-slim", content)
+        self.assertIn("Verify portable wheel in Biowork production base", content)
+        self.assertIn("manylinux_2_28_x86_64\\.whl", content)
+        self.assertNotIn("NOT an auditwheel/manylinux-portable wheel", content)
+
+    def test_native_release_uses_independent_fixtures_and_audited_private_dependencies(self) -> None:
+        content = self.read(".github/workflows/python-wheel.yml")
+        self.assertIn("cmake -S tests/processing/fixtures", content)
+        self.assertIn("mib_processing_fixture_throwing.dll", content)
+        self.assertIn("/exports", content)
+        self.assertIn("/dependents", content)
+        self.assertIn("^(Qt|hdf5|opencv|python|mib_studio)", content)
+        self.assertIn('opencv/*:shared=False', content)
+        self.assertIn("test-processing-core-authenticode.ps1", content)
+
+    def test_production_signing_is_isolated_from_unsigned_build_artifacts(self) -> None:
+        content = self.read(".github/workflows/python-wheel.yml")
+        self.assertIn("environment: Production", content)
+        self.assertIn("mib_processing-native-windows-x86_64-unsigned", content)
+        self.assertIn("name: mib_processing-native-windows-x86_64\n", content)
+        self.assertIn("WINDOWS_SIGNING_CERTIFICATE_BASE64", content)
+        self.assertIn("WINDOWS_SIGNING_CERTIFICATE_PASSWORD", content)
+
+    def test_release_channel_and_app_compatibility_are_explicit(self) -> None:
+        content = self.read(".github/workflows/python-wheel.yml")
+        self.assertIn('channel = "stable" if re.fullmatch', content)
+        self.assertIn("processing-core-registry-${{ needs.validate-source-version.outputs.channel }}", content)
+        self.assertIn('--channel "$PROCESSING_CHANNEL"', content)
+        self.assertIn("vars.MIB_PROCESSING_CORE_APP_MIN_VERSION", content)
+        self.assertIn("vars.MIB_PROCESSING_CORE_APP_MAX_VERSION", content)
+        self.assertIn("-DMIB_REQUIRE_PROCESSING_CORE_APP_COMPAT=", content)
+
+    def test_authenticated_promotion_workflow_verifies_the_public_pointer(self) -> None:
+        content = self.read(".github/workflows/processing-core-promote.yml")
+        self.assertIn("workflow_dispatch:", content)
+        self.assertIn("environment: Production", content)
+        self.assertIn("--promote-version", content)
+        self.assertIn("--upload-method s3", content)
+        self.assertIn("verify-processing-core-manifest.py", content)
+        self.assertIn("resolved version", content)
+        self.assertIn("processing-core-registry-${{ inputs.channel }}", content)
 
 
 class DesktopReleaseSafetyWiringTest(unittest.TestCase):

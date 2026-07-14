@@ -5,6 +5,20 @@
 
 ## Features shipped
 
+- **Processing-core release gate closure** (2026-07-14, A8/A10/A11/A12) —
+  Added repaired `manylinux_2_28` wheels proven in a clean Python 3.12 base,
+  independent native ABI fixtures, exact export/import auditing, secret-free
+  Authenticode rejection tests, flat signed release assets, and a separate
+  Production signing job. Release channels now follow stable/prerelease wheel
+  identity; an authenticated Production workflow promotes or rolls back
+  existing immutable versions and verifies public cross-links. Activation now
+  rejects leases before reset, clears stale scientific state, and passes
+  watchdog-protected A→B→A concurrency stress. Profile metadata carries an
+  optional processing contract, downgrades require confirmation, and HDF
+  regeneration warns on identity drift. Stable LUT revision `2026.07.14-1`
+  is live at `updates.yofo.bio`. The remaining blockers are the A7 full-kernel
+  boundary and A12's real production certificate/Windows hardware proof.
+
 - **Portable CI guards for processing-core release tests** (2026-07-14) —
   Required C11 for the pure-C ABI layout test so MSVC evaluates its compile-time
   assertions, installed NumPy in backend and sanitizer CI for the HDF5

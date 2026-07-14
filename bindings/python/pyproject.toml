@@ -32,11 +32,10 @@ cmake.source-dir = "../.."
 [tool.scikit-build.cmake.define]
 MIB_BUILD_PYTHON_BINDINGS = "ON"
 MIB_BUILD_BACKEND_ONLY = "ON"
+MIB_BUILD_PROCESSING_ONLY = "ON"
 BUILD_TESTING = "OFF"
-# mib_backend (which links Qt + optionally sentry-native) still configures
-# as part of add_subdirectory(src/backend) even though the wheel only needs
-# mib_processing; MIB_USE_SENTRY=OFF at least avoids an unneeded
-# sentry-native FetchContent source build during every wheel build.
+# Keep the release wheel's CMake graph Qt-free and avoid configuring desktop,
+# camera, native-plugin, and sentry targets that are not part of the package.
 MIB_USE_SENTRY = "OFF"
 
 [tool.scikit-build.wheel]

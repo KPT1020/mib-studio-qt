@@ -318,12 +318,6 @@ bool ProcessingService::activateProcessingKernel(
         }
         return false;
     }
-    std::string resetError;
-    if (!kernel->reset(&resetError)) {
-        if (error) *error = "processing kernel reset failed: " + resetError;
-        return false;
-    }
-
     std::unique_lock coreLock(processingKernelMutex_);
     if (rtRunning_.load(std::memory_order_acquire)) {
         if (error) *error = "realtime processing is running";
@@ -339,6 +333,16 @@ bool ProcessingService::activateProcessingKernel(
     }
     if (activeSynchronousCoreOperations_.load(std::memory_order_acquire) != 0) {
         if (error) *error = "an offline processing operation is active";
+        return false;
+    }
+
+    // Reset is part of the quiescent activation transaction. In particular,
+    // the candidate may be the currently active resident module, so resetting
+    // it before taking this lock could mutate a context held by an operation
+    // whose lease will subsequently cause activation to be rejected.
+    std::string resetError;
+    if (!kernel->reset(&resetError)) {
+        if (error) *error = "processing kernel reset failed: " + resetError;
         return false;
     }
 
@@ -373,7 +377,13 @@ bool ProcessingService::activateProcessingKernel(
         std::scoped_lock snapshotLock(snapshotMutex_);
         latestSnapshot_.reset();
     }
+    clearAccumulatedFrames();
     clearMonitoringFrames();
+    {
+        std::scoped_lock realtimeLock(rtMutex_);
+        rtBgGray_.reset();
+    }
+    configVersion_.fetch_add(1, std::memory_order_release);
     {
         std::scoped_lock previousFrameLock(previousFrameMutex_);
         previousFrameForAutoCapture_.release();

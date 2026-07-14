@@ -32,7 +32,7 @@ same mask/empty-frame algorithm is used on both sides of the boundary.
 ## Processing-core selection
 
 - `activateProcessingKernel(kernel)` swaps the selected kernel only at a safe
-  between-operation boundary. It resets the candidate first, then rejects the
+  between-operation boundary. It rejects active leases first, then resets the
   swap while realtime, an experiment, recording/export, the async batch
   pipeline, or a synchronous offline batch owns an operation lease. An optional
   pre-commit callback runs under the selection lock after all of those guards
@@ -40,6 +40,10 @@ same mask/empty-frame algorithm is used on both sides of the boundary.
   the exact `QSettings` selection; a false return or exception preserves the
   previous usable kernel and does not mark it unavailable. The callback must
   not re-enter `ProcessingService`.
+  A successful swap clears experiment/monitoring accumulation, realtime
+  background and snapshot data, motion history, and bumps the config version;
+  rejected reactivation never resets the live context. The watchdog-protected
+  activation stress test exercises concurrent processing and repeated A→B→A.
 - `activeProcessingCoreIdentity()` returns the exact selected version,
   contract, engine ABI, artifact/manifest hashes, release tag, build ID,
   runtime fingerprint, and source. `processBatch(..., processingCore)` captures

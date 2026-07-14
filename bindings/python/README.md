@@ -22,6 +22,12 @@ pip install "https://github.com/KPT1020/mib-studio-qt/releases/download/<tag>/mi
 See `.github/workflows/python-wheel.yml` for how wheels are built and
 released.
 
+Linux releases are repaired `manylinux_2_28_x86_64` wheels for CPython
+3.10–3.13. CI installs each repaired wheel, runs conformance, and imports the
+CPython 3.12 artifact in a clean `python:3.12-slim` container before a tag can
+publish. The build uses `MIB_BUILD_PROCESSING_ONLY=ON`, so Qt and the desktop
+service graph are not configured into the wheel.
+
 ## Build from source
 
 ```bash

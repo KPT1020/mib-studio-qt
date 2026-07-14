@@ -28,6 +28,13 @@ candidate, but `ProcessingService` refuses the final swap while realtime,
 capture-backed experiment work, async batch work, or an offline synchronous
 batch owns the current core. Stop those operations and retry.
 
+Moving to an older semantic version uses a distinct, default-No downgrade
+confirmation. Publication remains advisory: neither a new `latest.json` nor a
+profile changes the active core. Profile metadata may declare an optional
+processing contract; ConfigTabs marks a mismatch incompatible. Regenerating a
+recorded HDF5 file with a different active identity warns the operator and
+records the newly leased identity without silently switching.
+
 ## Resolution and trust chain
 
 1. Fetch `{base}/{channel}/processing-core/index.json` over HTTPS with a

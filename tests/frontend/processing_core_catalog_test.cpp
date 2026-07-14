@@ -34,6 +34,14 @@ int main() {
                "app compatibility range accepts supported version");
     MIB_EXPECT(!frontend::processingcorecatalog::isAppCompatible(*plugin, "2.0.0"),
                "app compatibility range rejects unsupported version");
+    MIB_EXPECT(frontend::processingcorecatalog::isProcessingContractCompatible(0, 1) &&
+                   frontend::processingcorecatalog::isProcessingContractCompatible(1, 1) &&
+                   !frontend::processingcorecatalog::isProcessingContractCompatible(2, 1),
+               "optional profile processing contract is advisory unless present and different");
+    MIB_EXPECT(frontend::processingcorecatalog::isVersionDowngrade("1.9.9", "2.0.0") &&
+                   frontend::processingcorecatalog::isVersionDowngrade("2.0.0rc1", "2.0.0") &&
+                   !frontend::processingcorecatalog::isVersionDowngrade("2.1.0", "2.0.0"),
+               "core downgrade detection handles older releases and prereleases");
     auto unboundedPlugin = *plugin;
     unboundedPlugin.appMaxVersion.clear();
     MIB_EXPECT(frontend::processingcorecatalog::isAppCompatible(unboundedPlugin, "99.0.0"),

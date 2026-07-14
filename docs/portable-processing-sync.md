@@ -56,7 +56,8 @@ same bytes under both the human-readable `index.html` key and that route key.
       "config_sha256": "<64-hex>",
       "camera_script_sha256": "<64-hex or null>",
       "app_min_version": "0.8.0",
-      "app_max_version": null
+      "app_max_version": null,
+      "processing_contract_version": 1
     }
   ]
 }
@@ -69,6 +70,11 @@ the same `image_processing` (nested) structure as
 `docs/gold_standard_metrics.md` ("ProcessingConfig contract") for the
 field-name mapping and the note that the Python bindings' dict shape is
 flat, not nested.
+
+`processing_contract_version` is optional. It declares which processing
+contract the profile was validated against; it never selects or activates a
+core. MIB Studio marks a present, mismatched value incompatible and requires
+the operator to choose a compatible core separately.
 
 ### Emodulus LUT manifest (`latest.json`)
 
@@ -118,9 +124,9 @@ LUT fields remain present.
     "release_url": "https://github.com/KPT1020/mib-studio-qt/releases/tag/mib-processing-v0.1.0",
     "wheels": [
       {
-        "filename": "mib_processing-0.1.0-cp311-cp311-linux_x86_64.whl",
-        "platform_tag": "cp311-cp311-linux_x86_64",
-        "url": "https://github.com/KPT1020/mib-studio-qt/releases/download/mib-processing-v0.1.0/mib_processing-0.1.0-cp311-cp311-linux_x86_64.whl",
+        "filename": "mib_processing-0.1.0-cp311-cp311-manylinux_2_28_x86_64.whl",
+        "platform_tag": "cp311-cp311-manylinux_2_28_x86_64",
+        "url": "https://github.com/KPT1020/mib-studio-qt/releases/download/mib-processing-v0.1.0/mib_processing-0.1.0-cp311-cp311-manylinux_2_28_x86_64.whl",
         "sha256": "<64-hex>",
         "size_bytes": 12345678
       }
@@ -287,6 +293,12 @@ different immutable bytes. Real `--from-release` publication uses the GitHub
 Release's stable `publishedAt` timestamp. Timestamps must include a timezone;
 registry JSON is emitted as UTF-8 with LF newlines on every platform so the
 same release serializes byte-for-byte identically on Windows and Linux.
+
+Production operators normally run **Actions → Promote or roll back processing
+core**, choose `stable` or `beta`, and enter an already-published version. The
+Production-environment workflow serializes changes per channel, uses the R2 S3
+API for consistent reads, writes `latest.json` last, and verifies the public
+pointer plus all cross-links before succeeding.
 
 Use `scripts/bump_mib_processing_version.py <version>` to update the
 authoritative pyproject version and the import-time wrapper literal together.

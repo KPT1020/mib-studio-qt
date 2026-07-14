@@ -145,6 +145,9 @@ call sites.
   `knowledge_map/task/review_2gb_scalability.md`.
 - PIMPL means you can't see HDF5 types in headers — look at
   `src/backend/recording/Hdf5Service.cpp` for dataset paths and dtypes.
+- The optional `H5Pset_file_locking` call is compiled only for HDF5 1.10.7+.
+  This keeps the processing-only manylinux build compatible with the 1.10.5
+  development package while preserving locking on newer desktop libraries.
 - If a primary `.h5` opens only after `h5clear --increment`, check recorder
   logs for final flush/close errors and whether the app or host was killed
   before `stopFrameRecording()` returned. With interval flushing, a kill

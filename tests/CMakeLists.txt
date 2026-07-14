@@ -120,6 +120,28 @@ add_test(NAME processing.core_loader
     COMMAND $<TARGET_FILE:processing_core_loader_test> $<TARGET_FILE:mib_processing_core>)
 set_tests_properties(processing.core_loader PROPERTIES LABELS "processing;backend" TIMEOUT 30)
 
+add_subdirectory(processing/fixtures)
+mib_add_backend_test_executable(processing_core_fixture_matrix_test processing/processing_core_fixture_matrix_test.cpp)
+add_dependencies(processing_core_fixture_matrix_test
+    mib_processing_fixture_good
+    mib_processing_fixture_truncated
+    mib_processing_fixture_incompatible
+    mib_processing_fixture_malformed
+    mib_processing_fixture_throwing
+)
+add_test(NAME processing.core_fixture_matrix
+    COMMAND $<TARGET_FILE:processing_core_fixture_matrix_test>
+        $<TARGET_FILE:mib_processing_fixture_good>
+        $<TARGET_FILE:mib_processing_fixture_truncated>
+        $<TARGET_FILE:mib_processing_fixture_incompatible>
+        $<TARGET_FILE:mib_processing_fixture_malformed>
+        $<TARGET_FILE:mib_processing_fixture_throwing>)
+set_tests_properties(processing.core_fixture_matrix PROPERTIES LABELS "processing;backend" TIMEOUT 30)
+
+if(WIN32)
+    mib_add_backend_test_executable(processing_core_authenticode_test processing/processing_core_authenticode_test.cpp)
+endif()
+
 mib_add_backend_test_executable(processing_core_cache_test processing/processing_core_cache_test.cpp)
 add_dependencies(processing_core_cache_test mib_processing_core)
 target_link_libraries(processing_core_cache_test PRIVATE Threads::Threads)
@@ -131,6 +153,11 @@ mib_add_backend_test_executable(processing_core_activation_test processing/proce
 target_link_libraries(processing_core_activation_test PRIVATE Threads::Threads)
 add_test(NAME processing.core_activation COMMAND $<TARGET_FILE:processing_core_activation_test>)
 set_tests_properties(processing.core_activation PROPERTIES LABELS "processing;backend" TIMEOUT 30)
+
+mib_add_backend_test_executable(processing_core_activation_stress_test processing/processing_core_activation_stress_test.cpp)
+target_link_libraries(processing_core_activation_stress_test PRIVATE Threads::Threads)
+add_test(NAME processing.core_activation_stress COMMAND $<TARGET_FILE:processing_core_activation_stress_test>)
+set_tests_properties(processing.core_activation_stress PROPERTIES LABELS "processing;backend;stress" TIMEOUT 60)
 
 mib_add_backend_test_executable(processing_batch_pipeline_test processing/processing_batch_pipeline_test.cpp)
 add_test(NAME backend.processing_batch_pipeline COMMAND $<TARGET_FILE:processing_batch_pipeline_test>)
@@ -396,6 +423,15 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/test_publish_processing_core.py
     )
     set_tests_properties(scripts.publish_processing_core PROPERTIES
+        LABELS "scripts;contract"
+        TIMEOUT 30
+    )
+
+    add_test(
+        NAME scripts.publish_profiles
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/test_publish_profiles.py
+    )
+    set_tests_properties(scripts.publish_profiles PROPERTIES
         LABELS "scripts;contract"
         TIMEOUT 30
     )

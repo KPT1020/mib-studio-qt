@@ -286,4 +286,25 @@ bool isAppCompatible(const NativePluginEntry& plugin, const QString& appVersion)
            (plugin.appMaxVersion.isEmpty() || (!maximum.isNull() && current <= maximum));
 }
 
+bool isProcessingContractCompatible(int requiredContractVersion,
+                                    int activeContractVersion) {
+    return requiredContractVersion <= 0 || activeContractVersion <= 0 ||
+           requiredContractVersion == activeContractVersion;
+}
+
+bool isVersionDowngrade(const QString& candidate, const QString& current) {
+    if (candidate == current) return false;
+    qsizetype candidateSuffix = 0;
+    qsizetype currentSuffix = 0;
+    const auto candidateCore = QVersionNumber::fromString(candidate, &candidateSuffix);
+    const auto currentCore = QVersionNumber::fromString(current, &currentSuffix);
+    if (candidateCore.isNull() || currentCore.isNull()) return false;
+    if (candidateCore != currentCore) return candidateCore < currentCore;
+
+    const bool candidatePrerelease = candidateSuffix < candidate.size();
+    const bool currentPrerelease = currentSuffix < current.size();
+    if (candidatePrerelease != currentPrerelease) return candidatePrerelease;
+    return candidatePrerelease && candidate.mid(candidateSuffix) < current.mid(currentSuffix);
+}
+
 } // namespace frontend::processingcorecatalog

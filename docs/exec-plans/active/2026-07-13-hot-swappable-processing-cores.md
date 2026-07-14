@@ -50,7 +50,10 @@ GitHub tracking:
       behavior before introducing dynamic loading.
 - [ ] [A8 #239](https://github.com/KPT1020/mib-studio-qt/issues/239) — freeze
       the POD/opaque-handle C ABI, build the Windows plugin and descriptor, and
-      validate independently built compatible/incompatible fixtures.
+      validate independently built compatible/incompatible fixtures. Local/CI
+      wiring now includes separately configured C/C++ fixture modules,
+      import/export audit, ephemeral signing tests, and isolated Production
+      signing; the real signed run remains A12 evidence.
 - [x] [A9 #237](https://github.com/KPT1020/mib-studio-qt/issues/237) — extend
       the existing conformance-gated tag workflow through Python 3.13, build
       and sign the native asset, attach one release set, then publish immutable
@@ -58,10 +61,14 @@ GitHub tracking:
       signing/R2 secret path is wired but intentionally not claimed as run.
 - [ ] [A10 #241](https://github.com/KPT1020/mib-studio-qt/issues/241) — add the
       trusted content-addressed cache, catalog client, resident module loader,
-      core leases, and transactional activation manager.
+      core leases, and transactional activation manager. A→B→A, rejection-before-
+      reset, stale-state clearing, and watchdog concurrency stress are green;
+      the Windows live rehearsal remains.
 - [ ] [A11 #243](https://github.com/KPT1020/mib-studio-qt/issues/243) — add the
       Processing Core selector/status, admin pin, compatibility handling, and
-      HDF5/run provenance.
+      HDF5/run provenance. Profile contract compatibility, explicit downgrade,
+      and recorded-vs-active regeneration warnings are now implemented; live
+      signed selector/restart evidence remains.
 - [ ] [A12 #240](https://github.com/KPT1020/mib-studio-qt/issues/240) — publish
       a real signed release to R2, activate/downgrade it on Windows hardware,
       and capture performance/provenance evidence.
@@ -95,7 +102,7 @@ the resolver and remain independent of desktop activation internals.
 
 - Registry/version tooling: `python3 -m unittest -v
   test_publish_processing_core.py test_bump_mib_processing_version.py
-  test_contract_version_consistency.py`.
+  test_contract_version_consistency.py test_publish_profiles.py`.
 - Docs/vault: `python3 scripts/check_docs.py`.
 - Backend/core: Linux backend CTest plus installed-wheel and dynamic-plugin
   golden conformance.
@@ -152,9 +159,10 @@ the resolver and remain independent of desktop activation internals.
 
 ## Residual infrastructure gates
 
-- Production certificate material, R2 credentials, and the approved signer
-  identity are unavailable in the sandbox. The workflows now validate them,
-  but no real value was invented or live release attempted.
+- Production certificate material and the approved signer identity remain
+  unavailable. R2 access is verified and stable LUT revision `2026.07.14-1`
+  is publicly reachable, but no fake signing identity was invented and no
+  unsigned core release was attempted.
 - The real GitHub tag/release, conditional R2 reads/writes, and package-page
   installation must be demonstrated in A12.
 - PowerShell and the Windows packaging toolchain are unavailable in this Linux
@@ -165,3 +173,7 @@ the resolver and remain independent of desktop activation internals.
   Docker daemon can validate Biowork's image/UI wiring, but cannot prove the
   release-driven version swap without that signed release; unit/conformance
   wiring is not a substitute for live evidence.
+- A7 remains a deliberate architectural blocker: ABI v1 owns mask/empty-frame
+  decisions, while contours, scientific metrics, tracking, target selection,
+  and callbacks remain host-owned. A science-changing core is not fully
+  swappable until that boundary is redesigned and re-baselined.

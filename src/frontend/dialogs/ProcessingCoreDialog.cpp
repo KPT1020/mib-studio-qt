@@ -453,11 +453,24 @@ void ProcessingCoreDialog::prepareAndActivateSelected() {
         return;
     }
     if (version.version.toStdString() != backend_.processing().activeProcessingCoreIdentity().version) {
+        const QString currentVersion = QString::fromStdString(
+            backend_.processing().activeProcessingCoreIdentity().version);
+        const bool downgrade = processingcorecatalog::isVersionDowngrade(
+            version.version, currentVersion);
         const auto answer = QMessageBox::question(
-            this, tr("Activate processing core"),
-            tr("Prepare and activate processing core %1?\n\n"
-               "Capture, experiments, recording, and batch processing must be stopped first.")
-                .arg(version.version));
+            this,
+            downgrade ? tr("Confirm processing-core downgrade")
+                      : tr("Activate processing core"),
+            downgrade
+                ? tr("Downgrade the active processing core from %1 to %2?\n\n"
+                     "Existing files keep their recorded core identity and will show a "
+                     "mismatch warning; the application never switches them automatically.")
+                      .arg(currentVersion, version.version)
+                : tr("Prepare and activate processing core %1?\n\n"
+                     "Capture, experiments, recording, and batch processing must be stopped first.")
+                      .arg(version.version),
+            QMessageBox::Yes | QMessageBox::No,
+            QMessageBox::No);
         if (answer != QMessageBox::Yes) return;
     }
 

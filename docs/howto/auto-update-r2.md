@@ -249,6 +249,12 @@ manifest with a newer publisher. Manual real publication and promotion require
 `--published-at`; release-driven publication derives the stable timestamp from
 GitHub.
 
+The supported production path is the manual
+`.github/workflows/processing-core-promote.yml` action. Its `Production`
+environment and per-channel concurrency prevent a release publish and rollback
+from racing; the job verifies `latest.json`, wheels/native assets, the profile
+catalog, and the LUT through the public hostname after writing.
+
 Version bump/tag sequence:
 
 ```bash

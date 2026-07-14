@@ -173,6 +173,11 @@ int main() {
                                                 [&] { return operationEntered; }),
                     "synchronous batch entered before timeout");
     }
+    const int resetsBeforeGuardedReactivation = spy->resets.load();
+    MIB_EXPECT(!service.activateProcessingKernel(spy, &error),
+               "reactivating the current core is rejected while a lease is outstanding");
+    MIB_EXPECT(spy->resets.load() == resetsBeforeGuardedReactivation,
+               "rejected reactivation never resets a context owned by the live operation");
     MIB_EXPECT(!service.activateProcessingKernel(alternate, &error),
                "activation rejected while synchronous batch owns the selected core");
     {
@@ -204,6 +209,9 @@ int main() {
     service.stopRealtime();
 
     watchdog.mark("activate after quiescence");
+    service.setRealtimeBackgroundGray(cv::Mat(24, 32, CV_8UC1, cv::Scalar(17)));
+    MIB_EXPECT(!service.getRealtimeBackgroundGray().empty(),
+               "test establishes stale background state before activation");
     int successfulPreCommitCalls = 0;
     MIB_REQUIRE(service.activateProcessingKernel(alternate, &error,
                                                  [&](std::string&) {
@@ -215,6 +223,16 @@ int main() {
                "successful activation persists exactly once before swapping");
     MIB_EXPECT(service.activeProcessingCoreIdentity().version == "10.0.0-test",
                "activation succeeds after every operation stops");
+    MIB_EXPECT(service.getRealtimeBackgroundGray().empty(),
+               "activation clears background state from the previous core");
+
+    watchdog.mark("reactivate original core");
+    MIB_REQUIRE(service.activateProcessingKernel(spy, &error), error);
+    MIB_EXPECT(service.activeProcessingCoreIdentity().version == "9.9.9-test",
+               "A to B to A activation works without unloading either core");
+    MIB_EXPECT(spy->resets.load() == 3,
+               "returning to a resident core resets its context before reuse");
+
     MIB_REQUIRE(service.activateBundledProcessingKernel(&error), error);
     MIB_EXPECT(service.activeProcessingCoreIdentity().source == "bundled",
                "bundled fallback is an explicit activation");

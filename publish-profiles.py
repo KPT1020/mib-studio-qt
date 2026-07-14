@@ -138,6 +138,15 @@ def build_profile_metadata(
     profile_revision = str(base_meta.get("revision") or revision)
     app_min_version = base_meta.get("app_min_version", "0.8.0")
     app_max_version = base_meta.get("app_max_version")
+    processing_contract_version = base_meta.get("processing_contract_version")
+    if processing_contract_version is not None and (
+        isinstance(processing_contract_version, bool)
+        or not isinstance(processing_contract_version, int)
+        or processing_contract_version <= 0
+    ):
+        raise ValueError(
+            f"{meta_path} processing_contract_version must be a positive integer or null"
+        )
 
     profile_object_prefix = f"{profile_prefix}/{profile_id}"
     config_key = f"{profile_object_prefix}/config.json"
@@ -161,6 +170,7 @@ def build_profile_metadata(
         "camera_script_sha256": script_digest,
         "app_min_version": app_min_version,
         "app_max_version": app_max_version,
+        "processing_contract_version": processing_contract_version,
         "last_checked_utc": None,
         "last_updated_utc": profile_revision,
     }
@@ -177,6 +187,7 @@ def build_profile_metadata(
         "camera_script_sha256": script_digest,
         "app_min_version": app_min_version,
         "app_max_version": app_max_version,
+        "processing_contract_version": processing_contract_version,
     }
 
     uploads = [
