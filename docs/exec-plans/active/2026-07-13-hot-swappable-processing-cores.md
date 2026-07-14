@@ -319,3 +319,60 @@ versus residual audit is recorded in
 [#245](https://github.com/KPT1020/mib-studio-qt/issues/245#issuecomment-4966396755),
 and the release-governance evidence is recorded in
 [#240](https://github.com/KPT1020/mib-studio-qt/issues/240#issuecomment-4966314630).
+
+## Live-gate operator runbook (A12 / A13-live / B12 / B13)
+
+Everything below needs credentials, repository administration, or hardware
+that no sandbox session can hold. Order matters: 1–3 are prerequisites for
+4; 5–6 depend on 4.
+
+1. **Provision signing identities.** Windows: install the production
+   Authenticode certificate/password as Production-environment secrets and
+   set the repository SPKI variable consumed as
+   `MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256`. Linux: generate the Ed25519
+   keypair offline (`openssl genpkey -algorithm ed25519`), store the private
+   key as a Production secret, and set
+   `MIB_PROCESSING_CORE_ED25519_SPKI_SHA256` from the DER-SPKI SHA-256 per
+   `docs/architecture/processing-core-linux-signing.md`.
+2. **Repository governance.** Protect `main` (required reviews + status
+   checks) and add Production-environment approval rules; the 2026-07-14 API
+   audit found both missing.
+3. **Windows-runner release rehearsal.** Run the stable and beta desktop
+   release entrypoints once on a real Windows runner; PowerShell/packaging
+   have only been statically validated from Linux.
+4. **Publish a real signed release (A12 steps 1–2).** Tag
+   `mib-processing-v<next>`; the workflow builds, signs, and attaches the
+   flat asset set, then publishes immutable manifest/catalog/package page
+   before `latest.json`. Verify the R2 documents and package-page install.
+   For the Linux lane, first add the Production signing job and extend the
+   release-asset allowlists (`python-wheel.yml`) — unsigned `.so` assets must
+   never publish.
+5. **Windows hardware verification (A12 steps 3–6).** On microscope
+   hardware: discover/prepare/activate v2 without reinstall/restart; run
+   live/experiment/replay/regeneration and verify HDF5 provenance matches the
+   leased core; downgrade A→B→A; promote and roll back the channel without
+   implicit desktop activation; capture signature chain, latency
+   median/p95 ratios, and run identifiers on #240.
+6. **Biowork live rehearsal (B12/B13).** With the published release: start
+   the unchanged baked-v1 image, trigger channel-active v2 and a concurrent
+   exact-v1 override, verify MLflow identity and cold/warm cache evidence,
+   promote/roll back the channel, and let the scheduled bump workflow open
+   its first real draft PR. Attach evidence to
+   [Biowork #116](https://github.com/gavinlouuu-kpt/Biowork-monorepo/issues/116).
+
+## Worker pass-off — 2026-07-14 (session 2)
+
+- Branch in both repositories: `claude/hot-swap-cores-handoff-14c9ps`,
+  based on `claude/biowork-pipeline-portability-j3qpu6` head (`ebed7ee` /
+  `26e9573`).
+- This session landed: A13's Ed25519 detached-signature verifier, sidecar/
+  publisher/catalog transport, Linux CI build/audit/sign-rehearsal lane, and
+  spec doc; A7's kernel-seam expansion (science moved behind
+  `IProcessingKernel` with golden + spy-kernel proofs); and the Biowork
+  clean-toolchain native-wheel gate closure (81 passed).
+- Verified here: full Linux backend suite 71/71, TSan lane 40/40 over
+  backend/recording/processing/camera labels, Qt-free guard, 44 registry
+  tooling unit tests, docs/vault checks, workflow YAML parse, and the local
+  nm/readelf/openssl rehearsal of every new CI step.
+- Still open: the runbook above (A12, A13-live, B12, B13) and A7's ABI v2
+  object-record marshalling.
