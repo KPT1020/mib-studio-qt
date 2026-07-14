@@ -63,7 +63,8 @@
   Local dry-run calculates the prospective version, installer failures are
   fatal, and existing release tags are immutable.
 - Closed the local A8/A10/A11 release-quality gaps: repaired manylinux wheels
-  import in a clean production base; Windows uses independently configured
+  import in a clean production base, with EPEL explicitly enabled in the
+  pinned AlmaLinux builder for HDF5/spdlog packages; Windows uses independently configured
   good/truncated/incompatible/malformed/throwing modules, export/import audits,
   an ephemeral Authenticode matrix, flat release assets, and a separate
   Production signing job. Activation rejects leases before reset, clears all

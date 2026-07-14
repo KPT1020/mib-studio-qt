@@ -26,7 +26,10 @@ Linux releases are repaired `manylinux_2_28_x86_64` wheels for CPython
 3.10–3.13. CI installs each repaired wheel, runs conformance, and imports the
 CPython 3.12 artifact in a clean `python:3.12-slim` container before a tag can
 publish. The build uses `MIB_BUILD_PROCESSING_ONLY=ON`, so Qt and the desktop
-service graph are not configured into the wheel.
+service graph are not configured into the wheel. The pinned AlmaLinux 8
+manylinux image enables EPEL before installing the OpenCV, HDF5, and spdlog
+build packages; those libraries are repaired into the portable wheel rather
+than assumed to exist in the target image.
 
 ## Build from source
 

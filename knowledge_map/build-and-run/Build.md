@@ -74,7 +74,9 @@ shared `.so` extension module); this has no effect on the desktop static/
 executable link.
 
 CI produces repaired `manylinux_2_28_x86_64` wheels for CPython 3.10–3.13 and
-imports CPython 3.12 in a clean slim production base. See
+imports CPython 3.12 in a clean slim production base. The pinned AlmaLinux 8
+builder enables EPEL to obtain HDF5 and spdlog development packages before
+`auditwheel` repairs their runtime libraries into the wheel. See
 `bindings/python/README.md`. `.github/workflows/python-wheel.yml` builds + tests on every relevant PR
 then runs the full-parity conformance harness before publishing wheels as
 GitHub Release assets on `mib-processing-v*` tags
