@@ -80,6 +80,12 @@
 - Bounded the Windows Authenticode regression helper with a 60-second child
   watchdog and a version-directory SDK lookup, avoiding an unbounded recursive
   SDK scan or process wait while retaining the real WinVerifyTrust/SPKI checks.
+- Replaced the hosted-runner PowerShell certificate-provider call after its
+  observed 75-minute hang with an in-memory .NET certificate request and
+  ephemeral PFX; both `signtool` and the verifier now run under the watchdog.
+- Capped the complete Windows native job at 30 minutes and moved artifact
+  uploads to the Node 24-based action, so a provider regression cannot consume
+  a six-hour runner and the release lane has no Node 20 deprecation warnings.
 - Added a Production promotion/rollback action, stable/beta tag-derived
   channels, and explicit app compatibility bounds. Published and publicly
   verified stable LUT revision `2026.07.14-1`, removing the registry's missing

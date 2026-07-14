@@ -208,14 +208,14 @@ jobs:
 
       - name: Upload conformance candidate
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: mib-processing-conformance-py${{ matrix.python-version }}
           path: artifacts/mib-processing-conformance.json
           if-no-files-found: ignore
 
       - name: Upload wheel artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: mib_processing-wheel-py${{ matrix.python-version }}
           path: wheelhouse/*.whl
@@ -225,6 +225,7 @@ jobs:
     name: Build native processing core (Windows x64)
     needs: validate-source-version
     runs-on: windows-2022
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -415,7 +416,7 @@ jobs:
             -WorkingDirectory "$env:RUNNER_TEMP/mib-processing-authenticode"
 
       - name: Upload unsigned native plugin artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: mib_processing-native-windows-x86_64-unsigned
           path: ${{ runner.temp }}/mib-processing-native-dist/*
@@ -515,7 +516,7 @@ jobs:
           }
 
       - name: Upload signed native plugin artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: mib_processing-native-windows-x86_64
           path: native-dist/*
