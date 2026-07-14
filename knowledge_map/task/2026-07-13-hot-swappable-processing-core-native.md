@@ -81,10 +81,11 @@
   watchdog and a version-directory SDK lookup, avoiding an unbounded recursive
   SDK scan or process wait while retaining the real WinVerifyTrust/SPKI checks.
 - Replaced hosted-runner certificate generation after repeated provider hangs
-  with an explicitly public, test-only PFX/CER fixture. Bounded `certutil`
-  installs/removes it from the current-user root store; `signtool` and the
-  verifier run under the same watchdog. Production signing remains secret-
-  backed and isolated from this fixture.
+  with an explicitly public, test-only CA-root/code-signing-leaf fixture.
+  Bounded `certutil` installs/removes only the CA from the current-user root
+  store; `signtool` uses the leaf PFX and the verifier pins the leaf SPKI under
+  the same watchdog. Production signing remains secret-backed and isolated
+  from this fixture.
 - Capped the complete Windows native job at 30 minutes and moved artifact
   uploads to the Node 24-based action, so a provider regression cannot consume
   a six-hour runner and the release lane has no Node 20 deprecation warnings.

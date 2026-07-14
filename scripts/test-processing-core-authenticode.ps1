@@ -68,10 +68,12 @@ $unsignedPath = (Resolve-Path -LiteralPath $UnsignedFixture).Path
 New-Item -ItemType Directory -Path $WorkingDirectory -Force | Out-Null
 $signedPath = Join-Path $WorkingDirectory 'mib-processing-authenticode-signed-fixture.dll'
 $pfxPath = Join-Path $WorkingDirectory 'mib-processing-authenticode-ci-fixture.pfx'
-$cerPath = Join-Path $WorkingDirectory 'mib-processing-authenticode-ci-fixture.cer'
+$rootCerPath = Join-Path $WorkingDirectory 'mib-processing-authenticode-ci-root.cer'
+$signerCerPath = Join-Path $WorkingDirectory 'mib-processing-authenticode-ci-signer.cer'
 Copy-Item -LiteralPath $unsignedPath -Destination $signedPath -Force
 
-$certificate = $null
+$rootCertificate = $null
+$signerCertificate = $null
 $rootInstalled = $false
 try {
     # These are deliberately public, test-only credentials. Keeping the fixture
@@ -81,22 +83,30 @@ try {
     $repositoryRoot = Split-Path -Parent $PSScriptRoot
     $fixtureRoot = Join-Path $repositoryRoot 'tests\processing\fixtures'
     $pfxBase64Path = Join-Path $fixtureRoot 'authenticode_ci_fixture.pfx.b64'
-    $cerBase64Path = Join-Path $fixtureRoot 'authenticode_ci_fixture.cer.b64'
+    $rootCerBase64Path = Join-Path $fixtureRoot 'authenticode_ci_fixture.cer.b64'
+    $signerCerBase64Path = Join-Path $fixtureRoot 'authenticode_ci_signer.cer.b64'
     $pfxPassword = 'mib-processing-ci-fixture'
     [IO.File]::WriteAllBytes(
         $pfxPath,
         [Convert]::FromBase64String((Get-Content -LiteralPath $pfxBase64Path -Raw))
     )
     [IO.File]::WriteAllBytes(
-        $cerPath,
-        [Convert]::FromBase64String((Get-Content -LiteralPath $cerBase64Path -Raw))
+        $rootCerPath,
+        [Convert]::FromBase64String((Get-Content -LiteralPath $rootCerBase64Path -Raw))
     )
-    $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($cerPath)
+    [IO.File]::WriteAllBytes(
+        $signerCerPath,
+        [Convert]::FromBase64String((Get-Content -LiteralPath $signerCerBase64Path -Raw))
+    )
+    $rootCertificate =
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($rootCerPath)
+    $signerCertificate =
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($signerCerPath)
 
     Write-Host 'Installing the CI fixture in the current-user trust store'
     Invoke-BoundedProcess `
         -FilePath 'certutil.exe' `
-        -ArgumentList @('-user', '-f', '-addstore', 'Root', $cerPath) `
+        -ArgumentList @('-user', '-f', '-addstore', 'Root', $rootCerPath) `
         -Description 'Current-user CI root installation'
     $rootInstalled = $true
 
@@ -116,8 +126,8 @@ try {
     Invoke-BoundedProcess `
         -FilePath $signtool.FullName `
         -ArgumentList @('sign', '/fd', 'SHA256', '/f', $pfxPath, '/p', $pfxPassword, $signedPath) `
-        -Description 'Ephemeral signtool'
-    $spki = Get-SignerSpkiSha256 $certificate
+        -Description 'Public-fixture signtool'
+    $spki = Get-SignerSpkiSha256 $signerCertificate
 
     Write-Host 'Running the processing-core Authenticode verifier'
     Invoke-BoundedProcess `
@@ -125,17 +135,21 @@ try {
         -ArgumentList @($unsignedPath, $signedPath, $spki) `
         -Description 'Processing-core Authenticode regression test'
 } finally {
-    if ($rootInstalled -and $certificate) {
+    if ($rootInstalled -and $rootCertificate) {
         Write-Host 'Removing the CI fixture from the current-user trust store'
         Invoke-BoundedProcess `
             -FilePath 'certutil.exe' `
-            -ArgumentList @('-user', '-delstore', 'Root', $certificate.Thumbprint) `
+            -ArgumentList @('-user', '-delstore', 'Root', $rootCertificate.Thumbprint) `
             -Description 'Current-user CI root removal'
     }
-    if ($certificate) {
-        $certificate.Dispose()
+    if ($signerCertificate) {
+        $signerCertificate.Dispose()
+    }
+    if ($rootCertificate) {
+        $rootCertificate.Dispose()
     }
     Remove-Item -LiteralPath $pfxPath -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $cerPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $rootCerPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $signerCerPath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $signedPath -Force -ErrorAction SilentlyContinue
 }
