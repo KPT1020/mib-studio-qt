@@ -116,9 +116,15 @@ is deliberately compiled as C, while loader parity and cache/concurrency tests
 exercise the dynamic artifact.
 
 Production desktop builds must configure
+`-DMIB_REQUIRE_PROCESSING_CORE_SIGNER_SPKI=ON` and
 `-DMIB_PROCESSING_CORE_SIGNER_SPKI_SHA256=<64-hex>` with the approved signer's
-DER SubjectPublicKeyInfo SHA-256. A Release build with no compiled value cannot
-load a native core; environment overrides are limited to Debug builds.
+DER SubjectPublicKeyInfo SHA-256. CMake rejects missing, non-hex, or
+non-64-character text and normalizes valid pins to lowercase. Official stable/beta workflows
+source the value from the repository Actions variable; the native release job
+also compares it with the signer certificate extracted from the signed DLL.
+The requirement defaults off so local and fork CI builds remain possible, but
+an unpinned Release build cannot load a native core and is not distributable;
+environment overrides are limited to Debug builds.
 
 The top-level CMake project enables both C and CXX so Ubuntu system-package
 HDF5 discovery can run its C probe while the application code remains C++17.

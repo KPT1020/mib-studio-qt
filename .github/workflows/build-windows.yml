@@ -33,6 +33,17 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # This must run before Determine version: release mode commits, tags,
+      # and pushes there, so a missing trust pin must fail before mutation.
+      - name: Validate processing-core signer trust pin
+        shell: pwsh
+        env:
+          PROCESSING_CORE_SIGNER_SPKI_SHA256: ${{ vars.MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256 }}
+        run: |
+          if ($env:PROCESSING_CORE_SIGNER_SPKI_SHA256 -notmatch '^[0-9A-Fa-f]{64}$') {
+            throw 'Repository variable MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256 must be a non-empty 64-hex DER-SPKI SHA-256 before a desktop release can build'
+          }
+
       # ── Version ────────────────────────────────────────────────
       - name: Determine version
         id: version
@@ -199,6 +210,7 @@ jobs:
         env:
           MIB_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           MIB_SENTRY_ENV: ${{ steps.version.outputs.channel == 'stable' && 'production' || 'beta' }}
+          PROCESSING_CORE_SIGNER_SPKI_SHA256: ${{ vars.MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256 }}
         run: |
           # Bake the Sentry DSN into the installer (HKLM env var) so installed
           # builds report crashes without per-user configuration. The DSN is a
@@ -207,7 +219,13 @@ jobs:
           # against quota.
           # Hosted GitHub runners do not have the proprietary MindVision SDK.
           # Keep this explicit so CI continues to exercise the portable stub.
-          $args = @('--preset', 'windows-default', '-DMIB_ENABLE_MINDVISION=OFF')
+          $args = @(
+            '--preset',
+            'windows-default',
+            '-DMIB_ENABLE_MINDVISION=OFF',
+            '-DMIB_REQUIRE_PROCESSING_CORE_SIGNER_SPKI=ON',
+            "-DMIB_PROCESSING_CORE_SIGNER_SPKI_SHA256=$env:PROCESSING_CORE_SIGNER_SPKI_SHA256"
+          )
           if ($env:MIB_SENTRY_DSN) {
             $args += "-DMIB_SENTRY_DSN=$env:MIB_SENTRY_DSN"
             $args += "-DMIB_SENTRY_ENVIRONMENT=$env:MIB_SENTRY_ENV"

@@ -48,6 +48,15 @@ jobs:
           echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
           echo "Building release: $TAG (version $VERSION)"
 
+      - name: Validate processing-core signer trust pin
+        shell: pwsh
+        env:
+          PROCESSING_CORE_SIGNER_SPKI_SHA256: ${{ vars.MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256 }}
+        run: |
+          if ($env:PROCESSING_CORE_SIGNER_SPKI_SHA256 -notmatch '^[0-9A-Fa-f]{64}$') {
+            throw 'Repository variable MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256 must be a non-empty 64-hex DER-SPKI SHA-256 before a desktop release can build'
+          }
+
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -151,8 +160,15 @@ jobs:
         shell: pwsh
         env:
           MIB_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          PROCESSING_CORE_SIGNER_SPKI_SHA256: ${{ vars.MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256 }}
         run: |
-          $cmakeArgs = @("--preset", "windows-default", "-DMIB_ENABLE_MINDVISION=OFF")
+          $cmakeArgs = @(
+            "--preset",
+            "windows-default",
+            "-DMIB_ENABLE_MINDVISION=OFF",
+            "-DMIB_REQUIRE_PROCESSING_CORE_SIGNER_SPKI=ON",
+            "-DMIB_PROCESSING_CORE_SIGNER_SPKI_SHA256=$env:PROCESSING_CORE_SIGNER_SPKI_SHA256"
+          )
           if ($env:MIB_SENTRY_DSN) {
             $cmakeArgs += "-DMIB_SENTRY_DSN=$env:MIB_SENTRY_DSN"
             Write-Host "Sentry DSN injected into release build."

@@ -126,11 +126,22 @@ the resolver and remain independent of desktop activation internals.
   serializer/schema behavior.
 - 2026-07-13: `bindings/python/pyproject.toml` is the wheel version source of
   truth. Tag creation is a post-commit step so it cannot point at stale files.
+- 2026-07-14: Native selection persistence is a locked activation pre-commit,
+  not post-swap cleanup. A failed settings sync preserves the prior live core.
+  The desktop uses the stable `MIB Studio` settings namespace and performs a
+  one-time, non-destructive migration of every legacy `Unknown Organization`
+  key before reading any preferences; an unwritable migration stops startup.
+- 2026-07-14: Every maintained desktop publisher must opt into CMake's
+  non-empty 64-hex signer requirement using the GitHub repository SPKI
+  variable. Native release CI independently derives the signed DLL's DER-SPKI
+  hash and rejects a mismatch before upload; ordinary development/fork builds
+  keep the requirement disabled.
 
 ## Residual infrastructure gates
 
 - Production certificate material, R2 credentials, and the approved signer
-  identity are unavailable in the sandbox.
+  identity are unavailable in the sandbox. The workflows now validate them,
+  but no real value was invented or live release attempted.
 - The real GitHub tag/release, conditional R2 reads/writes, and package-page
   installation must be demonstrated in A12.
 - Windows microscopy hardware and a published v2 do not exist here. A local

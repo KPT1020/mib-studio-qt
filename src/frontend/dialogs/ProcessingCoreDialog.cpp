@@ -6,6 +6,7 @@
 #include "backend/processing/ProcessingCoreLoader.h"
 #include "backend/processing/ProcessingService.h"
 #include "backend/services/CaptureService.h"
+#include "frontend/utils/ProcessingCoreSettings.h"
 
 #include <QComboBox>
 #include <QCoreApplication>
@@ -155,33 +156,6 @@ backend::processing::ProcessingCoreLoadRequirements loadRequirements(
     requirements.manifestSha256 = manifestSha256Hex.toStdString();
     requirements.trustVerifier = trustVerifier();
     return requirements;
-}
-
-bool persistSelection(const backend::processing::ProcessingCoreIdentity& identity,
-                      const std::filesystem::path& path,
-                      const QString& appMinVersion,
-                      const QString& appMaxVersion) {
-    QSettings settings;
-    settings.setValue(QStringLiteral("ProcessingCore/Version"),
-                      QString::fromStdString(identity.version));
-    settings.setValue(QStringLiteral("ProcessingCore/Sha256"),
-                      QString::fromStdString(identity.artifactSha256));
-    settings.setValue(QStringLiteral("ProcessingCore/ContractVersion"),
-                      static_cast<qulonglong>(identity.contractVersion));
-    settings.setValue(QStringLiteral("ProcessingCore/EngineAbiVersion"),
-                      static_cast<qulonglong>(identity.engineAbiVersion));
-    settings.setValue(QStringLiteral("ProcessingCore/RuntimeFingerprint"),
-                      QString::fromStdString(identity.runtimeFingerprint));
-    settings.setValue(QStringLiteral("ProcessingCore/ReleaseTag"),
-                      QString::fromStdString(identity.releaseTag));
-    settings.setValue(QStringLiteral("ProcessingCore/ManifestSha256"),
-                      QString::fromStdString(identity.manifestSha256));
-    settings.setValue(QStringLiteral("ProcessingCore/Path"),
-                      QString::fromStdString(path.string()));
-    settings.setValue(QStringLiteral("ProcessingCore/AppMinVersion"), appMinVersion);
-    settings.setValue(QStringLiteral("ProcessingCore/AppMaxVersion"), appMaxVersion);
-    settings.sync();
-    return settings.status() == QSettings::NoError;
 }
 
 } // namespace
@@ -615,16 +589,35 @@ void ProcessingCoreDialog::downloadAndActivate(
             return;
         }
         std::string activationError;
-        if (!backend_.processing().activateProcessingKernel(loaded.kernel, &activationError)) {
-            setBusy(false, tr("Activation blocked: %1")
+        const bool activated = backend_.processing().activateProcessingKernel(
+            loaded.kernel, &activationError, [&loaded, &cached, &plugin](std::string& commitError) {
+                QSettings settings;
+                QString persistenceError;
+                const auto& identity = loaded.kernel->identity();
+                processingcoresettings::Selection selection;
+                selection.version = QString::fromStdString(identity.version);
+                selection.sha256 = QString::fromStdString(identity.artifactSha256);
+                selection.contractVersion = identity.contractVersion;
+                selection.engineAbiVersion = identity.engineAbiVersion;
+                selection.runtimeFingerprint = QString::fromStdString(identity.runtimeFingerprint);
+                selection.releaseTag = QString::fromStdString(identity.releaseTag);
+                selection.manifestSha256 = QString::fromStdString(identity.manifestSha256);
+                selection.path = QString::fromStdString(cached.pluginPath.string());
+                selection.appMinVersion = plugin.appMinVersion;
+                selection.appMaxVersion = plugin.appMaxVersion;
+                if (processingcoresettings::persistSelection(settings, selection,
+                                                             &persistenceError)) {
+                    return true;
+                }
+                commitError = persistenceError.toStdString();
+                return false;
+            });
+        if (!activated) {
+            SPDLOG_WARN("ProcessingCoreDialog: activation of core {} refused; previous core "
+                        "remains active: {}",
+                        loaded.kernel->identity().version, activationError);
+            setBusy(false, tr("Activation refused; the previous core remains active: %1")
                                .arg(QString::fromStdString(activationError)));
-            return;
-        }
-        if (!persistSelection(loaded.kernel->identity(), cached.pluginPath,
-                              plugin.appMinVersion, plugin.appMaxVersion)) {
-            backend_.processing().markProcessingCoreSelectionUnavailable();
-            setBusy(false, tr("Core activated, but its selection could not be persisted; "
-                              "processing is blocked until this is resolved."));
             return;
         }
         SPDLOG_INFO("ProcessingCoreDialog: activated core {} from {}",

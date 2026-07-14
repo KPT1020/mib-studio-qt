@@ -27,6 +27,35 @@
   `knowledge_map/task/2026-07-13-user-manual-screenshots.md` and
   [[../frontend/Screenshot-Tour]].
 
+- **Release-time processing-core signer trust gate** (2026-07-14,
+  [A12 #240](https://github.com/KPT1020/mib-studio-qt/issues/240)) — All three
+  maintained Windows desktop publishers now require the same GitHub repository
+  `MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256` before shipping stable/beta
+  installers. CMake normalizes and validates exact 64-hex DER-SPKI pins while
+  keeping the requirement disabled for ordinary development/fork builds; the
+  manual workflow checks before its version commit/tag/push and the local
+  publisher reads the destination repository variable before every
+  non-skipped build and before bumping. The native-core tag job derives
+  DER-SPKI SHA-256 from the DLL's actual
+  Authenticode signer and rejects a repository-pin mismatch before upload.
+  Eight focused tests cover CMake rejection/normalization and cross-path
+  wiring. Real certificate secrets, repository pin provisioning, R2 publish,
+  and Windows hardware proof remain A12 live gates.
+
+- **Transactional processing-core settings persistence** (2026-07-14,
+  [A10 #241](https://github.com/KPT1020/mib-studio-qt/issues/241)) — Fixed the
+  desktop E2E defect where a native core became live before `QSettings::sync()`
+  failed and was then marked unavailable. The persistence callback now runs
+  under the core-selection lock after every operation guard and before the
+  pointer swap, so failure preserves the prior usable core. The app now sets a
+  stable `MIB Studio` settings identity, migrates all missing keys from Qt's
+  former `Unknown Organization` namespace once without overwriting or deleting
+  user data, and refuses startup if that migration cannot be synchronized.
+  Filesystem-backed fault injection covers previous-selection restoration;
+  activation tests cover commit ordering and old-kernel preservation. Live
+  A→B→A and TSan stress remain A10 exit gates. Task record:
+  `knowledge_map/task/2026-07-13-hot-swappable-processing-core-native.md`.
+
 - **Native processing-core selector foundation** (2026-07-13,
   [A7 #242](https://github.com/KPT1020/mib-studio-qt/issues/242),
   [A8 #239](https://github.com/KPT1020/mib-studio-qt/issues/239),

@@ -194,9 +194,12 @@ python publish-processing-core.py \
 The release job requires `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and
 `MIB_STUDIO_R2_ENDPOINT`. A release tag also requires
 `WINDOWS_SIGNING_CERTIFICATE_BASE64` and
-`WINDOWS_SIGNING_CERTIFICATE_PASSWORD`; missing production signing or R2
-credentials fail the release job instead of silently publishing an incomplete
-registry.
+`WINDOWS_SIGNING_CERTIFICATE_PASSWORD`, plus the public repository variable
+`MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256`. After signing, CI hashes the actual
+signer certificate's DER `SubjectPublicKeyInfo` and requires it to equal that
+64-hex desktop trust pin before uploading the DLL. Missing or mismatched
+production signing, trust identity, or R2 credentials fail the release job
+instead of silently publishing an unusable registry.
 
 To preview already-downloaded release assets without GitHub or R2:
 

@@ -46,9 +46,20 @@ batch owns the current core. Stop those operations and retry.
    into the application, use restricted Windows DLL
    dependency search, negotiate ABI/contract/runtime identity, and run the
    plugin self-test.
-7. Activate and persist the verified identity/path in
-   `QSettings`. Startup restores that cached artifact through the same
-   digest/trust/ABI checks before capture begins.
+7. At a quiescent boundary, synchronize the complete verified identity/path in
+   `QSettings` through `ProcessingService`'s locked pre-commit callback, then
+   swap the live kernel. A settings error restores the prior logical selection
+   and leaves the prior kernel usable; there is no activate-then-block window.
+   Startup restores the cached artifact through the same digest/trust/ABI
+   checks before capture begins.
+
+The desktop establishes the stable `MIB Studio` / `MIB Studio Qt` settings
+identity before any preference is read. On the first upgraded startup it copies
+every missing key from Qt's former `Unknown Organization` namespace, preserves
+all values already written in the stable namespace, leaves the legacy store
+untouched, and records completion only after successful synchronization.
+Startup fails closed if that migration cannot be persisted, rather than losing
+an explicit core selection or unrelated application preferences silently.
 
 Production native loading is Windows-only. Non-Windows trust verification
 fails closed. Debug builds alone may set
@@ -62,7 +73,11 @@ fails closed. Debug builds alone may set
   default is the app-local data directory's `processing-cores` folder.
 - `MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256` — CMake cache value compiled into
   the production app as the approved Authenticode signer public-key hash.
-  Release builds fail closed when it is absent. Debug builds alone can use
+  Official stable/beta builds enable
+  `MIB_REQUIRE_PROCESSING_CORE_SIGNER_SPKI`, so CMake rejects an absent or
+  malformed repository pin before packaging. Generic local/fork builds leave
+  that requirement off and fail closed if native activation is attempted
+  without a pin. Debug builds alone can use
   `MIB_STUDIO_PROCESSING_CORE_SIGNER_SPKI_SHA256` as a local override.
 - `MIB_STUDIO_PROCESSING_CORE_VERSION` — administrator hard pin. Other
   versions are disabled and experiment start fails closed until the pinned
@@ -74,8 +89,12 @@ The engine ABI v1 selects mask generation and empty-frame classification.
 Metrics, contour filtering, tracking, target decisions, and orchestration
 remain host-owned and consume the selected mask. A version that changes those
 semantics is not fully hot-swappable yet; GitHub issue #242 (A7) remains open.
-Independent Windows ABI-fixture auditing (#239/A8), A→B→A/TSan and persistence-
-rollback stress (#241/A10), and profile/review/downgrade UI policy (#243/A11)
-also remain explicit follow-ups.
-Production signing/R2 publication, compiling the real approved SPKI, and an
-on-hardware Windows exercise are live-environment gates tracked under A12.
+Independent Windows ABI-fixture auditing (#239/A8), A→B→A/TSan stress
+(#241/A10), and profile/review/downgrade UI policy (#243/A11) also remain
+explicit follow-ups. Deterministic settings-write fault injection now covers
+the A10 persistence rollback boundary; the live A→B→A and concurrency evidence
+are still required before closing that issue.
+Release paths now require and validate the repository SPKI and compare it with
+the DLL's actual Authenticode signer, but provisioning the real certificate,
+pin, R2 publication, and an on-hardware Windows exercise remain live-environment
+gates tracked under A12.

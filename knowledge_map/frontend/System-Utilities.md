@@ -80,6 +80,17 @@ tested by `tests/frontend/update_catalog_test.cpp`), `OverlayRenderer`,
 `RoiManager`, `SidebarWidget`, `SimpleImageCanvas`, `StatisticsPanel`,
 `StatsDisplayManager`.
 
+- **`ApplicationSettings`** — establishes the stable `MIB Studio` /
+  `MIB Studio Qt` identity before any default `QSettings` access. Its one-time,
+  versioned migration copies every missing user key from the former
+  `Unknown Organization` namespace, never overwrites stable values or deletes
+  the legacy store, and marks completion only after a successful sync. Desktop
+  startup fails closed if this cannot be written.
+- **`ProcessingCoreSettings`** — synchronizes the complete explicit native-core
+  selection as one pre-activation commit. It snapshots and restores the prior
+  logical values if `QSettings::sync()` fails; the backend does not swap the
+  kernel unless this helper returns success.
+
 ## Widgets (`src/frontend/widgets/`)
 
 - **`ZoomableChartView`** — subclass of `QChartView` with scroll/zoom.

@@ -15,7 +15,9 @@ target defined in `src/frontend/qt/CMakeLists.txt`
   `MIB_CAMERA_MODE=mock` forced, network/hardware services disabled by
   default (`MIB_DISABLED_SERVICES=auto_update,autofocus,trigger,yolo`), and
   backend data + `QSettings` isolated into a `QTemporaryDir` so every run is
-  clean and deterministic.
+  clean and deterministic. The stable application/settings identity is
+  initialized only after that temporary settings path is installed, so the
+  tour cannot read, migrate, or alter an operator's local preferences.
 - Walk the documented workflow: Connect tab → start capture → Overview →
   Experiment Preview/Monitoring → Review, then the Processing, Monitoring,
   and Pixel-to-Micron settings dialogs.

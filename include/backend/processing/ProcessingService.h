@@ -200,8 +200,14 @@ public:
     // Processing-core selection. Activation is transactional and is rejected
     // while realtime, an experiment, or the async batch pipeline is active.
     // Callers prepare and validate a plugin with ProcessingCoreLoader first.
+    // The optional preCommit callback runs under the core-selection lock after
+    // every fallible activation guard and before the live kernel is swapped.
+    // It must not call back into ProcessingService. Returning false preserves
+    // the previous usable kernel and forwards its diagnostic through error.
+    using ProcessingCoreActivationPreCommit = std::function<bool(std::string&)>;
     bool activateProcessingKernel(std::shared_ptr<backend::processing::IProcessingKernel> kernel,
-                                  std::string* error = nullptr);
+                                  std::string* error = nullptr,
+                                  ProcessingCoreActivationPreCommit preCommit = {});
     bool activateBundledProcessingKernel(std::string* error = nullptr);
     backend::processing::ProcessingCoreIdentity activeProcessingCoreIdentity() const;
     std::string requiredProcessingCoreVersion() const { return requiredProcessingCoreVersion_; }

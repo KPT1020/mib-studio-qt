@@ -38,6 +38,44 @@ Calibration and lookup-table updates can be published independently with `publis
 7. Creates a GitHub Release with installers and SHA-256 checksums.
 8. Publishes the update package to Cloudflare R2 via `publish-update.py`.
 
+### Processing-core signer trust pin
+
+Every shipped stable or beta desktop embeds the SHA-256 of the approved
+processing-core Authenticode signer's DER `SubjectPublicKeyInfo`. Configure the
+public repository Actions variable
+`MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256` with exactly 64 hexadecimal
+characters. Both desktop release workflows fail before building when it is
+missing; the manual `build-windows.yml` workflow checks it before its
+version-bump/tag/push step. Every non-`--skip-build` `release.ps1` run reads the
+same variable from the destination repository before changing the version and
+reconfigures CMake with the required production gate, including local/no-push
+installer builds. `--skip-build` produces no binary and remains exempt.
+
+Derive the value from an executable or DLL signed with the actual PFX. This is
+the same DER structure the application verifies; a certificate thumbprint,
+whole-certificate hash, or raw public-key-bit hash is not interchangeable:
+
+```powershell
+$signature = Get-AuthenticodeSignature .\signed-fixture.dll
+if ($signature.Status -ne 'Valid') { throw "Signature is not valid" }
+$certificate = $signature.SignerCertificate
+$key = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPublicKey($certificate)
+if (-not $key) {
+    $key = [System.Security.Cryptography.X509Certificates.ECDsaCertificateExtensions]::GetECDsaPublicKey($certificate)
+}
+if (-not $key) { throw "Unsupported signing key" }
+try { $spki = $key.ExportSubjectPublicKeyInfo() } finally { $key.Dispose() }
+$sha256 = [System.Security.Cryptography.SHA256]::Create()
+try { $pin = -join ($sha256.ComputeHash($spki) | ForEach-Object { $_.ToString('x2') }) } finally { $sha256.Dispose() }
+gh variable set MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256 --repo KPT1020/mib-studio-qt --body $pin
+```
+
+The `mib-processing-v*` workflow independently derives the SPKI from the DLL
+after signing and refuses to upload it unless it matches this repository
+variable. A certificate renewal that keeps the public key keeps the same pin;
+a new key requires a coordinated desktop/core rollout because the current
+desktop accepts one SPKI.
+
 ### Crash reporting (Sentry) in the tagged release
 
 The tag-triggered CI release (`.github/workflows/release.yml`) also wires up
@@ -87,6 +125,10 @@ Before starting a release, ensure you have:
      - `R2_ACCESS_KEY_ID`
      - `R2_SECRET_ACCESS_KEY`
      - `MIB_STUDIO_R2_ENDPOINT`
+     - `WINDOWS_SIGNING_CERTIFICATE_BASE64`
+     - `WINDOWS_SIGNING_CERTIFICATE_PASSWORD`
+   - GitHub Actions repository variable (public trust identity, not a secret):
+     - `MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256`
    - GitHub Actions publish step maps to AWS env vars:
      - `AWS_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}`
      - `AWS_SECRET_ACCESS_KEY=${{ secrets.R2_SECRET_ACCESS_KEY }}`
@@ -125,8 +167,15 @@ The script reads `DEFAULT_VERSION`, calculates the new semantic version, updates
 ### Step 2: Build Release Configuration
 
 ```powershell
+cmake -S . -B build `
+  -DMIB_REQUIRE_PROCESSING_CORE_SIGNER_SPKI=ON `
+  -DMIB_PROCESSING_CORE_SIGNER_SPKI_SHA256=<approved-64-hex-pin>
 cmake --build build --config Release --target mib_studio_qt
 ```
+
+The generic `windows-default` preset intentionally leaves the requirement off
+for local development and fork CI. Such an unpinned Release executable fails
+closed when asked to load a native core and is not eligible for distribution.
 
 Verify the build:
 

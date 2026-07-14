@@ -14,6 +14,7 @@
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
 #include <cstdlib>
+#include <exception>
 #include <iterator>
 #include <limits>
 #include <tuple>
@@ -303,7 +304,8 @@ void ProcessingService::startRealtime(std::shared_ptr<backend::playback::FrameSt
 }
 
 bool ProcessingService::activateProcessingKernel(
-    std::shared_ptr<backend::processing::IProcessingKernel> kernel, std::string* error) {
+    std::shared_ptr<backend::processing::IProcessingKernel> kernel, std::string* error,
+    ProcessingCoreActivationPreCommit preCommit) {
     if (!kernel) {
         if (error) *error = "processing kernel is null";
         return false;
@@ -338,6 +340,27 @@ bool ProcessingService::activateProcessingKernel(
     if (activeSynchronousCoreOperations_.load(std::memory_order_acquire) != 0) {
         if (error) *error = "an offline processing operation is active";
         return false;
+    }
+
+    if (preCommit) {
+        std::string commitError;
+        try {
+            if (!preCommit(commitError)) {
+                if (error) {
+                    *error = commitError.empty() ? "processing core activation commit was refused"
+                                                 : commitError;
+                }
+                return false;
+            }
+        } catch (const std::exception& ex) {
+            if (error) {
+                *error = "processing core activation commit failed: " + std::string(ex.what());
+            }
+            return false;
+        } catch (...) {
+            if (error) *error = "processing core activation commit failed";
+            return false;
+        }
     }
 
     const auto previous = processingKernel_ ? processingKernel_->identity()

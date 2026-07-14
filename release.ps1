@@ -48,7 +48,7 @@ if ($bumpCount -ne 1) {
 # --- Check prerequisites ---
 Write-Host "=== MIB Studio Qt Release ===" -ForegroundColor Cyan
 
-if ($Push -and -not $SkipBuild) {
+if (-not $SkipBuild) {
     # Check gh CLI is available
     try {
         $null = gh --version 2>&1
@@ -56,6 +56,32 @@ if ($Push -and -not $SkipBuild) {
         Write-Host "ERROR: 'gh' CLI not found. Install from https://cli.github.com/" -ForegroundColor Red
         exit 1
     }
+}
+
+# Resolve the public trust pin from the same GitHub repository that will
+# receive the release. Do this before bumping, committing, or tagging so a
+# missing/malformed release configuration cannot leave version mutations
+# behind. Even a no-push local run produces distributable installers, so every
+# build is gated. --skip-build produces no binary; when it pushes a tag, the
+# tag workflow owns the guarded build and performs this check itself.
+$releaseRepository = $null
+$processingCoreSignerSpki = $null
+if (-not $SkipBuild) {
+    $releaseRepository = (& gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $releaseRepository) {
+        Write-Host "ERROR: Could not resolve the destination GitHub repository." -ForegroundColor Red
+        exit 1
+    }
+    $releaseRepository = $releaseRepository.Trim()
+
+    $processingCoreSignerSpki = (& gh variable get MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256 --repo $releaseRepository 2>$null)
+    if ($LASTEXITCODE -ne 0 -or
+        $processingCoreSignerSpki -notmatch '^[0-9A-Fa-f]{64}$') {
+        Write-Host "ERROR: Repository variable MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256 must be a non-empty 64-hex DER-SPKI SHA-256 in $releaseRepository." -ForegroundColor Red
+        exit 1
+    }
+    $processingCoreSignerSpki = $processingCoreSignerSpki.Trim().ToLowerInvariant()
+    Write-Host "Processing-core signer trust pin validated for $releaseRepository." -ForegroundColor Green
 }
 
 # --- Check git status ---
@@ -147,8 +173,17 @@ if (-not $SkipBuild) {
     Write-Host "`n--- Step 3: Build Release ---" -ForegroundColor Cyan
 
     if ($DryRun) {
+        Write-Host "[DRY RUN] Would reconfigure Release with the repository processing-core signer trust pin" -ForegroundColor Gray
         Write-Host "[DRY RUN] Would build Release configuration" -ForegroundColor Gray
     } else {
+        Write-Host "Configuring the repository processing-core signer trust pin..." -ForegroundColor Yellow
+        cmake -S $PSScriptRoot -B "$PSScriptRoot\build" `
+            -DMIB_REQUIRE_PROCESSING_CORE_SIGNER_SPKI=ON `
+            "-DMIB_PROCESSING_CORE_SIGNER_SPKI_SHA256=$processingCoreSignerSpki"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "ERROR: CMake rejected the production signer configuration" -ForegroundColor Red
+            exit 1
+        }
         Write-Host "Building Release..." -ForegroundColor Yellow
         cmake --build build --config Release --target mib_studio_qt
         if ($LASTEXITCODE -ne 0) {
@@ -277,7 +312,7 @@ $checksumLines``````
                     "$PSScriptRoot\publish-update.py",
                     "--installer", $updateExe.FullName,
                     "--channel", $channel,
-                    "--release-notes-url", "https://github.com/gavinlouuu-kpt/mib-studio-qt/releases/tag/$tagName"
+                    "--release-notes-url", "https://github.com/$releaseRepository/releases/tag/$tagName"
                 )
                 if ($Profile) {
                     $publishArgs += @("--profile", $Profile)

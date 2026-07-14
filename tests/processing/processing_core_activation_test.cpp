@@ -85,6 +85,26 @@ int main() {
     MIB_EXPECT(service.isProcessingCorePinSatisfied(),
                "verified activation clears unavailable selection state");
 
+    auto persistenceFailure = std::make_shared<SpyKernel>("9.9.10-test");
+    bool failedPreCommitCalled = false;
+    watchdog.mark("settings failure preserves active core");
+    error.clear();
+    MIB_EXPECT(!service.activateProcessingKernel(persistenceFailure, &error,
+                                                 [&](std::string& commitError) {
+                                                     failedPreCommitCalled = true;
+                                                     commitError =
+                                                         "injected QSettings sync failure";
+                                                     return false;
+                                                 }),
+               "activation is refused when selection persistence fails");
+    MIB_EXPECT(failedPreCommitCalled, "persistence pre-commit is exercised at quiescence");
+    MIB_EXPECT(error == "injected QSettings sync failure",
+               "persistence failure diagnostic is preserved");
+    MIB_EXPECT(service.activeProcessingCoreIdentity().version == "9.9.9-test",
+               "persistence failure preserves the previous active core");
+    MIB_EXPECT(service.isProcessingCorePinSatisfied(),
+               "persistence failure does not mark the previous core unavailable");
+
     cv::Mat input = cv::Mat::zeros(24, 32, CV_8UC1);
     backend::services::ProcessingConfig config;
     config.require_single_inner_contour = false;
@@ -108,8 +128,15 @@ int main() {
     auto alternate = std::make_shared<SpyKernel>("10.0.0-test");
     watchdog.mark("experiment activation guard");
     service.startExperiment();
-    MIB_EXPECT(!service.activateProcessingKernel(alternate, &error),
+    int guardedPreCommitCalls = 0;
+    MIB_EXPECT(!service.activateProcessingKernel(alternate, &error,
+                                                 [&](std::string&) {
+                                                     ++guardedPreCommitCalls;
+                                                     return true;
+                                                 }),
                "activation rejected during experiment");
+    MIB_EXPECT(guardedPreCommitCalls == 0,
+               "persistence pre-commit runs only after operation guards pass");
     service.endExperiment();
 
     watchdog.mark("batch activation guard");
@@ -177,7 +204,15 @@ int main() {
     service.stopRealtime();
 
     watchdog.mark("activate after quiescence");
-    MIB_REQUIRE(service.activateProcessingKernel(alternate, &error), error);
+    int successfulPreCommitCalls = 0;
+    MIB_REQUIRE(service.activateProcessingKernel(alternate, &error,
+                                                 [&](std::string&) {
+                                                     ++successfulPreCommitCalls;
+                                                     return true;
+                                                 }),
+                error);
+    MIB_EXPECT(successfulPreCommitCalls == 1,
+               "successful activation persists exactly once before swapping");
     MIB_EXPECT(service.activeProcessingCoreIdentity().version == "10.0.0-test",
                "activation succeeds after every operation stops");
     MIB_REQUIRE(service.activateBundledProcessingKernel(&error), error);

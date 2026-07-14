@@ -1,9 +1,6 @@
 include(MIBLinkHelpers)
 include(MIBWindowsDeployment)
 
-set(MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256 "" CACHE STRING
-    "Approved Authenticode signer SubjectPublicKeyInfo SHA-256 for native processing cores")
-
 set(FRONTEND_COMMON_SOURCES
     # Core
     ${PROJECT_SOURCE_DIR}/src/frontend/qt/BackgroundFrameQtAdapter.cpp
@@ -73,6 +70,8 @@ set(FRONTEND_COMMON_SOURCES
     # Utils
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/ConfigPathManager.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/ConfigPathManager.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/ApplicationSettings.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/utils/ApplicationSettings.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/OverlayRenderer.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/OverlayRenderer.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/EgrabberConfigParser.cpp
@@ -87,6 +86,8 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/UpdateCatalog.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/ProcessingCoreCatalog.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/ProcessingCoreCatalog.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/ProcessingCoreSettings.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/utils/ProcessingCoreSettings.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/HdfReviewExportPaths.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/HdfReviewExportPaths.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/RoiManager.cpp

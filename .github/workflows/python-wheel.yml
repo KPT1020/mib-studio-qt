@@ -291,10 +291,39 @@ jobs:
         env:
           SIGNING_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_BASE64 }}
           SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+          PROCESSING_CORE_SIGNER_SPKI_SHA256: ${{ vars.MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256 }}
         run: |
           if (-not $env:SIGNING_CERTIFICATE_BASE64 -or -not $env:SIGNING_CERTIFICATE_PASSWORD) {
             throw 'Release tags require WINDOWS_SIGNING_CERTIFICATE_BASE64 and WINDOWS_SIGNING_CERTIFICATE_PASSWORD'
           }
+          if ($env:PROCESSING_CORE_SIGNER_SPKI_SHA256 -notmatch '^[0-9A-Fa-f]{64}$') {
+            throw 'Release tags require repository variable MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256 as a non-empty 64-hex DER-SPKI SHA-256'
+          }
+
+          function Get-SignerSpkiSha256(
+            [System.Security.Cryptography.X509Certificates.X509Certificate2] $Certificate
+          ) {
+            $key = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPublicKey($Certificate)
+            if (-not $key) {
+              $key = [System.Security.Cryptography.X509Certificates.ECDsaCertificateExtensions]::GetECDsaPublicKey($Certificate)
+            }
+            if (-not $key) {
+              throw 'The Authenticode signer uses an unsupported public-key algorithm'
+            }
+            try {
+              $subjectPublicKeyInfo = $key.ExportSubjectPublicKeyInfo()
+            } finally {
+              $key.Dispose()
+            }
+            $sha256 = [System.Security.Cryptography.SHA256]::Create()
+            try {
+              $digest = $sha256.ComputeHash($subjectPublicKeyInfo)
+            } finally {
+              $sha256.Dispose()
+            }
+            return (($digest | ForEach-Object { $_.ToString('x2') }) -join '')
+          }
+
           $certificate = Join-Path $env:RUNNER_TEMP 'mib-processing-signing.pfx'
           try {
             [IO.File]::WriteAllBytes(
@@ -316,6 +345,15 @@ jobs:
             if ($signature.Status -ne 'Valid') {
               throw "Authenticode verification failed: $($signature.Status) $($signature.StatusMessage)"
             }
+            if (-not $signature.SignerCertificate) {
+              throw 'Authenticode verification did not return the signer certificate'
+            }
+            $actualSignerSpki = Get-SignerSpkiSha256 $signature.SignerCertificate
+            $approvedSignerSpki = $env:PROCESSING_CORE_SIGNER_SPKI_SHA256.ToLowerInvariant()
+            if ($actualSignerSpki -ne $approvedSignerSpki) {
+              throw "Signed DLL DER-SPKI SHA-256 $actualSignerSpki does not match repository trust pin $approvedSignerSpki"
+            }
+            Write-Host "Signed DLL DER-SPKI SHA-256 matches the repository trust pin: $actualSignerSpki"
           } finally {
             Remove-Item $certificate -Force -ErrorAction SilentlyContinue
           }

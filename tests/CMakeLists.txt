@@ -303,6 +303,36 @@ set_target_properties(processing_core_catalog_test PROPERTIES
 add_test(NAME frontend.processing_core_catalog COMMAND $<TARGET_FILE:processing_core_catalog_test>)
 set_tests_properties(frontend.processing_core_catalog PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
 
+add_executable(application_settings_test
+    ${PROJECT_SOURCE_DIR}/tests/frontend/application_settings_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/ApplicationSettings.cpp
+)
+target_include_directories(application_settings_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+)
+target_link_libraries(application_settings_test PRIVATE Qt6::Core)
+set_target_properties(application_settings_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+)
+add_test(NAME frontend.application_settings COMMAND $<TARGET_FILE:application_settings_test>)
+set_tests_properties(frontend.application_settings PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
+
+add_executable(processing_core_settings_test
+    ${PROJECT_SOURCE_DIR}/tests/frontend/processing_core_settings_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/ProcessingCoreSettings.cpp
+)
+target_include_directories(processing_core_settings_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+)
+target_link_libraries(processing_core_settings_test PRIVATE Qt6::Core)
+set_target_properties(processing_core_settings_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+)
+add_test(NAME frontend.processing_core_settings COMMAND $<TARGET_FILE:processing_core_settings_test>)
+set_tests_properties(frontend.processing_core_settings PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
+
 
 add_executable(hdf_review_export_paths_test
     ${PROJECT_SOURCE_DIR}/tests/frontend/hdf_review_export_paths_test.cpp
@@ -389,6 +419,15 @@ if(Python3_Interpreter_FOUND)
     )
     set_tests_properties(scripts.verify_processing_core_manifest PROPERTIES
         LABELS "scripts;contract"
+        TIMEOUT 30
+    )
+
+    add_test(
+        NAME scripts.processing_core_signer_release_gate
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/test_processing_core_signer_release_gate.py
+    )
+    set_tests_properties(scripts.processing_core_signer_release_gate PROPERTIES
+        LABELS "scripts;contract;release"
         TIMEOUT 30
     )
 
