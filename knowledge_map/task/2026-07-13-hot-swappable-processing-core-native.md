@@ -128,3 +128,12 @@ real stable+beta Windows rehearsal. No live release was loaded in the sandbox.
 **Related:** [[../frontend/ProcessingCoreDialog]] ·
 [[../services/ProcessingService]] · [[../services/Hdf5Service]] ·
 [[2026-07-13-processing-core-registry]]
+
+## Pass-off pointer (2026-07-14)
+
+The exact branch/worktrees, implementation commits, active Windows CI run and
+job IDs, diagnostic history, pickup commands, and gates that must remain open
+are recorded in
+`docs/exec-plans/active/2026-07-13-hot-swappable-processing-cores.md` under
+**Worker pass-off — 2026-07-14 15:33 HKT**. Start there; do not repeat the
+hosted-runner certificate-generation or Root-store experiments.

@@ -191,3 +191,99 @@ the resolver and remain independent of desktop activation internals.
   decisions, while contours, scientific metrics, tracking, target selection,
   and callbacks remain host-owned. A science-changing core is not fully
   swappable until that boundary is redesigned and re-baselined.
+
+## Worker pass-off — 2026-07-14 15:33 HKT
+
+### Workspace and review state
+
+- Branch in both repositories:
+  `claude/biowork-pipeline-portability-j3qpu6`.
+- MIB worktree: `/home/gavin/Developer/.worktrees/mib-hot-swap`.
+  Implementation head before this documentation-only hand-off commit is
+  `9e22e8f`; PR
+  [#244](https://github.com/KPT1020/mib-studio-qt/pull/244) remains draft.
+- Biowork worktree: `/home/gavin/Developer/.worktrees/biowork-hot-swap`.
+  Head `26e9573`; PR
+  [#118](https://github.com/gavinlouuu-kpt/Biowork-monorepo/pull/118)
+  remains draft and all reported checks are green.
+- Both worktrees were clean before writing this pass-off. Do not merge or mark
+  either PR ready while the live gates below remain open.
+
+### Completed and locally verified
+
+- `3f55ec1` makes native registry/selector identity OS-neutral: OS-matched
+  `.dll`/`.so`/`.dylib`, normalized `x86_64`/`aarch64`, mandatory named trust
+  schemes, persisted trust identity, explicit Linux runtime fingerprints, and
+  fail-closed non-Windows activation pending A13.
+- `9e22e8f` removes hosted-runner certificate generation and trust-store writes
+  from PR CI. The Windows verifier matrix copies the embedded-signed Windows
+  SDK `signtool.exe`, derives its signer SPKI, and passes unsigned/valid/wrong-
+  signer/tamper cases to the watchdog-bounded C++ WinVerifyTrust verifier.
+  Production signing of the actual core remains a separate secret-backed job.
+- Local verification passed: 42 Python registry/version tests; all 68 Linux
+  backend/UI CTests (hardware-only and remote Dataset Viewer cases skip by
+  design); PowerShell syntax parsing in the official PowerShell container;
+  docs/vault integrity; workflow YAML parse; and `git diff --check`.
+- E2E screenshot evidence remains under `/tmp/mib-e2e-screenshots/` and
+  `/tmp/biowork-e2e-screenshots/`; it is local evidence, not a committed
+  release artifact.
+
+### Active CI proof to pick up first
+
+Implementation run
+[29314789785](https://github.com/KPT1020/mib-studio-qt/actions/runs/29314789785)
+was active at hand-off. Windows job `87026251950` was in Conan dependency
+installation; Docs CI and desktop workflow validation were already green.
+Poll it with:
+
+```bash
+cd /home/gavin/Developer/.worktrees/mib-hot-swap
+gh run view 29314789785 --json status,conclusion,jobs
+gh api repos/KPT1020/mib-studio-qt/actions/jobs/87026251950 \
+  --jq '{status,conclusion,current:[.steps[]|select(.status=="in_progress")|.name]}'
+```
+
+If the Windows job fails, collect only the bounded failure before changing
+code:
+
+```bash
+gh run view 29314789785 --job 87026251950 --log-failed
+```
+
+Do not reintroduce certificate creation or Root-store mutation. Diagnostic
+runs `29313197025` and `29313984541` proved `certutil` stalls after
+`Signature matches Public Key` for both a self-signed leaf and a proper
+CA-root/code-signing-leaf chain. The current signed-SDK sample deliberately
+avoids that hosted-image defect.
+
+On a green result, update PR #244 and A8/#239 with the run/job links and exact
+WinVerifyTrust matrix evidence. A documentation-only hand-off commit may mean
+the run is attached to its immediate parent rather than the new head; record
+that relationship explicitly rather than claiming an unrun commit.
+
+### Gates that must stay open
+
+- A7/[#242](https://github.com/KPT1020/mib-studio-qt/issues/242): ABI v1 owns
+  mask generation and empty-frame classification, not contours, metrics, LUT,
+  tracking, target decisions, or callbacks. A science-changing full pipeline
+  is not yet fully swappable.
+- A12/[#240](https://github.com/KPT1020/mib-studio-qt/issues/240): provision
+  the production certificate/password and repository SPKI pin; define branch
+  protection and Production-environment approval rules; publish a real tag/R2
+  version; and prove signed A→B→A activation, restart, provenance, latency, and
+  hardware behavior. The 2026-07-14 API audit found unprotected `main` and no
+  Production protection rules.
+- A13/[#245](https://github.com/KPT1020/mib-studio-qt/issues/245): specify the
+  detached-signature envelope/key rotation/revocation policy, implement the
+  Linux verifier, and build/sign/audit/publish a real `.so` across supported
+  distro baselines. Current Linux production activation correctly fails
+  closed.
+- Biowork B13/[#116](https://github.com/gavinlouuu-kpt/Biowork-monorepo/issues/116):
+  run live v1/v2 concurrent triggers, cold/warm cache checks, MLflow evidence,
+  rollback, and the real auto-bump PR against a published core.
+
+Issue #236 now includes A13 and platform-neutral trust wording. A13's landed
+versus residual audit is recorded in
+[#245](https://github.com/KPT1020/mib-studio-qt/issues/245#issuecomment-4966396755),
+and the release-governance evidence is recorded in
+[#240](https://github.com/KPT1020/mib-studio-qt/issues/240#issuecomment-4966314630).
