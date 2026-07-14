@@ -178,12 +178,13 @@ if(BUILD_TESTING)
     )
     add_test(NAME frontend.processing_core_dialog
         COMMAND $<TARGET_FILE:processing_core_dialog_test>)
-    # 120 s: the Windows release runner spends far longer than Linux inside
-    # first-time Qt widgets/network bring-up (this is the only QApplication
-    # test in the suite); the test itself is synchronous and offline.
+    # The test binary selects the QPA platform itself: offscreen everywhere
+    # except Windows, where the Conan Qt offscreen plugin deadlocks in the
+    # QApplication constructor on release runners; the native windows
+    # platform boots headlessly and the dialog is never shown. 120 s bounds
+    # first-time Qt widgets/network bring-up on those runners.
     set_tests_properties(frontend.processing_core_dialog PROPERTIES
         LABELS "frontend;processing"
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
         TIMEOUT 120
     )
 endif()

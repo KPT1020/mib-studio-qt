@@ -31,6 +31,14 @@ int main(int argc, char* argv[]) {
     qputenv("MIB_STUDIO_EMODULUS_LUT_MANIFEST_URL",
             QByteArrayLiteral("file:///nonexistent/mib-lut-manifest.json"));
 
+#ifdef Q_OS_WIN
+    // The Conan Qt 6.7.3 offscreen platform deadlocks inside the
+    // QApplication constructor on Windows release runners (runs 29331984211
+    // and 29333657030 stalled here for the full CTest timeout with no
+    // output). The native windows platform boots headlessly; the dialog is
+    // constructed but never shown, so nothing becomes visible.
+    qputenv("QT_QPA_PLATFORM", QByteArrayLiteral("windows"));
+#endif
     stage("creating QApplication");
     QApplication app(argc, argv);
     stage("QApplication ready");
