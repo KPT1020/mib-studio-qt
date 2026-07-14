@@ -198,6 +198,9 @@ jobs:
             --volume "${{ github.workspace }}/wheelhouse:/wheelhouse:ro" \
             python:3.12-slim \
             sh -ec '
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update
+              apt-get install -y --no-install-recommends libgl1 libglib2.0-0
               python -m venv /tmp/mib-wheel-check
               /tmp/mib-wheel-check/bin/pip install --no-cache-dir /wheelhouse/*.whl
               /tmp/mib-wheel-check/bin/python -c "import mib_processing as mp; assert mp.CONTRACT_VERSION == 1; print(mp.__version__, mp.CONTRACT_VERSION, mp.__file__)"
