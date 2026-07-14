@@ -115,10 +115,17 @@
 
 ## Deliberate residual scope
 
-The ABI v1 owns mask generation and empty-frame classification, not the full
-processing pipeline. Host code still computes contours, metrics, tracking,
-target groups, callbacks, and orchestration from the selected mask. A core
-that changes those semantics is not fully replaceable; A7/#242 remains open.
+The C++ kernel seam now owns the full science (2026-07-14): contours,
+metrics, LUT/target gating, and track matching execute through the selected
+`IProcessingKernel` (`analyzeObjects`/`matchTrack`) with the single shared
+implementation in `ProcessingScience.cpp`, pinned by
+`processing.science_golden` and spy-verified by `processing.science_seam`.
+The C ABI, however, is still v1 and transports only mask/empty decisions, so
+ABI v1 dynamic cores inherit host-compiled default science. A core that
+changes contour/metric/tracking semantics is not fully replaceable until an
+ABI v2 marshals object records across the plugin boundary; that is the
+remaining A7/#242 scope. Callbacks and track lifecycle state deliberately
+stay host-owned.
 
 A8/#239 now has independent-source fixtures, import/export audit, a secret-free
 signature matrix, and isolated production signing wiring; a real signed runner

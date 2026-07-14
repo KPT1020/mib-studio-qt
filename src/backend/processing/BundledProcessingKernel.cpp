@@ -1,5 +1,6 @@
 #include "backend/processing/IProcessingKernel.h"
 #include "backend/processing/ProcessingCoreAbi.h"
+#include "backend/processing/ProcessingScience.h"
 
 #include <algorithm>
 #include <exception>
@@ -202,6 +203,45 @@ ProcessingCoreIdentity bundledProcessingCoreIdentity() {
 
 std::shared_ptr<IProcessingKernel> makeBundledProcessingKernel() {
     return std::make_shared<BundledProcessingKernel>();
+}
+
+// Default science implementations: every kernel executes the shared bundled
+// pipeline unless it overrides these (ABI v2 dynamic cores will).
+bool IProcessingKernel::analyzeObjects(const cv::Mat& processedImage,
+                                       const cv::Rect& roi,
+                                       const services::ProcessingConfig& config,
+                                       const cv::Mat& originalImage,
+                                       double pixelToMicronFactor,
+                                       const backend::EModulusLut* eModulusLut,
+                                       std::vector<services::FilterResult>& results,
+                                       std::string* error) {
+    try {
+        results = science::filterProcessedObjects(processedImage, roi, config, originalImage,
+                                                  pixelToMicronFactor, eModulusLut);
+        return true;
+    } catch (const std::exception& ex) {
+        results.clear();
+        if (error) *error = ex.what();
+        return false;
+    }
+}
+
+bool IProcessingKernel::matchTrack(const std::vector<services::BatchTrack>& tracks,
+                                   const std::vector<bool>& matchedThisFrame,
+                                   const services::FilterResult& detection,
+                                   uint64_t frameIndex,
+                                   int frameWidth,
+                                   int& matchedTrack,
+                                   std::string* error) {
+    try {
+        matchedTrack =
+            science::findMatchingTrack(tracks, matchedThisFrame, detection, frameIndex, frameWidth);
+        return true;
+    } catch (const std::exception& ex) {
+        matchedTrack = -1;
+        if (error) *error = ex.what();
+        return false;
+    }
 }
 
 } // namespace backend::processing

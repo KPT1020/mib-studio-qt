@@ -97,6 +97,10 @@ mib_add_backend_test_executable(mock_camera_smoke_test camera/mock_camera_smoke_
 add_test(NAME camera.mock_smoke COMMAND $<TARGET_FILE:mock_camera_smoke_test>)
 set_tests_properties(camera.mock_smoke PROPERTIES LABELS "camera;backend")
 
+mib_add_backend_test_executable(processing_science_seam_test processing/processing_science_seam_test.cpp)
+add_test(NAME processing.science_seam COMMAND $<TARGET_FILE:processing_science_seam_test>)
+set_tests_properties(processing.science_seam PROPERTIES LABELS "processing;backend" TIMEOUT 30)
+
 mib_add_backend_test_executable(processing_science_golden_test processing/processing_science_golden_test.cpp)
 add_test(NAME processing.science_golden COMMAND $<TARGET_FILE:processing_science_golden_test>)
 set_tests_properties(processing.science_golden PROPERTIES LABELS "processing;backend" TIMEOUT 30)

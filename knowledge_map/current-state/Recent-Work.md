@@ -5,6 +5,19 @@
 
 ## Features shipped
 
+- **Kernel-owned scientific pipeline** (2026-07-14, A7/#242) — Moved contour
+  extraction, per-object metrics/LUT/target gating, brightness quantiles, and
+  batch track matching behind `IProcessingKernel`
+  (`analyzeObjects`/`matchTrack`), with the single shared implementation in
+  `src/backend/processing/ProcessingScience.cpp` and plain data contracts in
+  `ProcessingTypes.h`. `ProcessingService` routes every batch/offline/
+  realtime scientific decision through the selected kernel; threads,
+  callbacks, track lifecycle state, and HDF5 stay host-owned. A
+  pre-migration golden test (`processing.science_golden`) pins exact outputs
+  and a spy kernel (`processing.science_seam`) proves the routing. The native
+  plugin now compiles the science sources; the C ABI remains v1 (mask/empty),
+  so ABI v2 object-record marshalling is the remaining A7 step.
+
 - **Linux Ed25519 detached-signature trust adapter** (2026-07-14, A13/#245) —
   Implemented `verifyProcessingCoreEd25519` behind the injected trust seam:
   the immutable manifest transports a 44-byte DER SPKI and raw 64-byte

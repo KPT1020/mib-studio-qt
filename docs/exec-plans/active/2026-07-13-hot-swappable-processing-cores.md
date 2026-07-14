@@ -51,7 +51,13 @@ GitHub tracking:
       implemented; real R2 proof remains A12.
 - [ ] [A7 #242](https://github.com/KPT1020/mib-studio-qt/issues/242) — route
       every scientific path through `IProcessingKernel`, preserving golden
-      behavior before introducing dynamic loading.
+      behavior before introducing dynamic loading. The C++ seam is now total:
+      contours/metrics/LUT/target gating (`analyzeObjects`) and batch track
+      matching (`matchTrack`) execute through the selected kernel with the
+      shared implementation in `ProcessingScience.cpp`, pinned by a
+      pre-migration golden test and a spy-kernel routing proof. Remaining: an
+      ABI v2 that marshals object records across the C plugin boundary so a
+      dynamic core can replace the science, plus overlay-contour unification.
 - [ ] [A8 #239](https://github.com/KPT1020/mib-studio-qt/issues/239) — freeze
       the POD/opaque-handle C ABI, build the Windows plugin and descriptor, and
       validate independently built compatible/incompatible fixtures. Local/CI
@@ -182,6 +188,14 @@ the resolver and remain independent of desktop activation internals.
   never a trust root. An empty pin, a non-Ed25519 key, or any non-canonical
   encoding fails closed. Envelope, rotation, and revocation policy:
   `docs/architecture/processing-core-linux-signing.md`.
+- 2026-07-14: A7's seam expansion is code motion behind `IProcessingKernel`,
+  not a rewrite: `ProcessingScience.cpp` holds the single science
+  implementation, `analyzeObjects`/`matchTrack` are kernel virtuals whose
+  defaults execute it, and `ProcessingService` only routes. A golden test
+  (`processing.science_golden`) was pinned against the pre-migration outputs
+  first; a spy kernel (`processing.science_seam`) proves batch/offline
+  routing. The native plugin now compiles the science sources so the released
+  artifact is self-contained; ABI v1 still transports mask/empty only.
 
 ## Residual infrastructure gates
 
@@ -275,10 +289,13 @@ that relationship explicitly rather than claiming an unrun commit.
 
 ### Gates that must stay open
 
-- A7/[#242](https://github.com/KPT1020/mib-studio-qt/issues/242): ABI v1 owns
-  mask generation and empty-frame classification, not contours, metrics, LUT,
-  tracking, target decisions, or callbacks. A science-changing full pipeline
-  is not yet fully swappable.
+- A7/[#242](https://github.com/KPT1020/mib-studio-qt/issues/242): the C++
+  kernel seam now owns contours, metrics, LUT, target gating, and track
+  matching (golden-pinned, spy-verified), but the C ABI v1 still transports
+  only mask/empty decisions — ABI v1 dynamic cores inherit the host-compiled
+  default science. Full swappability of a science-changing core requires the
+  ABI v2 object-record marshalling and re-baselining; callbacks and track
+  lifecycle state deliberately stay host-owned.
 - A12/[#240](https://github.com/KPT1020/mib-studio-qt/issues/240): provision
   the production certificate/password and repository SPKI pin; define branch
   protection and Production-environment approval rules; publish a real tag/R2

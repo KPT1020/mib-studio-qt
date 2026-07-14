@@ -1,10 +1,17 @@
 #pragma once
 
+#include "backend/processing/ProcessingTypes.h"
+
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <opencv2/core.hpp>
+
+namespace backend {
+class EModulusLut;
+} // namespace backend
 
 namespace backend::processing {
 
@@ -57,6 +64,28 @@ public:
                          bool& outputIsEmpty,
                          std::string* error = nullptr) = 0;
     virtual bool reset(std::string* error = nullptr) = 0;
+
+    // ---- Version-sensitive science beyond mask generation (A7) ----
+    // Contour extraction, per-object metrics/LUT/target gating, and batch
+    // track matching. The default implementations execute the shared bundled
+    // science (ProcessingScience). ABI v1 dynamic cores inherit them because
+    // the C ABI transports only mask/empty decisions; an ABI v2 core
+    // overrides them to own the full pipeline across the plugin boundary.
+    virtual bool analyzeObjects(const cv::Mat& processedImage,
+                                const cv::Rect& roi,
+                                const services::ProcessingConfig& config,
+                                const cv::Mat& originalImage,
+                                double pixelToMicronFactor,
+                                const backend::EModulusLut* eModulusLut,
+                                std::vector<services::FilterResult>& results,
+                                std::string* error = nullptr);
+    virtual bool matchTrack(const std::vector<services::BatchTrack>& tracks,
+                            const std::vector<bool>& matchedThisFrame,
+                            const services::FilterResult& detection,
+                            uint64_t frameIndex,
+                            int frameWidth,
+                            int& matchedTrack,
+                            std::string* error = nullptr);
 };
 
 std::shared_ptr<IProcessingKernel> makeBundledProcessingKernel();

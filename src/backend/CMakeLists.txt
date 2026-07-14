@@ -30,6 +30,7 @@ add_library(mib_processing STATIC
     ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingCoreCache.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingCoreEd25519.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingCoreSha256.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingScience.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingService.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/processing/BatchMaskSources.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/recording/Hdf5Service.cpp
@@ -104,7 +105,9 @@ endif()
 # Windows DLL before the registry publisher hashes it.
 add_library(mib_processing_core MODULE
     ${PROJECT_SOURCE_DIR}/src/backend/processing/BundledProcessingKernel.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/processing/EModulusLut.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingCorePlugin.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingScience.cpp
 )
 target_include_directories(mib_processing_core PRIVATE ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(mib_processing_core PRIVATE spdlog::spdlog)

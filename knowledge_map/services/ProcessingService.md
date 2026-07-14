@@ -90,7 +90,9 @@ restarts the loop (same policy as `CaptureService::run`). Verified by
 
 1. The selected `IProcessingKernel` performs optional background subtraction,
    Gaussian blur, threshold, and morphology and returns the mask.
-2. Host-owned `filterProcessedImage` finds contours and produces a
+2. `filterProcessedImage`/`filterProcessedObjects` route through the selected
+   kernel's `analyzeObjects` (A7): the shared science implementation lives in
+   `src/backend/processing/ProcessingScience.cpp` and produces a
    `FilterResult`:
    - `deformability`, `area` (μm² via `pixelToMicronFactor_`),
      `areaRatio`, `ringRatio`, `youngsModulus` (LUT lookup)
@@ -261,12 +263,21 @@ current/max queue depth, batch size, worker count, and running state. See
 
 ## Gotchas
 
-- **The v1 native engine boundary owns mask generation and empty-frame
-  classification only.** Contour extraction, metrics, object tracking,
-  target-group classification, callbacks, and HDF5 orchestration remain in the
-  host and consume the selected mask. A processing release that needs to
-  change those semantics cannot yet be fully hot-swapped; this residual scope
-  remains tracked in GitHub issue #242 (A7).
+- **The kernel seam (`IProcessingKernel`) now owns the science decisions:**
+  mask generation, empty-frame classification, `analyzeObjects` (contours,
+  metrics, LUT lookup, range/target gating, brightness, object ordering), and
+  `matchTrack` (batch track matching). Threads, queues, callbacks, track
+  lifecycle state, `FrameStore`, experiments, and HDF5 stay host-owned.
+  `ProcessingScience.cpp` is the single shared implementation; do not call it
+  from pipeline code — route through the selected kernel
+  (`filterProcessedObjects` / `matchTrackWithActiveKernel`).
+- **The v1 C ABI still transports mask/empty decisions only.** ABI v1 dynamic
+  cores inherit the default kernel science (identical to bundled), so a
+  release that changes contour/metric/tracking semantics still requires an
+  ABI v2 that marshals object records across the plugin boundary; that
+  residual is tracked in GitHub issue #242 (A7). The
+  `processing.science_golden` test pins the science outputs and
+  `processing.science_seam` proves the batch/offline routing.
 - Activating a core is intentionally not an in-flight migration. Stop capture,
   experiment, recording, and offline/async batch work before switching.
 - Plugin modules are intentionally never unloaded. Repeatedly preparing many
