@@ -56,6 +56,16 @@ PEP503_PACKAGE = "mib-processing"
 _VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+!-]*$")
 _CHANNEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _TAG_PREFIX = "mib-processing-v"
+_NATIVE_LIBRARY_SUFFIXES = {
+    "windows": (".dll",),
+    "linux": (".so",),
+    "macos": (".dylib",),
+}
+_NATIVE_ARCH_ALIASES = {
+    "amd64": "x86_64",
+    "x64": "x86_64",
+    "arm64": "aarch64",
+}
 
 
 def utc_now() -> str:
@@ -215,6 +225,7 @@ def build_native_plugin_entries(
     """
     entries: list[dict[str, Any]] = []
     seen_names: set[str] = set()
+    seen_platforms: set[tuple[str, str]] = set()
     required = ("filename", "os", "arch", "engine_abi_version", "runtime_fingerprint", "entrypoint")
     for descriptor_path in sorted(descriptor_paths, key=lambda candidate: candidate.name):
         descriptor = _load_native_descriptor(descriptor_path)
@@ -223,8 +234,19 @@ def build_native_plugin_entries(
             raise ValueError(f"Native plugin descriptor {descriptor_path} is missing: {', '.join(missing)}")
 
         filename = str(descriptor["filename"])
-        if Path(filename).name != filename or not filename.lower().endswith(".dll"):
-            raise ValueError(f"Native plugin filename must be a basename ending in .dll: {filename!r}")
+        native_os = str(descriptor["os"]).strip().lower()
+        raw_arch = str(descriptor["arch"]).strip().lower()
+        native_arch = _NATIVE_ARCH_ALIASES.get(raw_arch, raw_arch)
+        allowed_suffixes = _NATIVE_LIBRARY_SUFFIXES.get(native_os)
+        if Path(filename).name != filename:
+            raise ValueError(f"Native plugin filename must be a basename: {filename!r}")
+        if allowed_suffixes is None:
+            raise ValueError(f"Native plugin declares unsupported OS {native_os!r}: {filename!r}")
+        if not filename.lower().endswith(allowed_suffixes):
+            expected = " or ".join(allowed_suffixes)
+            raise ValueError(
+                f"Native plugin for {native_os} must end in {expected}: {filename!r}"
+            )
         artifact = asset_dir / filename
         if not artifact.is_file():
             raise ValueError(f"Native plugin asset named by {descriptor_path.name} does not exist: {artifact}")
@@ -233,6 +255,10 @@ def build_native_plugin_entries(
         if filename in seen_names:
             raise ValueError(f"Duplicate native plugin release asset: {filename}")
         seen_names.add(filename)
+        platform = (native_os, native_arch)
+        if platform in seen_platforms:
+            raise ValueError(f"Duplicate native plugin platform: {native_os}/{native_arch}")
+        seen_platforms.add(platform)
 
         descriptor_version = str(descriptor.get("version", expected_version))
         if descriptor_version != expected_version:
@@ -249,10 +275,19 @@ def build_native_plugin_entries(
         signing = descriptor.get("signing", {})
         if signing is not None and not isinstance(signing, dict):
             raise ValueError(f"Native plugin signing metadata must be an object: {descriptor_path}")
+        signing = dict(signing or {})
+        signing_scheme = str(signing.get("scheme") or signing.get("format") or "").strip().lower()
+        if not signing_scheme:
+            raise ValueError(f"Native plugin signing scheme is required: {descriptor_path}")
+        if signing.get("required", True) is not True:
+            raise ValueError(f"Native plugin signatures must be required: {descriptor_path}")
+        signing.pop("format", None)
+        signing["scheme"] = signing_scheme
+        signing["required"] = True
         entries.append({
             "filename": filename,
-            "os": str(descriptor["os"]),
-            "arch": str(descriptor["arch"]),
+            "os": native_os,
+            "arch": native_arch,
             "artifact_kind": str(descriptor.get("artifact_kind", "shared_library")),
             "version": expected_version,
             "contract_version": expected_contract_version,
@@ -267,7 +302,7 @@ def build_native_plugin_entries(
             "descriptor_url": (
                 f"https://github.com/{repo}/releases/download/{release_tag}/{descriptor_path.name}"
             ),
-            "signing": signing or {},
+            "signing": signing,
         })
     return entries
 

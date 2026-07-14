@@ -5,6 +5,15 @@
 
 ## Features shipped
 
+- **Cross-platform processing-core seams** (2026-07-14, A13/#245) — Removed
+  DLL-only assumptions from registry publication/verification, made native
+  signature scheme and requirement part of catalog/persisted identity, and
+  gave Linux x86_64/aarch64 runtime fingerprints explicit platform identity.
+  The C ABI, cache, and `dlopen` loader already exercise real `.so` fixtures;
+  production Linux activation remains fail-closed until A13 supplies an
+  audited detached-signature and release lane. Authenticode remains only the
+  Windows trust adapter.
+
 - **Processing-core release gate closure** (2026-07-14, A8/A10/A11/A12) —
   Added repaired `manylinux_2_28` wheels proven in a clean Python 3.12 base,
   independent native ABI fixtures, exact export/import auditing, secret-free

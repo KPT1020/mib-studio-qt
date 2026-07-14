@@ -22,6 +22,8 @@ frontend::processingcoresettings::Selection selection(const QString& version, co
     result.path = path;
     result.appMinVersion = version;
     result.appMaxVersion = version;
+    result.signingScheme = QStringLiteral("authenticode");
+    result.signingRequired = true;
     return result;
 }
 
@@ -42,6 +44,10 @@ int main() {
     MIB_EXPECT(settings.value(QStringLiteral("ProcessingCore/Version")).toString() ==
                    QStringLiteral("1.0.0"),
                "complete selection persists on a writable settings path");
+    MIB_EXPECT(settings.value(QStringLiteral("ProcessingCore/SigningScheme")).toString() ==
+                       QStringLiteral("authenticode") &&
+                   settings.value(QStringLiteral("ProcessingCore/SigningRequired")).toBool(),
+               "platform trust policy is persisted with the exact selection");
 
     const auto backupParent = root / "settings-backup";
     std::filesystem::rename(settingsParent, backupParent);

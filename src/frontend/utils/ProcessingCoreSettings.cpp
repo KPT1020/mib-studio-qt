@@ -21,6 +21,8 @@ const QStringList& selectionKeys() {
         QStringLiteral("ProcessingCore/Path"),
         QStringLiteral("ProcessingCore/AppMinVersion"),
         QStringLiteral("ProcessingCore/AppMaxVersion"),
+        QStringLiteral("ProcessingCore/SigningScheme"),
+        QStringLiteral("ProcessingCore/SigningRequired"),
     };
     return keys;
 }
@@ -63,6 +65,8 @@ bool persistSelection(QSettings& settings, const Selection& selection, QString* 
     settings.setValue(QStringLiteral("ProcessingCore/Path"), selection.path);
     settings.setValue(QStringLiteral("ProcessingCore/AppMinVersion"), selection.appMinVersion);
     settings.setValue(QStringLiteral("ProcessingCore/AppMaxVersion"), selection.appMaxVersion);
+    settings.setValue(QStringLiteral("ProcessingCore/SigningScheme"), selection.signingScheme);
+    settings.setValue(QStringLiteral("ProcessingCore/SigningRequired"), selection.signingRequired);
     settings.sync();
     if (settings.status() == QSettings::NoError) return true;
 

@@ -14,7 +14,8 @@ int main() {
           "url":"https://example/core.dll","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "size_bytes":42,"engine_abi_version":1,"contract_version":1,
           "runtime_fingerprint":"windows-x86_64-msvc1942-md-cxx17","entrypoint":"mib_processing_get_api",
-          "app_min_version":"1.0.0","app_max_version":"1.9.9"}]},
+          "app_min_version":"1.0.0","app_max_version":"1.9.9",
+          "signing":{"scheme":"authenticode","required":true}}]},
         {"version":"1.0.0","contract_version":1,
          "manifest_url":"https://updates.example/stable/processing-core/versions/1.0.0.json",
          "native_plugins":[]}
@@ -30,6 +31,8 @@ int main() {
     MIB_REQUIRE(plugin != nullptr, "compatible Windows artifact selected");
     MIB_EXPECT(plugin->engineAbiVersion == 1 && plugin->contractVersion == 1,
                "native compatibility metadata parsed");
+    MIB_EXPECT(plugin->signingScheme == "authenticode" && plugin->signingRequired,
+               "platform trust policy is part of the selected artifact identity");
     MIB_EXPECT(frontend::processingcorecatalog::isAppCompatible(*plugin, "1.2.3"),
                "app compatibility range accepts supported version");
     MIB_EXPECT(!frontend::processingcorecatalog::isAppCompatible(*plugin, "2.0.0"),
@@ -60,7 +63,8 @@ int main() {
        "url":"https://example/core.dll","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
        "size_bytes":42,"engine_abi_version":1,"contract_version":1,
        "runtime_fingerprint":"windows-x86_64-msvc1942-md-cxx17","entrypoint":"mib_processing_get_api",
-       "app_min_version":"1.0.0","app_max_version":"1.9.9"}]})";
+       "app_min_version":"1.0.0","app_max_version":"1.9.9",
+       "signing":{"scheme":"authenticode","required":true}}]})";
     const auto parsedManifest = frontend::processingcorecatalog::parseVersionManifest(manifest);
     MIB_REQUIRE(parsedManifest.ok, parsedManifest.error.toStdString());
     MIB_EXPECT(parsedManifest.version.version == "2.0.0" &&
@@ -104,6 +108,10 @@ int main() {
     nonHex.replace(QByteArray(64, 'a'), QByteArray(64, 'g'));
     MIB_EXPECT(!frontend::processingcorecatalog::parseIndex(nonHex).ok,
                "non-hex native digest rejected");
+    QByteArray optionalSignature = fixture;
+    optionalSignature.replace("\"required\":true", "\"required\":false");
+    MIB_EXPECT(!frontend::processingcorecatalog::parseIndex(optionalSignature).ok,
+               "optional native signature policy is rejected");
     QByteArray missingManifestUrl = fixture;
     missingManifestUrl.replace(
         "\"manifest_url\":\"https://updates.example/stable/processing-core/versions/2.0.0.json\",",
@@ -120,13 +128,36 @@ int main() {
          "sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
          "size_bytes":1,"engine_abi_version":1,"contract_version":1,
          "runtime_fingerprint":"runtime","entrypoint":"mib_processing_get_api",
-         "app_min_version":"1.0.0","app_max_version":null},
+         "app_min_version":"1.0.0","app_max_version":null,
+         "signing":{"scheme":"authenticode","required":true}},
         {"filename":"b.dll","os":"windows","arch":"x86_64","url":"https://example/b.dll",
          "sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
          "size_bytes":1,"engine_abi_version":1,"contract_version":1,
          "runtime_fingerprint":"runtime","entrypoint":"mib_processing_get_api",
-         "app_min_version":"1.0.0","app_max_version":null}]}]})";
+         "app_min_version":"1.0.0","app_max_version":null,
+         "signing":{"scheme":"authenticode","required":true}}]}]})";
     MIB_EXPECT(!frontend::processingcorecatalog::parseIndex(duplicatePlatform).ok,
                "duplicate native platform entries rejected");
+
+    const QByteArray linuxCatalog = R"({
+      "processing_core_index_schema_version":1,"channel":"stable","active_version":"2.0.0",
+      "versions":[{"version":"2.0.0","contract_version":1,
+       "manifest_url":"https://updates.example/stable/processing-core/versions/2.0.0.json",
+       "native_plugins":[{"filename":"core.so","os":"linux","arch":"amd64",
+        "url":"https://example/core.so",
+        "sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size_bytes":1,"engine_abi_version":1,"contract_version":1,
+        "runtime_fingerprint":"linux-x86_64-gcc13-cxx17",
+        "entrypoint":"mib_processing_get_api","app_min_version":"1.0.0",
+        "app_max_version":null,
+        "signing":{"scheme":"detached-ed25519","required":true}}]}]})";
+    const auto parsedLinux = frontend::processingcorecatalog::parseIndex(linuxCatalog);
+    MIB_REQUIRE(parsedLinux.ok, parsedLinux.error.toStdString());
+    const auto* linuxPlugin = frontend::processingcorecatalog::findNativePlugin(
+        parsedLinux.versions.front(), "linux", "x86_64");
+    MIB_REQUIRE(linuxPlugin != nullptr, "Linux shared-library artifact selected exactly");
+    MIB_EXPECT(linuxPlugin->signingScheme == "detached-ed25519" &&
+                   linuxPlugin->signingRequired,
+               "Linux trust scheme is preserved without assuming Authenticode");
     return mib::test::exitCode();
 }

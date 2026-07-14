@@ -407,7 +407,7 @@ jobs:
           }
           Write-Host "Native imports: $($dependencyNames -join ', ')"
 
-      - name: Verify Authenticode trust with ephemeral CI signer
+      - name: Verify Authenticode trust with public CI fixture
         shell: pwsh
         run: |
           ./scripts/test-processing-core-authenticode.ps1 `

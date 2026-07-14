@@ -114,7 +114,10 @@ QString platformOs() {
 
 QString platformArch() {
     const QString architecture = QSysInfo::currentCpuArchitecture().toLower();
-    if (architecture == QStringLiteral("amd64")) return QStringLiteral("x86_64");
+    if (architecture == QStringLiteral("amd64") || architecture == QStringLiteral("x64")) {
+        return QStringLiteral("x86_64");
+    }
+    if (architecture == QStringLiteral("arm64")) return QStringLiteral("aarch64");
     return architecture;
 }
 
@@ -125,12 +128,27 @@ bool isHostCompatible(const processingcorecatalog::NativePluginEntry& plugin) {
            plugin.runtimeFingerprint == QString::fromStdString(host.runtimeFingerprint);
 }
 
-std::function<bool(const std::filesystem::path&, std::string&)> trustVerifier() {
+std::function<bool(const std::filesystem::path&, std::string&)> trustVerifier(
+    const processingcorecatalog::NativePluginEntry& plugin) {
 #if !defined(NDEBUG)
     if (qEnvironmentVariableIntValue("MIB_STUDIO_ALLOW_UNSIGNED_PROCESSING_CORE") == 1) {
         return [](const std::filesystem::path&, std::string&) { return true; };
     }
 #endif
+    if (!plugin.signingRequired) {
+        return [](const std::filesystem::path&, std::string& error) {
+            error = "processing-core manifest does not require an artifact signature";
+            return false;
+        };
+    }
+    const std::string signingScheme = plugin.signingScheme.toStdString();
+#if defined(_WIN32)
+    if (plugin.signingScheme != QStringLiteral("authenticode")) {
+        return [signingScheme](const std::filesystem::path&, std::string& error) {
+            error = "unsupported Windows processing-core trust scheme: " + signingScheme;
+            return false;
+        };
+    }
     std::string approved = MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256;
 #if !defined(NDEBUG)
     const QString debugOverride =
@@ -140,6 +158,13 @@ std::function<bool(const std::filesystem::path&, std::string&)> trustVerifier() 
     return [approved](const std::filesystem::path& path, std::string& error) {
         return backend::processing::verifyProcessingCoreAuthenticode(path, approved, error);
     };
+#else
+    return [signingScheme](const std::filesystem::path&, std::string& error) {
+        error = "processing-core trust scheme '" + signingScheme +
+                "' is not implemented for this host platform";
+        return false;
+    };
+#endif
 }
 
 backend::processing::ProcessingCoreLoadRequirements loadRequirements(
@@ -154,7 +179,7 @@ backend::processing::ProcessingCoreLoadRequirements loadRequirements(
     requirements.artifactSha256 = plugin.sha256.toStdString();
     requirements.releaseTag = version.releaseTag.toStdString();
     requirements.manifestSha256 = manifestSha256Hex.toStdString();
-    requirements.trustVerifier = trustVerifier();
+    requirements.trustVerifier = trustVerifier(plugin);
     return requirements;
 }
 
@@ -246,6 +271,10 @@ bool ProcessingCoreDialog::restorePersistedCore(backend::AppBackend& backend, QS
         settings.value(QStringLiteral("ProcessingCore/AppMinVersion")).toString();
     persistedCompatibility.appMaxVersion =
         settings.value(QStringLiteral("ProcessingCore/AppMaxVersion")).toString();
+    persistedCompatibility.signingScheme =
+        settings.value(QStringLiteral("ProcessingCore/SigningScheme")).toString();
+    persistedCompatibility.signingRequired =
+        settings.value(QStringLiteral("ProcessingCore/SigningRequired"), false).toBool();
     if (persistedCompatibility.appMinVersion.isEmpty() ||
         !processingcorecatalog::isAppCompatible(
             persistedCompatibility, QCoreApplication::applicationVersion())) {
@@ -267,7 +296,7 @@ bool ProcessingCoreDialog::restorePersistedCore(backend::AppBackend& backend, QS
         QStringLiteral("ProcessingCore/ReleaseTag")).toString().toStdString();
     requirements.manifestSha256 = settings.value(
         QStringLiteral("ProcessingCore/ManifestSha256")).toString().toStdString();
-    requirements.trustVerifier = trustVerifier();
+    requirements.trustVerifier = trustVerifier(persistedCompatibility);
     const auto loaded = backend::processing::loadProcessingCorePlugin(
         std::filesystem::path(path.toStdString()), requirements);
     if (!loaded) {
@@ -520,7 +549,9 @@ void ProcessingCoreDialog::prepareAndActivateSelected() {
             manifestPlugin->contractVersion == plugin.contractVersion &&
             manifestPlugin->runtimeFingerprint == plugin.runtimeFingerprint &&
             manifestPlugin->appMinVersion == plugin.appMinVersion &&
-            manifestPlugin->appMaxVersion == plugin.appMaxVersion;
+            manifestPlugin->appMaxVersion == plugin.appMaxVersion &&
+            manifestPlugin->signingScheme == plugin.signingScheme &&
+            manifestPlugin->signingRequired == plugin.signingRequired;
         if (!matchesIndex) {
             setBusy(false, manifest.ok
                                ? tr("Mutable index and immutable manifest disagree; activation refused.")
@@ -624,6 +655,8 @@ void ProcessingCoreDialog::downloadAndActivate(
                 selection.path = QString::fromStdString(cached.pluginPath.string());
                 selection.appMinVersion = plugin.appMinVersion;
                 selection.appMaxVersion = plugin.appMaxVersion;
+                selection.signingScheme = plugin.signingScheme;
+                selection.signingRequired = plugin.signingRequired;
                 if (processingcoresettings::persistSelection(settings, selection,
                                                              &persistenceError)) {
                     return true;

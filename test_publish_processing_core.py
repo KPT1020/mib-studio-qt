@@ -98,7 +98,7 @@ class NativePluginTest(unittest.TestCase):
                 "version": "0.1.0",
                 "contract_version": 1,
                 "os": "windows",
-                "arch": "x86_64",
+                "arch": "amd64",
                 "engine_abi_version": 1,
                 "runtime_fingerprint": "msvc194-md-x64",
                 "app_min_version": "0.8.0",
@@ -124,8 +124,68 @@ class NativePluginTest(unittest.TestCase):
             self.assertEqual(entry["size_bytes"], len(b"signed dll fixture"))
             self.assertEqual(entry["version"], "0.1.0")
             self.assertEqual(entry["contract_version"], 1)
+            self.assertEqual(entry["arch"], "x86_64")
+            self.assertEqual(entry["signing"]["scheme"], "authenticode")
+            self.assertTrue(entry["signing"]["required"])
             self.assertTrue(entry["url"].startswith("https://github.com/OWNER/REPO/releases/download/"))
             self.assertEqual(publish_processing_core.discover_native_descriptors(root), [descriptor])
+
+    def test_linux_shared_library_descriptor_is_portable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            shared_library = root / "mib_processing_core-0.1.0-linux_x86_64.so"
+            shared_library.write_bytes(b"signed linux shared-library fixture")
+            descriptor = root / "mib_processing_core-0.1.0-linux_x86_64.json"
+            descriptor.write_text(json.dumps({
+                "filename": shared_library.name,
+                "version": "0.1.0",
+                "contract_version": 1,
+                "os": "linux",
+                "arch": "x86_64",
+                "engine_abi_version": 1,
+                "runtime_fingerprint": "linux-x86_64-gcc13-cxx17",
+                "entrypoint": "mib_processing_get_api",
+                "signing": {"scheme": "detached-ed25519", "required": True},
+            }), encoding="utf-8")
+
+            entries = publish_processing_core.build_native_plugin_entries(
+                [descriptor],
+                asset_dir=root,
+                repo="OWNER/REPO",
+                release_tag="mib-processing-v0.1.0",
+                expected_version="0.1.0",
+                expected_contract_version=1,
+            )
+
+            self.assertEqual(entries[0]["os"], "linux")
+            self.assertEqual(entries[0]["arch"], "x86_64")
+            self.assertEqual(entries[0]["signing"]["scheme"], "detached-ed25519")
+
+            mismatched = json.loads(descriptor.read_text(encoding="utf-8"))
+            mismatched["filename"] = "core.dll"
+            descriptor.write_text(json.dumps(mismatched), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "linux must end in .so"):
+                publish_processing_core.build_native_plugin_entries(
+                    [descriptor],
+                    asset_dir=root,
+                    repo="OWNER/REPO",
+                    release_tag="mib-processing-v0.1.0",
+                    expected_version="0.1.0",
+                    expected_contract_version=1,
+                )
+
+            mismatched["filename"] = shared_library.name
+            mismatched["signing"]["required"] = False
+            descriptor.write_text(json.dumps(mismatched), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "signatures must be required"):
+                publish_processing_core.build_native_plugin_entries(
+                    [descriptor],
+                    asset_dir=root,
+                    repo="OWNER/REPO",
+                    release_tag="mib-processing-v0.1.0",
+                    expected_version="0.1.0",
+                    expected_contract_version=1,
+                )
 
     def test_descriptor_rejects_contract_or_path_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

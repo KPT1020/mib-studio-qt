@@ -82,9 +82,34 @@ class ManifestVerificationTest(unittest.TestCase):
                 "url": "https://example.invalid/core.dll",
                 "sha256": "b" * 64,
                 "size_bytes": 456,
+                "signing": {"scheme": "authenticode", "required": True},
             }]
             self.assertEqual(verify_fixture(Path(temp_dir), manifest), 0)
             manifest["native_plugins"][0]["contract_version"] = 2
+            self.assertEqual(verify_fixture(Path(temp_dir), manifest), 1)
+
+    def test_accepts_linux_shared_library_and_rejects_cross_os_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest = base_manifest()
+            manifest["native_plugins"] = [{
+                "filename": "core.so",
+                "os": "linux",
+                "arch": "x86_64",
+                "version": "0.1.0",
+                "contract_version": 1,
+                "engine_abi_version": 1,
+                "runtime_fingerprint": "linux-x86_64-gcc13-cxx17",
+                "entrypoint": "mib_processing_get_api",
+                "url": "https://example.invalid/core.so",
+                "sha256": "b" * 64,
+                "size_bytes": 456,
+                "signing": {"scheme": "detached-ed25519", "required": True},
+            }]
+            self.assertEqual(verify_fixture(Path(temp_dir), manifest), 0)
+            manifest["native_plugins"][0]["filename"] = "core.dll"
+            self.assertEqual(verify_fixture(Path(temp_dir), manifest), 1)
+            manifest["native_plugins"][0]["filename"] = "core.so"
+            manifest["native_plugins"][0]["signing"]["required"] = False
             self.assertEqual(verify_fixture(Path(temp_dir), manifest), 1)
 
     def test_rejects_insecure_artifact_urls(self) -> None:

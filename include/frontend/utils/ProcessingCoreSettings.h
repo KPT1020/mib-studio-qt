@@ -19,6 +19,8 @@ struct Selection {
     QString path;
     QString appMinVersion;
     QString appMaxVersion;
+    QString signingScheme;
+    bool signingRequired{false};
 };
 
 // Writes the complete explicit selection and synchronizes it before returning

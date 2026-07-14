@@ -16,9 +16,11 @@ struct NativePluginEntry {
     QString entrypoint;
     QString appMinVersion;
     QString appMaxVersion;
+    QString signingScheme;
     qint64 sizeBytes{-1};
     int engineAbiVersion{0};
     int contractVersion{0};
+    bool signingRequired{false};
 };
 
 struct VersionEntry {

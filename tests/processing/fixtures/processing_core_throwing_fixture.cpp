@@ -11,17 +11,31 @@
 #define MIB_FIXTURE_STRINGIFY_INNER(value) #value
 #define MIB_FIXTURE_STRINGIFY(value) MIB_FIXTURE_STRINGIFY_INNER(value)
 
+#if defined(_WIN32) && defined(__x86_64__)
+#  define MIB_FIXTURE_PLATFORM "windows-x86_64"
+#elif defined(__linux__) && defined(__x86_64__)
+#  define MIB_FIXTURE_PLATFORM "linux-x86_64"
+#elif defined(__linux__) && defined(__aarch64__)
+#  define MIB_FIXTURE_PLATFORM "linux-aarch64"
+#elif defined(__APPLE__) && defined(__aarch64__)
+#  define MIB_FIXTURE_PLATFORM "macos-aarch64"
+#elif defined(__APPLE__) && defined(__x86_64__)
+#  define MIB_FIXTURE_PLATFORM "macos-x86_64"
+#else
+#  define MIB_FIXTURE_PLATFORM "unknown-platform"
+#endif
+
 #if defined(_MSC_VER)
 #  define MIB_FIXTURE_RUNTIME_FINGERPRINT \
     "windows-x86_64-msvc" MIB_FIXTURE_STRINGIFY(_MSC_VER) "-md-cxx17"
 #elif defined(__clang__)
 #  define MIB_FIXTURE_RUNTIME_FINGERPRINT \
-    "portable-clang" MIB_FIXTURE_STRINGIFY(__clang_major__) "-cxx17"
+    MIB_FIXTURE_PLATFORM "-clang" MIB_FIXTURE_STRINGIFY(__clang_major__) "-cxx17"
 #elif defined(__GNUC__)
 #  define MIB_FIXTURE_RUNTIME_FINGERPRINT \
-    "portable-gcc" MIB_FIXTURE_STRINGIFY(__GNUC__) "-cxx17"
+    MIB_FIXTURE_PLATFORM "-gcc" MIB_FIXTURE_STRINGIFY(__GNUC__) "-cxx17"
 #else
-#  define MIB_FIXTURE_RUNTIME_FINGERPRINT "portable-unknown-cxx17"
+#  define MIB_FIXTURE_RUNTIME_FINGERPRINT "unknown-platform-cxx17"
 #endif
 
 namespace {

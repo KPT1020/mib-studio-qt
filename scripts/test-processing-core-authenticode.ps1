@@ -67,70 +67,38 @@ $testPath = (Resolve-Path -LiteralPath $TestExecutable).Path
 $unsignedPath = (Resolve-Path -LiteralPath $UnsignedFixture).Path
 New-Item -ItemType Directory -Path $WorkingDirectory -Force | Out-Null
 $signedPath = Join-Path $WorkingDirectory 'mib-processing-authenticode-signed-fixture.dll'
-$pfxPath = Join-Path $WorkingDirectory 'mib-processing-authenticode-ephemeral.pfx'
+$pfxPath = Join-Path $WorkingDirectory 'mib-processing-authenticode-ci-fixture.pfx'
+$cerPath = Join-Path $WorkingDirectory 'mib-processing-authenticode-ci-fixture.cer'
 Copy-Item -LiteralPath $unsignedPath -Destination $signedPath -Force
 
 $certificate = $null
-$trustedCertificate = $null
-$rsa = $null
-$rootStore = $null
+$rootInstalled = $false
 try {
-    Write-Host 'Creating ephemeral Authenticode signer'
-    $rsa = [System.Security.Cryptography.RSA]::Create(2048)
-    $request = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
-        'CN=MIB Processing Core Ephemeral CI Fixture',
-        $rsa,
-        [System.Security.Cryptography.HashAlgorithmName]::SHA256,
-        [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
-    )
-    $enhancedKeyUsages = [System.Security.Cryptography.OidCollection]::new()
-    [void]$enhancedKeyUsages.Add(
-        [System.Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.3')
-    )
-    [void]$request.CertificateExtensions.Add(
-        [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new(
-            $enhancedKeyUsages,
-            $true
-        )
-    )
-    [void]$request.CertificateExtensions.Add(
-        [System.Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new(
-            [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature,
-            $true
-        )
-    )
-    [void]$request.CertificateExtensions.Add(
-        [System.Security.Cryptography.X509Certificates.X509BasicConstraintsExtension]::new(
-            $false,
-            $false,
-            0,
-            $true
-        )
-    )
-    $certificate = $request.CreateSelfSigned(
-        [DateTimeOffset]::UtcNow.AddMinutes(-5),
-        [DateTimeOffset]::UtcNow.AddDays(1)
-    )
-    $pfxPassword = [Guid]::NewGuid().ToString('N')
+    # These are deliberately public, test-only credentials. Keeping the fixture
+    # static avoids hosted-runner certificate-provider hangs; production signing
+    # continues to use repository secrets in a separate release job.
+    Write-Host 'Materializing the public Authenticode CI fixture'
+    $repositoryRoot = Split-Path -Parent $PSScriptRoot
+    $fixtureRoot = Join-Path $repositoryRoot 'tests\processing\fixtures'
+    $pfxBase64Path = Join-Path $fixtureRoot 'authenticode_ci_fixture.pfx.b64'
+    $cerBase64Path = Join-Path $fixtureRoot 'authenticode_ci_fixture.cer.b64'
+    $pfxPassword = 'mib-processing-ci-fixture'
     [IO.File]::WriteAllBytes(
         $pfxPath,
-        $certificate.Export(
-            [System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx,
-            $pfxPassword
-        )
+        [Convert]::FromBase64String((Get-Content -LiteralPath $pfxBase64Path -Raw))
     )
-    $trustedCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
-        $certificate.Export(
-            [System.Security.Cryptography.X509Certificates.X509ContentType]::Cert
-        )
+    [IO.File]::WriteAllBytes(
+        $cerPath,
+        [Convert]::FromBase64String((Get-Content -LiteralPath $cerBase64Path -Raw))
     )
+    $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($cerPath)
 
-    $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-        [System.Security.Cryptography.X509Certificates.StoreName]::Root,
-        [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-    )
-    $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-    $rootStore.Add($trustedCertificate)
+    Write-Host 'Installing the CI fixture in the current-user trust store'
+    Invoke-BoundedProcess `
+        -FilePath 'certutil.exe' `
+        -ArgumentList @('-user', '-f', '-addstore', 'Root', $cerPath) `
+        -Description 'Current-user CI root installation'
+    $rootInstalled = $true
 
     Write-Host 'Locating the x64 Windows SDK signtool'
     $signtoolPattern = Join-Path `
@@ -144,7 +112,7 @@ try {
         throw 'signtool.exe (x64) was not found'
     }
 
-    Write-Host 'Signing the fixture with the ephemeral certificate'
+    Write-Host 'Signing the DLL with the public CI certificate fixture'
     Invoke-BoundedProcess `
         -FilePath $signtool.FullName `
         -ArgumentList @('sign', '/fd', 'SHA256', '/f', $pfxPath, '/p', $pfxPassword, $signedPath) `
@@ -157,22 +125,17 @@ try {
         -ArgumentList @($unsignedPath, $signedPath, $spki) `
         -Description 'Processing-core Authenticode regression test'
 } finally {
-    if ($rootStore) {
-        if ($trustedCertificate) {
-            $rootStore.Remove($trustedCertificate)
-        }
-        $rootStore.Close()
-        $rootStore.Dispose()
-    }
-    if ($trustedCertificate) {
-        $trustedCertificate.Dispose()
+    if ($rootInstalled -and $certificate) {
+        Write-Host 'Removing the CI fixture from the current-user trust store'
+        Invoke-BoundedProcess `
+            -FilePath 'certutil.exe' `
+            -ArgumentList @('-user', '-delstore', 'Root', $certificate.Thumbprint) `
+            -Description 'Current-user CI root removal'
     }
     if ($certificate) {
         $certificate.Dispose()
     }
-    if ($rsa) {
-        $rsa.Dispose()
-    }
     Remove-Item -LiteralPath $pfxPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $cerPath -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $signedPath -Force -ErrorAction SilentlyContinue
 }

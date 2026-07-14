@@ -119,9 +119,9 @@ The Windows build job uploads only an unsigned, already-tested artifact; the
 tag-only signing job consumes `WINDOWS_SIGNING_CERTIFICATE_BASE64` and
 `WINDOWS_SIGNING_CERTIFICATE_PASSWORD`, timestamps the DLL, verifies
 Authenticode and the DER-SPKI pin, and only then exposes the canonical signed
-artifact to the release job. CI separately signs an independent fixture with
-an ephemeral certificate to test unsigned/wrong-signer/tamper rejection
-without production secrets.
+artifact to the release job. CI separately signs an independent DLL with a
+public, test-only certificate fixture to test unsigned/wrong-signer/tamper
+rejection without production secrets or hosted certificate-provider calls.
 
 Native sidecars also require explicit repository variables
 `MIB_PROCESSING_CORE_APP_MIN_VERSION` and

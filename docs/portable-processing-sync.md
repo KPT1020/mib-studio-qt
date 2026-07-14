@@ -141,7 +141,7 @@ LUT fields remain present.
       "version": "0.1.0",
       "contract_version": 1,
       "engine_abi_version": 1,
-      "runtime_fingerprint": "windows-x86_64-msvc194-md",
+      "runtime_fingerprint": "windows-x86_64-msvc1942-md-cxx17",
       "app_min_version": "0.8.0",
       "app_max_version": null,
       "entrypoint": "mib_processing_get_api",
@@ -160,8 +160,17 @@ LUT fields remain present.
 `wheel.wheels[]` and `native_plugins[]` are derived from the bytes attached to
 the GitHub Release. The publisher calculates URL, size, and SHA-256 itself;
 native sidecars cannot override those fields. Native `signing` is descriptive,
-not a trust root—the desktop independently verifies Authenticode and the
-approved signer public-key (DER SPKI) SHA-256 compiled into the application.
+not a trust root—the desktop applies the named platform trust adapter. Windows
+uses Authenticode plus the approved signer public-key (DER SPKI) SHA-256
+compiled into the application. Linux/macOS schemes must be explicit and are
+rejected until their production verifier is implemented.
+
+The registry contract is not DLL-specific. Native filenames must match their
+declared OS: `.dll` for `windows`, `.so` for `linux`, and `.dylib` for `macos`.
+Every native entry carries `signing.scheme` and `signing.required=true`; an
+unknown, absent, or optional signature policy is never an unsigned fallback.
+The current release workflow publishes Windows x86_64 only. Linux signed
+publication and distro validation are tracked in A13/#245.
 
 A Python consumer selects the first wheel compatible with its ordered PEP 425
 tags, downloads and SHA-256-verifies it, then fetches `profile_catalog_url` /
@@ -181,10 +190,13 @@ Downloaded plugins live in a persistent content-addressed cache at
 `<cache>/<version>/<sha256>/<filename>`. Preparation uses a directory lock,
 same-directory staging, atomic rename, and a `.ready.json` marker; abandoned
 locks older than ten minutes are recoverable. At the final load boundary the
-desktop re-hashes the cached DLL, validates Authenticode plus the compiled
-approved signer-SPKI SHA-256, uses restricted Windows DLL search, checks
-version/contract/ABI/runtime identity, and runs the plugin self-test. Native
-modules remain resident for the rest of the process.
+desktop re-hashes the cached shared library, applies the artifact's required
+platform trust policy, checks version/contract/ABI/runtime identity, and runs
+the plugin self-test. Windows uses Authenticode, a compiled approved signer-
+SPKI SHA-256, and restricted DLL search. The Linux loader already uses
+`dlopen(..., RTLD_NOW | RTLD_LOCAL)` and real `.so` fixtures in CI, but
+production Linux activation fails closed until A13 provides its detached-
+signature verifier. Native modules remain resident for the rest of the process.
 
 Activation is allowed only between operations. The selected v1 core owns mask
 generation and empty-frame classification across live, offline, playback,

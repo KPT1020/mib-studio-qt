@@ -19,6 +19,11 @@ from urllib.request import Request, urlopen
 DEFAULT_MANIFEST_URL = "https://updates.yofo.bio/stable/processing-core/latest.json"
 DEFAULT_HEADERS = {"User-Agent": "MIB-Studio-Processing-Core-Verifier/1.0"}
 SHA256_RE = re.compile(r"[0-9a-fA-F]{64}")
+NATIVE_LIBRARY_SUFFIXES = {
+    "windows": (".dll",),
+    "linux": (".so",),
+    "macos": (".dylib",),
+}
 
 
 def fetch(url: str, *, method: str = "GET", headers: dict[str, str] | None = None, timeout: int = 30):
@@ -171,6 +176,18 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if not isinstance(entry["size_bytes"], int) or entry["size_bytes"] <= 0:
             print(f"ERROR: native plugin size_bytes is invalid: {entry['filename']}", file=sys.stderr)
+            return 1
+        native_os = str(entry["os"]).strip().lower()
+        suffixes = NATIVE_LIBRARY_SUFFIXES.get(native_os)
+        if suffixes is None or not str(entry["filename"]).lower().endswith(suffixes):
+            print(
+                f"ERROR: native plugin filename does not match OS {native_os}: {entry['filename']}",
+                file=sys.stderr,
+            )
+            return 1
+        signing = entry.get("signing")
+        if not isinstance(signing, dict) or signing.get("required") is not True or not signing.get("scheme"):
+            print(f"ERROR: native plugin signing policy is invalid: {entry['filename']}", file=sys.stderr)
             return 1
         try:
             require_absolute_url(str(entry["url"]), f"native_plugins[{entry['filename']}].url")

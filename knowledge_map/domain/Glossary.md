@@ -49,9 +49,10 @@
   `latest.json` and `index.json.active_version`. Publishing or rolling back a
   channel changes these mutable pointers; it never rewrites immutable version
   history, and clients with an explicit version pin ignore the pointer.
-- **Native processing core** — a versioned, Authenticode-approved Windows DLL
+- **Native processing core** — a versioned, platform-signed shared library
   selected by [[../frontend/ProcessingCoreDialog]] and loaded through the
-  POD-only C engine ABI. ABI v1 owns mask generation and empty-frame
+  POD-only C engine ABI. Windows uses Authenticode; Linux detached signatures
+  are tracked in A13/#245. ABI v1 owns mask generation and empty-frame
   classification; host metrics/tracking/orchestration remain outside it.
 - **Processing conformance reference** —
   `scripts/gold_standard_dataset.json`, a deterministic full-parity output from

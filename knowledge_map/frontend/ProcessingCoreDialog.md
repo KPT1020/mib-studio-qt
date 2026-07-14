@@ -46,16 +46,18 @@ records the newly leased identity without silently switching.
 3. Fetch the selected version's immutable schema-v2 manifest over HTTPS,
    hash its raw bytes, and cross-check its identity and native artifact fields
    against the mutable index.
-4. Download the platform DLL as bounded 64 KiB chunks over HTTPS with a
-   120-second absolute deadline; verify its declared byte size and SHA-256.
+4. Download the OS/architecture-matched shared library as bounded 64 KiB
+   chunks over HTTPS with a 120-second absolute deadline; verify its declared
+   byte size and SHA-256.
 5. Materialize it atomically at
    `<cache>/<version>/<sha256>/<filename>`, guarded by a directory lock with
    stale-lock recovery. `.ready.json` is written last.
-6. Immediately before module load, verify SHA-256 again, validate the embedded
-   Authenticode chain, require the signer public key's DER SPKI SHA-256 compiled
-   into the application, use restricted Windows DLL
-   dependency search, negotiate ABI/contract/runtime identity, and run the
-   plugin self-test.
+6. Immediately before module load, verify SHA-256 again and apply the persisted
+   mandatory platform trust scheme. Windows validates Authenticode, requires
+   the signer public key's DER SPKI SHA-256 compiled into the application, and
+   uses restricted DLL dependency search. Other platforms reject activation
+   until their named verifier exists. Then negotiate ABI/contract/runtime
+   identity and run the plugin self-test.
 7. At a quiescent boundary, synchronize the complete verified identity/path in
    `QSettings` through `ProcessingService`'s locked pre-commit callback, then
    swap the live kernel. A settings error restores the prior logical selection
@@ -71,8 +73,10 @@ untouched, and records completion only after successful synchronization.
 Startup fails closed if that migration cannot be persisted, rather than losing
 an explicit core selection or unrelated application preferences silently.
 
-Production native loading is Windows-only. Non-Windows trust verification
-fails closed. Debug builds alone may set
+The C ABI, registry, cache, and loader are cross-platform; Linux CI already
+loads real `.so` fixtures through `dlopen`. Production signed activation is
+currently Windows-only. Linux/macOS trust schemes fail closed and A13/#245
+owns the detached-signature release lane. Debug builds alone may set
 `MIB_STUDIO_ALLOW_UNSIGNED_PROCESSING_CORE=1` for local loader fixtures.
 
 ## Configuration

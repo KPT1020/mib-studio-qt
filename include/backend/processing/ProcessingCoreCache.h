@@ -23,7 +23,7 @@ struct ProcessingCoreCacheResult {
 };
 
 // Materializes an already-downloaded artifact into the content-addressed
-// persistent cache. Download and Authenticode validation remain separate;
+// persistent cache. Download and platform-signature validation remain separate;
 // loadProcessingCorePlugin performs digest and trust verification again at
 // the final load boundary.
 ProcessingCoreCacheResult prepareProcessingCoreArtifact(

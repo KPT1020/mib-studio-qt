@@ -20,13 +20,17 @@ GitHub tracking:
 
 - [ ] A signed version is published once as immutable metadata and appears in
       the channel catalog without destroying prior versions.
+- [ ] Registry and loader contracts remain OS-neutral: platform-matched shared
+      libraries carry a mandatory named trust scheme, while an unimplemented
+      platform verifier fails closed rather than falling back to unsigned code.
 - [ ] `latest.json` remains consumable by legacy clients; exact pins resolve
       through `versions/<version>.json` and fail closed.
 - [ ] Live capture, experiments, replay overlays, offline regeneration,
       tracking/target selection, and empty-frame detection use one selected
       kernel implementation.
-- [ ] Native activation verifies SHA-256, Authenticode signer, ABI, contract,
-      runtime, app compatibility, and self-test before transactional swap.
+- [ ] Native activation verifies SHA-256, the required platform signer, ABI,
+      contract, runtime, app compatibility, and self-test before transactional
+      swap.
 - [ ] A core remains pinned for an operation; activation is rejected while any
       processing lease, experiment, recording, preview executor, or batch job
       is active.
@@ -52,7 +56,7 @@ GitHub tracking:
       the POD/opaque-handle C ABI, build the Windows plugin and descriptor, and
       validate independently built compatible/incompatible fixtures. Local/CI
       wiring now includes separately configured C/C++ fixture modules,
-      import/export audit, ephemeral signing tests, and isolated Production
+      import/export audit, public-fixture signing tests, and isolated Production
       signing; the real signed run remains A12 evidence.
 - [x] [A9 #237](https://github.com/KPT1020/mib-studio-qt/issues/237) — extend
       the existing conformance-gated tag workflow through Python 3.13, build
@@ -72,6 +76,11 @@ GitHub tracking:
 - [ ] [A12 #240](https://github.com/KPT1020/mib-studio-qt/issues/240) — publish
       a real signed release to R2, activate/downgrade it on Windows hardware,
       and capture performance/provenance evidence.
+- [ ] [A13 #245](https://github.com/KPT1020/mib-studio-qt/issues/245) — add the
+      Linux `.so` release/audit lane and an offline-verifiable detached-signature
+      adapter behind the same injected trust boundary. The registry, catalog,
+      cache, `dlopen` loader, and fixtures are portable now; unsigned Linux
+      production activation remains deliberately unavailable.
 
 A6 and A7 proceed in parallel. A8 depends on A7. A9 depends on A6+A8; its
 workflow can land before A8 while the new target is developed on the same
@@ -89,10 +98,11 @@ the resolver and remain independent of desktop activation internals.
   to select Active during a partially completed publication.
 - Schema v2 keeps schema-v1 wheel/contract/profile/LUT fields and adds canonical
   `version`, wheel filename/size, and optional `native_plugins[]`.
-- A native release is
-  `mib_processing_core-<version>-windows_x86_64.{dll,json}`. The sidecar names
-  the ABI/contract/runtime/app/signing claims; the publisher derives URL,
-  digest, and size from actual release bytes.
+- A current native release is
+  `mib_processing_core-<version>-windows_x86_64.{dll,json}`. The registry also
+  reserves OS-matched `.so`/`.dylib` artifacts without changing schema. The
+  sidecar names ABI/contract/runtime/app and mandatory signing-scheme claims;
+  the publisher derives URL, digest, and size from actual release bytes.
 - The plugin exports `mib_processing_get_api`; no Qt/OpenCV/STL/exceptions or
   allocator ownership crosses its versioned C boundary.
 - Environment exact pins outrank user selection. Channel publication is only
@@ -156,6 +166,10 @@ the resolver and remain independent of desktop activation internals.
   make numeric/full binary identity explicit and reviewable. Beta installer
   bytes retain numeric Inno/GitHub names but use full-version immutable R2 keys;
   equal numeric SHA betas order by publication time.
+- 2026-07-14: The C ABI, immutable registry, content-addressed cache, and module
+  loader are platform contracts. Authenticode is only the Windows trust
+  adapter. Linux `.so` metadata is accepted now, but production activation
+  stays fail-closed until A13 implements and audits a detached-signature scheme.
 
 ## Residual infrastructure gates
 

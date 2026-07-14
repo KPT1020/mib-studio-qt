@@ -17,8 +17,8 @@ struct ProcessingCoreLoadRequirements {
     std::string artifactSha256;
     std::string releaseTag;
     std::string manifestSha256;
-    // The desktop supplies an Authenticode verifier in production. Tests and
-    // non-Windows backend builds can inject a deterministic verifier.
+    // The desktop supplies the platform's required artifact-signature verifier.
+    // Tests can inject a deterministic verifier without weakening production.
     std::function<bool(const std::filesystem::path&, std::string&)> trustVerifier;
 };
 

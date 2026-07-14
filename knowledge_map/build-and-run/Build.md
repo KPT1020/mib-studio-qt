@@ -21,7 +21,7 @@ From `CMakePresets.json`:
 | Target | Kind | Purpose |
 |---|---|---|
 | `mib_processing` | STATIC library | Qt-free processing core: `ProcessingService`, `EModulusLut`, `BatchMaskSources`, `Hdf5Service`, `FrameStore`, `Tools`, `CrashStateMirror`. Links only OpenCV + HDF5 + spdlog + STL. |
-| `mib_processing_core` | MODULE library | Native hot-swap plugin exposing the C engine ABI. Release Windows output is `build/Release/mib_processing_core-<version>-windows_x86_64.dll` plus the same-stem descriptor JSON. |
+| `mib_processing_core` | MODULE library | Cross-platform native hot-swap plugin exposing the C engine ABI. Linux builds exercise the `.so` loader; the current signed release output is `build/Release/mib_processing_core-<version>-windows_x86_64.dll` plus the same-stem descriptor JSON. |
 | `mib_backend` | STATIC library | Core: services, camera abstraction; links `mib_processing` publicly |
 | `mib_frontend_common` | STATIC library | All UI sources (tabs, dialogs, `.ui` files) compiled once and linked by both frontend executables. AUTOUIC runs only here — it is `OFF` on the executables because CMake would emit duplicate `ui_*.h` generation rules per target; the `.qrc` is compiled per-executable so the Qt resources survive static linking |
 | `mib_studio_qt` | executable (`WIN32` on Windows) | Production app (mock camera reachable via ConnectTab "Configure Mock…" or `MIB_CAMERA_MODE=mock`) |

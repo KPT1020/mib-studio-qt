@@ -68,7 +68,7 @@
   pinned AlmaLinux builder for HDF5/spdlog packages; Windows uses independently configured
   good/truncated/incompatible/malformed/throwing modules, export/import audits,
   a `dumpbin` parser that permits its trailing alias text while counting exact
-  export rows, an ephemeral Authenticode matrix, flat release assets, and a separate
+  export rows, a public-fixture Authenticode matrix, flat release assets, and a separate
   Production signing job. Activation rejects leases before reset, clears all
   stale state after a committed swap, and passes concurrent A→B→A stress.
   Profiles carry optional processing-contract compatibility, downgrades require
@@ -80,12 +80,19 @@
 - Bounded the Windows Authenticode regression helper with a 60-second child
   watchdog and a version-directory SDK lookup, avoiding an unbounded recursive
   SDK scan or process wait while retaining the real WinVerifyTrust/SPKI checks.
-- Replaced the hosted-runner PowerShell certificate-provider call after its
-  observed 75-minute hang with an in-memory .NET certificate request and
-  ephemeral PFX; both `signtool` and the verifier now run under the watchdog.
+- Replaced hosted-runner certificate generation after repeated provider hangs
+  with an explicitly public, test-only PFX/CER fixture. Bounded `certutil`
+  installs/removes it from the current-user root store; `signtool` and the
+  verifier run under the same watchdog. Production signing remains secret-
+  backed and isolated from this fixture.
 - Capped the complete Windows native job at 30 minutes and moved artifact
   uploads to the Node 24-based action, so a provider regression cannot consume
   a six-hour runner and the release lane has no Node 20 deprecation warnings.
+- Kept the engine portable instead of baking Windows into the contract:
+  registry publication accepts OS-matched `.dll`/`.so`/`.dylib` artifacts,
+  catalog and persisted identity include a mandatory signing scheme, Linux
+  runtime fingerprints name OS/architecture, and non-Windows production trust
+  remains explicitly fail-closed pending A13/#245.
 - Added a Production promotion/rollback action, stable/beta tag-derived
   channels, and explicit app compatibility bounds. Published and publicly
   verified stable LUT revision `2026.07.14-1`, removing the registry's missing

@@ -35,12 +35,30 @@ bool httpsUrl(const QString& value) {
            !url.host().isEmpty();
 }
 
+bool nativeFilenameMatchesOs(const QString& filename, const QString& os) {
+    if (os == QStringLiteral("windows")) {
+        return filename.endsWith(QStringLiteral(".dll"), Qt::CaseInsensitive);
+    }
+    if (os == QStringLiteral("linux")) {
+        return filename.endsWith(QStringLiteral(".so"), Qt::CaseInsensitive);
+    }
+    if (os == QStringLiteral("macos")) {
+        return filename.endsWith(QStringLiteral(".dylib"), Qt::CaseInsensitive);
+    }
+    return false;
+}
+
 bool parseNativePlugin(const QJsonObject& object,
                        int defaultContractVersion,
                        NativePluginEntry& plugin) {
     plugin.filename = object.value(QStringLiteral("filename")).toString().trimmed();
     plugin.os = object.value(QStringLiteral("os")).toString().trimmed().toLower();
     plugin.arch = object.value(QStringLiteral("arch")).toString().trimmed().toLower();
+    if (plugin.arch == QStringLiteral("amd64") || plugin.arch == QStringLiteral("x64")) {
+        plugin.arch = QStringLiteral("x86_64");
+    } else if (plugin.arch == QStringLiteral("arm64")) {
+        plugin.arch = QStringLiteral("aarch64");
+    }
     plugin.url = object.value(QStringLiteral("url")).toString().trimmed();
     plugin.sha256 = object.value(QStringLiteral("sha256")).toString().trimmed().toLower();
     plugin.runtimeFingerprint =
@@ -48,6 +66,12 @@ bool parseNativePlugin(const QJsonObject& object,
     plugin.entrypoint = object.value(QStringLiteral("entrypoint")).toString().trimmed();
     plugin.appMinVersion = object.value(QStringLiteral("app_min_version")).toString().trimmed();
     plugin.appMaxVersion = object.value(QStringLiteral("app_max_version")).toString().trimmed();
+    const auto signing = object.value(QStringLiteral("signing")).toObject();
+    plugin.signingScheme = signing.value(QStringLiteral("scheme")).toString().trimmed().toLower();
+    if (plugin.signingScheme.isEmpty()) {
+        plugin.signingScheme = signing.value(QStringLiteral("format")).toString().trimmed().toLower();
+    }
+    plugin.signingRequired = signing.value(QStringLiteral("required")).toBool(false);
     const auto sizeValue = object.value(QStringLiteral("size_bytes"));
     const double rawSize = sizeValue.toDouble(-1);
     const bool validSize = sizeValue.isDouble() && std::isfinite(rawSize) && rawSize > 0 &&
@@ -62,11 +86,13 @@ bool parseNativePlugin(const QJsonObject& object,
         (plugin.appMaxVersion.isEmpty() || (!maximum.isNull() && maximum >= minimum));
     return !plugin.filename.isEmpty() && !plugin.filename.contains('/') &&
            !plugin.filename.contains('\\') && QFileInfo(plugin.filename).fileName() == plugin.filename &&
-           !plugin.os.isEmpty() && !plugin.arch.isEmpty() && httpsUrl(plugin.url) &&
+           nativeFilenameMatchesOs(plugin.filename, plugin.os) && !plugin.arch.isEmpty() &&
+           httpsUrl(plugin.url) &&
            sha256(plugin.sha256) && plugin.sizeBytes >= 0 && plugin.engineAbiVersion > 0 &&
            plugin.contractVersion > 0 &&
            plugin.entrypoint == QStringLiteral("mib_processing_get_api") &&
-           !plugin.runtimeFingerprint.isEmpty() && validRange;
+           !plugin.runtimeFingerprint.isEmpty() && !plugin.signingScheme.isEmpty() &&
+           plugin.signingRequired && validRange;
 }
 
 bool parseNativePlugins(const QJsonValue& value,
@@ -104,7 +130,9 @@ bool samePlugin(const NativePluginEntry& left, const NativePluginEntry& right) {
            left.url == right.url && left.sha256 == right.sha256 &&
            left.runtimeFingerprint == right.runtimeFingerprint &&
            left.entrypoint == right.entrypoint && left.appMinVersion == right.appMinVersion &&
-           left.appMaxVersion == right.appMaxVersion && left.sizeBytes == right.sizeBytes &&
+           left.appMaxVersion == right.appMaxVersion &&
+           left.signingScheme == right.signingScheme &&
+           left.signingRequired == right.signingRequired && left.sizeBytes == right.sizeBytes &&
            left.engineAbiVersion == right.engineAbiVersion &&
            left.contractVersion == right.contractVersion;
 }

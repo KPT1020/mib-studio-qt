@@ -51,12 +51,24 @@ bool validateGray(const cv::Mat& gray, std::string* error) {
 std::string runtimeFingerprint() {
 #if defined(_MSC_VER)
     return "windows-x86_64-msvc" + std::to_string(_MSC_VER) + "-md-cxx17";
-#elif defined(__clang__)
-    return "portable-clang" + std::to_string(__clang_major__) + "-cxx17";
-#elif defined(__GNUC__)
-    return "portable-gcc" + std::to_string(__GNUC__) + "-cxx17";
+#elif defined(_WIN32) && defined(__x86_64__) && defined(__clang__)
+    return "windows-x86_64-clang" + std::to_string(__clang_major__) + "-cxx17";
+#elif defined(_WIN32) && defined(__x86_64__) && defined(__GNUC__)
+    return "windows-x86_64-gcc" + std::to_string(__GNUC__) + "-cxx17";
+#elif defined(__linux__) && defined(__x86_64__) && defined(__clang__)
+    return "linux-x86_64-clang" + std::to_string(__clang_major__) + "-cxx17";
+#elif defined(__linux__) && defined(__x86_64__) && defined(__GNUC__)
+    return "linux-x86_64-gcc" + std::to_string(__GNUC__) + "-cxx17";
+#elif defined(__linux__) && defined(__aarch64__) && defined(__clang__)
+    return "linux-aarch64-clang" + std::to_string(__clang_major__) + "-cxx17";
+#elif defined(__linux__) && defined(__aarch64__) && defined(__GNUC__)
+    return "linux-aarch64-gcc" + std::to_string(__GNUC__) + "-cxx17";
+#elif defined(__APPLE__) && defined(__aarch64__) && defined(__clang__)
+    return "macos-aarch64-clang" + std::to_string(__clang_major__) + "-cxx17";
+#elif defined(__APPLE__) && defined(__x86_64__) && defined(__clang__)
+    return "macos-x86_64-clang" + std::to_string(__clang_major__) + "-cxx17";
 #else
-    return "portable-unknown-cxx17";
+    return "unknown-platform-cxx17";
 #endif
 }
 
