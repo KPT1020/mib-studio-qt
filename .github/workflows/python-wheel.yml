@@ -381,8 +381,11 @@ jobs:
           if (-not $dumpbin) { throw 'MSVC x64 dumpbin.exe was not found' }
 
           $exports = & $dumpbin.FullName /nologo /exports '${{ steps.native-assets.outputs.dll }}'
+          Write-Host ($exports -join "`n")
           $exportNames = @($exports | ForEach-Object {
-            if ($_ -match '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)\s*$') {
+            # dumpbin may append an alias/forwarder after the name. Parse the
+            # stable ordinal/hint/RVA/name prefix and still count every row.
+            if ($_ -match '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)') {
               $matches[1]
             }
           })
@@ -391,6 +394,7 @@ jobs:
           }
 
           $dependents = & $dumpbin.FullName /nologo /dependents '${{ steps.native-assets.outputs.dll }}'
+          Write-Host ($dependents -join "`n")
           $dependencyNames = @($dependents | ForEach-Object {
             if ($_ -match '^\s+([A-Za-z0-9_.+\-]+\.dll)\s*$') { $matches[1] }
           })

@@ -67,7 +67,8 @@
   `libgl1`/`libglib2.0-0` prerequisites, with EPEL explicitly enabled in the
   pinned AlmaLinux builder for HDF5/spdlog packages; Windows uses independently configured
   good/truncated/incompatible/malformed/throwing modules, export/import audits,
-  an ephemeral Authenticode matrix, flat release assets, and a separate
+  a `dumpbin` parser that permits its trailing alias text while counting exact
+  export rows, an ephemeral Authenticode matrix, flat release assets, and a separate
   Production signing job. Activation rejects leases before reset, clears all
   stale state after a committed swap, and passes concurrent A→B→A stress.
   Profiles carry optional processing-contract compatibility, downgrades require

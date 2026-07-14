@@ -93,6 +93,10 @@ updates the R2 registry. Publication order is immutable
 fails when production Authenticode or R2 secrets are absent; local/PR builds
 may exercise the unsigned fixture path but cannot publish it.
 
+The Windows audit logs raw `dumpbin` exports/dependents, accepts its optional
+alias suffix when parsing export rows, and still requires exactly one export
+named `mib_processing_get_api` with no Qt/HDF5/OpenCV/Python/app DLL imports.
+
 Use `python scripts/bump_mib_processing_version.py <version>` to update both
 the authoritative pyproject and package wrapper literal. After committing,
 rerun with `--create-tag`; the script verifies that `HEAD` contains the version
