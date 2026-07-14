@@ -116,7 +116,8 @@ transfer may cross this boundary. `tests/processing/processing_core_abi_c_test.c
 is deliberately compiled as required C11 on every compiler, while loader parity
 and cache/concurrency tests exercise the dynamic artifact.
 
-The backend CI installs NumPy for the external-HDF5 conformance-input test.
+The backend and sanitizer CI lanes install NumPy for the external-HDF5
+conformance-input test.
 The public Hugging Face Dataset Viewer integration retries remote requests and
 uses CTest exit 77 only for exhausted HTTP 429/5xx, connection, or timeout
 failures; malformed dataset payloads and scientific regressions still fail.

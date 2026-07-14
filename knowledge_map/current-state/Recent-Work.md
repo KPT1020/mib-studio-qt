@@ -7,10 +7,10 @@
 
 - **Portable CI guards for processing-core release tests** (2026-07-14) —
   Required C11 for the pure-C ABI layout test so MSVC evaluates its compile-time
-  assertions, installed NumPy in backend CI for the HDF5 conformance-input
-  regression, and made the public Hugging Face Dataset Viewer integration skip
-  only after exhausted transient HTTP/network retries. Payload-shape and
-  scientific failures remain fatal.
+  assertions, installed NumPy in backend and sanitizer CI for the HDF5
+  conformance-input regression, and made the public Hugging Face Dataset Viewer
+  integration skip only after exhausted transient HTTP/network retries.
+  Payload-shape and scientific failures remain fatal.
 
 - **Desktop release identity/artifact gates** (2026-07-14,
   [A12 #240](https://github.com/KPT1020/mib-studio-qt/issues/240)) — Hardened
