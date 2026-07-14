@@ -166,6 +166,15 @@ job imports the committed public root into the ephemeral runner store via
 report `Valid`, while the DER-SPKI pin stays the trust decision. Evidence:
 issues #240 and #245.
 
+The first real Windows-runner beta rehearsal (run 29330458231) failed in
+`Run tests` without mutating any refs, catching two Windows-only defects the
+Linux sandbox could not: the desktop release entrypoints installed no numpy
+for `scripts.run_processing_conformance_input`, and
+`frontend.processing_core_dialog` was the only backend-booting test not
+stubbing `MIB_STUDIO_EMODULUS_LUT_MANIFEST_URL`, so `AppBackend::initialize`
+performed a real synchronous LUT-manifest fetch whose Windows proxy
+resolution exceeded the 30 s CTest timeout.
+
 ## Pass-off pointer (2026-07-14)
 
 The exact branch/worktrees, implementation commits, active Windows CI run and

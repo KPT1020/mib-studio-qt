@@ -103,7 +103,7 @@ jobs:
 
       - name: Install Conan
         run: |
-          pip install conan boto3
+          pip install conan boto3 numpy
           conan profile detect --force
           # Create CI profile pinned to msvc 194 to match prebuilt binaries on conancenter
           @"

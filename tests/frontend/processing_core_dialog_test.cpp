@@ -13,6 +13,11 @@ int main(int argc, char* argv[]) {
     qputenv("MIB_DISABLED_SERVICES", QByteArrayLiteral("all"));
     qputenv("MIB_STUDIO_PROCESSING_CORE_BASE_URL",
             QByteArrayLiteral("http://invalid-registry.example"));
+    // Keep the LUT catalog offline: AppBackend::initialize resolves the
+    // manifest through a synchronous QEventLoop fetch, and the Windows
+    // release runner's proxy resolution can stall past the CTest timeout.
+    qputenv("MIB_STUDIO_EMODULUS_LUT_MANIFEST_URL",
+            QByteArrayLiteral("file:///nonexistent/mib-lut-manifest.json"));
 
     QApplication app(argc, argv);
     mib::test::TempDir dataRoot("processing_core_dialog");
