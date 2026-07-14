@@ -68,7 +68,7 @@
   pinned AlmaLinux builder for HDF5/spdlog packages; Windows uses independently configured
   good/truncated/incompatible/malformed/throwing modules, export/import audits,
   a `dumpbin` parser that permits its trailing alias text while counting exact
-  export rows, a public-fixture Authenticode matrix, flat release assets, and a separate
+  export rows, a trusted signed-SDK Authenticode matrix, flat release assets, and a separate
   Production signing job. Activation rejects leases before reset, clears all
   stale state after a committed swap, and passes concurrent A→B→A stress.
   Profiles carry optional processing-contract compatibility, downgrades require
@@ -80,12 +80,12 @@
 - Bounded the Windows Authenticode regression helper with a 60-second child
   watchdog and a version-directory SDK lookup, avoiding an unbounded recursive
   SDK scan or process wait while retaining the real WinVerifyTrust/SPKI checks.
-- Replaced hosted-runner certificate generation after repeated provider hangs
-  with an explicitly public, test-only CA-root/code-signing-leaf fixture.
-  Bounded `certutil` installs/removes only the CA from the current-user root
-  store; `signtool` uses the leaf PFX and the verifier pins the leaf SPKI under
-  the same watchdog. Production signing remains secret-backed and isolated
-  from this fixture.
+- After bounded diagnostics proved both certificate generation and current-
+  user Root-store mutation can stall on the hosted image, removed both from PR
+  CI. The verifier matrix now copies the already trusted, Microsoft-signed SDK
+  `signtool.exe`, derives its embedded signer SPKI, and checks unsigned/valid/
+  wrong-signer/tamper outcomes under one watchdog. Production signing remains
+  secret-backed, signs the actual core, and stays isolated in the release job.
 - Capped the complete Windows native job at 30 minutes and moved artifact
   uploads to the Node 24-based action, so a provider regression cannot consume
   a six-hour runner and the release lane has no Node 20 deprecation warnings.

@@ -56,7 +56,7 @@ GitHub tracking:
       the POD/opaque-handle C ABI, build the Windows plugin and descriptor, and
       validate independently built compatible/incompatible fixtures. Local/CI
       wiring now includes separately configured C/C++ fixture modules,
-      import/export audit, public-fixture signing tests, and isolated Production
+      import/export audit, a trusted signed-SDK verifier matrix, and isolated Production
       signing; the real signed run remains A12 evidence.
 - [x] [A9 #237](https://github.com/KPT1020/mib-studio-qt/issues/237) — extend
       the existing conformance-gated tag workflow through Python 3.13, build
