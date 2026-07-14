@@ -106,6 +106,9 @@ add_executable(processing_core_abi_c_test
 )
 target_include_directories(processing_core_abi_c_test PRIVATE ${PROJECT_SOURCE_DIR}/include)
 set_target_properties(processing_core_abi_c_test PROPERTIES
+    C_STANDARD 11
+    C_STANDARD_REQUIRED YES
+    C_EXTENSIONS NO
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
 )
 add_test(NAME processing.core_abi_c COMMAND $<TARGET_FILE:processing_core_abi_c_test>)

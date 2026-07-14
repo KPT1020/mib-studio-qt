@@ -28,7 +28,9 @@
   through realtime, batch, recording, and buffer-export lifecycles. Added exact
   core identity to both experiment and raw-recording HDF5 provenance.
 - Added C ABI, dynamic parity, loader trust, cache concurrency/recovery,
-  catalog hardening, activation lifecycle, and HDF5 round-trip tests.
+  catalog hardening, activation lifecycle, and HDF5 round-trip tests. The
+  pure-C ABI compile guard requires C11 explicitly so MSVC enables the
+  `_Static_assert` checks instead of using its legacy default C mode.
 - Kept the local active-core identity independent of registry availability:
   the dialog renders it before the first fetch, while preserving any registry
   failure in the separate status label. An offscreen Qt regression covers the
