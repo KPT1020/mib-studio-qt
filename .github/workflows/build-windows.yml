@@ -348,10 +348,17 @@ jobs:
       - name: Build screenshot tour
         run: cmake --build build --config Release --target screenshot_tour
 
+      # The native platform is deliberate: the Conan Qt offscreen plugin
+      # deadlocks inside QApplication on Windows runners (rehearsal run
+      # 29334787107 hung here for the 6-hour job limit). Screenshots are
+      # optional for a release, so a bounded failure degrades to the
+      # existing warning path instead of consuming the job.
       - name: Generate user-manual screenshots
         id: screenshots
+        timeout-minutes: 20
+        continue-on-error: true
         env:
-          QT_QPA_PLATFORM: offscreen
+          QT_QPA_PLATFORM: windows
           MIB_MOCK_CAMERA_DIR: ${{ github.workspace }}\data\mock_frames
         run: |
           & build\Release\screenshot_tour.exe --out docs\manual\images
