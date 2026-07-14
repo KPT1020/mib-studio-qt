@@ -209,6 +209,7 @@ ProcessingCoreDialog::ProcessingCoreDialog(backend::AppBackend& backend, QWidget
     connect(prepareButton_, &QPushButton::clicked, this,
             &ProcessingCoreDialog::prepareAndActivateSelected);
     connect(closeButton, &QPushButton::clicked, this, &QDialog::accept);
+    updateActiveCoreLabel();
     reload();
 }
 
@@ -389,8 +390,7 @@ void ProcessingCoreDialog::loadCanonicalActive(const QString& channel) {
     });
 }
 
-void ProcessingCoreDialog::populate() {
-    versions_->clear();
+void ProcessingCoreDialog::updateActiveCoreLabel() {
     const auto current = backend_.processing().activeProcessingCoreIdentity();
     activeLabel_->setText(
         backend_.processing().isProcessingCorePinSatisfied()
@@ -400,6 +400,12 @@ void ProcessingCoreDialog::populate() {
                   .arg(current.engineAbiVersion)
                   .arg(QString::fromStdString(current.source))
             : tr("Processing core unavailable: the selected version must be repaired."));
+}
+
+void ProcessingCoreDialog::populate() {
+    versions_->clear();
+    updateActiveCoreLabel();
+    const auto current = backend_.processing().activeProcessingCoreIdentity();
     const QString hardPin =
         qEnvironmentVariable("MIB_STUDIO_PROCESSING_CORE_VERSION").trimmed();
     for (const auto& entry : catalog_.versions) {

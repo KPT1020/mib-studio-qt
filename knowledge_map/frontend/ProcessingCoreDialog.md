@@ -18,7 +18,10 @@ select **Prepare & Activate**. The list marks the channel-active version from
 the independently fetched `latest.json` pointer, the
 currently selected version, and entries incompatible with the current OS,
 architecture, or app-version range. The status bar always shows the active
-core version and contract.
+core version and contract. That identity is rendered from the already-loaded
+local core before any registry request begins, so an offline, malformed, or
+untrusted registry cannot make the active selection appear blank; registry
+errors remain visible separately in the status label.
 
 Activation is a between-operation change. The dialog prepares and validates a
 candidate, but `ProcessingService` refuses the final swap while realtime,

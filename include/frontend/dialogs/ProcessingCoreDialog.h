@@ -31,6 +31,7 @@ private slots:
 private:
     int selectedVersionIndex() const;
     void loadCanonicalActive(const QString& channel);
+    void updateActiveCoreLabel();
     void populate();
     void setBusy(bool busy, const QString& message = {});
     void downloadAndActivate(

@@ -163,6 +163,27 @@ target_compile_definitions(mib_frontend_common PUBLIC
 
 mib_link_opencv(mib_frontend_common PUBLIC)
 
+if(BUILD_TESTING)
+    add_executable(processing_core_dialog_test
+        ${PROJECT_SOURCE_DIR}/tests/frontend/processing_core_dialog_test.cpp
+    )
+    target_include_directories(processing_core_dialog_test PRIVATE
+        ${PROJECT_SOURCE_DIR}/tests
+    )
+    target_link_libraries(processing_core_dialog_test PRIVATE mib_frontend_common)
+    set_target_properties(processing_core_dialog_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+        AUTOUIC OFF
+    )
+    add_test(NAME frontend.processing_core_dialog
+        COMMAND $<TARGET_FILE:processing_core_dialog_test>)
+    set_tests_properties(frontend.processing_core_dialog PROPERTIES
+        LABELS "frontend;processing"
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 30
+    )
+endif()
+
 set(MIB_STUDIO_QT_EXTRA_SOURCES)
 if(WIN32)
     list(APPEND MIB_STUDIO_QT_EXTRA_SOURCES ${PROJECT_SOURCE_DIR}/resources/app_icon.rc)

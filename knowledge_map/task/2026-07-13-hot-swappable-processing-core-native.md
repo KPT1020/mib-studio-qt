@@ -29,6 +29,10 @@
   core identity to both experiment and raw-recording HDF5 provenance.
 - Added C ABI, dynamic parity, loader trust, cache concurrency/recovery,
   catalog hardening, activation lifecycle, and HDF5 round-trip tests.
+- Kept the local active-core identity independent of registry availability:
+  the dialog renders it before the first fetch, while preserving any registry
+  failure in the separate status label. An offscreen Qt regression covers the
+  original blank-label failure without network access.
 - Closed the settings-write ordering defect found by desktop E2E: the desktop
   now has a stable organization/application identity, migrates every legacy
   `Unknown Organization` preference once without overwriting current values,

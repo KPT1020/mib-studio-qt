@@ -5,6 +5,14 @@
 
 ## Features shipped
 
+- **Offline processing-core identity visibility** (2026-07-14,
+  [A11 #243](https://github.com/KPT1020/mib-studio-qt/issues/243)) — Fixed the
+  selector E2E defect where its active-core label remained blank until both
+  registry documents loaded successfully. The dialog now renders the local
+  active identity before starting the first request and keeps registry/network
+  failures in the separate status label. A real offscreen Qt dialog regression
+  proves both messages coexist when registry loading is refused.
+
 - **User-guide website** (2026-07-13, issue #233) — `docs/manual/` is now
   published as a searchable site at
   <https://kpt1020.github.io/mib-studio-qt/>: new `mkdocs.yml` (Material,

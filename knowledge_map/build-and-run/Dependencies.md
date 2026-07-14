@@ -33,6 +33,9 @@
   `Widgets`, `Charts`, and `Concurrent` are still not required.
 - Qt shared DLLs + plugins are deployed next to the exe via
   `windeployqt.exe` in a post-build step.
+- Full frontend test builds use Qt Widgets in offscreen mode for the
+  `processing_core_dialog_test`; backend-only builds do not generate that
+  target.
 - OpenCV and HDF5 DLLs are also copied next to the exe (see
   `docs/howto/windows-deploy.md`).
 - Windows-only hardware SDK linkage is gated by `MIB_HAS_EGRABBER`
