@@ -624,6 +624,33 @@ jobs:
           name: mib_processing-native-windows-x86_64-unsigned
           path: native-dist
 
+      - name: Checkout signing trust anchors
+        uses: actions/checkout@v6
+        with:
+          path: repo
+          sparse-checkout: |
+            deploy/signing
+          sparse-checkout-cone-mode: false
+
+      # The KPT organizational root must be trusted for
+      # Get-AuthenticodeSignature to report Valid; the SPKI pin comparison
+      # below stays the actual trust decision. The store mutation is scoped
+      # to this ephemeral tag-gated Production runner and uses the .NET
+      # X509Store API because certutil hangs on hosted images (#239).
+      - name: Trust the committed organizational signing root
+        shell: pwsh
+        run: |
+          $root = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+            (Resolve-Path 'repo/deploy/signing/kpt-mib-studio-root-ca.cer').Path)
+          $basicConstraints = $root.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.19' }
+          if (-not $basicConstraints) {
+            throw 'Committed trust anchor is missing basic constraints'
+          }
+          $store = [System.Security.Cryptography.X509Certificates.X509Store]::new('Root', 'LocalMachine')
+          $store.Open('ReadWrite')
+          try { $store.Add($root) } finally { $store.Dispose() }
+          Write-Host "Trusted organizational root: $($root.Subject) ($($root.Thumbprint))"
+
       - name: Sign and verify native plugin
         shell: pwsh
         env:
@@ -708,9 +735,103 @@ jobs:
           path: native-dist/*
           if-no-files-found: error
 
+  sign-native-plugin-linux:
+    name: Sign native processing core (Linux, Production)
+    needs: build-native-plugin-linux
+    if: startsWith(github.ref, 'refs/tags/mib-processing-v')
+    runs-on: ubuntu-24.04
+    environment: Production
+    permissions:
+      contents: read
+
+    steps:
+      - name: Download verified unsigned native plugin
+        uses: actions/download-artifact@v6
+        with:
+          name: mib_processing-native-linux-x86_64-unsigned
+          path: native-dist
+
+      # The staged descriptor carries the PR-lane rehearsal envelope from an
+      # ephemeral key; this step replaces every transported signing field
+      # with the production envelope. The key must match the repository
+      # DER-SPKI pin before any signature is produced.
+      - name: Sign with the production Ed25519 key and inject the envelope
+        shell: bash
+        env:
+          ED25519_SIGNING_KEY_PEM: ${{ secrets.LINUX_ED25519_SIGNING_KEY_PEM }}
+          PROCESSING_CORE_ED25519_SPKI_SHA256: ${{ vars.MIB_PROCESSING_CORE_ED25519_SPKI_SHA256 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ED25519_SIGNING_KEY_PEM:-}" ]; then
+            echo "::error::Release tags require the Production secret LINUX_ED25519_SIGNING_KEY_PEM"
+            exit 1
+          fi
+          if ! printf '%s' "${PROCESSING_CORE_ED25519_SPKI_SHA256:-}" | grep -Eqx '[0-9A-Fa-f]{64}'; then
+            echo "::error::Release tags require repository variable MIB_PROCESSING_CORE_ED25519_SPKI_SHA256 as a non-empty 64-hex DER-SPKI SHA-256"
+            exit 1
+          fi
+          shopt -s nullglob
+          libraries=(native-dist/mib_processing_core-*-linux_x86_64.so)
+          if [ "${#libraries[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one native plugin .so, found ${#libraries[@]}"
+            exit 1
+          fi
+          shared_library="${libraries[0]}"
+          descriptor="${shared_library%.so}.json"
+          test -f "$descriptor"
+          workdir="$(mktemp -d)"
+          trap 'rm -rf "$workdir"' EXIT
+          umask 077
+          printf '%s\n' "$ED25519_SIGNING_KEY_PEM" > "$workdir/signer.pem"
+          openssl pkey -in "$workdir/signer.pem" -pubout -outform DER -out "$workdir/signer-spki.der"
+          actual_spki="$(openssl dgst -sha256 -r "$workdir/signer-spki.der" | cut -d' ' -f1)"
+          approved_spki="$(printf '%s' "$PROCESSING_CORE_ED25519_SPKI_SHA256" | tr 'A-F' 'a-f')"
+          if [ "$actual_spki" != "$approved_spki" ]; then
+            echo "::error::Signing key DER-SPKI SHA-256 $actual_spki does not match repository trust pin $approved_spki"
+            exit 1
+          fi
+          openssl pkeyutl -sign -inkey "$workdir/signer.pem" -rawin \
+            -in "$shared_library" -out "$workdir/artifact.sig"
+          openssl pkeyutl -verify -pubin -inkey "$workdir/signer-spki.der" -keyform DER \
+            -rawin -in "$shared_library" -sigfile "$workdir/artifact.sig"
+          python3 - "$descriptor" "$workdir" "$approved_spki" <<'EOF'
+          import base64, hashlib, json, sys
+          descriptor_path, workdir, approved_spki = sys.argv[1:]
+          with open(f"{workdir}/signer-spki.der", "rb") as handle:
+              spki = handle.read()
+          with open(f"{workdir}/artifact.sig", "rb") as handle:
+              signature = handle.read()
+          if len(spki) != 44 or len(signature) != 64:
+              raise SystemExit("non-canonical Ed25519 SPKI or signature length")
+          if hashlib.sha256(spki).hexdigest() != approved_spki:
+              raise SystemExit("SPKI hash diverged from the approved repository pin")
+          with open(descriptor_path, encoding="utf-8") as handle:
+              metadata = json.load(handle)
+          signing = metadata.get("signing", {})
+          if signing.get("scheme") != "ed25519" or signing.get("required") is not True:
+              raise SystemExit("descriptor does not declare the required ed25519 scheme")
+          signing.update({
+              "public_key_spki_base64": base64.b64encode(spki).decode("ascii"),
+              "public_key_spki_sha256": hashlib.sha256(spki).hexdigest(),
+              "signature_base64": base64.b64encode(signature).decode("ascii"),
+          })
+          metadata["signing"] = signing
+          with open(descriptor_path, "w", encoding="utf-8") as handle:
+              json.dump(metadata, handle, indent=2)
+              handle.write("\n")
+          print("injected production ed25519 envelope into the sidecar descriptor")
+          EOF
+
+      - name: Upload signed native plugin artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: mib_processing-native-linux-x86_64
+          path: native-dist/*
+          if-no-files-found: error
+
   release:
     name: Publish processing-core GitHub Release and registry
-    needs: [validate-source-version, build-and-test, sign-native-plugin]
+    needs: [validate-source-version, build-and-test, sign-native-plugin, sign-native-plugin-linux]
     if: startsWith(github.ref, 'refs/tags/mib-processing-v')
     runs-on: ubuntu-24.04
     permissions:
@@ -731,6 +852,12 @@ jobs:
         uses: actions/download-artifact@v6
         with:
           name: mib_processing-native-windows-x86_64
+          path: dist
+
+      - name: Download Linux native plugin artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: mib_processing-native-linux-x86_64
           path: dist
 
       - name: List processing-core release assets
@@ -758,6 +885,8 @@ jobs:
           expected_native = {
               f"mib_processing_core-{version}-windows_x86_64.dll",
               f"mib_processing_core-{version}-windows_x86_64.json",
+              f"mib_processing_core-{version}-linux_x86_64.so",
+              f"mib_processing_core-{version}-linux_x86_64.json",
           }
           wheel_pattern = re.compile(
               rf"mib_processing-{re.escape(version)}-cp(310|311|312|313)-cp\1-"
@@ -817,6 +946,8 @@ jobs:
           expected_native = {
               f"mib_processing_core-{version}-windows_x86_64.dll",
               f"mib_processing_core-{version}-windows_x86_64.json",
+              f"mib_processing_core-{version}-linux_x86_64.so",
+              f"mib_processing_core-{version}-linux_x86_64.json",
           }
           wheel_pattern = re.compile(
               rf"mib_processing-{re.escape(version)}-cp(310|311|312|313)-cp\1-"
@@ -850,7 +981,7 @@ jobs:
               --repo "${{ github.repository }}" \
               --verify-tag \
               --title "$tag" \
-              --notes "mib-processing wheels and signed Windows processing-core plugin for tag $tag. See bindings/python/README.md and docs/portable-processing-sync.md for compatibility notes." \
+              --notes "mib-processing wheels and signed Windows/Linux processing-core plugins for tag $tag. See bindings/python/README.md and docs/portable-processing-sync.md for compatibility notes." \
               --generate-notes \
               "${release_flags[@]}" \
               dist/*

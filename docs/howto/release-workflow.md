@@ -124,6 +124,31 @@ Windows SDK `signtool.exe` as an independent signed sample, derives its signer
 SPKI, and tests unsigned/valid/wrong-signer/tamper outcomes without production
 secrets, certificate generation, or hosted-runner trust-store mutation.
 
+The production identity is the KPT organizational root/leaf chain
+(`deploy/signing/README.md`). Because that root is not publicly trusted, the
+tag-only Production signing job first imports the committed public root
+certificate into the ephemeral runner's `LocalMachine\Root` store through the
+.NET `X509Store` API (never `certutil`, which hangs on hosted images) so
+`Get-AuthenticodeSignature` can chain-validate; the DER-SPKI pin comparison
+remains the actual trust decision, and PR CI is unaffected. Workstations
+running MIB Studio install the same public root once (see
+`deploy/signing/README.md`); machines without it fail closed.
+
+### Linux processing-core Ed25519 signing
+
+The `mib-processing-v*` tag workflow signs the Linux `.so` in a separate
+tag-only `sign-native-plugin-linux` job, also isolated in the `Production`
+environment. The Linux build job uploads an unsigned, already-audited
+artifact whose sidecar carries only a rehearsal envelope from an ephemeral
+key; the Production job consumes the `LINUX_ED25519_SIGNING_KEY_PEM` secret,
+refuses to sign unless the key's DER-SPKI SHA-256 equals the repository
+variable `MIB_PROCESSING_CORE_ED25519_SPKI_SHA256`, produces the detached
+RFC 8032 signature over the exact artifact bytes, verifies it, and replaces
+every transported `signing` field in the sidecar with the production
+envelope. The release job requires the signed `.so`/`.json` pair in the flat
+asset set; envelope format, rotation, and revocation policy live in
+`docs/architecture/processing-core-linux-signing.md`.
+
 Native sidecars also require explicit repository variables
 `MIB_PROCESSING_CORE_APP_MIN_VERSION` and
 `MIB_PROCESSING_CORE_APP_MAX_VERSION`. Release CMake rejects absent,

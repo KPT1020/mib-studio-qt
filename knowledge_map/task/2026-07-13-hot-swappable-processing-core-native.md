@@ -150,6 +150,22 @@ real stable+beta Windows rehearsal. No live release was loaded in the sandbox.
 [[../services/ProcessingService]] · [[../services/Hdf5Service]] ·
 [[2026-07-13-processing-core-registry]]
 
+## Operator provisioning (2026-07-14, local session)
+
+The credential/governance gates were closed from the operator's machine:
+`main` is branch-protected (five always-run required checks, one review,
+admin bypass as the emergency path) and the `Production` environment
+requires operator approval and only deploys from `main` or
+`mib-processing-v*` tags. The Linux Ed25519 identity is provisioned
+(`LINUX_ED25519_SIGNING_KEY_PEM` + repository pin variable), and
+`sign-native-plugin-linux` now performs the tag-only Production signing with
+key-vs-pin verification before any signature. The Windows identity is the
+KPT organizational root/leaf chain in `deploy/signing/`; the Production sign
+job imports the committed public root into the ephemeral runner store via
+.NET `X509Store` (never `certutil`) so `Get-AuthenticodeSignature` can
+report `Valid`, while the DER-SPKI pin stays the trust decision. Evidence:
+issues #240 and #245.
+
 ## Pass-off pointer (2026-07-14)
 
 The exact branch/worktrees, implementation commits, active Windows CI run and

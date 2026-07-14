@@ -103,13 +103,18 @@ descriptor and publisher path, and uploads the unsigned artifact.
 
 ## Remaining live gates (deliberately open)
 
-- Provision the production Ed25519 keypair and repository SPKI variable; add
-  the Production-gated signing job (parallel to `sign-native-plugin`) that
-  signs the real release `.so` and injects the envelope into the sidecar
-  before `release` publishes it.
-- Add the Linux asset pair to the release workflow's expected-asset
-  allowlists once a signed artifact exists; unsigned Linux assets must never
-  be published.
+- ~~Provision the production Ed25519 keypair and repository SPKI variable~~
+  Done 2026-07-14: the keypair was generated offline by the operator, the
+  private key lives in the Production secret `LINUX_ED25519_SIGNING_KEY_PEM`,
+  and `MIB_PROCESSING_CORE_ED25519_SPKI_SHA256` holds the pin
+  (`94172d4c0651b1e1511b4e243e0acb8e005cd3aacedbac77a3a4609b76668946`).
+- ~~Add the Production-gated signing job and the Linux asset pair to the
+  release allowlists~~ Done 2026-07-14: `sign-native-plugin-linux` verifies
+  the key against the repository pin before signing, injects the envelope
+  into the sidecar, and the release job requires the signed `.so`/`.json`
+  pair in the flat asset set.
+- Publish a real signed `.so` through a `mib-processing-v*` tag and record
+  the evidence on #245.
 - Validate the dynamic OpenCV/spdlog link baseline (or static linking)
   across supported distros; the CI import audit currently reports these
   dependencies without pinning distro baselines.
