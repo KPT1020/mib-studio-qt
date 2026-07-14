@@ -170,6 +170,7 @@ if(Python3_Interpreter_FOUND)
     )
     set_tests_properties(backend.kin10_hf_dataset_pipeline PROPERTIES
         LABELS "backend;integration"
+        SKIP_RETURN_CODE 77
         TIMEOUT 180
     )
 elseif(UNIX)
@@ -182,6 +183,7 @@ elseif(UNIX)
     )
     set_tests_properties(backend.kin10_hf_dataset_pipeline PROPERTIES
         LABELS "backend;integration"
+        SKIP_RETURN_CODE 77
         TIMEOUT 180
     )
 else()
@@ -467,6 +469,15 @@ if(Python3_Interpreter_FOUND)
     )
     set_tests_properties(scripts.run_processing_conformance_input PROPERTIES
         LABELS "scripts;contract;processing;hdf5"
+        TIMEOUT 30
+    )
+
+    add_test(
+        NAME scripts.kin10_hf_dataset_runner
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/test_kin10_run_hf_dataset_test.py
+    )
+    set_tests_properties(scripts.kin10_hf_dataset_runner PROPERTIES
+        LABELS "scripts;integration"
         TIMEOUT 30
     )
 endif()
