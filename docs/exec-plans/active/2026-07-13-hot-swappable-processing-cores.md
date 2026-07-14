@@ -78,9 +78,12 @@ GitHub tracking:
       and capture performance/provenance evidence.
 - [ ] [A13 #245](https://github.com/KPT1020/mib-studio-qt/issues/245) — add the
       Linux `.so` release/audit lane and an offline-verifiable detached-signature
-      adapter behind the same injected trust boundary. The registry, catalog,
-      cache, `dlopen` loader, and fixtures are portable now; unsigned Linux
-      production activation remains deliberately unavailable.
+      adapter behind the same injected trust boundary. The Ed25519 verifier,
+      compiled SPKI pin, manifest signature transport, hidden-visibility `.so`
+      + sidecar build, and the Linux CI build/audit/sign-rehearsal lane are
+      implemented and tested; the live gate (production keypair, repository
+      pin, Production signing job, signed `.so` publication, distro baselines)
+      remains open and unsigned Linux production activation stays unavailable.
 
 A6 and A7 proceed in parallel. A8 depends on A7. A9 depends on A6+A8; its
 workflow can land before A8 while the new target is developed on the same
@@ -170,6 +173,15 @@ the resolver and remain independent of desktop activation internals.
   loader are platform contracts. Authenticode is only the Windows trust
   adapter. Linux `.so` metadata is accepted now, but production activation
   stays fail-closed until A13 implements and audits a detached-signature scheme.
+- 2026-07-14: The Linux trust adapter is a detached Ed25519 signature over the
+  exact artifact bytes, transported in the immutable manifest's `signing`
+  block (44-byte DER SPKI + 64-byte raw signature, both base64) and trusted
+  only against the compiled `MIB_PROCESSING_CORE_ED25519_SPKI_SHA256` pin —
+  the same pin format as the Windows Authenticode SPKI. The publisher
+  re-derives the key hash from the key bytes; manifest fields are transport,
+  never a trust root. An empty pin, a non-Ed25519 key, or any non-canonical
+  encoding fails closed. Envelope, rotation, and revocation policy:
+  `docs/architecture/processing-core-linux-signing.md`.
 
 ## Residual infrastructure gates
 
@@ -273,11 +285,14 @@ that relationship explicitly rather than claiming an unrun commit.
   version; and prove signed A→B→A activation, restart, provenance, latency, and
   hardware behavior. The 2026-07-14 API audit found unprotected `main` and no
   Production protection rules.
-- A13/[#245](https://github.com/KPT1020/mib-studio-qt/issues/245): specify the
-  detached-signature envelope/key rotation/revocation policy, implement the
-  Linux verifier, and build/sign/audit/publish a real `.so` across supported
-  distro baselines. Current Linux production activation correctly fails
-  closed.
+- A13/[#245](https://github.com/KPT1020/mib-studio-qt/issues/245): the
+  envelope/rotation/revocation policy, Linux Ed25519 verifier, and CI
+  build/audit/sign-rehearsal lane are implemented
+  (`docs/architecture/processing-core-linux-signing.md`). Still open live:
+  provision the production Ed25519 keypair and repository SPKI variable, add
+  the Production-gated signing job and release-asset allowlist entries, and
+  build/sign/publish a real `.so` across supported distro baselines. An
+  unpinned production Linux build correctly fails closed.
 - Biowork B13/[#116](https://github.com/gavinlouuu-kpt/Biowork-monorepo/issues/116):
   run live v1/v2 concurrent triggers, cold/warm cache checks, MLflow evidence,
   rollback, and the real auto-bump PR against a published core.

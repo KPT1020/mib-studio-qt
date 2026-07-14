@@ -422,6 +422,192 @@ jobs:
           path: ${{ runner.temp }}/mib-processing-native-dist/*
           if-no-files-found: error
 
+  build-native-plugin-linux:
+    name: Build native processing core (Linux x86_64)
+    needs: validate-source-version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install system dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            git \
+            libgl1-mesa-dev \
+            libhdf5-dev \
+            libopencv-dev \
+            libspdlog-dev \
+            libsqlite3-dev \
+            libssl-dev \
+            libxkbcommon-dev \
+            nlohmann-json3-dev \
+            pkg-config \
+            python3-pip \
+            qt6-base-dev \
+            qt6-serialport-dev
+
+      - name: Configure and build native plugin
+        shell: bash
+        env:
+          APP_MIN_VERSION: ${{ vars.MIB_PROCESSING_CORE_APP_MIN_VERSION }}
+          APP_MAX_VERSION: ${{ vars.MIB_PROCESSING_CORE_APP_MAX_VERSION }}
+        run: |
+          set -euo pipefail
+          cmake --preset linux-backend-only \
+            -DMIB_REQUIRE_PROCESSING_CORE_APP_COMPAT=${{ startsWith(github.ref, 'refs/tags/mib-processing-v') && 'ON' || 'OFF' }} \
+            -DMIB_PROCESSING_CORE_APP_MIN_VERSION="$APP_MIN_VERSION" \
+            -DMIB_PROCESSING_CORE_APP_MAX_VERSION="$APP_MAX_VERSION"
+          cmake --build --preset linux-backend-only-build --parallel --target \
+            mib_processing_core \
+            processing_core_abi_c_test \
+            processing_core_loader_test \
+            processing_core_cache_test \
+            processing_core_fixture_matrix_test \
+            processing_core_ed25519_test
+
+      - name: Verify native ABI, loader, cache, and Ed25519 trust
+        shell: bash
+        env:
+          MIB_STUDIO_EMODULUS_LUT_MANIFEST_URL: "file:///nonexistent/mib-lut-manifest.json"
+        run: |
+          set -euo pipefail
+          ctest --preset linux-backend-only-test \
+            -R "processing\.core_(abi_c|loader|cache|fixture_matrix|ed25519)" \
+            --output-on-failure
+
+      - name: Locate and validate release assets
+        id: native-assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python3 - <<'EOF'
+          import tomllib
+          with open("bindings/python/pyproject.toml", "rb") as handle:
+              print(tomllib.load(handle)["project"]["version"])
+          EOF
+          )"
+          stem="mib_processing_core-${version}-linux_x86_64"
+          shared_library="build/linux-backend/Release/${stem}.so"
+          descriptor="build/linux-backend/Release/${stem}.json"
+          test -f "$shared_library"
+          test -f "$descriptor"
+          python3 - "$descriptor" "$stem.so" "$version" <<'EOF'
+          import json, sys
+          descriptor, filename, version = sys.argv[1:]
+          with open(descriptor, encoding="utf-8") as handle:
+              metadata = json.load(handle)
+          assert metadata["filename"] == filename, "sidecar filename mismatch"
+          assert metadata["version"] == version, "sidecar version mismatch"
+          assert metadata["os"] == "linux" and metadata["arch"] == "x86_64"
+          assert metadata["signing"] == {"required": True, "scheme": "ed25519"}
+          EOF
+          staging="$RUNNER_TEMP/mib-processing-native-dist"
+          rm -rf "$staging"
+          mkdir -p "$staging"
+          cp "$shared_library" "$descriptor" "$staging/"
+          echo "so=$staging/${stem}.so" >> "$GITHUB_OUTPUT"
+          echo "descriptor=$staging/${stem}.json" >> "$GITHUB_OUTPUT"
+
+      - name: Audit native plugin exports and imports
+        shell: bash
+        run: |
+          set -euo pipefail
+          shared_library='${{ steps.native-assets.outputs.so }}'
+          exports="$(nm -D --defined-only "$shared_library" | awk '$2 == "T" {print $3}')"
+          echo "Exports: $exports"
+          if [ "$exports" != "mib_processing_get_api" ]; then
+            echo "::error::Native plugin must export exactly mib_processing_get_api"
+            exit 1
+          fi
+          needed="$(readelf -d "$shared_library" | awk '/NEEDED/ {gsub(/[\[\]]/, "", $5); print $5}')"
+          echo "Native imports:"
+          echo "$needed"
+          # The Windows lane forbids OpenCV because Conan links it statically.
+          # This lane uses distro OpenCV, so the dynamic libopencv/libspdlog
+          # dependencies are reported but allowed; pinning them down across
+          # supported distro baselines is part of the remaining A13 live gate.
+          if echo "$needed" | grep -Eiq '^(libQt|libhdf5|libpython|libmib_studio)'; then
+            echo "::error::Native plugin imports forbidden host/framework libraries"
+            exit 1
+          fi
+
+      - name: Rehearse detached Ed25519 signing with an ephemeral key
+        shell: bash
+        run: |
+          set -euo pipefail
+          workdir="$RUNNER_TEMP/mib-processing-ed25519"
+          rm -rf "$workdir"
+          mkdir -p "$workdir"
+          openssl genpkey -algorithm ed25519 -out "$workdir/signer.pem"
+          openssl pkey -in "$workdir/signer.pem" -pubout -outform DER -out "$workdir/signer-spki.der"
+          openssl pkeyutl -sign -inkey "$workdir/signer.pem" -rawin \
+            -in '${{ steps.native-assets.outputs.so }}' -out "$workdir/artifact.sig"
+          openssl pkeyutl -verify -pubin -inkey <(openssl pkey -in "$workdir/signer.pem" -pubout) \
+            -rawin -in '${{ steps.native-assets.outputs.so }}' -sigfile "$workdir/artifact.sig"
+          python3 - '${{ steps.native-assets.outputs.descriptor }}' "$workdir" <<'EOF'
+          import base64, hashlib, json, sys
+          descriptor_path, workdir = sys.argv[1:]
+          with open(f"{workdir}/signer-spki.der", "rb") as handle:
+              spki = handle.read()
+          with open(f"{workdir}/artifact.sig", "rb") as handle:
+              signature = handle.read()
+          assert len(spki) == 44 and len(signature) == 64
+          with open(descriptor_path, encoding="utf-8") as handle:
+              metadata = json.load(handle)
+          metadata["signing"].update({
+              "public_key_spki_base64": base64.b64encode(spki).decode("ascii"),
+              "public_key_spki_sha256": hashlib.sha256(spki).hexdigest(),
+              "signature_base64": base64.b64encode(signature).decode("ascii"),
+          })
+          with open(descriptor_path, "w", encoding="utf-8") as handle:
+              json.dump(metadata, handle, indent=2)
+              handle.write("\n")
+          EOF
+
+      - name: Validate the signed descriptor through the registry publisher
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - '${{ steps.native-assets.outputs.descriptor }}' <<'EOF'
+          import importlib.util, json, sys
+          from pathlib import Path
+          descriptor = Path(sys.argv[1])
+          spec = importlib.util.spec_from_file_location(
+              "publish_processing_core", "publish-processing-core.py")
+          publisher = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(publisher)
+          version = json.loads(descriptor.read_text(encoding="utf-8"))["version"]
+          entries = publisher.build_native_plugin_entries(
+              [descriptor],
+              asset_dir=descriptor.parent,
+              repo="OWNER/REPO",
+              release_tag=f"mib-processing-v{version}",
+              expected_version=version,
+              expected_contract_version=1,
+          )
+          signing = entries[0]["signing"]
+          assert signing["scheme"] == "ed25519" and signing["required"] is True
+          assert signing["public_key_spki_sha256"]
+          print("publisher accepted the ed25519-signed Linux descriptor")
+          EOF
+
+      - name: Upload unsigned native plugin artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: mib_processing-native-linux-x86_64-unsigned
+          path: ${{ runner.temp }}/mib-processing-native-dist/*
+          if-no-files-found: error
+
   sign-native-plugin:
     name: Sign native processing core (Production)
     needs: build-native-plugin

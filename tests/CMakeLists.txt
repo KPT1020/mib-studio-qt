@@ -142,6 +142,18 @@ if(WIN32)
     mib_add_backend_test_executable(processing_core_authenticode_test processing/processing_core_authenticode_test.cpp)
 endif()
 
+if(UNIX AND NOT APPLE)
+    # Imported find_package targets are directory-scoped, so resolve OpenSSL
+    # here as well; the desktop Linux build already requires it.
+    find_package(OpenSSL REQUIRED)
+    mib_add_backend_test_executable(processing_core_ed25519_test processing/processing_core_ed25519_test.cpp)
+    add_dependencies(processing_core_ed25519_test mib_processing_core)
+    target_link_libraries(processing_core_ed25519_test PRIVATE OpenSSL::Crypto)
+    add_test(NAME processing.core_ed25519
+        COMMAND $<TARGET_FILE:processing_core_ed25519_test> $<TARGET_FILE:mib_processing_core>)
+    set_tests_properties(processing.core_ed25519 PROPERTIES LABELS "processing;backend" TIMEOUT 30)
+endif()
+
 mib_add_backend_test_executable(processing_core_cache_test processing/processing_core_cache_test.cpp)
 add_dependencies(processing_core_cache_test mib_processing_core)
 target_link_libraries(processing_core_cache_test PRIVATE Threads::Threads)

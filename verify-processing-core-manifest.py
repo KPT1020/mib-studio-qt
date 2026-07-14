@@ -8,6 +8,9 @@ HTTP client to resolve config + LUT + engine as one pinned set.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
+import hashlib
 import json
 import re
 import sys
@@ -189,6 +192,24 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(signing, dict) or signing.get("required") is not True or not signing.get("scheme"):
             print(f"ERROR: native plugin signing policy is invalid: {entry['filename']}", file=sys.stderr)
             return 1
+        if str(signing.get("scheme")).strip().lower() == "ed25519":
+            try:
+                spki = base64.b64decode(str(signing.get("public_key_spki_base64") or ""), validate=True)
+                signature_bytes = base64.b64decode(str(signing.get("signature_base64") or ""), validate=True)
+            except (ValueError, binascii.Error):
+                spki = b""
+                signature_bytes = b""
+            declared_spki_sha256 = str(signing.get("public_key_spki_sha256") or "").strip().lower()
+            if (
+                len(spki) != 44
+                or len(signature_bytes) != 64
+                or hashlib.sha256(spki).hexdigest() != declared_spki_sha256
+            ):
+                print(
+                    f"ERROR: native plugin ed25519 signing material is invalid: {entry['filename']}",
+                    file=sys.stderr,
+                )
+                return 1
         try:
             require_absolute_url(str(entry["url"]), f"native_plugins[{entry['filename']}].url")
         except ValueError as exc:

@@ -23,6 +23,9 @@ const QStringList& selectionKeys() {
         QStringLiteral("ProcessingCore/AppMaxVersion"),
         QStringLiteral("ProcessingCore/SigningScheme"),
         QStringLiteral("ProcessingCore/SigningRequired"),
+        QStringLiteral("ProcessingCore/SigningPublicKeySpkiBase64"),
+        QStringLiteral("ProcessingCore/SigningPublicKeySpkiSha256"),
+        QStringLiteral("ProcessingCore/SigningSignatureBase64"),
     };
     return keys;
 }
@@ -67,6 +70,12 @@ bool persistSelection(QSettings& settings, const Selection& selection, QString* 
     settings.setValue(QStringLiteral("ProcessingCore/AppMaxVersion"), selection.appMaxVersion);
     settings.setValue(QStringLiteral("ProcessingCore/SigningScheme"), selection.signingScheme);
     settings.setValue(QStringLiteral("ProcessingCore/SigningRequired"), selection.signingRequired);
+    settings.setValue(QStringLiteral("ProcessingCore/SigningPublicKeySpkiBase64"),
+                      selection.signingPublicKeySpkiBase64);
+    settings.setValue(QStringLiteral("ProcessingCore/SigningPublicKeySpkiSha256"),
+                      selection.signingPublicKeySpkiSha256);
+    settings.setValue(QStringLiteral("ProcessingCore/SigningSignatureBase64"),
+                      selection.signingSignatureBase64);
     settings.sync();
     if (settings.status() == QSettings::NoError) return true;
 

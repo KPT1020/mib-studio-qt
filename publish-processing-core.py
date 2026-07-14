@@ -14,6 +14,8 @@ See docs/portable-processing-sync.md for the public contract.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import hashlib
 import html
 import json
@@ -284,6 +286,37 @@ def build_native_plugin_entries(
         signing.pop("format", None)
         signing["scheme"] = signing_scheme
         signing["required"] = True
+        if signing_scheme == "ed25519":
+            # A detached-signature scheme must ship its transport material and
+            # the key hash must be derived from the actual key bytes, mirroring
+            # how artifact URL/digest/size come from the real release assets.
+            spki_b64 = str(signing.get("public_key_spki_base64") or "").strip()
+            signature_b64 = str(signing.get("signature_base64") or "").strip()
+            try:
+                spki = base64.b64decode(spki_b64, validate=True)
+                signature_bytes = base64.b64decode(signature_b64, validate=True)
+            except (ValueError, binascii.Error) as exc:
+                raise ValueError(
+                    f"Native plugin ed25519 signing material is not valid base64: {descriptor_path}"
+                ) from exc
+            if len(spki) != 44:
+                raise ValueError(
+                    f"Native plugin ed25519 public key must be a 44-byte DER SPKI: {descriptor_path}"
+                )
+            if len(signature_bytes) != 64:
+                raise ValueError(
+                    f"Native plugin ed25519 signature must be 64 bytes: {descriptor_path}"
+                )
+            derived_spki_sha256 = hashlib.sha256(spki).hexdigest()
+            declared_spki_sha256 = str(signing.get("public_key_spki_sha256") or "").strip().lower()
+            if declared_spki_sha256 and declared_spki_sha256 != derived_spki_sha256:
+                raise ValueError(
+                    f"Native plugin ed25519 public_key_spki_sha256 does not match the key bytes: "
+                    f"{descriptor_path}"
+                )
+            signing["public_key_spki_base64"] = spki_b64
+            signing["public_key_spki_sha256"] = derived_spki_sha256
+            signing["signature_base64"] = signature_b64
         entries.append({
             "filename": filename,
             "os": native_os,

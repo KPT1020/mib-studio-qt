@@ -20,6 +20,9 @@ struct Selection {
     QString appMinVersion;
     QString appMaxVersion;
     QString signingScheme;
+    QString signingPublicKeySpkiBase64;
+    QString signingPublicKeySpkiSha256;
+    QString signingSignatureBase64;
     bool signingRequired{false};
 };
 

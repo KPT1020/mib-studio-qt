@@ -55,9 +55,13 @@ records the newly leased identity without silently switching.
 6. Immediately before module load, verify SHA-256 again and apply the persisted
    mandatory platform trust scheme. Windows validates Authenticode, requires
    the signer public key's DER SPKI SHA-256 compiled into the application, and
-   uses restricted DLL dependency search. Other platforms reject activation
-   until their named verifier exists. Then negotiate ABI/contract/runtime
-   identity and run the plugin self-test.
+   uses restricted DLL dependency search. Linux validates the manifest's
+   detached Ed25519 signature over the artifact bytes and requires the signer
+   key's DER SPKI SHA-256 to match the compiled
+   `MIB_PROCESSING_CORE_ED25519_SPKI_SHA256` pin (see
+   [Linux signing](../../docs/architecture/processing-core-linux-signing.md)).
+   Other platforms reject activation until their named verifier exists. Then
+   negotiate ABI/contract/runtime identity and run the plugin self-test.
 7. At a quiescent boundary, synchronize the complete verified identity/path in
    `QSettings` through `ProcessingService`'s locked pre-commit callback, then
    swap the live kernel. A settings error restores the prior logical selection
@@ -73,11 +77,15 @@ untouched, and records completion only after successful synchronization.
 Startup fails closed if that migration cannot be persisted, rather than losing
 an explicit core selection or unrelated application preferences silently.
 
-The C ABI, registry, cache, and loader are cross-platform; Linux CI already
-loads real `.so` fixtures through `dlopen`. Production signed activation is
-currently Windows-only. Linux/macOS trust schemes fail closed and A13/#245
-owns the detached-signature release lane. Debug builds alone may set
-`MIB_STUDIO_ALLOW_UNSIGNED_PROCESSING_CORE=1` for local loader fixtures.
+The C ABI, registry, cache, and loader are cross-platform; Linux CI loads
+real `.so` fixtures and an Ed25519-signed core through `dlopen`. The Windows
+Authenticode and Linux Ed25519 detached-signature verifiers are both
+implemented behind the injected trust seam; macOS and unknown schemes fail
+closed. A13/#245 keeps the *live* signed `.so` publication gate open: no
+production Linux keypair or repository pin exists yet, so an unpinned
+production Linux build still refuses activation. Debug builds alone may set
+`MIB_STUDIO_ALLOW_UNSIGNED_PROCESSING_CORE=1` for local loader fixtures, or
+`MIB_STUDIO_PROCESSING_CORE_ED25519_SPKI_SHA256` to pin a test signer.
 
 ## Configuration
 

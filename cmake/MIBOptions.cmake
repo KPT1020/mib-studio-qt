@@ -37,6 +37,12 @@ option(MIB_REQUIRE_PROCESSING_CORE_SIGNER_SPKI
     "Require a non-empty approved processing-core signer SPKI SHA-256"
     OFF)
 
+set(MIB_PROCESSING_CORE_ED25519_SPKI_SHA256 "" CACHE STRING
+    "Approved Ed25519 signer SubjectPublicKeyInfo SHA-256 for Linux native processing cores")
+option(MIB_REQUIRE_PROCESSING_CORE_ED25519_SPKI
+    "Require a non-empty approved Linux processing-core Ed25519 signer SPKI SHA-256"
+    OFF)
+
 set(MIB_PROCESSING_CORE_APP_MIN_VERSION "" CACHE STRING
     "Oldest desktop app version allowed to load a released native processing core")
 set(MIB_PROCESSING_CORE_APP_MAX_VERSION "" CACHE STRING
@@ -110,3 +116,29 @@ set(MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256
     FORCE)
 unset(_mib_processing_core_signer_spki_sha256)
 unset(_mib_processing_core_signer_spki_sha256_length)
+
+# The Linux Ed25519 pin follows the same rules: optional for development and
+# fork builds, unambiguous when supplied, and mandatory only for entry points
+# that opt into producing a production Linux artifact.
+string(STRIP "${MIB_PROCESSING_CORE_ED25519_SPKI_SHA256}"
+    _mib_processing_core_ed25519_spki_sha256)
+if(_mib_processing_core_ed25519_spki_sha256)
+    string(LENGTH "${_mib_processing_core_ed25519_spki_sha256}"
+        _mib_processing_core_ed25519_spki_sha256_length)
+    if(NOT _mib_processing_core_ed25519_spki_sha256_length EQUAL 64 OR
+       _mib_processing_core_ed25519_spki_sha256 MATCHES "[^0-9A-Fa-f]")
+        message(FATAL_ERROR
+            "MIB_PROCESSING_CORE_ED25519_SPKI_SHA256 must be exactly 64 hexadecimal characters")
+    endif()
+    string(TOLOWER "${_mib_processing_core_ed25519_spki_sha256}"
+        _mib_processing_core_ed25519_spki_sha256)
+elseif(MIB_REQUIRE_PROCESSING_CORE_ED25519_SPKI)
+    message(FATAL_ERROR
+        "A production Linux build requires MIB_PROCESSING_CORE_ED25519_SPKI_SHA256")
+endif()
+set(MIB_PROCESSING_CORE_ED25519_SPKI_SHA256
+    "${_mib_processing_core_ed25519_spki_sha256}" CACHE STRING
+    "Approved Ed25519 signer SubjectPublicKeyInfo SHA-256 for Linux native processing cores"
+    FORCE)
+unset(_mib_processing_core_ed25519_spki_sha256)
+unset(_mib_processing_core_ed25519_spki_sha256_length)

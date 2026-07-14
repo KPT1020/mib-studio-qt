@@ -94,6 +94,20 @@
   catalog and persisted identity include a mandatory signing scheme, Linux
   runtime fingerprints name OS/architecture, and non-Windows production trust
   remains explicitly fail-closed pending A13/#245.
+- 2026-07-14 (this session): implemented A13's Linux trust adapter. A
+  detached Ed25519 signature and 44-byte DER SPKI travel in the immutable
+  manifest's `signing` block; `verifyProcessingCoreEd25519`
+  (`src/backend/processing/ProcessingCoreEd25519.cpp`, OpenSSL libcrypto)
+  enforces the compiled `MIB_PROCESSING_CORE_ED25519_SPKI_SHA256` pin and
+  fails closed without one. The Linux plugin builds with hidden symbol
+  visibility, a release-named `.so` plus generated sidecar, and CI gained a
+  `build-native-plugin-linux` lane (build, focused CTests including the new
+  `processing.core_ed25519` matrix and cache→`dlopen` load, `nm`/`readelf`
+  audits, ephemeral-key signing rehearsal through the real publisher).
+  Envelope/rotation/revocation policy:
+  `docs/architecture/processing-core-linux-signing.md`. The live gate — real
+  keypair, repository pin, Production signing job, and signed `.so`
+  publication — deliberately stays open.
 - Added a Production promotion/rollback action, stable/beta tag-derived
   channels, and explicit app compatibility bounds. Published and publicly
   verified stable LUT revision `2026.07.14-1`, removing the registry's missing

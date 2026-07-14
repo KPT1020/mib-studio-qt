@@ -2,6 +2,8 @@
 """Shape tests for verify-processing-core-manifest.py (file:// only)."""
 from __future__ import annotations
 
+import base64
+import hashlib
 import importlib.util
 import json
 import sys
@@ -107,6 +109,36 @@ class ManifestVerificationTest(unittest.TestCase):
             }]
             self.assertEqual(verify_fixture(Path(temp_dir), manifest), 0)
             manifest["native_plugins"][0]["filename"] = "core.dll"
+            self.assertEqual(verify_fixture(Path(temp_dir), manifest), 1)
+
+    def test_validates_ed25519_detached_signature_material(self) -> None:
+        spki = bytes(44)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manifest = base_manifest()
+            manifest["native_plugins"] = [{
+                "filename": "core.so",
+                "os": "linux",
+                "arch": "x86_64",
+                "version": "0.1.0",
+                "contract_version": 1,
+                "engine_abi_version": 1,
+                "runtime_fingerprint": "linux-x86_64-gcc13-cxx17",
+                "entrypoint": "mib_processing_get_api",
+                "url": "https://example.invalid/core.so",
+                "sha256": "b" * 64,
+                "size_bytes": 456,
+                "signing": {
+                    "scheme": "ed25519",
+                    "required": True,
+                    "public_key_spki_base64": base64.b64encode(spki).decode("ascii"),
+                    "public_key_spki_sha256": hashlib.sha256(spki).hexdigest(),
+                    "signature_base64": base64.b64encode(bytes(64)).decode("ascii"),
+                },
+            }]
+            self.assertEqual(verify_fixture(Path(temp_dir), manifest), 0)
+            manifest["native_plugins"][0]["signing"]["public_key_spki_sha256"] = "f" * 64
+            self.assertEqual(verify_fixture(Path(temp_dir), manifest), 1)
+            manifest["native_plugins"][0]["signing"].pop("public_key_spki_sha256")
             self.assertEqual(verify_fixture(Path(temp_dir), manifest), 1)
             manifest["native_plugins"][0]["filename"] = "core.so"
             manifest["native_plugins"][0]["signing"]["required"] = False

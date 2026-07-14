@@ -159,5 +159,54 @@ int main() {
     MIB_EXPECT(linuxPlugin->signingScheme == "detached-ed25519" &&
                    linuxPlugin->signingRequired,
                "Linux trust scheme is preserved without assuming Authenticode");
+
+    // The production "ed25519" scheme must carry canonical detached-signature
+    // transport: 44-byte DER SPKI, its 64-hex SHA-256, and a 64-byte signature.
+    const QString spkiBase64 = QString::fromLatin1(QByteArray(44, '\x01').toBase64());
+    const QString signatureBase64 = QString::fromLatin1(QByteArray(64, '\x02').toBase64());
+    const QString ed25519Template = QStringLiteral(R"({
+      "processing_core_index_schema_version":1,"channel":"stable","active_version":"2.0.0",
+      "versions":[{"version":"2.0.0","contract_version":1,
+       "manifest_url":"https://updates.example/stable/processing-core/versions/2.0.0.json",
+       "native_plugins":[{"filename":"core.so","os":"linux","arch":"x86_64",
+        "url":"https://example/core.so",
+        "sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size_bytes":1,"engine_abi_version":1,"contract_version":1,
+        "runtime_fingerprint":"linux-x86_64-gcc13-cxx17",
+        "entrypoint":"mib_processing_get_api","app_min_version":"1.0.0",
+        "app_max_version":null,
+        "signing":{"scheme":"ed25519","required":true%1}}]}]})");
+    const QString ed25519Fields = QStringLiteral(
+        R"(,"public_key_spki_base64":"%1",)"
+        R"("public_key_spki_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",)"
+        R"("signature_base64":"%2")")
+                                        .arg(spkiBase64, signatureBase64);
+    const auto parsedEd25519 = frontend::processingcorecatalog::parseIndex(
+        ed25519Template.arg(ed25519Fields).toUtf8());
+    MIB_REQUIRE(parsedEd25519.ok, parsedEd25519.error.toStdString());
+    const auto* ed25519Plugin = frontend::processingcorecatalog::findNativePlugin(
+        parsedEd25519.versions.front(), "linux", "x86_64");
+    MIB_REQUIRE(ed25519Plugin != nullptr, "ed25519 shared-library artifact selected");
+    MIB_EXPECT(ed25519Plugin->signingPublicKeySpkiBase64 == spkiBase64 &&
+                   ed25519Plugin->signingSignatureBase64 == signatureBase64 &&
+                   ed25519Plugin->signingPublicKeySpkiSha256 ==
+                       QString(64, QLatin1Char('b')),
+               "ed25519 detached-signature transport fields are preserved");
+
+    const auto missingSignature =
+        frontend::processingcorecatalog::parseIndex(ed25519Template.arg(QString()).toUtf8());
+    MIB_EXPECT(!missingSignature.ok,
+               "an ed25519 entry without detached-signature material is rejected");
+
+    const QString truncatedFields = QStringLiteral(
+        R"(,"public_key_spki_base64":"%1",)"
+        R"("public_key_spki_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",)"
+        R"("signature_base64":"%2")")
+                                         .arg(spkiBase64,
+                                              QString::fromLatin1(QByteArray(63, '\x02').toBase64()));
+    const auto truncatedSignature = frontend::processingcorecatalog::parseIndex(
+        ed25519Template.arg(truncatedFields).toUtf8());
+    MIB_EXPECT(!truncatedSignature.ok,
+               "an ed25519 entry with a non-canonical signature length is rejected");
     return mib::test::exitCode();
 }

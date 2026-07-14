@@ -51,9 +51,11 @@
   history, and clients with an explicit version pin ignore the pointer.
 - **Native processing core** — a versioned, platform-signed shared library
   selected by [[../frontend/ProcessingCoreDialog]] and loaded through the
-  POD-only C engine ABI. Windows uses Authenticode; Linux detached signatures
-  are tracked in A13/#245. ABI v1 owns mask generation and empty-frame
-  classification; host metrics/tracking/orchestration remain outside it.
+  POD-only C engine ABI. Windows uses Authenticode; Linux uses detached
+  Ed25519 signatures pinned to a compiled signer SPKI SHA-256 (A13/#245
+  keeps the live signed publication gate open). ABI v1 owns mask generation
+  and empty-frame classification; host metrics/tracking/orchestration remain
+  outside it.
 - **Processing conformance reference** —
   `scripts/gold_standard_dataset.json`, a deterministic full-parity output from
   the installed wheel. `scripts/run_processing_conformance.py` fails on metric,

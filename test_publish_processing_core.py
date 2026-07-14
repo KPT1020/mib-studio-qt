@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import importlib.util
 import json
 import re
@@ -185,6 +187,87 @@ class NativePluginTest(unittest.TestCase):
                     release_tag="mib-processing-v0.1.0",
                     expected_version="0.1.0",
                     expected_contract_version=1,
+                )
+
+    def test_ed25519_signing_material_is_validated_and_key_hash_derived(self) -> None:
+        spki = bytes(44)
+        signature = bytes(64)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            shared_library = root / "mib_processing_core-0.1.0-linux_x86_64.so"
+            shared_library.write_bytes(b"ed25519-signed linux shared-library fixture")
+            descriptor = root / "mib_processing_core-0.1.0-linux_x86_64.json"
+            payload = {
+                "filename": shared_library.name,
+                "version": "0.1.0",
+                "contract_version": 1,
+                "os": "linux",
+                "arch": "x86_64",
+                "engine_abi_version": 1,
+                "runtime_fingerprint": "linux-x86_64-gcc13-cxx17",
+                "entrypoint": "mib_processing_get_api",
+                "signing": {
+                    "scheme": "ed25519",
+                    "required": True,
+                    "public_key_spki_base64": base64.b64encode(spki).decode("ascii"),
+                    "signature_base64": base64.b64encode(signature).decode("ascii"),
+                },
+            }
+            descriptor.write_text(json.dumps(payload), encoding="utf-8")
+
+            entries = publish_processing_core.build_native_plugin_entries(
+                [descriptor],
+                asset_dir=root,
+                repo="OWNER/REPO",
+                release_tag="mib-processing-v0.1.0",
+                expected_version="0.1.0",
+                expected_contract_version=1,
+            )
+            signing = entries[0]["signing"]
+            self.assertEqual(signing["scheme"], "ed25519")
+            self.assertEqual(
+                signing["public_key_spki_sha256"], hashlib.sha256(spki).hexdigest()
+            )
+            self.assertEqual(
+                base64.b64decode(signing["signature_base64"], validate=True), signature
+            )
+
+            payload["signing"]["public_key_spki_sha256"] = "f" * 64
+            descriptor.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "does not match the key bytes"):
+                publish_processing_core.build_native_plugin_entries(
+                    [descriptor], asset_dir=root, repo="OWNER/REPO",
+                    release_tag="mib-processing-v0.1.0",
+                    expected_version="0.1.0", expected_contract_version=1,
+                )
+
+            del payload["signing"]["public_key_spki_sha256"]
+            payload["signing"]["signature_base64"] = base64.b64encode(bytes(63)).decode("ascii")
+            descriptor.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "signature must be 64 bytes"):
+                publish_processing_core.build_native_plugin_entries(
+                    [descriptor], asset_dir=root, repo="OWNER/REPO",
+                    release_tag="mib-processing-v0.1.0",
+                    expected_version="0.1.0", expected_contract_version=1,
+                )
+
+            payload["signing"]["signature_base64"] = "not*base64"
+            descriptor.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "not valid base64"):
+                publish_processing_core.build_native_plugin_entries(
+                    [descriptor], asset_dir=root, repo="OWNER/REPO",
+                    release_tag="mib-processing-v0.1.0",
+                    expected_version="0.1.0", expected_contract_version=1,
+                )
+
+            del payload["signing"]["public_key_spki_base64"]
+            payload["signing"]["signature_base64"] = base64.b64encode(signature).decode("ascii")
+            descriptor.write_text(json.dumps(payload), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "44-byte DER SPKI"):
+                publish_processing_core.build_native_plugin_entries(
+                    [descriptor], asset_dir=root, repo="OWNER/REPO",
+                    release_tag="mib-processing-v0.1.0",
+                    expected_version="0.1.0", expected_contract_version=1,
                 )
 
     def test_descriptor_rejects_contract_or_path_mismatch(self) -> None:

@@ -119,6 +119,15 @@ private:
 
 } // namespace
 
+std::string processingCoreBytesSha256(const uint8_t* bytes, size_t count) {
+    Sha256 sha;
+    if (bytes && count > 0) sha.update(bytes, count);
+    std::ostringstream output;
+    output << std::hex << std::setfill('0');
+    for (uint8_t byte : sha.finish()) output << std::setw(2) << static_cast<unsigned>(byte);
+    return output.str();
+}
+
 std::string processingCoreFileSha256(const std::filesystem::path& path, std::string* error) {
     std::ifstream input(path, std::ios::binary);
     if (!input) {

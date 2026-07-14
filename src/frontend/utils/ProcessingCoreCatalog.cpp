@@ -72,6 +72,12 @@ bool parseNativePlugin(const QJsonObject& object,
         plugin.signingScheme = signing.value(QStringLiteral("format")).toString().trimmed().toLower();
     }
     plugin.signingRequired = signing.value(QStringLiteral("required")).toBool(false);
+    plugin.signingPublicKeySpkiBase64 =
+        signing.value(QStringLiteral("public_key_spki_base64")).toString().trimmed();
+    plugin.signingPublicKeySpkiSha256 =
+        signing.value(QStringLiteral("public_key_spki_sha256")).toString().trimmed().toLower();
+    plugin.signingSignatureBase64 =
+        signing.value(QStringLiteral("signature_base64")).toString().trimmed();
     const auto sizeValue = object.value(QStringLiteral("size_bytes"));
     const double rawSize = sizeValue.toDouble(-1);
     const bool validSize = sizeValue.isDouble() && std::isfinite(rawSize) && rawSize > 0 &&
@@ -84,6 +90,21 @@ bool parseNativePlugin(const QJsonObject& object,
     const auto maximum = QVersionNumber::fromString(plugin.appMaxVersion);
     const bool validRange = !minimum.isNull() &&
         (plugin.appMaxVersion.isEmpty() || (!maximum.isNull() && maximum >= minimum));
+    // A detached-signature scheme must ship canonical transport material: a
+    // 44-byte DER Ed25519 SubjectPublicKeyInfo, its 64-hex SHA-256, and a raw
+    // 64-byte signature. Other schemes (e.g. embedded Authenticode) carry no
+    // detached fields.
+    bool validDetachedSignature = true;
+    if (plugin.signingScheme == QStringLiteral("ed25519")) {
+        const QByteArray spki = QByteArray::fromBase64(
+            plugin.signingPublicKeySpkiBase64.toLatin1(),
+            QByteArray::Base64Encoding | QByteArray::AbortOnBase64DecodingErrors);
+        const QByteArray signatureBytes = QByteArray::fromBase64(
+            plugin.signingSignatureBase64.toLatin1(),
+            QByteArray::Base64Encoding | QByteArray::AbortOnBase64DecodingErrors);
+        validDetachedSignature = spki.size() == 44 && signatureBytes.size() == 64 &&
+                                 sha256(plugin.signingPublicKeySpkiSha256);
+    }
     return !plugin.filename.isEmpty() && !plugin.filename.contains('/') &&
            !plugin.filename.contains('\\') && QFileInfo(plugin.filename).fileName() == plugin.filename &&
            nativeFilenameMatchesOs(plugin.filename, plugin.os) && !plugin.arch.isEmpty() &&
@@ -92,7 +113,7 @@ bool parseNativePlugin(const QJsonObject& object,
            plugin.contractVersion > 0 &&
            plugin.entrypoint == QStringLiteral("mib_processing_get_api") &&
            !plugin.runtimeFingerprint.isEmpty() && !plugin.signingScheme.isEmpty() &&
-           plugin.signingRequired && validRange;
+           plugin.signingRequired && validRange && validDetachedSignature;
 }
 
 bool parseNativePlugins(const QJsonValue& value,
@@ -132,6 +153,9 @@ bool samePlugin(const NativePluginEntry& left, const NativePluginEntry& right) {
            left.entrypoint == right.entrypoint && left.appMinVersion == right.appMinVersion &&
            left.appMaxVersion == right.appMaxVersion &&
            left.signingScheme == right.signingScheme &&
+           left.signingPublicKeySpkiBase64 == right.signingPublicKeySpkiBase64 &&
+           left.signingPublicKeySpkiSha256 == right.signingPublicKeySpkiSha256 &&
+           left.signingSignatureBase64 == right.signingSignatureBase64 &&
            left.signingRequired == right.signingRequired && left.sizeBytes == right.sizeBytes &&
            left.engineAbiVersion == right.engineAbiVersion &&
            left.contractVersion == right.contractVersion;

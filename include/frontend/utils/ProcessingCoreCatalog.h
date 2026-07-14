@@ -17,6 +17,13 @@ struct NativePluginEntry {
     QString appMinVersion;
     QString appMaxVersion;
     QString signingScheme;
+    // Ed25519 detached-signature transport (scheme "ed25519" only): the
+    // signer's base64 DER SubjectPublicKeyInfo, its SHA-256, and the base64
+    // raw signature over the artifact bytes. Trust comes from the compiled
+    // SPKI pin, never from these manifest fields alone.
+    QString signingPublicKeySpkiBase64;
+    QString signingPublicKeySpkiSha256;
+    QString signingSignatureBase64;
     qint64 sizeBytes{-1};
     int engineAbiVersion{0};
     int contractVersion{0};

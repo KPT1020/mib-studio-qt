@@ -5,6 +5,20 @@
 
 ## Features shipped
 
+- **Linux Ed25519 detached-signature trust adapter** (2026-07-14, A13/#245) —
+  Implemented `verifyProcessingCoreEd25519` behind the injected trust seam:
+  the immutable manifest transports a 44-byte DER SPKI and raw 64-byte
+  Ed25519 signature over the artifact bytes, trusted only against the
+  compiled `MIB_PROCESSING_CORE_ED25519_SPKI_SHA256` pin (OpenSSL libcrypto,
+  Linux desktop builds only; wheel builds stay OpenSSL-optional and fail
+  closed). The plugin now builds with hidden symbol visibility and a
+  release-named `.so` + sidecar; catalog/settings/publisher/verify tooling
+  validate the signature transport; CI gained a Linux build/audit/
+  sign-rehearsal lane and the `processing.core_ed25519` CTest matrix with a
+  cache→`dlopen` load. Spec:
+  `docs/architecture/processing-core-linux-signing.md`. Live signed
+  publication (real keypair, repository pin, Production job) remains open.
+
 - **Cross-platform processing-core seams** (2026-07-14, A13/#245) — Removed
   DLL-only assumptions from registry publication/verification, made native
   signature scheme and requirement part of catalog/persisted identity, and

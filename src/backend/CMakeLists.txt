@@ -28,6 +28,7 @@ add_library(mib_processing STATIC
     ${PROJECT_SOURCE_DIR}/src/backend/processing/BundledProcessingKernel.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingCoreLoader.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingCoreCache.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingCoreEd25519.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingCoreSha256.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingService.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/processing/BatchMaskSources.cpp
@@ -67,6 +68,23 @@ if(WIN32)
     target_link_libraries(mib_processing PUBLIC wintrust crypt32)
 endif()
 
+# The Linux detached-signature verifier needs libcrypto for Ed25519. Desktop
+# Linux builds require it so production trust is always compiled in; the
+# Qt-less manylinux wheel keeps it optional because it never activates native
+# cores, and the verifier fails closed when OpenSSL is absent.
+if(UNIX AND NOT APPLE)
+    if(MIB_BUILD_PROCESSING_ONLY)
+        find_package(OpenSSL QUIET)
+    else()
+        find_package(OpenSSL REQUIRED)
+    endif()
+    if(TARGET OpenSSL::Crypto)
+        target_link_libraries(mib_processing PRIVATE OpenSSL::Crypto)
+        target_compile_definitions(mib_processing PRIVATE
+            MIB_PROCESSING_CORE_HAVE_OPENSSL=1)
+    endif()
+endif()
+
 if(TARGET nlohmann_json::nlohmann_json)
     target_link_libraries(mib_processing PUBLIC nlohmann_json::nlohmann_json)
 endif()
@@ -101,6 +119,11 @@ set_target_properties(mib_processing_core PROPERTIES
     AUTOUIC OFF
     AUTORCC OFF
     POSITION_INDEPENDENT_CODE ON
+    # MSVC only exports __declspec(dllexport) symbols; ELF must opt into the
+    # same discipline so the release audit sees exactly mib_processing_get_api.
+    C_VISIBILITY_PRESET hidden
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
     RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/$<CONFIG>"
     LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/$<CONFIG>"
 )
@@ -118,6 +141,37 @@ if(WIN32)
     file(GENERATE
         OUTPUT "${PROJECT_BINARY_DIR}/$<CONFIG>/${_mib_processing_native_basename}.json"
         CONTENT "{\n  \"schema_version\": 1,\n  \"version\": \"${MIB_PROCESSING_CORE_VERSION}\",\n  \"filename\": \"$<TARGET_FILE_NAME:mib_processing_core>\",\n  \"os\": \"windows\",\n  \"arch\": \"x86_64\",\n  \"engine_abi_version\": 1,\n  \"contract_version\": 1,\n  \"entrypoint\": \"mib_processing_get_api\",\n  \"runtime_fingerprint\": \"${_mib_processing_runtime_fingerprint}\",\n  \"app_min_version\": \"${MIB_PROCESSING_CORE_APP_MIN_VERSION}\",\n  \"app_max_version\": \"${MIB_PROCESSING_CORE_APP_MAX_VERSION}\",\n  \"signing\": {\"required\": true, \"scheme\": \"authenticode\"}\n}\n")
+elseif(UNIX AND NOT APPLE)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+        set(_mib_processing_native_arch "x86_64")
+    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64)$")
+        set(_mib_processing_native_arch "aarch64")
+    else()
+        set(_mib_processing_native_arch "${CMAKE_SYSTEM_PROCESSOR}")
+    endif()
+    set(_mib_processing_native_basename
+        "mib_processing_core-${MIB_PROCESSING_CORE_VERSION}-linux_${_mib_processing_native_arch}")
+    set_target_properties(mib_processing_core PROPERTIES
+        OUTPUT_NAME "${_mib_processing_native_basename}")
+    # The fingerprint must match runtimeFingerprint() in
+    # BundledProcessingKernel.cpp, which uses the compiler's major version.
+    string(REGEX MATCH "^[0-9]+" _mib_processing_cxx_major
+        "${CMAKE_CXX_COMPILER_VERSION}")
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        set(_mib_processing_runtime_fingerprint
+            "linux-${_mib_processing_native_arch}-clang${_mib_processing_cxx_major}-cxx17")
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        set(_mib_processing_runtime_fingerprint
+            "linux-${_mib_processing_native_arch}-gcc${_mib_processing_cxx_major}-cxx17")
+    else()
+        set(_mib_processing_runtime_fingerprint "unknown-platform-cxx17")
+    endif()
+    # The build cannot self-sign: release CI appends the Ed25519
+    # public_key_spki_base64/signature_base64/public_key_spki_sha256 signing
+    # fields after the artifact bytes are final.
+    file(GENERATE
+        OUTPUT "${PROJECT_BINARY_DIR}/$<CONFIG>/${_mib_processing_native_basename}.json"
+        CONTENT "{\n  \"schema_version\": 1,\n  \"version\": \"${MIB_PROCESSING_CORE_VERSION}\",\n  \"filename\": \"$<TARGET_FILE_NAME:mib_processing_core>\",\n  \"os\": \"linux\",\n  \"arch\": \"${_mib_processing_native_arch}\",\n  \"engine_abi_version\": 1,\n  \"contract_version\": 1,\n  \"entrypoint\": \"mib_processing_get_api\",\n  \"runtime_fingerprint\": \"${_mib_processing_runtime_fingerprint}\",\n  \"app_min_version\": \"${MIB_PROCESSING_CORE_APP_MIN_VERSION}\",\n  \"app_max_version\": \"${MIB_PROCESSING_CORE_APP_MAX_VERSION}\",\n  \"signing\": {\"required\": true, \"scheme\": \"ed25519\"}\n}\n")
 endif()
 
 add_library(mib_backend STATIC

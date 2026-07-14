@@ -158,6 +158,26 @@ std::function<bool(const std::filesystem::path&, std::string&)> trustVerifier(
     return [approved](const std::filesystem::path& path, std::string& error) {
         return backend::processing::verifyProcessingCoreAuthenticode(path, approved, error);
     };
+#elif defined(__linux__)
+    if (plugin.signingScheme != QStringLiteral("ed25519")) {
+        return [signingScheme](const std::filesystem::path&, std::string& error) {
+            error = "unsupported Linux processing-core trust scheme: " + signingScheme;
+            return false;
+        };
+    }
+    backend::processing::ProcessingCoreDetachedSignature signature;
+    signature.publicKeySpkiDerBase64 = plugin.signingPublicKeySpkiBase64.toStdString();
+    signature.signatureBase64 = plugin.signingSignatureBase64.toStdString();
+    std::string approved = MIB_PROCESSING_CORE_ED25519_SPKI_SHA256;
+#if !defined(NDEBUG)
+    const QString debugOverride =
+        qEnvironmentVariable("MIB_STUDIO_PROCESSING_CORE_ED25519_SPKI_SHA256").trimmed();
+    if (!debugOverride.isEmpty()) approved = debugOverride.toStdString();
+#endif
+    return [signature, approved](const std::filesystem::path& path, std::string& error) {
+        return backend::processing::verifyProcessingCoreEd25519(path, signature, approved,
+                                                                error);
+    };
 #else
     return [signingScheme](const std::filesystem::path&, std::string& error) {
         error = "processing-core trust scheme '" + signingScheme +
@@ -275,6 +295,12 @@ bool ProcessingCoreDialog::restorePersistedCore(backend::AppBackend& backend, QS
         settings.value(QStringLiteral("ProcessingCore/SigningScheme")).toString();
     persistedCompatibility.signingRequired =
         settings.value(QStringLiteral("ProcessingCore/SigningRequired"), false).toBool();
+    persistedCompatibility.signingPublicKeySpkiBase64 =
+        settings.value(QStringLiteral("ProcessingCore/SigningPublicKeySpkiBase64")).toString();
+    persistedCompatibility.signingPublicKeySpkiSha256 =
+        settings.value(QStringLiteral("ProcessingCore/SigningPublicKeySpkiSha256")).toString();
+    persistedCompatibility.signingSignatureBase64 =
+        settings.value(QStringLiteral("ProcessingCore/SigningSignatureBase64")).toString();
     if (persistedCompatibility.appMinVersion.isEmpty() ||
         !processingcorecatalog::isAppCompatible(
             persistedCompatibility, QCoreApplication::applicationVersion())) {
@@ -551,6 +577,9 @@ void ProcessingCoreDialog::prepareAndActivateSelected() {
             manifestPlugin->appMinVersion == plugin.appMinVersion &&
             manifestPlugin->appMaxVersion == plugin.appMaxVersion &&
             manifestPlugin->signingScheme == plugin.signingScheme &&
+            manifestPlugin->signingPublicKeySpkiBase64 == plugin.signingPublicKeySpkiBase64 &&
+            manifestPlugin->signingPublicKeySpkiSha256 == plugin.signingPublicKeySpkiSha256 &&
+            manifestPlugin->signingSignatureBase64 == plugin.signingSignatureBase64 &&
             manifestPlugin->signingRequired == plugin.signingRequired;
         if (!matchesIndex) {
             setBusy(false, manifest.ok
@@ -657,6 +686,9 @@ void ProcessingCoreDialog::downloadAndActivate(
                 selection.appMaxVersion = plugin.appMaxVersion;
                 selection.signingScheme = plugin.signingScheme;
                 selection.signingRequired = plugin.signingRequired;
+                selection.signingPublicKeySpkiBase64 = plugin.signingPublicKeySpkiBase64;
+                selection.signingPublicKeySpkiSha256 = plugin.signingPublicKeySpkiSha256;
+                selection.signingSignatureBase64 = plugin.signingSignatureBase64;
                 if (processingcoresettings::persistSelection(settings, selection,
                                                              &persistenceError)) {
                     return true;
