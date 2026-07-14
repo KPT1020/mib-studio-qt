@@ -8,6 +8,18 @@
 #include <QApplication>
 #include <QLabel>
 
+#include <cstdio>
+
+namespace {
+// The Windows release runner killed this test at the CTest timeout without
+// any captured output; unbuffered stage markers make the next stall
+// attributable from CI logs alone.
+void stage(const char* name) {
+    std::fprintf(stderr, "stage: %s\n", name);
+    std::fflush(stderr);
+}
+}  // namespace
+
 int main(int argc, char* argv[]) {
     qputenv("QT_QPA_PLATFORM", QByteArrayLiteral("offscreen"));
     qputenv("MIB_DISABLED_SERVICES", QByteArrayLiteral("all"));
@@ -19,14 +31,20 @@ int main(int argc, char* argv[]) {
     qputenv("MIB_STUDIO_EMODULUS_LUT_MANIFEST_URL",
             QByteArrayLiteral("file:///nonexistent/mib-lut-manifest.json"));
 
+    stage("creating QApplication");
     QApplication app(argc, argv);
+    stage("QApplication ready");
     mib::test::TempDir dataRoot("processing_core_dialog");
     backend::AppBackend backend;
+    stage("initializing AppBackend");
     MIB_REQUIRE(backend.initialize(dataRoot.path().string()),
                 "backend initializes with all optional services disabled");
+    stage("AppBackend initialized");
 
     const auto localCore = backend.processing().activeProcessingCoreIdentity();
+    stage("constructing ProcessingCoreDialog");
     frontend::ProcessingCoreDialog dialog(backend);
+    stage("ProcessingCoreDialog constructed");
     const auto labels = dialog.findChildren<QLabel*>(QString(), Qt::FindDirectChildrenOnly);
 
     bool renderedLocalCore = false;

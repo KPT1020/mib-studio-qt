@@ -178,10 +178,13 @@ if(BUILD_TESTING)
     )
     add_test(NAME frontend.processing_core_dialog
         COMMAND $<TARGET_FILE:processing_core_dialog_test>)
+    # 120 s: the Windows release runner spends far longer than Linux inside
+    # first-time Qt widgets/network bring-up (this is the only QApplication
+    # test in the suite); the test itself is synchronous and offline.
     set_tests_properties(frontend.processing_core_dialog PROPERTIES
         LABELS "frontend;processing"
         ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-        TIMEOUT 30
+        TIMEOUT 120
     )
 endif()
 
