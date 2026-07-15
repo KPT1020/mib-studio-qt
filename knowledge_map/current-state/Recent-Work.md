@@ -5,6 +5,21 @@
 
 ## Features shipped
 
+- **Qt → React/Tauri migration: backend de-Qt slice 5 — `mib_backend` is now
+  Qt-free** (2026-07-15, epic #246) — The crash-reporter's Qt log handler
+  (`qInstallMessageHandler` → spdlog / Sentry) moved out of the backend into the
+  frontend `src/frontend/system/QtLogBridge.cpp` (installed from `main.cpp`,
+  calls back to `CrashReporter::captureMessage`); the dead `#include <QString>`
+  in `AppBackend.cpp` was removed. With no Qt symbols left, **`Qt6::Core` is
+  dropped from `mib_backend` and `AUTOMOC` is turned OFF** — `nm`/`ldd` confirm
+  the backend library and its test binaries reference zero Qt. Also de-Qt-ed 6
+  backend/integration/hardware tests that only built a throwaway
+  `QCoreApplication` (dead since the LUT catalog stopped checking for a Qt app
+  instance). Full `linux-backend-only` suite green (73/73). The backend-only
+  *build* still `find_package`s `Qt6::Core` solely for 7 `frontend;utility`
+  tests — de-Qt-ing those is the last step to the Phase 1 exit gate (no Qt SDK).
+  Details: `knowledge_map/task/2026-07-15-qt-decoupling-crashreporter.md`.
+
 - **Qt → React/Tauri migration: backend de-Qt slice 4 (LUT catalog HTTP seam)**
   (2026-07-15, epic #246, ADR 0002) — `EModulusLutCatalog` is now Qt-free: the
   update/verify/cache/fallback state machine stays in C++ (nlohmann JSON,
