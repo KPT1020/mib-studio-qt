@@ -16,5 +16,11 @@ cxx = "1"
 [build-dependencies]
 cxx-build = "1"
 
+[dev-dependencies]
+# The contract tests each construct a full AppBackend, whose C++ backend has
+# process-global state (spdlog, HDF5, OpenCV). cargo runs tests in parallel by
+# default, so two backends racing in one process can SIGSEGV — serialize them.
+serial_test = "3"
+
 # The bridge links the static mib_backend / mib_processing archives, which pull
 # in OpenCV / HDF5 / SQLite / spdlog. Those are built by CMake (see build.rs).

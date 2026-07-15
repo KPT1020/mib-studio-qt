@@ -259,6 +259,7 @@ fn fetch_processing_stats(state: State<AppState>) -> Result<ProcessingStats, Str
 mod tests {
     use super::kind_name;
     use mib_bridge::ffi::{self, BridgeEventKind};
+    use serial_test::serial;
     use std::time::{Duration, Instant};
 
     #[test]
@@ -271,6 +272,7 @@ mod tests {
     // Headless proof that the desktop crate links the bridge and the mock-camera
     // vertical slice works end to end (no Tauri runtime, no display).
     #[test]
+    #[serial]
     fn mock_camera_slice_round_trip() {
         let sample = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../data/mock_frames/frame_00000.tiff");
@@ -314,6 +316,7 @@ mod tests {
     // Headless proof of the recording + review slice: record a clip, load it
     // back, and pull a frame by index.
     #[test]
+    #[serial]
     fn record_and_review_round_trip() {
         let sample = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../data/mock_frames/frame_00000.tiff");
@@ -355,6 +358,7 @@ mod tests {
 
     // Headless proof of the processing slice: apply settings, then pull stats.
     #[test]
+    #[serial]
     fn processing_settings_round_trip() {
         let sample = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../data/mock_frames/frame_00000.tiff");

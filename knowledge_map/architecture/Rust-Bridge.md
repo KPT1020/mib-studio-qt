@@ -101,6 +101,11 @@ CI: `.github/workflows/bridge-ci.yml` builds the archives then runs
 - Keep the event sink non-blocking on the C++ thread; do not add a per-frame
   base64/JSON pixel channel — extend the command/event variants (with a version
   bump) instead.
+- Tests that construct a `BackendBridge` (i.e. an `AppBackend`) must be
+  `#[serial]` (via the `serial_test` dev-dependency): the C++ backend has
+  process-global state (spdlog, HDF5, OpenCV), so cargo's default **parallel**
+  test execution can `SIGSEGV` when two backends race in one process. This bit
+  the `desktop-ci` lane once — annotate every backend-constructing test.
 - `BackendBridge` is `Send` but **not** `Sync` (`unsafe impl Send` in
   `lib.rs`): it may be moved between threads / held in a Tauri
   `State<Mutex<UniquePtr<BackendBridge>>>`, but commands funnel through the one
