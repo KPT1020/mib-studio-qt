@@ -44,6 +44,31 @@ Backend code may use Qt Core/Gui where the current implementation requires it,
 but it should avoid Qt Widgets ownership. Widget layout, tab state, dialogs,
 and display-specific behavior belong in the frontend.
 
+## Portable Processing Sub-Boundary (`mib_processing`)
+
+Within backend, the deformability-cytometry algorithm and its I/O adapters
+(`ProcessingService`, `EModulusLut`, `BatchMaskSources`, `Hdf5Service`,
+`FrameStore`, `Tools`, `CrashStateMirror`) compile into a separate CMake
+target, `mib_processing`, that must stay **Qt-free** — no `Qt6::*` link, no
+`#include <Q...>` anywhere in its sources. `mib_backend` links
+`mib_processing` publicly rather than compiling these files itself, so the
+desktop app is unaffected; `backend-ci.yml` builds `mib_processing`
+explicitly and fails if a Qt symbol leaks into it.
+
+This is a stricter sub-rule than "Backend may use Qt Core/Gui" above: it
+exists so `mib_processing` can be built and consumed (e.g. via Python
+bindings) without a Qt toolchain at all — the artifact a non-Qt consumer
+like Biowork's `services/mib-processing` links against. See
+`docs/gold_standard_metrics.md` ("Portable Processing Contract") and the
+[Biowork portability epic](https://github.com/KPT1020/mib-studio-qt/issues/220).
+
+Where a `mib_processing` source needs functionality that would pull in Qt
+(e.g. `Hdf5Service`'s optional performance telemetry, which the real
+`CrashReporter` implementation depends on `QtGlobal`/`QString` for), inject it
+as a callback set from the Qt-aware side at startup rather than linking Qt
+into `mib_processing` — see `Hdf5Service::setHdf5PerformanceTraceHook` /
+`src/frontend/core/main.cpp`.
+
 ## Frontend-Only Responsibilities
 
 Frontend code owns user interaction and presentation:

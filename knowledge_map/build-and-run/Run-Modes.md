@@ -55,6 +55,11 @@ For backend CI loops without Qt Widgets/Charts frontend binaries:
 - Backend tests can be selected by label:
   `ctest --preset linux-backend-only-test -L backend`
 
+Full frontend builds also register `frontend.processing_core_dialog`. CTest
+runs it with `QT_QPA_PLATFORM=offscreen`; its deliberately invalid registry
+URL exercises the offline selector state without opening a window or reaching
+the network.
+
 ## Troubleshooting
 
 - `docs/howto/troubleshoot-crashes.md`

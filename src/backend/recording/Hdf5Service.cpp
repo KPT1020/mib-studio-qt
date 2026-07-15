@@ -1,8 +1,6 @@
 #include "backend/recording/Hdf5Service.h"
 #include "backend/diagnostics/CrashStateMirror.h"
-#include "backend/services/CrashReporter.h"
 #include "backend/processing/ProcessingService.h"
-#include "backend/services/Logger.h"
 
 #include <spdlog/spdlog.h>
 #include <opencv2/core.hpp>
@@ -23,6 +21,22 @@
 
 namespace backend::services
 {
+    namespace
+    {
+        PerformanceTraceFn g_performanceTraceHook;
+
+        void tracePerformance(std::string_view name, std::string_view operation,
+                               double durationMs, std::string_view jsonData)
+        {
+            if (g_performanceTraceHook)
+                g_performanceTraceHook(name, operation, durationMs, jsonData);
+        }
+    }
+
+    void setHdf5PerformanceTraceHook(PerformanceTraceFn fn)
+    {
+        g_performanceTraceHook = std::move(fn);
+    }
 
     struct Hdf5Service::Impl
     {
@@ -78,8 +92,12 @@ namespace backend::services
                 return H5P_DEFAULT;
             }
 
-            // Best-effort: ignored gracefully if the build doesn't support it.
+            // H5Pset_file_locking was added after the HDF5 1.10.5 baseline
+            // used by manylinux_2_28. Keep portable wheel builds compatible;
+            // older runtimes retain their default locking behavior.
+#if H5_VERSION_GE(1, 10, 7)
             H5Pset_file_locking(fileAccessId, /*use_file_locking=*/0, /*ignore_when_disabled=*/1);
+#endif
 
             return fileAccessId;
         }
@@ -360,8 +378,7 @@ namespace backend::services
                 data << "{\"status\":" << status
                      << ",\"final_flush_ok\":" << (flushOk ? "true" : "false")
                      << ",\"open_objects_before_close\":" << openObjects << "}";
-                CrashReporter::capturePerformanceTransaction(
-                    "hdf5.close_file", "hdf5.close", ms, data.str());
+                tracePerformance("hdf5.close_file", "hdf5.close", ms, data.str());
             }
             impl_->fileId_ = H5I_INVALID_HID;
             impl_->isOpen_ = false;
@@ -1241,8 +1258,7 @@ namespace backend::services
                  << ",\"series_ms\":" << msSeries
                  << ",\"invalid_ms\":" << msInvalid
                  << "}";
-            CrashReporter::capturePerformanceTransaction(
-                "hdf5.append_frames", "hdf5.write", msTotal, data.str());
+            tracePerformance("hdf5.append_frames", "hdf5.write", msTotal, data.str());
         }
 
         if (!validFrames.empty() || !invalidFrames.empty())
@@ -1260,7 +1276,8 @@ namespace backend::services
                                           size_t totalValidFrames, size_t totalInvalidFrames,
                                           const ProcessingConfig& processingConfig,
                                           const ProcessingService::Roi& roi,
-                                          const cv::Mat* background)
+                                          const cv::Mat* background,
+                                          const backend::processing::ProcessingCoreIdentity* processingCore)
     {
         if (!isFileOpen())
         {
@@ -1492,8 +1509,50 @@ namespace backend::services
             H5Aclose(attrMI2);
         }
 
+        const auto defaultIdentity = backend::processing::bundledProcessingCoreIdentity();
+        const auto& coreIdentity = processingCore ? *processingCore : defaultIdentity;
+        const auto writeUint32Attribute = [&](const char* name, uint32_t value) {
+            hid_t attribute = H5Acreate2(infoGroupId, name, H5T_NATIVE_UINT32, scalarSpaceId,
+                                         H5P_DEFAULT, H5P_DEFAULT);
+            if (attribute < 0) return false;
+            const bool ok = H5Awrite(attribute, H5T_NATIVE_UINT32, &value) >= 0;
+            H5Aclose(attribute);
+            return ok;
+        };
+        const auto writeStringAttribute = [&](const char* name, const std::string& value) {
+            hid_t stringType = H5Tcopy(H5T_C_S1);
+            if (stringType < 0) return false;
+            H5Tset_size(stringType, H5T_VARIABLE);
+            H5Tset_cset(stringType, H5T_CSET_UTF8);
+            hid_t attribute = H5Acreate2(infoGroupId, name, stringType, scalarSpaceId,
+                                         H5P_DEFAULT, H5P_DEFAULT);
+            bool ok = false;
+            if (attribute >= 0) {
+                const char* pointer = value.c_str();
+                ok = H5Awrite(attribute, stringType, &pointer) >= 0;
+                H5Aclose(attribute);
+            }
+            H5Tclose(stringType);
+            return ok;
+        };
+        const bool provenanceOk =
+            writeStringAttribute("processing_core_version", coreIdentity.version) &&
+            writeUint32Attribute("processing_contract_version", coreIdentity.contractVersion) &&
+            writeUint32Attribute("processing_engine_abi_version", coreIdentity.engineAbiVersion) &&
+            writeStringAttribute("processing_core_sha256", coreIdentity.artifactSha256) &&
+            writeStringAttribute("processing_release_tag", coreIdentity.releaseTag) &&
+            writeStringAttribute("processing_manifest_sha256", coreIdentity.manifestSha256) &&
+            writeStringAttribute("processing_core_source", coreIdentity.source) &&
+            writeStringAttribute("processing_core_build_id", coreIdentity.buildId) &&
+            writeStringAttribute("processing_runtime_fingerprint", coreIdentity.runtimeFingerprint);
+
         H5Sclose(scalarSpaceId);
         H5Gclose(infoGroupId);
+
+        if (!provenanceOk) {
+            SPDLOG_ERROR("Failed to persist processing-core provenance");
+            return false;
+        }
 
         // Write background image for reproducibility (if provided and non-empty)
         if (background != nullptr && !background->empty())
@@ -2133,6 +2192,86 @@ namespace backend::services
                         startTimeNs, endTimeNs, totalValidFrames, totalInvalidFrames);
         }
         return success;
+    }
+
+    bool Hdf5Service::readProcessingCoreIdentity(
+        backend::processing::ProcessingCoreIdentity& processingCore) const
+    {
+        if (!isFileOpen()) return false;
+        const char* groupPath = nullptr;
+        if (H5Lexists(impl_->fileId_, "/experiment_info", H5P_DEFAULT) > 0)
+            groupPath = "/experiment_info";
+        else if (H5Lexists(impl_->fileId_, "/recording_info", H5P_DEFAULT) > 0)
+            groupPath = "/recording_info";
+        else
+            return false;
+        hid_t group = H5Gopen2(impl_->fileId_, groupPath, H5P_DEFAULT);
+        if (group < 0) return false;
+
+        const auto isScalarAttribute = [](hid_t attribute) {
+            hid_t space = H5Aget_space(attribute);
+            if (space < 0) return false;
+            const hssize_t points = H5Sget_simple_extent_npoints(space);
+            H5Sclose(space);
+            return points == 1;
+        };
+        const auto readUint32 = [&](const char* name, uint32_t& value) {
+            hid_t attribute = H5Aopen(group, name, H5P_DEFAULT);
+            if (attribute < 0) return false;
+            const bool ok = isScalarAttribute(attribute) &&
+                            H5Aread(attribute, H5T_NATIVE_UINT32, &value) >= 0;
+            H5Aclose(attribute);
+            return ok;
+        };
+        const auto readString = [&](const char* name, std::string& value) {
+            hid_t attribute = H5Aopen(group, name, H5P_DEFAULT);
+            if (attribute < 0) return false;
+            if (!isScalarAttribute(attribute) || H5Aget_storage_size(attribute) > 1024 * 1024) {
+                H5Aclose(attribute);
+                return false;
+            }
+            hid_t type = H5Aget_type(attribute);
+            if (type < 0 || H5Tget_class(type) != H5T_STRING) {
+                if (type >= 0) H5Tclose(type);
+                H5Aclose(attribute);
+                return false;
+            }
+            bool ok = false;
+            if (H5Tis_variable_str(type) > 0) {
+                char* pointer = nullptr;
+                ok = H5Aread(attribute, type, &pointer) >= 0;
+                if (ok) value = pointer ? pointer : "";
+                if (pointer) H5free_memory(pointer);
+            } else {
+                const size_t size = H5Tget_size(type);
+                if (size > 0 && size <= 1024 * 1024) {
+                    std::vector<char> buffer(size + 1, '\0');
+                    ok = H5Aread(attribute, type, buffer.data()) >= 0;
+                    if (ok) {
+                        const auto end = std::find(buffer.begin(), buffer.begin() + size, '\0');
+                        value.assign(buffer.begin(), end);
+                    }
+                }
+            }
+            H5Tclose(type);
+            H5Aclose(attribute);
+            return ok;
+        };
+
+        backend::processing::ProcessingCoreIdentity result;
+        const bool ok =
+            readString("processing_core_version", result.version) &&
+            readUint32("processing_contract_version", result.contractVersion) &&
+            readUint32("processing_engine_abi_version", result.engineAbiVersion) &&
+            readString("processing_core_sha256", result.artifactSha256) &&
+            readString("processing_release_tag", result.releaseTag) &&
+            readString("processing_manifest_sha256", result.manifestSha256) &&
+            readString("processing_core_source", result.source) &&
+            readString("processing_core_build_id", result.buildId) &&
+            readString("processing_runtime_fingerprint", result.runtimeFingerprint);
+        H5Gclose(group);
+        if (ok) processingCore = std::move(result);
+        return ok;
     }
 
 } // namespace backend::services
@@ -3113,7 +3252,8 @@ namespace backend::services {
     bool Hdf5Service::writeRecordingInfo(uint64_t startTimeNs, uint64_t endTimeNs,
                                          uint64_t totalFrames, uint64_t filteredFrames,
                                          bool multiImageEnabled,
-                                         uint64_t multiImageCount)
+                                         uint64_t multiImageCount,
+                                         const backend::processing::ProcessingCoreIdentity* processingCore)
     {
         if (!isFileOpen())
             return false;
@@ -3176,6 +3316,49 @@ namespace backend::services {
             H5Aclose(multiCountAttr);
         }
 
+        const auto defaultIdentity = backend::processing::bundledProcessingCoreIdentity();
+        const auto& coreIdentity = processingCore ? *processingCore : defaultIdentity;
+        const auto writeUint32Attribute = [&](const char* name, uint32_t value) {
+            hid_t attribute = H5Aopen(infoGroupId, name, H5P_DEFAULT);
+            if (attribute < 0) {
+                attribute = H5Acreate2(infoGroupId, name, H5T_NATIVE_UINT32, scalarSpaceId,
+                                       H5P_DEFAULT, H5P_DEFAULT);
+            }
+            if (attribute < 0) return false;
+            const bool ok = H5Awrite(attribute, H5T_NATIVE_UINT32, &value) >= 0;
+            H5Aclose(attribute);
+            return ok;
+        };
+        const auto writeStringAttribute = [&](const char* name, const std::string& value) {
+            hid_t stringType = H5Tcopy(H5T_C_S1);
+            if (stringType < 0) return false;
+            H5Tset_size(stringType, H5T_VARIABLE);
+            H5Tset_cset(stringType, H5T_CSET_UTF8);
+            hid_t attribute = H5Aopen(infoGroupId, name, H5P_DEFAULT);
+            if (attribute < 0) {
+                attribute = H5Acreate2(infoGroupId, name, stringType, scalarSpaceId,
+                                       H5P_DEFAULT, H5P_DEFAULT);
+            }
+            bool ok = false;
+            if (attribute >= 0) {
+                const char* pointer = value.c_str();
+                ok = H5Awrite(attribute, stringType, &pointer) >= 0;
+                H5Aclose(attribute);
+            }
+            H5Tclose(stringType);
+            return ok;
+        };
+        const bool provenanceOk =
+            writeStringAttribute("processing_core_version", coreIdentity.version) &&
+            writeUint32Attribute("processing_contract_version", coreIdentity.contractVersion) &&
+            writeUint32Attribute("processing_engine_abi_version", coreIdentity.engineAbiVersion) &&
+            writeStringAttribute("processing_core_sha256", coreIdentity.artifactSha256) &&
+            writeStringAttribute("processing_release_tag", coreIdentity.releaseTag) &&
+            writeStringAttribute("processing_manifest_sha256", coreIdentity.manifestSha256) &&
+            writeStringAttribute("processing_core_source", coreIdentity.source) &&
+            writeStringAttribute("processing_core_build_id", coreIdentity.buildId) &&
+            writeStringAttribute("processing_runtime_fingerprint", coreIdentity.runtimeFingerprint);
+
         // Mark recording mode
         const char* mode = "frame_recording";
         hid_t strType = H5Tcopy(H5T_C_S1);
@@ -3195,6 +3378,11 @@ namespace backend::services {
 
         H5Sclose(scalarSpaceId);
         H5Gclose(infoGroupId);
+
+        if (!provenanceOk) {
+            SPDLOG_ERROR("Failed to persist recording processing-core provenance");
+            return false;
+        }
 
         if (!flush())
         {

@@ -9,6 +9,9 @@ Usage:
     # Export CSV metrics only
     python scripts/export_hdf5.py -i experiment.h5 -o ./export --format csv
 
+    # Export gold-standard metrics JSON (docs/gold_standard_metrics.schema.json)
+    python scripts/export_hdf5.py -i experiment.h5 -o ./export --format json
+
     # Export CSV + images
     python scripts/export_hdf5.py -i experiment.h5 -o ./export --format all
 
@@ -27,9 +30,15 @@ Install dependencies:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+# Schema version for the gold-standard metrics JSON document
+# (docs/gold_standard_metrics.schema.json). Bump alongside the schema file
+# whenever the frame field set changes; see docs/gold_standard_metrics.md.
+GOLD_STANDARD_SCHEMA_VERSION = 1
 
 try:
     import h5py
@@ -107,6 +116,16 @@ def metrics_csv_path(input_path: Path, output_root: Path) -> Path:
     )
 
 
+def metrics_json_path(input_path: Path, output_root: Path) -> Path:
+    """Return the collision-safe gold-standard JSON path for a metrics-only export."""
+    base = source_base_name(input_path)
+    return unique_path(
+        output_root,
+        f"{base}_metrics.json",
+        f"{base}_metrics_{{suffix}}.json",
+    )
+
+
 def export_folder_path(input_path: Path, output_root: Path) -> Path:
     """Return the collision-safe source-specific folder path for image/all exports."""
     base = source_base_name(input_path)
@@ -117,6 +136,9 @@ def resolve_export_targets(input_path: Path, output_root: Path, format_type: str
     """Resolve generated output paths for the selected export format."""
     if format_type == "csv":
         return metrics_csv_path(input_path, output_root), output_root
+
+    if format_type == "json":
+        return metrics_json_path(input_path, output_root), output_root
 
     data_output_dir = export_folder_path(input_path, output_root)
     csv_path = data_output_dir / "metrics.csv" if format_type == "all" else None
@@ -145,9 +167,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--format", "-f",
         type=str,
-        choices=["csv", "images", "all"],
+        choices=["csv", "json", "images", "all"],
         default="csv",
-        help="Export format: csv (metrics only), images (images only), or all (both). Default: csv"
+        help=(
+            "Export format: csv (metrics only), json (gold-standard metrics "
+            "JSON per docs/gold_standard_metrics.schema.json), images "
+            "(images only), or all (csv + images). Default: csv"
+        )
     )
     parser.add_argument(
         "--pixel-to-micron", "-p",
@@ -186,6 +212,11 @@ def read_hdf5_metadata(h5_file: h5py.File, dataset_path: str) -> Optional[np.nda
 def metadata_value(row: np.void, field: str, default):
     names = row.dtype.names or ()
     return row[field] if field in names else default
+
+
+def metadata_has(row: np.void, field: str) -> bool:
+    """Return whether an HDF5 compound metadata row carries ``field``."""
+    return field in (row.dtype.names or ())
 
 
 def read_hdf5_images(h5_file: h5py.File, dataset_path: str) -> Optional[np.ndarray]:
@@ -309,7 +340,94 @@ def export_metrics_to_csv(
                 f.write(f"{row['brightness_q3']:.2f},")
                 f.write(f"{row['brightness_q4']:.2f}\n")
                 invalid_count += 1
-    
+
+    return valid_count, invalid_count
+
+
+def _frame_to_gold_standard_dict(row: "np.void", frame_type: str, pixel_to_micron: float) -> Dict[str, Any]:
+    """Map one metadata row to a gold-standard JSON frame object (schema v1)."""
+    area = float(row['area'])
+    document: Dict[str, Any] = {
+        "frame_type": frame_type,
+        "index": int(row['index']),
+        "timestamp_ns": int(row['timestampNs']),
+        "object_id": int(metadata_value(row, 'objectId', -1)),
+        "object_count": int(metadata_value(row, 'objectCount', 0)),
+        "deformability": float(row['deformability']),
+        "area": area,
+        "area_um2": area * pixel_to_micron * pixel_to_micron,
+        "area_ratio": float(row['areaRatio']),
+        "ring_ratio": float(row['ringRatio']),
+        "is_valid": bool(row['isValid']),
+        "touches_border": bool(row['touchesBorder']),
+        "has_single_inner_contour": bool(row['hasSingleInnerContour']),
+        "in_range": bool(row['inRange']),
+        "inner_contour_count": int(row['innerContourCount']),
+        "brightness_q1": float(row['brightness_q1']),
+        "brightness_q2": float(row['brightness_q2']),
+        "brightness_q3": float(row['brightness_q3']),
+        "brightness_q4": float(row['brightness_q4']),
+    }
+    # youngsModulus is only present in HDF5 metadata written by newer builds;
+    # omit (rather than emit non-JSON NaN) when absent or out of LUT coverage.
+    youngs_modulus = float(metadata_value(row, 'youngsModulus', float('nan')))
+    if youngs_modulus == youngs_modulus:  # not NaN
+        document["youngs_modulus"] = youngs_modulus
+    if metadata_has(row, "isTargetGroup"):
+        document["is_target_group"] = bool(row["isTargetGroup"])
+    if metadata_has(row, "trackId"):
+        document["track_id"] = int(row["trackId"])
+        document["track_first_frame"] = int(metadata_value(row, "trackFirstFrame", 0))
+        document["track_last_frame"] = int(metadata_value(row, "trackLastFrame", 0))
+        document["track_observation_count"] = int(metadata_value(row, "trackObservationCount", 0))
+    return document
+
+
+def export_metrics_to_json(
+    metadata_valid: Optional[np.ndarray],
+    metadata_invalid: Optional[np.ndarray],
+    output_path: Path,
+    pixel_to_micron: float,
+    frame_type: str,
+    source_label: str,
+) -> Tuple[int, int]:
+    """
+    Export metrics to gold-standard JSON matching
+    docs/gold_standard_metrics.schema.json (the portable processing contract).
+
+    Args:
+        metadata_valid: Valid frames metadata array, or None
+        metadata_invalid: Invalid frames metadata array, or None
+        output_path: Path to output JSON file
+        pixel_to_micron: Pixel to micron conversion factor
+        frame_type: "valid", "invalid", or "both"
+        source_label: Value for the document's "source" field
+
+    Returns:
+        Tuple of (valid_count, invalid_count) frames exported
+    """
+    frames: List[Dict[str, Any]] = []
+    valid_count = 0
+    invalid_count = 0
+
+    if metadata_valid is not None and frame_type in ("valid", "both"):
+        for row in metadata_valid:
+            frames.append(_frame_to_gold_standard_dict(row, "valid", pixel_to_micron))
+            valid_count += 1
+
+    if metadata_invalid is not None and frame_type in ("invalid", "both"):
+        for row in metadata_invalid:
+            frames.append(_frame_to_gold_standard_dict(row, "invalid", pixel_to_micron))
+            invalid_count += 1
+
+    document = {
+        "version": GOLD_STANDARD_SCHEMA_VERSION,
+        "contract_version": GOLD_STANDARD_SCHEMA_VERSION,
+        "pixel_to_micron": pixel_to_micron,
+        "source": source_label,
+        "frames": frames,
+    }
+    output_path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
     return valid_count, invalid_count
 
 
@@ -451,7 +569,7 @@ def export_hdf5(
     Args:
         input_path: Path to input HDF5 file
         output_dir: Output directory
-        format_type: "csv", "images", or "all"
+        format_type: "csv", "json", "images", or "all"
         frame_type: "valid", "invalid", or "both"
         pixel_to_micron: Pixel to micron conversion factor
         
@@ -530,7 +648,24 @@ def export_hdf5(
                 total_count = valid_count + invalid_count
                 print(f"Exported {total_count} frames to CSV (Valid: {valid_count}, Invalid: {invalid_count})")
                 print(f"CSV file: {csv_path}")
-            
+
+            # Export gold-standard JSON if requested
+            if format_type == "json":
+                if csv_path is None:
+                    print("ERROR: JSON output path was not resolved", file=sys.stderr)
+                    return 1
+                valid_count, invalid_count = export_metrics_to_json(
+                    metadata_valid,
+                    metadata_invalid,
+                    csv_path,
+                    pixel_to_micron,
+                    frame_type,
+                    source_base_name(input_path),
+                )
+                total_count = valid_count + invalid_count
+                print(f"Exported {total_count} frames to JSON (Valid: {valid_count}, Invalid: {invalid_count})")
+                print(f"JSON file: {csv_path}")
+
             # Export images if requested
             if format_type in ("images", "all"):
                 total_exported = 0

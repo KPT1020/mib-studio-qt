@@ -24,6 +24,10 @@ DEFAULT_PUBLIC_BASE_URL = "https://updates.yofo.bio"
 ARTIFACT_CACHE_CONTROL = "public, max-age=31536000, immutable"
 MANIFEST_CACHE_CONTROL = "public, max-age=60, must-revalidate"
 INDEX_SCHEMA_VERSION = 1
+_PUBLISHED_VERSION = re.compile(
+    r"^(?P<numeric>\d+\.\d+\.\d+)"
+    r"(?:-beta\.[0-9A-Za-z][0-9A-Za-z.-]*)?$"
+)
 
 
 def _version_sort_key(version: str) -> tuple:
@@ -40,12 +44,23 @@ def _version_sort_key(version: str) -> tuple:
     return (tuple(parts[:3]), beta)
 
 
+def _index_sort_key(entry: dict) -> tuple:
+    """Order semver first, then equal SHA betas by publication time.
+
+    SHA beta identifiers intentionally have no numeric prerelease ordering.
+    Their UTC timestamps make a newly published build lead older builds on the
+    same numeric line; the version string is a deterministic final tie-break.
+    """
+    published = str(entry.get("published_utc") or entry.get("published_at") or "")
+    return (*_version_sort_key(entry.get("version", "")), published, str(entry.get("version", "")))
+
+
 def merge_index(existing: dict, entry: dict, channel: str) -> dict:
     """Insert/replace `entry` (keyed by 'version') into a per-channel index,
     returning a newest-first {schema_version, channel, versions} dict. Pure."""
     versions = [v for v in (existing.get("versions") or []) if v.get("version") != entry.get("version")]
     versions.append(entry)
-    versions.sort(key=lambda v: _version_sort_key(v.get("version", "")), reverse=True)
+    versions.sort(key=_index_sort_key, reverse=True)
     return {"schema_version": INDEX_SCHEMA_VERSION, "channel": channel, "versions": versions}
 
 
@@ -133,6 +148,29 @@ def detect_version(installer: Path) -> str:
     return match.group(1)
 
 
+def published_artifact_name(installer: Path, version: str) -> str:
+    """Return the immutable R2 filename for an explicit release identity.
+
+    Inno Setup emits a numeric filename even for beta builds. R2 objects use
+    the full beta identity so two prereleases never overwrite the same
+    year-cached key.
+    """
+    release_match = _PUBLISHED_VERSION.fullmatch(version)
+    if release_match is None:
+        raise ValueError(
+            "Version must be X.Y.Z or X.Y.Z-beta.<identifier> for publishing"
+        )
+    installer_version = detect_version(installer)
+    if release_match.group("numeric") != installer_version:
+        raise ValueError(
+            "Explicit release numeric version does not match installer filename: "
+            f"{version!r} vs {installer_version!r}"
+        )
+    return installer.name.replace(
+        f"_v{installer_version}.exe", f"_v{version}.exe", 1
+    )
+
+
 def write_manifest_file(manifest: dict[str, object], manifest_out: str | None) -> Path:
     if manifest_out:
         path = Path(manifest_out)
@@ -154,7 +192,11 @@ def write_manifest_file(manifest: dict[str, object], manifest_out: str | None) -
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--version", default=None)
+    parser.add_argument(
+        "--version",
+        default=None,
+        help="Full release identity (X.Y.Z or X.Y.Z-beta.<id>); required to preserve beta identity",
+    )
     parser.add_argument("--installer", required=True, help="Path to MIB_Studio_Qt_(Update|Setup)_vX.Y.Z.exe")
     parser.add_argument("--endpoint", default=os.getenv("MIB_STUDIO_R2_ENDPOINT"))
     parser.add_argument("--bucket", default=DEFAULT_BUCKET)
@@ -231,6 +273,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         version = args.version or detect_version(installer)
+        artifact_name = published_artifact_name(installer, version)
     except ValueError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -250,7 +293,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"   Hash: {digest}")
     print(f"   Size: {size_bytes} bytes")
 
-    installer_key = f"{args.channel}/{installer.name}"
+    installer_key = f"{args.channel}/{artifact_name}"
     manifest_key = f"{args.channel}/latest.json"
     installer_url = join_public_object_url(args.public_base_url, installer_key)
     manifest_url = join_public_object_url(args.public_base_url, manifest_key)

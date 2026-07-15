@@ -36,6 +36,7 @@
 #include "backend/app/AppBackend.h"
 #include "frontend/core/MainWindow.h"
 #include "frontend/tabs/OverviewTab.h"
+#include "frontend/utils/ApplicationSettings.h"
 
 namespace {
 
@@ -280,6 +281,12 @@ int main(int argc, char* argv[])
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                        scratch.filePath(QStringLiteral("settings")));
+    QString settingsError;
+    if (!frontend::applicationsettings::initialize(&settingsError)) {
+        SPDLOG_ERROR("screenshot_tour: settings initialization failed: {}",
+                     settingsError.toStdString());
+        return 1;
+    }
 
     backend::AppBackend backend;
     if (!backend.initialize(scratch.filePath(QStringLiteral("data")).toStdString())) {

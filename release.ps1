@@ -22,6 +22,15 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$resolvedScriptRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
+$resolvedWorkingDirectory = (Resolve-Path -LiteralPath (Get-Location).Path).Path
+if (-not [System.StringComparer]::OrdinalIgnoreCase.Equals(
+        $resolvedScriptRoot.TrimEnd('\', '/'),
+        $resolvedWorkingDirectory.TrimEnd('\', '/'))) {
+    Write-Host "ERROR: Run release.ps1 from the repository root: $resolvedScriptRoot" -ForegroundColor Red
+    exit 1
+}
+
 # --- Validate bump type ---
 $bumpCount = 0
 if ($Patch) { $bumpCount++ }
@@ -48,7 +57,16 @@ if ($bumpCount -ne 1) {
 # --- Check prerequisites ---
 Write-Host "=== MIB Studio Qt Release ===" -ForegroundColor Cyan
 
-if ($Push -and -not $SkipBuild) {
+$python = if ($env:PYTHON) { $env:PYTHON } else { "python" }
+try {
+    & $python --version *> $null
+    if ($LASTEXITCODE -ne 0) { throw "Python returned $LASTEXITCODE" }
+} catch {
+    Write-Host "ERROR: Python is required for release version resolution and publishing." -ForegroundColor Red
+    exit 1
+}
+
+if (-not $SkipBuild) {
     # Check gh CLI is available
     try {
         $null = gh --version 2>&1
@@ -58,49 +76,77 @@ if ($Push -and -not $SkipBuild) {
     }
 }
 
-# --- Check git status ---
-$gitStatus = git status --porcelain
-if ($gitStatus) {
-    Write-Host "WARNING: Working tree has uncommitted changes:" -ForegroundColor Yellow
-    Write-Host $gitStatus -ForegroundColor Gray
-    Write-Host ""
-    $response = Read-Host "Continue anyway? (y/N)"
-    if ($response -ne 'y' -and $response -ne 'Y') {
-        Write-Host "Aborted." -ForegroundColor Red
+# Resolve the public trust pin from the same GitHub repository that will
+# receive the release. Do this before bumping, committing, or tagging so a
+# missing/malformed release configuration cannot leave version mutations
+# behind. Even a no-push local run produces distributable installers, so every
+# build is gated. --skip-build produces no binary; when it pushes a tag, the
+# tag workflow owns the guarded build and performs this check itself.
+$releaseRepository = $null
+$processingCoreSignerSpki = $null
+if (-not $SkipBuild) {
+    $releaseRepository = (& gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $releaseRepository) {
+        Write-Host "ERROR: Could not resolve the destination GitHub repository." -ForegroundColor Red
         exit 1
     }
+    $releaseRepository = $releaseRepository.Trim()
+
+    $processingCoreSignerSpki = (& gh variable get MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256 --repo $releaseRepository 2>$null)
+    if ($LASTEXITCODE -ne 0 -or
+        $processingCoreSignerSpki -notmatch '^[0-9A-Fa-f]{64}$') {
+        Write-Host "ERROR: Repository variable MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256 must be a non-empty 64-hex DER-SPKI SHA-256 in $releaseRepository." -ForegroundColor Red
+        exit 1
+    }
+    $processingCoreSignerSpki = $processingCoreSignerSpki.Trim().ToLowerInvariant()
+    Write-Host "Processing-core signer trust pin validated for $releaseRepository." -ForegroundColor Green
+}
+
+# --- Check git status ---
+$currentBranch = (git rev-parse --abbrev-ref HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or -not $currentBranch -or $currentBranch -eq 'HEAD') {
+    Write-Host "ERROR: Release must run from a named branch" -ForegroundColor Red
+    exit 1
+}
+if ($Push -and -not $Beta -and $currentBranch -ne 'main') {
+    Write-Host "ERROR: A pushed stable release must run from main (current: $currentBranch)" -ForegroundColor Red
+    exit 1
+}
+
+$gitStatus = git status --porcelain
+if ($gitStatus) {
+    Write-Host "ERROR: Release requires a clean working tree so built bytes match the tag:" -ForegroundColor Red
+    Write-Host $gitStatus -ForegroundColor Gray
+    exit 1
+}
+
+git fetch origin --tags
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: Could not refresh release tags from origin" -ForegroundColor Red
+    exit 1
 }
 
 # --- Step 1: Bump version ---
 Write-Host "`n--- Step 1: Bump Version ---" -ForegroundColor Cyan
 
-$bumpArg = if ($Patch) { "--patch" } elseif ($Minor) { "--minor" } else { "--major" }
-
-if ($DryRun) {
-    Write-Host "[DRY RUN] Would run: .\bump-version.ps1 $bumpArg --tag" -ForegroundColor Gray
-} else {
-    $bumpParams = @{ Tag = $true }
-    if ($Patch) { $bumpParams.Patch = $true }
-    elseif ($Minor) { $bumpParams.Minor = $true }
-    else { $bumpParams.Major = $true }
-    & "$PSScriptRoot\bump-version.ps1" @bumpParams
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "ERROR: Version bump failed" -ForegroundColor Red
-        exit 1
-    }
-}
-
-# Read new version
+$bumpName = if ($Patch) { "patch" } elseif ($Minor) { "minor" } else { "major" }
 $versionFile = "$PSScriptRoot\cmake\MIBVersion.cmake"
 $cmakeContent = Get-Content $versionFile -Raw
-if ($cmakeContent -match 'set\(DEFAULT_VERSION\s+"(\d+\.\d+\.\d+)"\)') {
-    $newVersion = $matches[1]
-} else {
-    Write-Host "ERROR: Could not read version from cmake\MIBVersion.cmake" -ForegroundColor Red
+$versionInfoJson = & $python "$PSScriptRoot\scripts\resolve_desktop_release_version.py" `
+    --repo-root $PSScriptRoot --bump $bumpName
+if ($LASTEXITCODE -ne 0 -or -not $versionInfoJson) {
+    Write-Host "ERROR: Could not resolve the effective desktop release version" -ForegroundColor Red
     exit 1
 }
+$versionInfo = $versionInfoJson | ConvertFrom-Json
+$fallbackVersion = [string]$versionInfo.default_version
+$currentVersion = [string]$versionInfo.current_version
+$newVersion = [string]$versionInfo.next_version
 
-# Determine tag name based on channel
+# Calculate the prospective version without mutating the tree so --dry-run
+# exercises the same effective-version/tag decision as a real release.
+# Determine the tag before writing so an existing immutable tag fails without
+# leaving a version-file mutation behind.
 if ($Beta) {
     # Find next beta number for this version
     $betaNum = 1
@@ -120,6 +166,30 @@ if ($Beta) {
     $channel = "stable"
 }
 
+$existingTag = @(git tag -l $tagName)
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: Could not inspect existing release tags" -ForegroundColor Red
+    exit 1
+}
+if ($existingTag.Count -ne 0) {
+    Write-Host "ERROR: Tag $tagName already exists; refusing to move an immutable release tag" -ForegroundColor Red
+    exit 1
+}
+
+if ($DryRun) {
+    Write-Host "[DRY RUN] Prospective version: $currentVersion -> $newVersion (fallback: $fallbackVersion)" -ForegroundColor Gray
+    Write-Host "[DRY RUN] Would set DEFAULT_VERSION to $newVersion" -ForegroundColor Gray
+} else {
+    $updatedContent = $cmakeContent -replace `
+        "set\(DEFAULT_VERSION\s+`"$([regex]::Escape($fallbackVersion))`"\)", `
+        "set(DEFAULT_VERSION `"$newVersion`")"
+    if ($updatedContent -eq $cmakeContent) {
+        Write-Host "ERROR: Could not replace DEFAULT_VERSION $fallbackVersion with $newVersion" -ForegroundColor Red
+        exit 1
+    }
+    Set-Content -Path $versionFile -Value $updatedContent -NoNewline
+}
+
 Write-Host "Version: $tagName (channel: $channel)" -ForegroundColor Green
 
 # --- Step 2: Commit version bump ---
@@ -131,58 +201,116 @@ if ($DryRun) {
     git add cmake/MIBVersion.cmake
     git commit -m "chore: bump version to $newVersion"
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "WARNING: Commit may have failed (perhaps no changes?)" -ForegroundColor Yellow
+        Write-Host "ERROR: Could not commit version bump" -ForegroundColor Red
+        exit 1
     }
 
-    # Move tag to include the commit (only for non-beta; beta tags are always new)
-    if (-not $Beta) {
-        git tag -d "v$newVersion" 2>$null
+    git rev-parse --verify --quiet "refs/tags/$tagName" *> $null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "ERROR: Tag $tagName already exists; refusing to move an immutable release tag" -ForegroundColor Red
+        exit 1
     }
     git tag -a "$tagName" -m "Version $tagName"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "ERROR: Could not create tag $tagName" -ForegroundColor Red
+        exit 1
+    }
     Write-Host "Tag $tagName created on version bump commit" -ForegroundColor Green
 }
+
+$distDir = Join-Path $PSScriptRoot "build\dist"
+$expectedSetupPath = Join-Path $distDir "MIB_Studio_Qt_Setup_v$newVersion.exe"
+$expectedUpdatePath = Join-Path $distDir "MIB_Studio_Qt_Update_v$newVersion.exe"
+$setupExe = $null
+$updateExe = $null
 
 # --- Step 3: Build (optional) ---
 if (-not $SkipBuild) {
     Write-Host "`n--- Step 3: Build Release ---" -ForegroundColor Cyan
 
     if ($DryRun) {
-        Write-Host "[DRY RUN] Would build Release configuration" -ForegroundColor Gray
+        Write-Host "[DRY RUN] Would reconfigure Release with the repository processing-core signer trust pin" -ForegroundColor Gray
+        Write-Host "[DRY RUN] Would build the full Release target set and run CTest" -ForegroundColor Gray
     } else {
+        Write-Host "Configuring the repository processing-core signer trust pin..." -ForegroundColor Yellow
+        cmake -S $PSScriptRoot -B "$PSScriptRoot\build" `
+            -DMIB_REQUIRE_PROCESSING_CORE_SIGNER_SPKI=ON `
+            "-DMIB_PROCESSING_CORE_SIGNER_SPKI_SHA256=$processingCoreSignerSpki" `
+            "-DMIB_RELEASE_VERSION_OVERRIDE=$newVersion" `
+            "-DMIB_RELEASE_VERSION_FULL_OVERRIDE=$($tagName.Substring(1))"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "ERROR: CMake rejected the production signer configuration" -ForegroundColor Red
+            exit 1
+        }
+        $identity = @{}
+        Get-Content -LiteralPath "$PSScriptRoot\build\mib-release-identity.txt" | ForEach-Object {
+            $parts = $_ -split '=', 2
+            if ($parts.Count -eq 2) { $identity[$parts[0]] = $parts[1] }
+        }
+        if ($identity.version -ne $newVersion -or
+            $identity.full_version -ne $tagName.Substring(1)) {
+            Write-Host "ERROR: Configured release identity does not match $tagName" -ForegroundColor Red
+            exit 1
+        }
         Write-Host "Building Release..." -ForegroundColor Yellow
-        cmake --build build --config Release --target mib_studio_qt
+        cmake --build "$PSScriptRoot\build" --config Release
         if ($LASTEXITCODE -ne 0) {
             Write-Host "ERROR: Build failed" -ForegroundColor Red
             exit 1
         }
-        Write-Host "Build succeeded" -ForegroundColor Green
+        Write-Host "Running Release tests..." -ForegroundColor Yellow
+        ctest --test-dir "$PSScriptRoot\build" --build-config Release `
+            --output-on-failure --timeout 30
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "ERROR: Release tests failed" -ForegroundColor Red
+            exit 1
+        }
+        Write-Host "Build and tests succeeded" -ForegroundColor Green
     }
 
     # --- Step 4: Build installers ---
     Write-Host "`n--- Step 4: Build Installers ---" -ForegroundColor Cyan
 
     if ($DryRun) {
+        Write-Host "[DRY RUN] Would remove prior MIB Studio installer outputs from $distDir" -ForegroundColor Gray
         Write-Host "[DRY RUN] Would build installers" -ForegroundColor Gray
+        $setupExe = [System.IO.FileInfo]::new($expectedSetupPath)
+        $updateExe = [System.IO.FileInfo]::new($expectedUpdatePath)
     } else {
+        New-Item -ItemType Directory -Force $distDir | Out-Null
+        Get-ChildItem -LiteralPath $distDir -Filter "MIB_Studio_Qt_*" -File `
+            -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^MIB_Studio_Qt_(Setup|Update)_v.+\.exe$' } |
+            Remove-Item -Force
+
         Write-Host "Building full installer..." -ForegroundColor Yellow
-        cmake --build build --config Release --target package_installer
+        cmake --build "$PSScriptRoot\build" --config Release --target package_installer
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "WARNING: Full installer build failed" -ForegroundColor Yellow
-        } else {
-            Write-Host "Full installer built" -ForegroundColor Green
+            Write-Host "ERROR: Full installer build failed" -ForegroundColor Red
+            exit 1
         }
+        if (-not (Test-Path -LiteralPath $expectedSetupPath -PathType Leaf)) {
+            Write-Host "ERROR: Full installer did not produce exact expected artifact $expectedSetupPath" -ForegroundColor Red
+            exit 1
+        }
+        Write-Host "Full installer built" -ForegroundColor Green
 
         Write-Host "Building update package..." -ForegroundColor Yellow
-        cmake --build build --config Release --target package_installer_update
+        cmake --build "$PSScriptRoot\build" --config Release --target package_installer_update
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "WARNING: Update package build failed" -ForegroundColor Yellow
-        } else {
-            Write-Host "Update package built" -ForegroundColor Green
+            Write-Host "ERROR: Update package build failed" -ForegroundColor Red
+            exit 1
         }
+        if (-not (Test-Path -LiteralPath $expectedUpdatePath -PathType Leaf)) {
+            Write-Host "ERROR: Update package did not produce exact expected artifact $expectedUpdatePath" -ForegroundColor Red
+            exit 1
+        }
+        Write-Host "Update package built" -ForegroundColor Green
 
-        # Show output
+        $setupExe = Get-Item -LiteralPath $expectedSetupPath
+        $updateExe = Get-Item -LiteralPath $expectedUpdatePath
         Write-Host "`nInstaller output:" -ForegroundColor Cyan
-        Get-ChildItem "build\dist\MIB_Studio_Qt_*.exe" -ErrorAction SilentlyContinue | ForEach-Object {
+        @($setupExe, $updateExe) | ForEach-Object {
             $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLower().Substring(0, 16)
             Write-Host "  $($_.Name) ($([math]::Round($_.Length / 1MB, 1)) MB) sha256:$hash..." -ForegroundColor Green
         }
@@ -196,41 +324,32 @@ if ($Push) {
     Write-Host "`n--- Step 5: Push to Remote ---" -ForegroundColor Cyan
 
     if ($DryRun) {
-        Write-Host "[DRY RUN] Would push branch and tag $tagName" -ForegroundColor Gray
+        Write-Host "[DRY RUN] Would atomically push branch and tag $tagName" -ForegroundColor Gray
     } else {
-        $branch = git rev-parse --abbrev-ref HEAD
-        Write-Host "Pushing branch '$branch'..." -ForegroundColor Yellow
-        git push origin $branch
+        Write-Host "Atomically pushing branch '$currentBranch' and tag $tagName..." -ForegroundColor Yellow
+        git push --atomic origin "HEAD:refs/heads/$currentBranch" "refs/tags/$tagName"
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "WARNING: Branch push failed" -ForegroundColor Yellow
-        }
-
-        Write-Host "Pushing tag $tagName..." -ForegroundColor Yellow
-        git push origin "$tagName"
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "ERROR: Tag push failed" -ForegroundColor Red
+            Write-Host "ERROR: Atomic branch/tag push failed; neither ref was published" -ForegroundColor Red
             exit 1
         }
-        Write-Host "Tag pushed" -ForegroundColor Green
+        Write-Host "Branch and tag pushed atomically" -ForegroundColor Green
     }
 
     # --- Step 6: Create GitHub Release ---
     if (-not $SkipBuild) {
         Write-Host "`n--- Step 6: Create GitHub Release ---" -ForegroundColor Cyan
 
-        $updateExe = Get-ChildItem "build\dist\MIB_Studio_Qt_Update_v*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-
         if (-not $updateExe) {
-            Write-Host "WARNING: No update installer found in build\dist\, skipping GitHub Release" -ForegroundColor Yellow
+            Write-Host "ERROR: Exact update installer was not prepared" -ForegroundColor Red
+            exit 1
+        }
+
+        if ($DryRun) {
+            Write-Host "[DRY RUN] Would create GitHub Release for $tagName with $($updateExe.Name)" -ForegroundColor Gray
         } else {
-            # Build checksums for release body
-            $checksumLines = ""
-            $releaseFiles = @()
-            if ($updateExe) {
-                $updateHash = (Get-FileHash -Algorithm SHA256 $updateExe.FullName).Hash.ToLower()
-                $checksumLines += "$updateHash  $($updateExe.Name)`n"
-                $releaseFiles += $updateExe.FullName
-            }
+            $updateHash = (Get-FileHash -Algorithm SHA256 $updateExe.FullName).Hash.ToLower()
+            $checksumLines = "$updateHash  $($updateExe.Name)`n"
+            $releaseFiles = @($updateExe.FullName)
 
             $releaseBody = @"
 ## MIB Studio Qt $tagName
@@ -251,17 +370,13 @@ $checksumLines``````
             }
             $ghArgs += $releaseFiles
 
-            if ($DryRun) {
-                Write-Host "[DRY RUN] Would create GitHub Release for $tagName with $($releaseFiles.Count) files" -ForegroundColor Gray
-            } else {
-                Write-Host "Creating GitHub Release for $tagName..." -ForegroundColor Yellow
-                & gh @ghArgs
-                if ($LASTEXITCODE -ne 0) {
-                    Write-Host "WARNING: GitHub Release creation failed" -ForegroundColor Yellow
-                } else {
-                    Write-Host "GitHub Release created" -ForegroundColor Green
-                }
+            Write-Host "Creating GitHub Release for $tagName..." -ForegroundColor Yellow
+            & gh @ghArgs
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "ERROR: GitHub Release creation failed" -ForegroundColor Red
+                exit 1
             }
+            Write-Host "GitHub Release created" -ForegroundColor Green
         }
 
         # --- Step 7: Publish to Cloudflare R2 ---
@@ -276,21 +391,23 @@ $checksumLines``````
                 $publishArgs = @(
                     "$PSScriptRoot\publish-update.py",
                     "--installer", $updateExe.FullName,
+                    "--version", $tagName.Substring(1),
                     "--channel", $channel,
-                    "--release-notes-url", "https://github.com/gavinlouuu-kpt/mib-studio-qt/releases/tag/$tagName"
+                    "--release-notes-url", "https://github.com/$releaseRepository/releases/tag/$tagName"
                 )
                 if ($Profile) {
                     $publishArgs += @("--profile", $Profile)
                 }
                 & $python @publishArgs
                 if ($LASTEXITCODE -ne 0) {
-                    Write-Host "WARNING: Cloudflare R2 publish failed" -ForegroundColor Yellow
-                } else {
-                    Write-Host "Published to Cloudflare R2 ($channel)" -ForegroundColor Green
+                    Write-Host "ERROR: Cloudflare R2 publish failed" -ForegroundColor Red
+                    exit 1
                 }
+                Write-Host "Published to Cloudflare R2 ($channel)" -ForegroundColor Green
             }
         } else {
-            Write-Host "WARNING: Update package not found, skipping Cloudflare R2 publish" -ForegroundColor Yellow
+            Write-Host "ERROR: Exact update package missing before Cloudflare R2 publish" -ForegroundColor Red
+            exit 1
         }
     } else {
         Write-Host "`n--- Step 6-7: Publish (skipped - no build) ---" -ForegroundColor Cyan
@@ -307,11 +424,8 @@ $checksumLines``````
 Write-Host "`n=== Release Complete ===" -ForegroundColor Cyan
 Write-Host "Version: $tagName (channel: $channel)" -ForegroundColor Green
 
-if (-not $SkipBuild) {
-    $installers = Get-ChildItem "build\dist\MIB_Studio_Qt_*.exe" -ErrorAction SilentlyContinue
-    if ($installers) {
-        Write-Host "Installers: $($installers.Count) files in build\dist\" -ForegroundColor Green
-    }
+if (-not $SkipBuild -and $setupExe -and $updateExe) {
+    Write-Host "Installers: $($setupExe.Name), $($updateExe.Name)" -ForegroundColor Green
 }
 
 if ($Push -and -not $SkipBuild) {

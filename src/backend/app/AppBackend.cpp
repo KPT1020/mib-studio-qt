@@ -845,6 +845,10 @@ namespace backend
             SPDLOG_ERROR("Cannot start frame recording: camera not running");
             return false;
         }
+        if (!processingService_ || !processingService_->isProcessingCorePinSatisfied()) {
+            SPDLOG_ERROR("Cannot start frame recording: selected processing core is unavailable");
+            return false;
+        }
 
         // Open HDF5 file for recording
         auto& hdf5 = *hdf5Service_;
@@ -867,6 +871,7 @@ namespace backend
             hdf5.closeFile();
             return false;
         }
+        auto processingCoreLease = processingService_->acquireProcessingCoreOperation();
 
         frameRecordingPath_ = path;
         frameRecordingWritten_.store(0);
@@ -882,7 +887,8 @@ namespace backend
             "frame recording started", path);
 
         // Launch recording thread
-        frameRecordingThread_ = std::make_unique<std::thread>([this]() {
+        frameRecordingThread_ = std::make_unique<std::thread>(
+            [this, processingCoreLease = std::move(processingCoreLease)]() mutable {
             SPDLOG_INFO("Frame recording thread started");
 
             const uint64_t startTimeNs = static_cast<uint64_t>(
@@ -967,7 +973,8 @@ namespace backend
                         continue;
                     }
 
-                    if (services::ProcessingService::isFrameEmpty(f, config, roi, bgShared)) {
+                    if (processingService_->isFrameEmptyWithActiveKernel(f, config, roi,
+                                                                         bgShared)) {
                         frameRecordingFiltered_.fetch_add(1, std::memory_order_relaxed);
                         lastProcessedIdx = idx;
                         continue;
@@ -1031,8 +1038,11 @@ namespace backend
                                                   frameRecordingWritten_.load(),
                                                   frameRecordingFiltered_.load(),
                                                   recordingMultiImageEnabled,
-                                                  recordingMultiImageCount)) {
+                                                  recordingMultiImageCount,
+                                                  &processingCoreLease.identity())) {
                 SPDLOG_ERROR("Frame recording: failed to write recording_info metadata");
+                reportFatalSaveError(
+                    "Frame recording metadata/processing-core provenance write failed");
             }
             hdf5Service_->closeFile();
 
@@ -1045,7 +1055,8 @@ namespace backend
     }
 
     void AppBackend::stopFrameRecording() {
-        if (!frameRecordingRunning_.load()) return;
+        if (!frameRecordingRunning_.load() &&
+            (!frameRecordingThread_ || !frameRecordingThread_->joinable())) return;
 
         frameRecordingRunning_.store(false);
         if (frameRecordingThread_ && frameRecordingThread_->joinable()) {

@@ -24,6 +24,43 @@
 - **ROI** — rectangular region of interest; applied pre-analysis by
   [[../services/ProcessingService]] and by display in [[../frontend/PreviewPage]].
 
+## Portability
+
+- **Portable processing contract** — the frozen combination of the
+  gold-standard metrics JSON shape, `ProcessingConfig` JSON shape, and
+  Young's-modulus LUT text format that a non-Qt consumer (e.g. Biowork's
+  `services/mib-processing`) must match to get identical results. Defined in
+  `docs/gold_standard_metrics.md` ("Portable Processing Contract" section)
+  and `docs/gold_standard_metrics.schema.json`.
+- **`contract_version`** — single integer naming one frozen version of the
+  portable processing contract above. Bump it whenever the metrics schema,
+  config schema, or LUT format changes incompatibly. Currently declared
+  independently in six places (`test_contract_version_consistency.py` guards
+  against drift until/unless that's folded into one source of truth).
+- **Processing core registry** — versioned engine metadata published by
+  `publish-processing-core.py`: a complete short-cache active pointer at
+  `{channel}/processing-core/latest.json`, immutable manifests under
+  `versions/<version>.json`, and an enumerable `index.json`. Schema v2 pins
+  the canonical core/contract version, hash-qualified Python wheels, optional
+  signed native plugins, profile catalog, and emodulus LUT as one reproducible
+  set. The generated PEP 503 page supports baked `mib-processing==<version>`
+  dependencies. See `docs/portable-processing-sync.md`.
+- **Processing core active version** — the full manifest named by both
+  `latest.json` and `index.json.active_version`. Publishing or rolling back a
+  channel changes these mutable pointers; it never rewrites immutable version
+  history, and clients with an explicit version pin ignore the pointer.
+- **Native processing core** — a versioned, platform-signed shared library
+  selected by [[../frontend/ProcessingCoreDialog]] and loaded through the
+  POD-only C engine ABI. Windows uses Authenticode; Linux uses detached
+  Ed25519 signatures pinned to a compiled signer SPKI SHA-256 (A13/#245
+  keeps the live signed publication gate open). ABI v1 owns mask generation
+  and empty-frame classification; host metrics/tracking/orchestration remain
+  outside it.
+- **Processing conformance reference** —
+  `scripts/gold_standard_dataset.json`, a deterministic full-parity output from
+  the installed wheel. `scripts/run_processing_conformance.py` fails on metric,
+  mask, series-image, target-group, tracking, or record-accounting drift.
+
 ## Protocols & SDKs
 
 - **GenICam** — standard camera control API.

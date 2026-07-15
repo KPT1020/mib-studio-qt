@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <queue>
 #include <thread>
 #include <vector>
@@ -13,6 +14,8 @@
 #include <deque>
 #include <cmath>
 #include "backend/processing/EModulusLut.h"
+#include "backend/processing/IProcessingKernel.h"
+#include "backend/processing/ProcessingTypes.h"
 #include "backend/recording/HdfWriteQueue.h"
 
 namespace backend { namespace playback { class FrameStore; struct Frame; } }
@@ -22,84 +25,6 @@ namespace backend::services {
 struct ProcessingStats {
     std::atomic<uint64_t> jobsQueued{0};
     std::atomic<uint64_t> jobsProcessed{0};
-};
-
-struct BrightnessQuantiles {
-    double q1{0.0}; // 25th percentile
-    double q2{0.0}; // 50th percentile (median)
-    double q3{0.0}; // 75th percentile
-    double q4{0.0}; // 100th percentile (max)
-};
-
-struct ProcessingConfig {
-    int gaussian_blur_size{3};
-    int bg_subtract_threshold{8};
-    int morph_kernel_size{3};
-    int morph_iterations{1};
-    int area_threshold_min{60};    // μm²
-    int area_threshold_max{290};   // μm²
-    double deformability_threshold_min{0.0};
-    double deformability_threshold_max{1.0};
-    bool enable_border_check{true};
-    bool enable_area_range_check{true};
-    bool enable_deformability_range_check{false};
-    double area_ratio_threshold_max{1.5};
-    bool enable_area_ratio_check{false};
-    double ring_ratio_min{15.0};
-    double ring_ratio_max{25.0};
-    bool enable_ring_ratio_check{true};
-    bool require_single_inner_contour{true};
-    int empty_frame_pixel_threshold{100};
-    bool auto_background_enabled{false};
-    int auto_background_empty_frames{30};
-    int auto_background_cooldown_frames{1000};
-    // Target group sort trigger (second gate within valid frames)
-    bool enable_target_group{false};
-    int target_group_area_min{72};   // μm²
-    int target_group_area_max{191};  // μm²
-    double target_group_deformability_min{0.0};
-    double target_group_deformability_max{0.3};
-    // Young's modulus gating (uses LUT lookup from area + deformability)
-    bool enable_target_group_emodulus{false};
-    double target_group_emodulus_min{0.0};
-    double target_group_emodulus_max{10.0};
-    // Multi-image recording: capture a series of N consecutive frames per valid detection
-    // Metrics are computed only from the first (trigger) frame
-    bool multi_image_enabled{false};
-    int multi_image_count{1}; // Number of images per series (1 = disabled, >1 = series)
-};
-
-struct FilterResult {
-    bool isValid{false};
-    bool touchesBorder{false};
-    bool hasSingleInnerContour{false};
-    bool inRange{false};
-    int innerContourCount{0};
-    int objectId{-1};
-    int objectCount{0};
-    int trackId{-1};
-    uint64_t trackFirstFrame{0};
-    uint64_t trackLastFrame{0};
-    int trackObservationCount{0};
-    double bboxX{0.0};
-    double bboxY{0.0};
-    double bboxWidth{0.0};
-    double bboxHeight{0.0};
-    double centroidX{0.0};
-    double centroidY{0.0};
-    double deformability{0.0};
-    double area{0.0};
-    double areaRatio{0.0};
-    double ringRatio{0.0};
-    double youngsModulus{0.0}; // Young's modulus (kPa) from LUT lookup
-    BrightnessQuantiles brightness;
-    bool isTargetGroup{false}; // True if valid AND matches target group criteria
-    // Contours found during processing (for snapshot/display), in the same
-    // coordinate space as the processedImage mask. Shared (not deep-copied) so
-    // that the per-object FilterResults of a frame, plus the monitoring /
-    // experiment copies, all reference one allocation instead of duplicating
-    // every contour point N times. Null when no contours were extracted.
-    std::shared_ptr<const std::vector<std::vector<cv::Point>>> allContours;
 };
 
 struct TargetGroupEvent {
@@ -163,12 +88,60 @@ public:
     ProcessingService();
     ~ProcessingService();
 
+    class CoreOperationLease {
+    public:
+        CoreOperationLease() = default;
+        ~CoreOperationLease();
+        CoreOperationLease(const CoreOperationLease&) = delete;
+        CoreOperationLease& operator=(const CoreOperationLease&) = delete;
+        CoreOperationLease(CoreOperationLease&& other) noexcept;
+        CoreOperationLease& operator=(CoreOperationLease&& other) noexcept;
+
+        explicit operator bool() const noexcept { return owner_ != nullptr; }
+        const backend::processing::ProcessingCoreIdentity& identity() const noexcept {
+            return identity_;
+        }
+
+    private:
+        friend class ProcessingService;
+        CoreOperationLease(
+            ProcessingService* owner,
+            backend::processing::ProcessingCoreIdentity identity);
+        void release() noexcept;
+
+        ProcessingService* owner_{nullptr};
+        backend::processing::ProcessingCoreIdentity identity_;
+    };
+
     void start(size_t workerCount = std::thread::hardware_concurrency());
     void stop();
 
     void submit(Job job);
 
     const ProcessingStats& stats() const { return stats_; }
+
+    // Processing-core selection. Activation is transactional and is rejected
+    // while realtime, an experiment, or the async batch pipeline is active.
+    // Callers prepare and validate a plugin with ProcessingCoreLoader first.
+    // The optional preCommit callback runs under the core-selection lock after
+    // every fallible activation guard and before the live kernel is swapped.
+    // It must not call back into ProcessingService. Returning false preserves
+    // the previous usable kernel and forwards its diagnostic through error.
+    using ProcessingCoreActivationPreCommit = std::function<bool(std::string&)>;
+    bool activateProcessingKernel(std::shared_ptr<backend::processing::IProcessingKernel> kernel,
+                                  std::string* error = nullptr,
+                                  ProcessingCoreActivationPreCommit preCommit = {});
+    bool activateBundledProcessingKernel(std::string* error = nullptr);
+    backend::processing::ProcessingCoreIdentity activeProcessingCoreIdentity() const;
+    std::string requiredProcessingCoreVersion() const { return requiredProcessingCoreVersion_; }
+    bool isProcessingCorePinSatisfied() const;
+    // Startup selection restoration failures fail closed until a verified
+    // candidate is activated successfully.
+    void markProcessingCoreSelectionUnavailable();
+    // Pins the current core identity and prevents activation for the lifetime
+    // of the returned lease. Long-running non-ProcessingService owners (for
+    // example raw recording) must hold one for their whole operation.
+    CoreOperationLease acquireProcessingCoreOperation();
 
     // Realtime processing API
     void startRealtime(std::shared_ptr<backend::playback::FrameStore> store);
@@ -274,6 +247,14 @@ public:
                             const Roi& roi,
                             const std::shared_ptr<const cv::Mat>& background);
 
+    // Selected-core variant used by runtime paths. The static overloads above
+    // remain as compatibility helpers and use bundled behavior.
+    bool isFrameEmptyWithActiveKernel(
+        const backend::playback::Frame& frame,
+        const ProcessingConfig& config,
+        const Roi& roi,
+        const std::shared_ptr<const cv::Mat>& background) const;
+
     // ---- Batch mask generation ----
     // Pure pipeline: Gaussian blur -> (optional) background subtract -> binary
     // threshold -> morphology -> contour validation. Produces a full-frame mask
@@ -313,7 +294,8 @@ public:
         const ProcessingConfig& config,
         const cv::Mat& background = cv::Mat{},
         const Roi& roi = Roi{0, 0, 0, 0},
-        BatchProgressCallback progress = {});
+        BatchProgressCallback progress = {},
+        backend::processing::ProcessingCoreIdentity* processingCore = nullptr);
 
     struct BatchPipelineConfig {
         size_t batchSize{64};
@@ -377,16 +359,6 @@ private:
         uint64_t timestampNs{0};
     };
 
-    struct ContourAnalysis {
-        std::vector<std::vector<cv::Point>> filteredContours;
-        std::vector<std::vector<cv::Point>> innerContours;
-        std::vector<int> parentIndices;
-        std::vector<int> innerFilteredIndices;
-        std::vector<std::vector<cv::Point>> allContours;
-        std::vector<cv::Vec4i> hierarchy;
-        std::vector<size_t> originalIndices;
-    };
-
     void workerLoop();
     void batchWorkerLoop();
     void realtimeLoop();
@@ -408,35 +380,26 @@ private:
                                       const ProcessingConfig& config, const cv::Mat& originalImage);
     std::vector<FilterResult> filterProcessedObjects(const cv::Mat& processedImage, const cv::Rect& roi,
                                                      const ProcessingConfig& config, const cv::Mat& originalImage);
-    // region restricts the scan to a sub-rectangle (e.g. an object's bounding
-    // box); an empty rect scans the whole image. Mask pixels outside an object's
-    // bbox are zero, so restricting the scan yields an identical brightness set.
-    BrightnessQuantiles calculateBrightnessQuantiles(const cv::Mat& originalImage, const cv::Mat& mask,
-                                                     const cv::Rect& region = cv::Rect());
-    double calculateRingRatio(const std::vector<cv::Point>& innerContour, const std::vector<cv::Point>& outerContour);
-    cv::Mat makeObjectMask(const cv::Size& size,
-                           const std::vector<std::vector<cv::Point>>& contours,
-                           int contourIdx,
-                           int parentIdx,
-                           bool nested) const;
-    bool contourTouchesRoiBorder(const std::vector<cv::Point>& contour, const cv::Rect& roi) const;
-    FilterResult evaluateInnerContourObject(const ContourAnalysis& analysis,
-                                            size_t innerIdx,
-                                            int objectId,
-                                            int objectCount,
-                                            const cv::Mat& processedImage,
-                                            const cv::Rect& roi,
-                                            const ProcessingConfig& config,
-                                            const cv::Mat& originalImage);
-    FilterResult evaluateOuterContourObject(const ContourAnalysis& analysis,
-                                            size_t contourIdx,
-                                            int objectId,
-                                            int objectCount,
-                                            const cv::Mat& processedImage,
-                                            const cv::Rect& roi,
-                                            const ProcessingConfig& config,
-                                            const cv::Mat& originalImage);
-    ContourAnalysis findContours(const cv::Mat& processedImage);
+    // Batch track matching routed through the selected kernel; -1 = new track.
+    int matchTrackWithActiveKernel(const std::vector<BatchTrack>& tracks,
+                                   const std::vector<bool>& matchedThisFrame,
+                                   const FilterResult& detection,
+                                   uint64_t frameIndex,
+                                   int frameWidth) const;
+    bool processMaskWithActiveKernel(const cv::Mat& gray,
+                                     const cv::Mat& background,
+                                     const ProcessingConfig& config,
+                                     const Roi& roi,
+                                     cv::Mat& mask,
+                                     std::string* error = nullptr) const;
+    bool isImageEmptyWithActiveKernel(const cv::Mat& gray,
+                                      const cv::Mat& background,
+                                      const ProcessingConfig& config,
+                                      const Roi& roi,
+                                      bool absoluteBackgroundDifference,
+                                      bool& empty,
+                                      std::string* error = nullptr) const;
+    void releaseProcessingCoreOperation() noexcept;
 
     std::vector<std::thread> workers_;
     std::queue<Job> queue_;
@@ -445,6 +408,15 @@ private:
     std::atomic<bool> running_{false};
 
     ProcessingStats stats_{};
+
+    // Shared for calls, exclusive for activation/start transitions. A shared
+    // pointer additionally keeps a loaded module resident for any in-flight
+    // call even during service teardown.
+    mutable std::shared_mutex processingKernelMutex_;
+    std::shared_ptr<backend::processing::IProcessingKernel> processingKernel_;
+    std::string requiredProcessingCoreVersion_;
+    std::atomic<bool> processingCoreSelectionAvailable_{true};
+    std::atomic<uint32_t> activeSynchronousCoreOperations_{0};
 
     // Async batch processing state
     std::vector<std::thread> batchWorkers_;

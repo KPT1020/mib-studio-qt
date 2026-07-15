@@ -28,6 +28,15 @@ namespace frontend
             return false;
         }
 
+        if (!backend_.processing().isProcessingCorePinSatisfied())
+        {
+            if (errorMsg)
+                *errorMsg = QString("Administrator-pinned processing core %1 is not active")
+                                .arg(QString::fromStdString(
+                                    backend_.processing().requiredProcessingCoreVersion()));
+            return false;
+        }
+
         // Guard: Experiment cannot start without first starting camera
         if (!backend_.capture().isRunning())
         {
@@ -103,6 +112,7 @@ namespace frontend
         auto &hdf5 = backend_.hdf5();
         size_t validFrames = 0;
         size_t invalidFrames = 0;
+        bool metadataOk = true;
 
         if (hdf5.isFileOpen())
         {
@@ -152,13 +162,19 @@ namespace frontend
             auto processingConfig = processing.getProcessingConfig();
             auto roi = processing.getRealtimeRoi();
             cv::Mat bg = processing.getRealtimeBackgroundGray();
-            hdf5.writeExperimentInfo(startTimeNs_, endTimeNs_,
-                                     validFrames, invalidFrames, processingConfig, roi,
-                                     bg.empty() ? nullptr : &bg);
+            const auto processingCore = processing.activeProcessingCoreIdentity();
+            metadataOk = hdf5.writeExperimentInfo(
+                startTimeNs_, endTimeNs_, validFrames, invalidFrames, processingConfig, roi,
+                bg.empty() ? nullptr : &bg, &processingCore);
+            if (!metadataOk) {
+                SPDLOG_ERROR("Experiment metadata/provenance write failed");
+                if (errorMsg)
+                    *errorMsg = "Mandatory experiment metadata/provenance write failed";
+            }
 
             // Save full config.json content for backtracking
             std::string configJson = backend_.getLastConfigJson();
-            if (!configJson.empty()) {
+            if (metadataOk && !configJson.empty()) {
                 hdf5.writeConfigJson(configJson);
             }
 
@@ -178,7 +194,7 @@ namespace frontend
         emit stateChanged(state_);
         emit experimentStopped(endTimeNs_, validFrames, invalidFrames);
 
-        return true;
+        return metadataOk;
     }
 
 } // namespace frontend

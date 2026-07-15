@@ -55,6 +55,8 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/src/frontend/dialogs/ProcessingSettingsDialog.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/dialogs/ProcessingSettingsDialog.h
     ${PROJECT_SOURCE_DIR}/resources/ui/ProcessingSettingsDialog.ui
+    ${PROJECT_SOURCE_DIR}/src/frontend/dialogs/ProcessingCoreDialog.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/dialogs/ProcessingCoreDialog.h
     ${PROJECT_SOURCE_DIR}/src/frontend/dialogs/SyringePumpSettingsDialog.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/dialogs/SyringePumpSettingsDialog.h
     ${PROJECT_SOURCE_DIR}/resources/ui/SyringePumpSettingsDialog.ui
@@ -68,6 +70,8 @@ set(FRONTEND_COMMON_SOURCES
     # Utils
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/ConfigPathManager.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/ConfigPathManager.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/ApplicationSettings.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/utils/ApplicationSettings.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/OverlayRenderer.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/OverlayRenderer.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/EgrabberConfigParser.cpp
@@ -80,6 +84,10 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/JsonConfigMerge.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/UpdateCatalog.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/UpdateCatalog.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/ProcessingCoreCatalog.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/utils/ProcessingCoreCatalog.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/ProcessingCoreSettings.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/utils/ProcessingCoreSettings.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/HdfReviewExportPaths.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/HdfReviewExportPaths.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/RoiManager.cpp
@@ -150,9 +158,36 @@ target_link_libraries(mib_frontend_common PUBLIC
 target_compile_definitions(mib_frontend_common PUBLIC
     MIB_STUDIO_QT_VERSION="${PROJECT_VERSION}"
     MIB_STUDIO_QT_VERSION_FULL="${PROJECT_VERSION_FULL}"
+    MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256="${MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256}"
+    MIB_PROCESSING_CORE_ED25519_SPKI_SHA256="${MIB_PROCESSING_CORE_ED25519_SPKI_SHA256}"
 )
 
 mib_link_opencv(mib_frontend_common PUBLIC)
+
+if(BUILD_TESTING)
+    add_executable(processing_core_dialog_test
+        ${PROJECT_SOURCE_DIR}/tests/frontend/processing_core_dialog_test.cpp
+    )
+    target_include_directories(processing_core_dialog_test PRIVATE
+        ${PROJECT_SOURCE_DIR}/tests
+    )
+    target_link_libraries(processing_core_dialog_test PRIVATE mib_frontend_common)
+    set_target_properties(processing_core_dialog_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+        AUTOUIC OFF
+    )
+    add_test(NAME frontend.processing_core_dialog
+        COMMAND $<TARGET_FILE:processing_core_dialog_test>)
+    # The test binary selects the QPA platform itself: offscreen everywhere
+    # except Windows, where the Conan Qt offscreen plugin deadlocks in the
+    # QApplication constructor on release runners; the native windows
+    # platform boots headlessly and the dialog is never shown. 120 s bounds
+    # first-time Qt widgets/network bring-up on those runners.
+    set_tests_properties(frontend.processing_core_dialog PROPERTIES
+        LABELS "frontend;processing"
+        TIMEOUT 120
+    )
+endif()
 
 set(MIB_STUDIO_QT_EXTRA_SOURCES)
 if(WIN32)
