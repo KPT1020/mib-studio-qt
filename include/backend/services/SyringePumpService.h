@@ -1,5 +1,7 @@
 #pragma once
 
+#include "backend/services/ISerialPort.h"
+
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -7,8 +9,6 @@
 #include <mutex>
 #include <string>
 #include <vector>
-
-class QSerialPort;
 
 namespace backend::services {
 
@@ -51,6 +51,10 @@ public:
     SyringePumpService();
     ~SyringePumpService();
 
+    // Inject the serial-port factory (defaults to the platform port). Tests
+    // supply a fake to drive the Modbus protocol without hardware.
+    void setSerialPortFactory(SerialPortFactory factory);
+
     // Connection management
     bool connect(PumpId id, int comPort, int baudRate, uint8_t modbusAddress);
     void disconnect(PumpId id);
@@ -85,8 +89,8 @@ public:
         int timeoutMs = 300);
 
 private:
-    // Modbus RTU helpers. Frames are Qt-free byte vectors; conversion to/from
-    // QByteArray happens only at the QSerialPort seam inside the .cpp.
+    // Modbus RTU helpers. Frames are byte vectors; transport goes through the
+    // Qt-free ISerialPort (see ModbusRtu.h for the framing primitives).
     static uint16_t crc16(const uint8_t* data, size_t len);
     std::vector<uint8_t> buildReadRequest(uint8_t addr, uint16_t startReg, uint16_t count);
     std::vector<uint8_t> buildWriteSingleRequest(uint8_t addr, uint16_t reg, uint16_t value);
@@ -103,12 +107,13 @@ private:
     bool writeMultipleRegisters(int pumpIdx, uint16_t startReg, const std::vector<uint8_t>& regData);
 
     struct PumpConnection {
-        QSerialPort* serial{nullptr};
+        std::unique_ptr<ISerialPort> serial;
         PumpConfig config;
         PumpStatus status;
         mutable std::mutex mutex;
     };
 
+    SerialPortFactory serialPortFactory_;
     std::array<PumpConnection, PUMP_COUNT> pumps_;
 };
 

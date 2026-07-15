@@ -5,6 +5,21 @@
 
 ## Features shipped
 
+- **Qt → React/Tauri migration: backend de-Qt slice 3 (serial abstraction)**
+  (2026-07-15, epic #246) — `SyringePumpService` serial I/O now goes through a
+  Qt-free `ISerialPort` (`include/backend/services/ISerialPort.h`) with POSIX
+  (termios) and Win32 implementations, created via an injected
+  `SerialPortFactory` (mirrors `CaptureService`'s `CameraFactory`). The service
+  and `scanModbusAddresses` are now fully Qt-free, so `Qt6::SerialPort` is
+  dropped from the backend link and removed from the backend-only Qt component
+  set (`cmake/MIBDependencies.cmake` now `Core Network`). New tests: a
+  `FakeSerialPort` Modbus-slave drives connect/setFlowRate/pollStatus headless
+  (`syringe_pump_fake_serial_test`), and a pty loopback exercises the real
+  termios transport (`serial_port_posix_loopback_test`). Full
+  `linux-backend-only` suite green (73/73). Also added `dev/react-tauri` to the
+  `backend-ci`/`docs-ci` triggers. Details:
+  `knowledge_map/task/2026-07-15-qt-decoupling-serial-abstraction.md`.
+
 - **Qt → React/Tauri migration: backend de-Qt slice 2 (mock-camera decode)**
   (2026-07-15, epic #246) — `MockCamera::loadFrameFromPath` now decodes every
   supported format with OpenCV `cv::imread` (Qt-free), replacing the

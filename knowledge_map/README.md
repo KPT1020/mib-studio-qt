@@ -19,7 +19,8 @@ following `[[WikiLinks]]`. If you are a new agent, start here:
 - Persistence: [[services/Hdf5Service]], [[services/SqliteService]]
 - Playback: [[services/PlaybackService]]
 - Hardware I/O: [[services/CameraControlService]], [[services/AutofocusService]],
-  [[services/TriggerService]], [[services/SyringePumpService]]
+  [[services/TriggerService]], [[services/SyringePumpService]],
+  [[services/ISerialPort]]
 - Optional: [[services/YoloService]], [[services/RecorderService]],
   [[services/BatchMaskSources]]
 

@@ -9,8 +9,9 @@
 
 ## Responsibility
 
-- Maintain two independent `QSerialPort` connections
-  (`PumpId::Sample`, `PumpId::Sheath`).
+- Maintain two independent [[ISerialPort]] connections
+  (`PumpId::Sample`, `PumpId::Sheath`), created via an injected
+  `SerialPortFactory` (defaults to the platform port).
 - Per-pump control: `setFlowRate`, `setDirection`, `start`, `stop`,
   `purge`, `stopPurge`, `setSyringeVolume`.
 - Per-pump status polling: `pollStatus(id)` — UI timer drives this.
@@ -34,13 +35,13 @@ Private: CRC-16, `buildReadRequest`, `buildWriteSingleRequest`,
 The pure framing primitives live in `include/backend/services/ModbusRtu.h`
 (`backend::services::modbus`), unit-tested by
 `tests/backend/modbus_rtu_test.cpp`. As of the Qt-decoupling work (epic #246)
-they are **Qt-free**: frames are `std::vector<uint8_t>` (`modbus::Frame`), not
-`QByteArray`. `SyringePumpService` converts to/from `QByteArray` only at the
-`QSerialPort` read/write seam inside the `.cpp`; `SyringePumpService.h` no
-longer forward-declares or exposes `QByteArray`. Serial I/O itself still uses
-`QSerialPort` — moving that behind a platform-neutral interface is a later
-migration slice (see
-[the Qt-decoupling exec-plan](../../docs/exec-plans/active/2026-07-15-qt-decoupling-and-tauri-migration.md)).
+this service is **fully Qt-free**: frames are `std::vector<uint8_t>`
+(`modbus::Frame`, not `QByteArray`) and transport goes through [[ISerialPort]]
+(POSIX termios / Win32) instead of `QSerialPort`. `connect()` and
+`scanModbusAddresses()` obtain ports from the injected `SerialPortFactory`, so a
+`FakeSerialPort` can drive the whole Modbus round-trip headless
+(`tests/backend/syringe_pump_fake_serial_test.cpp`). This dropped
+`Qt6::SerialPort` from the backend link.
 
 Public scan helper probes `REG_RUN_COMMAND` (`0x0001`) with Modbus function
 `0x03` over an address range (default 1..8) and returns responsive addresses.

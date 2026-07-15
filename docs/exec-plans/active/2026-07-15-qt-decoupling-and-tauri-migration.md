@@ -1,7 +1,7 @@
 # Qt decoupling and React + Tauri migration
 
-Status: active (2026-07-15) — Phase 1 slices 1–2 landed; backend links
-`Qt6::Core+Network+SerialPort` (Gui dropped).
+Status: active (2026-07-15) — Phase 1 slices 1–3 landed; backend links only
+`Qt6::Core+Network` (Gui + SerialPort dropped).
 
 Tracks epic #246. The platform decision is recorded in ADR
 [`../../decisions/0001-react-tauri-migration.md`](../../decisions/0001-react-tauri-migration.md).
@@ -37,16 +37,17 @@ these clusters. "Contract" = Qt appears in a public header.
 |---|---------|-------|---------|-----------|-------------|--------|
 | 1 | Modbus framing | `include/backend/services/ModbusRtu.h` | `QByteArray` | yes | `std::vector<uint8_t>` | **done (this PR)** |
 | 2 | MindVision JSON | `include/backend/camera/mindvision/MindVisionConfig.h` (+ `MindVisionCamera.cpp`, `CameraControlService.cpp` reads) | Qt JSON, `QFile` | yes | `nlohmann_json` + `std::ifstream` | **done (this PR)** |
-| 3 | Syringe-pump serial I/O | `src/backend/services/SyringePumpService.cpp` | `QSerialPort`, `QByteArray` (at seam) | no (header now Qt-free) | platform-neutral serial interface | pending |
+| 3 | Syringe-pump serial I/O | `src/backend/services/SyringePumpService.cpp` (+ new `ISerialPort.h`, `SerialPort{Posix,Win32}.cpp`) | `QSerialPort` | now Qt-free | `ISerialPort` interface + factory + POSIX/Win32 impls | **done (slice 3)** — `Qt6::SerialPort` dropped; fake-serial + pty-loopback tests |
 | 4 | LUT catalog | `include/backend/processing/EModulusLutCatalog.{h,cpp}` | `QNetworkAccessManager`, `QStandardPaths`, `QDir/QFile/QSaveFile`, `QDateTime`, `QUrl`, `QCryptographicHash`, `QEventLoop/QTimer` | yes | UI-neutral HTTP/paths seam, or move fetch to Rust shell; `std::filesystem`; a hashing lib | pending (largest; needs the networking-seam decision) |
 | 5 | Mock-camera decode | `src/backend/camera/mock/MockCamera.cpp` | `QImage`/`QImageReader` | no | OpenCV `imread` (fallback already present) | **done (slice 2)** — `Qt6::Gui` dropped from the backend link + moved to frontend-only in `MIBDependencies.cmake` |
 | 6 | Crash-reporter glue | `src/backend/app/CrashReporter.cpp` (+ incidental `QString` in `AppBackend.cpp`) | `qtMessageHandler`, `QString` | no | spdlog-native sink; std::string paths | pending (falls away with #4) |
 
-When clusters 3, 4, 6 land, drop the remaining `Qt6::*` and `AUTOMOC` from
-`src/backend/CMakeLists.txt` and stop `find_package`-ing Qt for
+When clusters 4 and 6 land, drop the remaining `Qt6::*` (Core, Network) and
+`AUTOMOC` from `src/backend/CMakeLists.txt` and stop `find_package`-ing Qt for
 `MIB_BUILD_BACKEND_ONLY` in `cmake/MIBDependencies.cmake` — that is the Phase 1
-exit gate (`linux-backend-only` builds with no Qt SDK). Slice 2 already removed
-`Gui` from the backend-only Qt component set.
+exit gate (`linux-backend-only` builds with no Qt SDK). Slices 2–3 already
+removed `Gui` and `SerialPort` from the backend-only Qt component set (now
+`Core Network`).
 
 ## Feature-parity matrix
 
@@ -90,12 +91,13 @@ Phase 1 — backend Qt-free (one PR per cluster, each with tests + vault):
    the backend link and moved it to the frontend-only Qt component set.
    (Reordered ahead of serial: smaller, fully Linux-verifiable by the existing
    `camera.mock_smoke` test, and it removed the last backend `Qt6::Gui` user.)
-3. Serial abstraction: `QSerialPort` behind a platform-neutral `ISerialPort` +
-   factory (mirror the `CameraFactory` DI pattern); port `SyringePumpService`
-   and `scanModbusAddresses`; add a fake serial for headless protocol tests.
-   Drops `Qt6::SerialPort`.
+3. **[done]** Serial abstraction: `QSerialPort` behind a platform-neutral
+   `ISerialPort` + factory (mirrors the `CameraFactory` DI pattern); ported
+   `SyringePumpService` + `scanModbusAddresses` (now fully Qt-free); POSIX
+   (termios) + Win32 impls. Dropped `Qt6::SerialPort`. Tests: a `FakeSerialPort`
+   Modbus-slave headless round-trip + a real pty-loopback termios test.
 4. LUT-catalog networking/paths seam (cluster 4) — requires the HTTP-seam vs
-   move-to-Rust decision (own ADR).
+   move-to-Rust decision (own ADR). **Next.**
 5. Crash-reporter/`QString` glue (cluster 6).
 6. Drop the remaining `Qt6::*` + `AUTOMOC` from the backend; make
    `MIB_BUILD_BACKEND_ONLY` configure/build/test with no Qt SDK.

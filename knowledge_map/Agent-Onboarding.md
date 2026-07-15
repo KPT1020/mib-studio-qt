@@ -28,7 +28,7 @@ Jump to the notes that match your task:
 | Live charts during a run | [[frontend/ExperimentMonitoringTab]] |
 | Processing-core versions / native hot-swap | [[frontend/ProcessingCoreDialog]] + [[services/ProcessingService]] |
 | Autofocus / nanopositioner | [[services/AutofocusService]] + [[frontend/NanopositionerTab]] |
-| Syringe pumps | [[services/SyringePumpService]] + [[frontend/SyringePumpTab]] |
+| Syringe pumps | [[services/SyringePumpService]] (serial via [[services/ISerialPort]]) + [[frontend/SyringePumpTab]] |
 | Crashes / observability | [[services/CrashReporter]] + [[diagnostics/CrashStateMirror]] |
 | Build / deploy | [[build-and-run/Build]], [[build-and-run/Run-Modes]] |
 | User manual / generated screenshots | [[frontend/Screenshot-Tour]] + `docs/manual/README.md` |

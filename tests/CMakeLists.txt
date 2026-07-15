@@ -42,6 +42,14 @@ mib_add_backend_test_executable(modbus_rtu_test backend/modbus_rtu_test.cpp)
 add_test(NAME backend.modbus_rtu COMMAND $<TARGET_FILE:modbus_rtu_test>)
 set_tests_properties(backend.modbus_rtu PROPERTIES LABELS "backend" TIMEOUT 30)
 
+mib_add_backend_test_executable(syringe_pump_fake_serial_test backend/syringe_pump_fake_serial_test.cpp)
+add_test(NAME backend.syringe_pump_fake_serial COMMAND $<TARGET_FILE:syringe_pump_fake_serial_test>)
+set_tests_properties(backend.syringe_pump_fake_serial PROPERTIES LABELS "backend" TIMEOUT 30)
+
+mib_add_backend_test_executable(serial_port_posix_loopback_test backend/serial_port_posix_loopback_test.cpp)
+add_test(NAME backend.serial_port_posix_loopback COMMAND $<TARGET_FILE:serial_port_posix_loopback_test>)
+set_tests_properties(backend.serial_port_posix_loopback PROPERTIES LABELS "backend" TIMEOUT 30)
+
 mib_add_backend_test_executable(autofocus_math_test backend/autofocus_math_test.cpp)
 add_test(NAME backend.autofocus_math COMMAND $<TARGET_FILE:autofocus_math_test>)
 set_tests_properties(backend.autofocus_math PROPERTIES LABELS "backend" TIMEOUT 30)
