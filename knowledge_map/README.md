@@ -12,6 +12,7 @@ following `[[WikiLinks]]`. If you are a new agent, start here:
 - [[architecture/AppBackend]] — composition root
 - [[architecture/Threading-Model]]
 - [[architecture/Data-Flow]]
+- [[architecture/Rust-Bridge]] — Rust ↔ C++ bridge (React + Tauri migration)
 
 ### Services (`src/backend/services/`)
 - [[services/_MOC|Services MOC]]

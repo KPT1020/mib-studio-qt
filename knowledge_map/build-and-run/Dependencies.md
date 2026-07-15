@@ -78,6 +78,17 @@ and `find_package(Qt6)` was removed for backend-only — so **`MIB_BUILD_BACKEND
 now builds and tests with no Qt SDK**, the Phase 1 exit gate. Tracked in
 `docs/exec-plans/active/2026-07-15-qt-decoupling-and-tauri-migration.md`.
 
+**Phase 2 — Rust bridge:** `crates/mib-bridge` is a `cxx` crate that links the
+Qt-free static archives (`libmib_backend.a` / `libmib_processing.a`) and drives
+them through `backend::bridge::BackendFacade` — see [[../architecture/Rust-Bridge]]
+and ADR `docs/decisions/0003-rust-cxx-bridge.md`. Toolchain: Rust stable +
+`cxx`/`cxx-build`; no Qt, no webkit. Its `build.rs` drives the
+`linux-backend-only` preset to produce the archives (skip with
+`MIB_BRIDGE_NO_CMAKE=1` if already built) and links them plus OpenCV / HDF5 /
+SQLite / spdlog / fmt / crypto. Runtime needs
+`LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/hdf5/serial` on Ubuntu. CI:
+`.github/workflows/bridge-ci.yml` (headless `cargo test`).
+
 ## Linux cloud build notes
 
 - If CMake fails before project checks with

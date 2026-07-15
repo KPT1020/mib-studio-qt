@@ -1,10 +1,12 @@
 # Qt decoupling and React + Tauri migration
 
-Status: active (2026-07-15) — **Phase 1 COMPLETE.** The C++ backend is fully
-Qt-free and `MIB_BUILD_BACKEND_ONLY` configures/builds/tests with **no Qt SDK**
-(verified by uninstalling Qt6 locally; enforced by `backend-ci.yml` installing
-no `qt6-*` packages). Next: Phase 2 (production Rust ↔ C++ bridge) and Phase 3
-(first Tauri vertical slice).
+Status: active (2026-07-15) — **Phase 1 COMPLETE; Phase 2 bridge landed.** The
+C++ backend is fully Qt-free and `MIB_BUILD_BACKEND_ONLY` configures/builds/tests
+with **no Qt SDK** (verified by uninstalling Qt6 locally; enforced by
+`backend-ci.yml` installing no `qt6-*` packages). Phase 2 delivered the
+production Rust ↔ C++ bridge (`crates/mib-bridge`, `cxx` over `BackendFacade`,
+ADR 0003) with a headless `cargo test` contract lane (`bridge-ci.yml`, no Qt / no
+webkit). Next: Phase 3 (first Tauri vertical slice — mock camera end to end).
 
 Tracks epic #246. The platform decision is recorded in ADR
 [`../../decisions/0001-react-tauri-migration.md`](../../decisions/0001-react-tauri-migration.md).
@@ -124,9 +126,25 @@ Phase 1 — backend Qt-free (one PR per cluster, each with tests + vault):
    **`linux-backend-only` configures/builds/tests with no Qt SDK** — verified by
    uninstalling Qt6 locally (66/66 green).
 
-Phase 2 defines the production Rust ↔ C++ bridge (own ADR); Phase 3 is the
-first Tauri vertical slice (mock camera end to end); Phase 4 migrates the
-remaining workflows; Phase 5 packages, documents, and cuts over.
+Phase 2 — production Rust ↔ C++ bridge (ADR 0003):
+
+7. **[done]** `crates/mib-bridge` — a `cxx` bridge wrapping
+   `backend::bridge::BackendFacade`. Rust owns an opaque `BackendBridge`
+   (`UniquePtr`) composing `AppBackend` + `BackendFacade`; it exposes lifecycle
+   (`initialize`/`shutdown`), flat command submitters (mock-camera configure,
+   start/stop capture, start/stop recording, playback-seek), a poll-drained
+   event queue (events serialised to a typed-slot `BridgeEvent`, enqueued
+   non-blocking on the backend thread), and an on-demand frame pull
+   (`fetch_latest_frame` → metadata + one owned byte copy; **no per-frame
+   base64**, per principle #4). `build.rs` drives the `linux-backend-only`
+   preset to produce the archives and links them; a headless `cargo test`
+   contract test runs the full init → configure → start → pull-frame → seek →
+   FrameReady → stop → shutdown lifecycle. CI: `bridge-ci.yml` (no Qt, no
+   webkit, no display). The command/event set is versioned
+   (`bridge_abi_version() == 1`).
+
+Phase 3 is the first Tauri vertical slice (mock camera end to end); Phase 4
+migrates the remaining workflows; Phase 5 packages, documents, and cuts over.
 
 **PR #59** stays open as reference; it is superseded when the first production
 Tauri slice (Phase 3) lands, at which point it is closed with a pointer here.

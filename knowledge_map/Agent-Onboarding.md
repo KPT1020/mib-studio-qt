@@ -30,6 +30,7 @@ Jump to the notes that match your task:
 | Autofocus / nanopositioner | [[services/AutofocusService]] + [[frontend/NanopositionerTab]] |
 | Syringe pumps | [[services/SyringePumpService]] (serial via [[services/ISerialPort]]) + [[frontend/SyringePumpTab]] |
 | Crashes / observability | [[services/CrashReporter]] + [[diagnostics/CrashStateMirror]] |
+| React + Tauri migration / Rust bridge | [[architecture/Rust-Bridge]] + `docs/decisions/0003-rust-cxx-bridge.md` |
 | Build / deploy | [[build-and-run/Build]], [[build-and-run/Run-Modes]] |
 | User manual / generated screenshots | [[frontend/Screenshot-Tour]] + `docs/manual/README.md` |
 

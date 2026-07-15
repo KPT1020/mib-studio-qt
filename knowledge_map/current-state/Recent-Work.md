@@ -5,6 +5,23 @@
 
 ## Features shipped
 
+- **Qt → React/Tauri migration: Phase 2 — production Rust ↔ C++ bridge (cxx)**
+  (2026-07-15, epic #246) — New crate `crates/mib-bridge`: a `cxx` bridge that
+  wraps `backend::bridge::BackendFacade` so a Rust shell can drive the Qt-free
+  backend with no Qt / no webkit / no display. Rust owns an opaque
+  `BackendBridge` (`UniquePtr`) composing `AppBackend` + `BackendFacade`, with
+  flat command submitters (mock-camera configure, start/stop capture, start/stop
+  recording, playback-seek), a poll-drained event queue (events serialised to a
+  typed-slot `BridgeEvent`, enqueued non-blocking on the backend thread), and an
+  on-demand `fetch_latest_frame` (metadata + one owned byte copy — **no per-frame
+  base64**, per epic principle #4 / ADR 0003). `build.rs` drives the
+  `linux-backend-only` preset for the static archives and links them; a headless
+  `cargo test` contract test runs the full init → configure → start → pull-frame
+  → seek → `FrameReady` → stop → shutdown lifecycle; `bridge-ci.yml` is the CI
+  lane. Command/event set is versioned (`bridge_abi_version() == 1`). Decision in
+  ADR `docs/decisions/0003-rust-cxx-bridge.md`; details:
+  `knowledge_map/task/2026-07-15-rust-cxx-bridge-phase2.md`.
+
 - **Qt → React/Tauri migration: Phase 1 COMPLETE — backend-only builds with no
   Qt SDK** (2026-07-15, epic #246) — Reached the Phase 1 exit gate. The 7
   `frontend;utility` tests (which link `Qt6::Core` and compile
