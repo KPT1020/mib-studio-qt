@@ -25,6 +25,12 @@ The repo root `src/` is the C++ tree, so the whole Tauri app lives under
   `#[tauri::command]` layer; `main.rs` calls `run()`.
 - `desktop/scripts/xvfb-smoke.sh` — headless GUI smoke launcher.
 
+Native **file pickers** use `tauri-plugin-dialog` (registered in `run()`,
+granted via `dialog:default` in `capabilities/default.json`, called from the
+frontend through `@tauri-apps/plugin-dialog`'s `open`/`save`): a folder picker
+for the mock frame dir, a save dialog for the recording path, and an open dialog
+(HDF5 filter) for the review file — so paths are never hand-typed.
+
 ## Command layer
 
 Thin wrappers over the bridge (all take the managed `AppState`):

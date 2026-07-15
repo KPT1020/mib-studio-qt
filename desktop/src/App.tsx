@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   bridge,
   mono8ToImageData,
@@ -6,6 +7,8 @@ import {
   type FrameMeta,
   type ProcessingStats,
 } from "./bridge";
+
+const H5_FILTER = [{ name: "HDF5", extensions: ["h5"] }];
 
 // Phase 3 + 4 slices: mock camera live view, frame recording to HDF5, and
 // review (load a recording and scrub by frame index) — all through the Tauri
@@ -59,6 +62,21 @@ export default function App() {
     setLastMeta(
       `#${meta.frame_index} ${meta.width}×${meta.height} stride=${meta.stride_bytes} bytes=${meta.byte_len}`,
     );
+  }, []);
+
+  const browseFrameDir = useCallback(async () => {
+    const picked = await open({ directory: true, title: "Select mock frame directory" });
+    if (typeof picked === "string") setFrameDir(picked);
+  }, []);
+
+  const browseRecPath = useCallback(async () => {
+    const picked = await save({ title: "Recording output", filters: H5_FILTER, defaultPath: "clip.h5" });
+    if (picked) setRecPath(picked);
+  }, []);
+
+  const browseReviewPath = useCallback(async () => {
+    const picked = await open({ title: "Open recording", filters: H5_FILTER, multiple: false });
+    if (typeof picked === "string") setReviewPath(picked);
   }, []);
 
   const onInit = useCallback(async () => {
@@ -203,11 +221,12 @@ export default function App() {
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", margin: "12px 0" }}>
         <button onClick={onInit} disabled={ready}>Initialize backend</button>
         <input
-          style={{ flex: 1, minWidth: 240, padding: 6 }}
+          style={{ flex: 1, minWidth: 220, padding: 6 }}
           placeholder="mock frame directory (folder of .tiff/.png)"
           value={frameDir}
           onChange={(e) => setFrameDir(e.target.value)}
         />
+        <button onClick={browseFrameDir}>Browse…</button>
         <button onClick={onStart} disabled={!ready || running || !frameDir}>Start mock capture</button>
         <button onClick={onStop} disabled={!running}>Stop</button>
       </div>
@@ -216,11 +235,12 @@ export default function App() {
         <legend>Recording</legend>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <input
-            style={{ flex: 1, minWidth: 240, padding: 6 }}
+            style={{ flex: 1, minWidth: 220, padding: 6 }}
             placeholder="recording output path (…/clip.h5)"
             value={recPath}
             onChange={(e) => setRecPath(e.target.value)}
           />
+          <button onClick={browseRecPath} disabled={recording}>Browse…</button>
           <button onClick={onToggleRecord} disabled={!running || !recPath}>
             {recording ? "Stop recording" : "Record"}
           </button>
@@ -259,11 +279,12 @@ export default function App() {
         <legend>Review</legend>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <input
-            style={{ flex: 1, minWidth: 240, padding: 6 }}
+            style={{ flex: 1, minWidth: 220, padding: 6 }}
             placeholder="recording to review (…/clip.h5)"
             value={reviewPath}
             onChange={(e) => setReviewPath(e.target.value)}
           />
+          <button onClick={browseReviewPath}>Browse…</button>
           <button onClick={onLoadReview} disabled={!ready || !reviewPath}>Load recording</button>
         </div>
         {reviewing && range.count > 0 && (
