@@ -136,14 +136,10 @@ no contour processing.
 - `startFrameRecording(hdf5Path)`, `stopFrameRecording()`, `isFrameRecording()`
 - Counters: `frameRecordingCount()`, `frameRecordingFiltered()`
 - Uses a dedicated `frameRecordingThread_`. Empty frames are dropped via
-  `ProcessingService::isFrameEmptyWithActiveKernel` after the
+  `ProcessingService::isFrameEmpty` (ROI-only shared_ptr overload) after the
   recording thread has hoisted config/ROI/background out of the per-frame loop.
   All three are refreshed once per poll batch, keyed off `getConfigVersion()`.
   (The old `FrameStore::setFrameFilter` API was dead code and has been removed.)
-- Recording acquires a processing-core operation lease before the worker
-  starts and owns it through `/recording_info` finalization. Activation is
-  therefore blocked for the entire recording, and the stored provenance is
-  the exact identity used by empty-frame filtering.
 - `stopFrameRecording()` joins the recording thread; the thread drains the write
   queue, writes `/recording_info`, and closes the HDF5 file before the stop call
   returns.
@@ -163,9 +159,6 @@ no contour processing.
   The realtime ROI is set from two sources: PlaybackPanel's canvas ROI
   drawing and OverviewTab's `roiChanged` signal (connected in
   `MainWindow.cpp`). Both call `ProcessingService::setRealtimeRoi()`.
-- The selected core therefore owns raw-recording empty classification too. An
-  unsatisfied administrator version pin fails closed instead of recording with
-  a silently different algorithm.
 
 ### Fatal save-error sink
 

@@ -50,7 +50,6 @@ private:
     Ui::MainWindow* ui;
     backend::AppBackend& backend_;
     QLabel* statusLabel_ = nullptr;
-    QLabel* processingCoreLabel_ = nullptr;
     QTimer* statsTimer_ = nullptr;
     PlaybackPanel* playbackPanel_ = nullptr;
     QTabWidget* experimentTabs_ = nullptr;

@@ -97,87 +97,9 @@ mib_add_backend_test_executable(mock_camera_smoke_test camera/mock_camera_smoke_
 add_test(NAME camera.mock_smoke COMMAND $<TARGET_FILE:mock_camera_smoke_test>)
 set_tests_properties(camera.mock_smoke PROPERTIES LABELS "camera;backend")
 
-mib_add_backend_test_executable(processing_science_seam_test processing/processing_science_seam_test.cpp)
-add_test(NAME processing.science_seam COMMAND $<TARGET_FILE:processing_science_seam_test>)
-set_tests_properties(processing.science_seam PROPERTIES LABELS "processing;backend" TIMEOUT 30)
-
-mib_add_backend_test_executable(processing_science_golden_test processing/processing_science_golden_test.cpp)
-add_test(NAME processing.science_golden COMMAND $<TARGET_FILE:processing_science_golden_test>)
-set_tests_properties(processing.science_golden PROPERTIES LABELS "processing;backend" TIMEOUT 30)
-
 mib_add_backend_test_executable(processing_pipeline_smoke_test processing/processing_pipeline_smoke_test.cpp)
 add_test(NAME processing.pipeline_smoke COMMAND $<TARGET_FILE:processing_pipeline_smoke_test>)
 set_tests_properties(processing.pipeline_smoke PROPERTIES LABELS "processing;backend")
-
-add_executable(processing_core_abi_c_test
-    ${PROJECT_SOURCE_DIR}/tests/processing/processing_core_abi_c_test.c
-)
-target_include_directories(processing_core_abi_c_test PRIVATE ${PROJECT_SOURCE_DIR}/include)
-set_target_properties(processing_core_abi_c_test PROPERTIES
-    C_STANDARD 11
-    C_STANDARD_REQUIRED YES
-    C_EXTENSIONS NO
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
-)
-add_test(NAME processing.core_abi_c COMMAND $<TARGET_FILE:processing_core_abi_c_test>)
-set_tests_properties(processing.core_abi_c PROPERTIES LABELS "processing;backend" TIMEOUT 30)
-
-mib_add_backend_test_executable(processing_core_loader_test processing/processing_core_loader_test.cpp)
-add_dependencies(processing_core_loader_test mib_processing_core)
-add_test(NAME processing.core_loader
-    COMMAND $<TARGET_FILE:processing_core_loader_test> $<TARGET_FILE:mib_processing_core>)
-set_tests_properties(processing.core_loader PROPERTIES LABELS "processing;backend" TIMEOUT 30)
-
-add_subdirectory(processing/fixtures)
-mib_add_backend_test_executable(processing_core_fixture_matrix_test processing/processing_core_fixture_matrix_test.cpp)
-add_dependencies(processing_core_fixture_matrix_test
-    mib_processing_fixture_good
-    mib_processing_fixture_truncated
-    mib_processing_fixture_incompatible
-    mib_processing_fixture_malformed
-    mib_processing_fixture_throwing
-)
-add_test(NAME processing.core_fixture_matrix
-    COMMAND $<TARGET_FILE:processing_core_fixture_matrix_test>
-        $<TARGET_FILE:mib_processing_fixture_good>
-        $<TARGET_FILE:mib_processing_fixture_truncated>
-        $<TARGET_FILE:mib_processing_fixture_incompatible>
-        $<TARGET_FILE:mib_processing_fixture_malformed>
-        $<TARGET_FILE:mib_processing_fixture_throwing>)
-set_tests_properties(processing.core_fixture_matrix PROPERTIES LABELS "processing;backend" TIMEOUT 30)
-
-if(WIN32)
-    mib_add_backend_test_executable(processing_core_authenticode_test processing/processing_core_authenticode_test.cpp)
-endif()
-
-if(UNIX AND NOT APPLE)
-    # Imported find_package targets are directory-scoped, so resolve OpenSSL
-    # here as well; the desktop Linux build already requires it.
-    find_package(OpenSSL REQUIRED)
-    mib_add_backend_test_executable(processing_core_ed25519_test processing/processing_core_ed25519_test.cpp)
-    add_dependencies(processing_core_ed25519_test mib_processing_core)
-    target_link_libraries(processing_core_ed25519_test PRIVATE OpenSSL::Crypto)
-    add_test(NAME processing.core_ed25519
-        COMMAND $<TARGET_FILE:processing_core_ed25519_test> $<TARGET_FILE:mib_processing_core>)
-    set_tests_properties(processing.core_ed25519 PROPERTIES LABELS "processing;backend" TIMEOUT 30)
-endif()
-
-mib_add_backend_test_executable(processing_core_cache_test processing/processing_core_cache_test.cpp)
-add_dependencies(processing_core_cache_test mib_processing_core)
-target_link_libraries(processing_core_cache_test PRIVATE Threads::Threads)
-add_test(NAME processing.core_cache
-    COMMAND $<TARGET_FILE:processing_core_cache_test> $<TARGET_FILE:mib_processing_core>)
-set_tests_properties(processing.core_cache PROPERTIES LABELS "processing;backend" TIMEOUT 30)
-
-mib_add_backend_test_executable(processing_core_activation_test processing/processing_core_activation_test.cpp)
-target_link_libraries(processing_core_activation_test PRIVATE Threads::Threads)
-add_test(NAME processing.core_activation COMMAND $<TARGET_FILE:processing_core_activation_test>)
-set_tests_properties(processing.core_activation PROPERTIES LABELS "processing;backend" TIMEOUT 30)
-
-mib_add_backend_test_executable(processing_core_activation_stress_test processing/processing_core_activation_stress_test.cpp)
-target_link_libraries(processing_core_activation_stress_test PRIVATE Threads::Threads)
-add_test(NAME processing.core_activation_stress COMMAND $<TARGET_FILE:processing_core_activation_stress_test>)
-set_tests_properties(processing.core_activation_stress PROPERTIES LABELS "processing;backend;stress" TIMEOUT 60)
 
 mib_add_backend_test_executable(processing_batch_pipeline_test processing/processing_batch_pipeline_test.cpp)
 add_test(NAME backend.processing_batch_pipeline COMMAND $<TARGET_FILE:processing_batch_pipeline_test>)
@@ -217,7 +139,6 @@ if(Python3_Interpreter_FOUND)
     )
     set_tests_properties(backend.kin10_hf_dataset_pipeline PROPERTIES
         LABELS "backend;integration"
-        SKIP_RETURN_CODE 77
         TIMEOUT 180
     )
 elseif(UNIX)
@@ -230,7 +151,6 @@ elseif(UNIX)
     )
     set_tests_properties(backend.kin10_hf_dataset_pipeline PROPERTIES
         LABELS "backend;integration"
-        SKIP_RETURN_CODE 77
         TIMEOUT 180
     )
 else()
@@ -340,67 +260,6 @@ set_target_properties(json_config_merge_test PROPERTIES
 add_test(NAME frontend.json_config_merge COMMAND $<TARGET_FILE:json_config_merge_test>)
 set_tests_properties(frontend.json_config_merge PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
 
-add_executable(processing_core_catalog_test
-    ${PROJECT_SOURCE_DIR}/tests/frontend/processing_core_catalog_test.cpp
-    ${PROJECT_SOURCE_DIR}/src/frontend/utils/ProcessingCoreCatalog.cpp
-)
-target_include_directories(processing_core_catalog_test PRIVATE
-    ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/tests
-)
-target_link_libraries(processing_core_catalog_test PRIVATE Qt6::Core)
-set_target_properties(processing_core_catalog_test PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
-)
-add_test(NAME frontend.processing_core_catalog COMMAND $<TARGET_FILE:processing_core_catalog_test>)
-set_tests_properties(frontend.processing_core_catalog PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
-
-add_executable(application_settings_test
-    ${PROJECT_SOURCE_DIR}/tests/frontend/application_settings_test.cpp
-    ${PROJECT_SOURCE_DIR}/src/frontend/utils/ApplicationSettings.cpp
-)
-target_include_directories(application_settings_test PRIVATE
-    ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/tests
-)
-target_link_libraries(application_settings_test PRIVATE Qt6::Core)
-set_target_properties(application_settings_test PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
-)
-add_test(NAME frontend.application_settings COMMAND $<TARGET_FILE:application_settings_test>)
-set_tests_properties(frontend.application_settings PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
-
-add_executable(processing_core_settings_test
-    ${PROJECT_SOURCE_DIR}/tests/frontend/processing_core_settings_test.cpp
-    ${PROJECT_SOURCE_DIR}/src/frontend/utils/ProcessingCoreSettings.cpp
-)
-target_include_directories(processing_core_settings_test PRIVATE
-    ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/tests
-)
-target_link_libraries(processing_core_settings_test PRIVATE Qt6::Core)
-set_target_properties(processing_core_settings_test PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
-)
-add_test(NAME frontend.processing_core_settings COMMAND $<TARGET_FILE:processing_core_settings_test>)
-set_tests_properties(frontend.processing_core_settings PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
-
-
-add_executable(hdf_review_export_paths_test
-    ${PROJECT_SOURCE_DIR}/tests/frontend/hdf_review_export_paths_test.cpp
-    ${PROJECT_SOURCE_DIR}/src/frontend/utils/HdfReviewExportPaths.cpp
-)
-target_include_directories(hdf_review_export_paths_test PRIVATE
-    ${PROJECT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/tests
-)
-target_link_libraries(hdf_review_export_paths_test PRIVATE Qt6::Core)
-set_target_properties(hdf_review_export_paths_test PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
-)
-add_test(NAME frontend.hdf_review_export_paths COMMAND $<TARGET_FILE:hdf_review_export_paths_test>)
-set_tests_properties(frontend.hdf_review_export_paths PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
-
 add_executable(update_catalog_test
     ${PROJECT_SOURCE_DIR}/tests/frontend/update_catalog_test.cpp
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/UpdateCatalog.cpp
@@ -418,122 +277,3 @@ set_target_properties(update_catalog_test PROPERTIES
 )
 add_test(NAME frontend.update_catalog COMMAND $<TARGET_FILE:update_catalog_test>)
 set_tests_properties(frontend.update_catalog PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
-
-if(Python3_Interpreter_FOUND)
-    add_test(
-        NAME scripts.export_hdf5_paths
-        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/test_export_hdf5_paths.py
-    )
-    set_tests_properties(scripts.export_hdf5_paths PROPERTIES
-        LABELS "scripts;hdf5"
-        TIMEOUT 30
-    )
-
-    add_test(
-        NAME scripts.convert_legacy_csv_to_json
-        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/test_convert_legacy_csv_to_json.py
-    )
-    set_tests_properties(scripts.convert_legacy_csv_to_json PROPERTIES
-        LABELS "scripts;hdf5"
-        TIMEOUT 30
-    )
-
-    add_test(
-        NAME scripts.publish_processing_core
-        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/test_publish_processing_core.py
-    )
-    set_tests_properties(scripts.publish_processing_core PROPERTIES
-        LABELS "scripts;contract"
-        TIMEOUT 30
-    )
-
-    add_test(
-        NAME scripts.publish_profiles
-        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/test_publish_profiles.py
-    )
-    set_tests_properties(scripts.publish_profiles PROPERTIES
-        LABELS "scripts;contract"
-        TIMEOUT 30
-    )
-
-    add_test(
-        NAME scripts.contract_version_consistency
-        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/test_contract_version_consistency.py
-    )
-    set_tests_properties(scripts.contract_version_consistency PROPERTIES
-        LABELS "scripts;contract"
-        TIMEOUT 30
-    )
-
-    add_test(
-        NAME scripts.bump_mib_processing_version
-        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/test_bump_mib_processing_version.py
-    )
-    set_tests_properties(scripts.bump_mib_processing_version PROPERTIES
-        LABELS "scripts;contract"
-        TIMEOUT 30
-    )
-
-    add_test(
-        NAME scripts.verify_processing_core_manifest
-        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/test_verify_processing_core_manifest.py
-    )
-    set_tests_properties(scripts.verify_processing_core_manifest PROPERTIES
-        LABELS "scripts;contract"
-        TIMEOUT 30
-    )
-
-    add_test(
-        NAME scripts.processing_core_signer_release_gate
-        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/test_processing_core_signer_release_gate.py
-    )
-    set_tests_properties(scripts.processing_core_signer_release_gate PROPERTIES
-        LABELS "scripts;contract;release"
-        TIMEOUT 30
-    )
-
-    add_test(
-        NAME scripts.desktop_release_version
-        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/test_desktop_release_version.py
-    )
-    set_tests_properties(scripts.desktop_release_version PROPERTIES
-        LABELS "scripts;release"
-        TIMEOUT 30
-    )
-
-    add_test(
-        NAME scripts.publish_update_index
-        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/tools/test_publish_index_merge.py
-    )
-    set_tests_properties(scripts.publish_update_index PROPERTIES
-        LABELS "scripts;release"
-        TIMEOUT 30
-    )
-
-    add_test(
-        NAME scripts.compare_metrics
-        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/test_compare_metrics.py
-    )
-    set_tests_properties(scripts.compare_metrics PROPERTIES
-        LABELS "scripts;contract;processing"
-        TIMEOUT 30
-    )
-
-    add_test(
-        NAME scripts.run_processing_conformance_input
-        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/test_run_processing_conformance.py
-    )
-    set_tests_properties(scripts.run_processing_conformance_input PROPERTIES
-        LABELS "scripts;contract;processing;hdf5"
-        TIMEOUT 30
-    )
-
-    add_test(
-        NAME scripts.kin10_hf_dataset_runner
-        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/test_kin10_run_hf_dataset_test.py
-    )
-    set_tests_properties(scripts.kin10_hf_dataset_runner PROPERTIES
-        LABELS "scripts;integration"
-        TIMEOUT 30
-    )
-endif()

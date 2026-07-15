@@ -1,19 +1,16 @@
 # Run Modes
 
-> Two executables, three camera sources, a handful of env vars.
+> Three executables, two camera sources, a handful of env vars.
 
 **Related:** [[../camera/MockCamera]], [[../camera/MindVisionCamera]],
-[[../frontend/ConnectTab]], [[../frontend/Screenshot-Tour]]
+[[../frontend/ConnectTab]]
 
 ## Executables
 
-- **`mib_studio_qt.exe`** — the app. Hardware camera via
-  [[../camera/EGrabberCamera]] or MindVision; the mock camera is reachable
-  from [[../frontend/ConnectTab]] ("Configure Mock…") or forced via
-  `MIB_CAMERA_MODE=mock`. (The former separate `mock_studio_qt` target was
-  removed — mock support lives in the production binary.)
-- **`screenshot_tour.exe`** — headless mock-mode UI tour that regenerates
-  the user-manual screenshots. See [[../frontend/Screenshot-Tour]].
+- **`mib_studio_qt.exe`** — production. Uses hardware camera via
+  [[../camera/EGrabberCamera]]. No mock option in the UI.
+- **`mock_studio_qt.exe`** — development. Same UI, but lets the user
+  select a mock folder from the [[../frontend/ConnectTab]].
 
 ## Mock camera env vars
 
@@ -54,11 +51,6 @@ For backend CI loops without Qt Widgets/Charts frontend binaries:
 - Test preset: `linux-backend-only-test`
 - Backend tests can be selected by label:
   `ctest --preset linux-backend-only-test -L backend`
-
-Full frontend builds also register `frontend.processing_core_dialog`. CTest
-runs it with `QT_QPA_PLATFORM=offscreen`; its deliberately invalid registry
-URL exercises the offline selector state without opening a window or reaching
-the network.
 
 ## Troubleshooting
 

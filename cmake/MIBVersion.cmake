@@ -1,55 +1,6 @@
 # Default version (fallback if git is not available or no tags exist)
 set(DEFAULT_VERSION "1.0.3")
 
-# Release publishers pass both values explicitly so the binary identity being
-# tested is the same identity later used for the tag, installer, and manifest.
-# Capture and remove the command-line cache entries immediately: these are
-# deliberately one-configure overrides and must not leak into a later local
-# development configure that reuses the build directory.
-if(DEFINED MIB_RELEASE_VERSION_OVERRIDE OR
-   DEFINED MIB_RELEASE_VERSION_FULL_OVERRIDE)
-    if(NOT DEFINED MIB_RELEASE_VERSION_OVERRIDE OR
-       NOT DEFINED MIB_RELEASE_VERSION_FULL_OVERRIDE)
-        message(FATAL_ERROR
-            "MIB_RELEASE_VERSION_OVERRIDE and "
-            "MIB_RELEASE_VERSION_FULL_OVERRIDE must be provided together")
-    endif()
-
-    set(_MIB_RELEASE_VERSION "${MIB_RELEASE_VERSION_OVERRIDE}")
-    set(_MIB_RELEASE_VERSION_FULL "${MIB_RELEASE_VERSION_FULL_OVERRIDE}")
-    unset(MIB_RELEASE_VERSION_OVERRIDE CACHE)
-    unset(MIB_RELEASE_VERSION_FULL_OVERRIDE CACHE)
-
-    if(NOT _MIB_RELEASE_VERSION MATCHES
-       "^[0-9]+\\.[0-9]+\\.[0-9]+$")
-        message(FATAL_ERROR
-            "MIB_RELEASE_VERSION_OVERRIDE must be numeric X.Y.Z")
-    endif()
-    if(NOT _MIB_RELEASE_VERSION_FULL MATCHES
-       "^[0-9]+\\.[0-9]+\\.[0-9]+(-beta\\.[0-9A-Za-z][0-9A-Za-z.-]*)?$")
-        message(FATAL_ERROR
-            "MIB_RELEASE_VERSION_FULL_OVERRIDE must be X.Y.Z or "
-            "X.Y.Z-beta.<identifier>")
-    endif()
-    string(REGEX REPLACE
-        "^([0-9]+\\.[0-9]+\\.[0-9]+).*" "\\1"
-        _MIB_RELEASE_FULL_NUMERIC "${_MIB_RELEASE_VERSION_FULL}")
-    if(NOT _MIB_RELEASE_FULL_NUMERIC STREQUAL _MIB_RELEASE_VERSION)
-        message(FATAL_ERROR
-            "Release numeric and full overrides must name the same numeric version")
-    endif()
-
-    set(PROJECT_VERSION "${_MIB_RELEASE_VERSION}")
-    set(PROJECT_VERSION_FULL "${_MIB_RELEASE_VERSION_FULL}")
-    file(WRITE "${CMAKE_BINARY_DIR}/mib-release-identity.txt"
-        "version=${PROJECT_VERSION}\n"
-        "full_version=${PROJECT_VERSION_FULL}\n")
-    message(STATUS
-        "Using explicit release version: ${PROJECT_VERSION} "
-        "(full: ${PROJECT_VERSION_FULL})")
-    return()
-endif()
-
 # Try to get version from git tags
 set(GIT_VERSION "")
 # Full version retains any pre-release suffix (e.g. 1.0.4-beta.1) so the running

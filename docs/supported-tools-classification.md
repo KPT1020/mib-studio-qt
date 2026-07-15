@@ -21,9 +21,8 @@ Not shipped as standalone binaries. Used for development, QA, or automation.
 |----------------|---------|
 | `export_hdf5.py` | Core export logic; used by HDF5 Export GUI. Also runnable as CLI for dev/automation. |
 | `export_worker.py` | Background worker for the HDF5 Export GUI. |
-| `compare_metrics.py` | QA: compare metrics/conformance JSON, including optional masks, series, target, and tracking evidence. |
-| `run_processing_conformance.py` | QA: run the installed wheel and fail on drift from the committed reference. |
-| `gold_standard_dataset.json` | Committed deterministic full-parity wheel-conformance reference. |
+| `compare_metrics.py` | QA: compare two metrics JSON files (e.g. gold vs pipeline output). |
+| `gold_standard_dataset.json` | Config for gold-standard dataset path used by `compare_metrics.py` and docs. |
 | `build_windows.ps1`, `build_mac.sh` | Build scripts for packaging; remain in `scripts/` or are mirrored under `tools/` for building. |
 | `requirements.txt` | Dependencies for scripts; `tools/` has its own `requirements-runtime.txt` and `requirements-build.txt`. |
 

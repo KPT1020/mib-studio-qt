@@ -53,7 +53,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m pip install --upgrade pip
-          python3 -m pip install conan numpy
+          python3 -m pip install conan
           conan profile detect --force
 
       - name: Probe Conan dependency availability
@@ -84,31 +84,6 @@ jobs:
         run: |
           set -o pipefail
           cmake --build --preset linux-backend-only-build 2>&1 | tee artifacts/backend-ci/build.log
-
-      - name: Build mib_processing explicitly
-        shell: bash
-        run: |
-          set -o pipefail
-          cmake --build --preset linux-backend-only-build --target mib_processing 2>&1 | \
-            tee artifacts/backend-ci/build-mib-processing.log
-
-      - name: Verify mib_processing has no Qt dependency
-        shell: bash
-        # mib_processing (the portable deformability-cytometry core, see
-        # docs/gold_standard_metrics.md "Portable Processing Contract") must
-        # stay Qt-free so a non-Qt consumer (Biowork's services/mib-processing,
-        # tracked in the Biowork portability epic) can build it without a Qt
-        # toolchain. Regression guard: fail CI if any Qt symbol leaks in.
-        run: |
-          set -euo pipefail
-          lib="build/linux-backend/libmib_processing.a"
-          test -f "$lib"
-          if nm "$lib" | grep -Eq '\b(Q[A-Z][A-Za-z0-9_]*(6|)::|_ZN[0-9]+Q[A-Z])'; then
-            echo "::error::libmib_processing.a references Qt symbols; it must stay Qt-free."
-            nm "$lib" | grep -E '\b(Q[A-Z][A-Za-z0-9_]*(6|)::|_ZN[0-9]+Q[A-Z])'
-            exit 1
-          fi
-          echo "OK: libmib_processing.a has no Qt symbol references."
 
       - name: Test backend-only preset
         shell: bash

@@ -12,7 +12,6 @@
 #include "support/tempdir.h"
 
 #include <opencv2/core.hpp>
-#include <hdf5.h>
 
 #include <cmath>
 #include <string>
@@ -63,18 +62,8 @@ int main()
 
         ProcessingConfig cfg;
         ProcessingService::Roi roi{1, 2, 6, 7};
-        backend::processing::ProcessingCoreIdentity core;
-        core.version = "2.3.4";
-        core.contractVersion = 1;
-        core.engineAbiVersion = 1;
-        core.artifactSha256 = std::string(64, 'a');
-        core.releaseTag = "mib-processing-v2.3.4";
-        core.manifestSha256 = std::string(64, 'b');
-        core.source = "plugin";
-        core.buildId = "fixture-build";
-        core.runtimeFingerprint = "fixture-runtime";
         MIB_REQUIRE(hdf5.writeExperimentInfo(1000, 4000, valid.size(),
-                                             invalid.size(), cfg, roi, nullptr, &core),
+                                             invalid.size(), cfg, roi),
                     "writeExperimentInfo");
         MIB_EXPECT(hdf5.writeConfigJson("{\"pixel_to_micron\":0.4886}"),
                    "writeConfigJson");
@@ -95,13 +84,6 @@ int main()
         MIB_EXPECT(totalValid == 2 && totalInvalid == 1, "frame totals round-trip");
         MIB_EXPECT(roiOut.x == 1 && roiOut.y == 2 && roiOut.w == 6 && roiOut.h == 7,
                    "ROI round-trips");
-        backend::processing::ProcessingCoreIdentity coreOut;
-        MIB_REQUIRE(r.readProcessingCoreIdentity(coreOut), "processing core identity round-trip");
-        MIB_EXPECT(coreOut.version == "2.3.4" && coreOut.source == "plugin",
-                   "processing core version/source round-trip");
-        MIB_EXPECT(coreOut.artifactSha256 == std::string(64, 'a') &&
-                       coreOut.manifestSha256 == std::string(64, 'b'),
-                   "processing core digests round-trip");
 
         std::vector<ProcessedFrame> meta;
         MIB_REQUIRE(r.readValidMetadata(meta), "readValidMetadata");
@@ -125,57 +107,6 @@ int main()
             MIB_EXPECT(false, "valid frames carry image payloads");
         }
         r.closeFile();
-    }
-
-    // Legacy/external HDF writers may use fixed-length strings. Replacing one
-    // provenance attribute exercises the bounded fixed-string reader path
-    // (it must not treat fixed bytes as a heap-allocated char pointer).
-    {
-        hid_t file = H5Fopen(path.c_str(), H5F_ACC_RDWR, H5P_DEFAULT);
-        MIB_REQUIRE(file >= 0, "open raw HDF handle for fixed-string fixture");
-        hid_t group = H5Gopen2(file, "/experiment_info", H5P_DEFAULT);
-        MIB_REQUIRE(group >= 0, "open experiment_info for fixed-string fixture");
-        MIB_REQUIRE(H5Adelete(group, "processing_core_version") >= 0,
-                    "remove variable processing_core_version");
-        hid_t space = H5Screate(H5S_SCALAR);
-        hid_t type = H5Tcopy(H5T_C_S1);
-        H5Tset_size(type, 16);
-        H5Tset_strpad(type, H5T_STR_NULLTERM);
-        hid_t attribute = H5Acreate2(group, "processing_core_version", type, space,
-                                     H5P_DEFAULT, H5P_DEFAULT);
-        const char fixedVersion[16] = "2.3.4-fixed";
-        MIB_REQUIRE(attribute >= 0 && H5Awrite(attribute, type, fixedVersion) >= 0,
-                    "write fixed processing_core_version");
-        H5Aclose(attribute);
-        H5Tclose(type);
-        H5Sclose(space);
-        H5Gclose(group);
-        H5Fclose(file);
-
-        Hdf5Service reader;
-        MIB_REQUIRE(reader.loadFile(path), "reload fixed-string provenance fixture");
-        backend::processing::ProcessingCoreIdentity core;
-        MIB_REQUIRE(reader.readProcessingCoreIdentity(core),
-                    "fixed-string provenance is read safely");
-        MIB_EXPECT(core.version == "2.3.4-fixed", "fixed string is decoded without overread");
-        reader.closeFile();
-    }
-
-    {
-        const std::string legacyPath = (td / "legacy.h5").string();
-        hid_t file = H5Fcreate(legacyPath.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
-        MIB_REQUIRE(file >= 0, "create legacy provenance fixture");
-        hid_t group = H5Gcreate2(file, "/experiment_info", H5P_DEFAULT,
-                                 H5P_DEFAULT, H5P_DEFAULT);
-        MIB_REQUIRE(group >= 0, "create legacy experiment_info group");
-        H5Gclose(group);
-        H5Fclose(file);
-        Hdf5Service legacy;
-        MIB_REQUIRE(legacy.loadFile(legacyPath), "load legacy provenance fixture");
-        backend::processing::ProcessingCoreIdentity missing;
-        MIB_EXPECT(!legacy.readProcessingCoreIdentity(missing),
-                   "legacy file without core attributes is reported explicitly");
-        legacy.closeFile();
     }
 
     if (mib::test::exitCode() == 0) {

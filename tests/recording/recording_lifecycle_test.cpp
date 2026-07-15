@@ -66,17 +66,7 @@ int main()
         std::filesystem::remove(path);
         return 4;
     }
-    backend::processing::ProcessingCoreIdentity recordingCore;
-    recordingCore.version = "7.8.9";
-    recordingCore.contractVersion = 1;
-    recordingCore.engineAbiVersion = 1;
-    recordingCore.artifactSha256 = std::string(64, 'c');
-    recordingCore.manifestSha256 = std::string(64, 'd');
-    recordingCore.releaseTag = "mib-processing-v7.8.9";
-    recordingCore.source = "plugin";
-    recordingCore.buildId = "recording-fixture";
-    recordingCore.runtimeFingerprint = "recording-runtime";
-    if (!hdf5.writeRecordingInfo(1000, 4000, 3, 1, true, 5, &recordingCore))
+    if (!hdf5.writeRecordingInfo(1000, 4000, 3, 1, true, 5))
     {
         std::cerr << "failed to write recording info\n";
         hdf5.closeFile();
@@ -113,14 +103,6 @@ int main()
         hdf5.closeFile();
         std::filesystem::remove(path);
         return 8;
-    }
-    backend::processing::ProcessingCoreIdentity coreOut;
-    if (!hdf5.readProcessingCoreIdentity(coreOut) || coreOut != recordingCore)
-    {
-        std::cerr << "recording processing-core identity should round-trip\n";
-        hdf5.closeFile();
-        std::filesystem::remove(path);
-        return 12;
     }
 
     std::vector<backend::services::ProcessedFrame> metadata;

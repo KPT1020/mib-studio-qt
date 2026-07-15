@@ -29,9 +29,6 @@
   leaving the experiment-related tabs (ExperimentController state).
 - `onNoCamerasFound` — shows a friendly dialog when
   `DeviceInitManager` reports empty discovery.
-- Startup restores the persisted native core through
-  [[ProcessingCoreDialog]] before capture begins. A restore/pin failure is
-  visible in the status bar and experiment start remains blocked.
 
 - EGrabber JavaScript camera scripts are skipped during `onTabChanged` when
   a MindVision camera is selected.
@@ -52,9 +49,8 @@
 - **File:** Open Data Folder (`Documents/MIB_Studio_Qt`), Open Logs Folder
   (`%LOCALAPPDATA%/MIB_Studio_Qt/logs`), Exit.
 - **Settings:** Processing / Monitoring / Pixel-to-Micron / Syringe Pump
-  settings, **Processing Core…** ([[ProcessingCoreDialog]]), Boot Service
-  Toggles (added in code), and **Profiles…** (navigates to Experiment ▸
-  Preview, which hosts the config/profiles editor).
+  settings, Boot Service Toggles (added in code), and **Profiles…** (navigates
+  to Experiment ▸ Preview, which hosts the config/profiles editor).
 - **Help:** About, **Software Updates…** (opens [[System-Utilities]]'s
   `SoftwareUpdatesDialog` — channel + version selection; replaced the old
   "Check for Updates…"), Documentation and Report a Problem (open the GitHub
@@ -77,9 +73,6 @@
   the stale `StreamModule` stats seen in `docs/howto/safe-start-stop-egrabber.md`.
 - `experimentServicesActive_` must stay in sync with
   `ExperimentController::State` or buttons wedge.
-- The status-bar `Core: <version> · contract <n>` label is authoritative for
-  the selected engine. Experiment metadata receives that core identity on
-  stop; activation itself is rejected while an operation is active.
 - The async experiment flush (`QtConcurrent::run` + `flushWatcher_`) captures
   the **backend pointer, not `this`**: `QFutureWatcher`'s destructor does not
   block on a running future, so the task can outlive the window (the backend

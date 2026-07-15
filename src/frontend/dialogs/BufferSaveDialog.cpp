@@ -288,7 +288,6 @@ void BufferSaveDialog::onSaveFrames() {
     if (!validateInputs()) {
         return;
     }
-    auto processingCoreLease = backend_.processing().acquireProcessingCoreOperation();
 
     QString outputPath = ui->outputDirEdit->text().trimmed();
     if (outputPath.isEmpty()) {
@@ -322,9 +321,9 @@ void BufferSaveDialog::onSaveFrames() {
     if (ui->filterEmptyFramesCheck && ui->filterEmptyFramesCheck->isChecked()) {
         auto config = backend_.processing().getProcessingConfig();
         auto roi = backend_.processing().getRealtimeRoi();
-        auto bg = backend_.processing().getRealtimeBackgroundGrayShared();
-        filterFn = [this, config, roi, bg](const backend::playback::Frame& frame) {
-            return backend_.processing().isFrameEmptyWithActiveKernel(frame, config, roi, bg);
+        auto bg = backend_.processing().getRealtimeBackgroundGray();
+        filterFn = [config, roi, bg](const backend::playback::Frame& frame) {
+            return backend::services::ProcessingService::isFrameEmpty(frame, config, roi, bg);
         };
     }
 
@@ -543,3 +542,4 @@ QString BufferSaveDialog::resolveNonCollidingPath(const QString& candidate) cons
 }
 
 } // namespace frontend
+

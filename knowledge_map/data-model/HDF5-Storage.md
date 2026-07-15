@@ -12,20 +12,13 @@
 - `/experiment_info` — root attributes:
   `startTimeNs`, `endTimeNs`, `totalValidFrames`, `totalInvalidFrames`,
   serialized `ProcessingConfig`, ROI, optional `background` image,
-  `config_json` (raw JSON string), plus processing-core provenance:
-  `processing_core_version`, `processing_contract_version`,
-  `processing_engine_abi_version`, `processing_core_sha256`,
-  `processing_manifest_sha256`, `processing_release_tag`,
-  `processing_core_source`, `processing_core_build_id`, and
-  `processing_runtime_fingerprint`.
+  `config_json` (raw JSON string).
 - `/valid_frames/` — per-field datasets (images, masks, metrics).
 - `/invalid_frames/` — same shape; populated only at
   `invalidFrameSamplingRate` sampling.
 - `/series_images` — 4D `(N, seriesCount, H, W)` for multi-image mode.
 - `/recorded_frames/` — used by frame-recording mode (images + basic
   metadata only; no contour metrics).
-- `/recording_info` — raw-recording totals/config plus the same nine
-  processing-core provenance attributes as `/experiment_info`.
 - Chart snapshot datasets — 2D/3D `cv::Mat` saved via
   `saveChartSnapshot(path, image)`.
 
@@ -39,17 +32,12 @@
   `writeExperimentInfo(...)` →
   optional `writeConfigJson(...)`.
   Called from `ProcessingService::flushBufferedFrames`.
-  `writeExperimentInfo` receives the exact core identity used by the live or
-  offline operation; `readProcessingCoreIdentity` returns it to review/tooling
-  callers and reports absence for legacy files.
   Append steps flush on a time interval (`maybeIntervalFlush`); one-shot
   finalization writes (`writeExperimentInfo`, `writeConfigJson`) flush
   unconditionally.
 - **Recording mode**: `initializeRecordingDatasets()` →
   `appendRecordingFrames(images, metadata)` →
-  `writeRecordingInfo(..., processingCore)`. The recorder holds one operation
-  lease from start through final metadata so the identity describes the exact
-  core used for every empty-frame decision.
+  `writeRecordingInfo(...)`.
   Recording appends also flush on the same time interval — no per-append
   full-file copy. Finalization performs a global HDF5 flush and strong
   `H5Fclose`, so the superblock EOA is updated before `stopFrameRecording()`

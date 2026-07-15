@@ -9,10 +9,8 @@
 
 #include "backend/app/AppBackend.h"
 #include "backend/diagnostics/CrashStateMirror.h"
-#include "backend/recording/Hdf5Service.h"
 #include "backend/services/CrashReporter.h"
 #include "frontend/core/MainWindow.h"
-#include "frontend/utils/ApplicationSettings.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -140,13 +138,6 @@ namespace {
 
         backend::services::CrashReporter::init(cfg);
 
-        // Wire Hdf5Service's optional performance-trace hook to the real
-        // crash reporter. Hdf5Service itself has no CrashReporter (or Qt)
-        // dependency -- it lives in the Qt-free mib_processing target; this
-        // is the only place the two are connected, and only in the real app.
-        backend::services::setHdf5PerformanceTraceHook(
-            &backend::services::CrashReporter::capturePerformanceTransaction);
-
         // Register the state mirror as the source of crash-time JSON.
         backend::services::CrashReporter::registerStateMirror([]() {
             return backend::diagnostics::CrashStateMirror::instance().snapshotJsonString();
@@ -183,22 +174,8 @@ int main(int argc, char* argv[]) {
         // Initialize QApplication first
         QApplication app(argc, argv);
 
-        // Establish a complete, stable QSettings identity before any settings
-        // are read. Older builds used Qt's "Unknown Organization" fallback;
-        // initialize() migrates every legacy key without replacing newer ones.
-        QString settingsMigrationError;
-        if (!frontend::applicationsettings::initialize(&settingsMigrationError)) {
-            const QString message =
-                QStringLiteral("MIB Studio could not initialize its persistent settings. "
-                               "Startup is stopped to avoid silently losing the selected "
-                               "processing core or other preferences.\n\n%1")
-                    .arg(settingsMigrationError);
-            writeEarlyError(message.toStdString());
-            showError(QStringLiteral("Settings Initialization Failed"), message);
-            return 1;
-        }
-
-        // Application version is used by the updater and About dialogs.
+        // Application identity/version (used by the updater and About dialogs)
+        QCoreApplication::setApplicationName(QStringLiteral("MIB Studio Qt"));
         // Full version retains any pre-release suffix (e.g. 1.0.4-beta.1) so the
         // updater/About know the build's channel and can mark the right release.
         QCoreApplication::setApplicationVersion(QStringLiteral(MIB_STUDIO_QT_VERSION_FULL));

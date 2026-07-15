@@ -66,26 +66,6 @@
       </widget>
      </item>
      <item>
-      <widget class="QPushButton" name="batchExportMetricsBtn">
-       <property name="text">
-        <string>Batch Metrics...</string>
-       </property>
-       <property name="toolTip">
-        <string>Export one collision-safe metrics CSV per selected HDF5 file.</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="batchExportAllBtn">
-       <property name="text">
-        <string>Batch Export All...</string>
-       </property>
-       <property name="toolTip">
-        <string>Export each selected HDF5 file into its own collision-safe folder.</string>
-       </property>
-      </widget>
-     </item>
-     <item>
       <widget class="QPushButton" name="exportChartsBtn">
        <property name="text">
         <string>Export Charts as TIFF...</string>

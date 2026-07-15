@@ -7,11 +7,6 @@ The test runner downloads a small, stable sample set through the Hugging Face
 Dataset Viewer API. It does not require `HF_TOKEN`, `huggingface-cli`, or manual
 login for the public dataset.
 
-The runner retries remote requests five times. If the public service still
-returns HTTP 429/5xx or a connection/timeout error, it exits 77 and CTest marks
-the network integration as skipped. Dataset schema, row, image, and processing
-regressions remain hard failures.
-
 ## Run Locally
 
 Windows Debug:

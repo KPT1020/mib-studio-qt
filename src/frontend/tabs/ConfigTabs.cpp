@@ -46,7 +46,6 @@
 #endif
 
 #include "backend/app/AppBackend.h"
-#include "backend/processing/ProcessingService.h"
 #include "frontend/system/ProfileManager.h"
 #include "frontend/models/JsonTableModel.h"
 #include "frontend/utils/JsonFlatten.h"
@@ -842,9 +841,7 @@ bool ConfigTabs::ensureProfilesDirExists(QString* err) const {
 QStringList ConfigTabs::listProfiles() const {
     QStringList result;
     QString err;
-    const auto summaries = profileManager_.scanLocalProfiles(
-        true, remoteCatalog_ ? &*remoteCatalog_ : nullptr, &err,
-        static_cast<int>(backend_.processing().activeProcessingCoreIdentity().contractVersion));
+    const auto summaries = profileManager_.scanLocalProfiles(true, remoteCatalog_ ? &*remoteCatalog_ : nullptr, &err);
     if (!err.isEmpty()) {
         SPDLOG_WARN("ConfigTabs: failed to scan profiles for list: {}", err.toStdString());
     }
@@ -858,9 +855,7 @@ void ConfigTabs::refreshProfilesList() {
     if (!profileSelect_) return;
     const QString last = QSettings().value("Profiles/LastProfileName").toString();
     QString err;
-    const auto summaries = profileManager_.scanLocalProfiles(
-        true, remoteCatalog_ ? &*remoteCatalog_ : nullptr, &err,
-        static_cast<int>(backend_.processing().activeProcessingCoreIdentity().contractVersion));
+    const auto summaries = profileManager_.scanLocalProfiles(true, remoteCatalog_ ? &*remoteCatalog_ : nullptr, &err);
     if (!err.isEmpty()) {
         SPDLOG_WARN("ConfigTabs: profile scan warning: {}", err.toStdString());
     }
@@ -936,9 +931,7 @@ std::optional<frontend::ProfileManager::LocalProfile> ConfigTabs::selectedProfil
         return std::nullopt;
     }
     QString err;
-    const auto summaries = profileManager_.scanLocalProfiles(
-        true, remoteCatalog_ ? &*remoteCatalog_ : nullptr, &err,
-        static_cast<int>(backend_.processing().activeProcessingCoreIdentity().contractVersion));
+    const auto summaries = profileManager_.scanLocalProfiles(true, remoteCatalog_ ? &*remoteCatalog_ : nullptr, &err);
     if (!err.isEmpty()) {
         SPDLOG_WARN("ConfigTabs: failed to fetch selected profile summary: {}", err.toStdString());
     }
@@ -1001,20 +994,10 @@ void ConfigTabs::refreshProfileStatusLabel() {
         details << tr("incompatible");
     }
     profileStatusLabel_->setText(details.join(QStringLiteral(" | ")));
-    const int requiredContract = summary->remoteEntry.has_value()
-        ? summary->remoteEntry->processingContractVersion
-        : summary->metadata.processingContractVersion;
-    profileStatusLabel_->setToolTip(QStringLiteral(
-                                        "Profile: %1\nConfig: %2\nMetadata: %3\n"
-                                        "Required processing contract: %4\nActive processing contract: %5")
+    profileStatusLabel_->setToolTip(QStringLiteral("Profile: %1\nConfig: %2\nMetadata: %3")
                                         .arg(summary->profileName,
                                              summary->hasConfig ? summary->configPath : tr("missing"),
-                                             summary->hasMetadata ? summary->metaPath : tr("missing"))
-                                        .arg(requiredContract > 0 ? QString::number(requiredContract)
-                                                                  : tr("any"))
-                                        .arg(backend_.processing()
-                                                 .activeProcessingCoreIdentity()
-                                                 .contractVersion));
+                                             summary->hasMetadata ? summary->metaPath : tr("missing")));
 }
 
 void ConfigTabs::showDiffDialog(const QString& title, const QVector<frontend::ProfileManager::DiffRow>& rows) {
@@ -1279,9 +1262,7 @@ void ConfigTabs::onCheckProfileUpdates() {
 
     const int remoteCount = catalog->profiles.size();
     int updateCount = 0;
-    const auto refreshed = profileManager_.scanLocalProfiles(
-        true, &*remoteCatalog_, nullptr,
-        static_cast<int>(backend_.processing().activeProcessingCoreIdentity().contractVersion));
+    const auto refreshed = profileManager_.scanLocalProfiles(true, &*remoteCatalog_, nullptr);
     for (const auto& profile : refreshed) {
         if (profile.updateAvailable) {
             ++updateCount;

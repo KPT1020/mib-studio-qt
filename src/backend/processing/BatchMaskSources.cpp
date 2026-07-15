@@ -217,8 +217,7 @@ bool saveMasksToHdf5(const std::vector<ProcessedFrame>& frames,
                      const ProcessingConfig& config,
                      int roiX, int roiY, int roiW, int roiH,
                      const cv::Mat& background,
-                     bool useFrameTimestamps,
-                     const backend::processing::ProcessingCoreIdentity* processingCore) {
+                     bool useFrameTimestamps) {
     if (frames.empty()) {
         SPDLOG_WARN("saveMasksToHdf5: no frames to save");
         return false;
@@ -254,8 +253,7 @@ bool saveMasksToHdf5(const std::vector<ProcessedFrame>& frames,
     ProcessingService::Roi roi{roiX, roiY, roiW, roiH};
     const cv::Mat* bgPtr = background.empty() ? nullptr : &background;
 
-    if (!out.writeExperimentInfo(startTimeNs, endTimeNs, valid.size(), invalid.size(), config, roi,
-                                 bgPtr, processingCore)) {
+    if (!out.writeExperimentInfo(startTimeNs, endTimeNs, valid.size(), invalid.size(), config, roi, bgPtr)) {
         SPDLOG_ERROR("saveMasksToHdf5: writeExperimentInfo failed");
         out.closeFile();
         return false;

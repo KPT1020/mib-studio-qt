@@ -9,22 +9,6 @@
 **Related:** [[ProcessingService]], [[../data-model/HDF5-Storage]],
 [[../frontend/HdfReviewTab]], [[../architecture/AppBackend]]
 
-**Build target:** compiled into `mib_processing`, the Qt-free static library
-`mib_backend` links publicly (`src/backend/CMakeLists.txt`). `Hdf5Service`
-itself has no `CrashReporter` (or Qt) dependency — see "Performance telemetry
-hook" below.
-
-## Performance telemetry hook
-
-`setHdf5PerformanceTraceHook(PerformanceTraceFn)` (free function, same
-header) is an optional sink for HDF5 I/O performance events (`hdf5.close_file`,
-`hdf5.append_frames`). It defaults to a no-op so `Hdf5Service` stays Qt-free;
-`src/frontend/core/main.cpp` wires it to
-`CrashReporter::capturePerformanceTransaction` during startup
-(`installCrashReporter`), right after `CrashReporter::init`. This is the only
-place `Hdf5Service` and `CrashReporter` are connected, and only in the real
-desktop app — tests and portable consumers may leave it unset.
-
 ## Async write decoupling — `HdfWriteQueue`
 
 `include/backend/recording/HdfWriteQueue.h` is a header-only, bounded (3-slot)
@@ -50,8 +34,7 @@ a macro). Unit-tested by `tests/backend/hdf_write_queue_test.cpp`.
 - Writes valid/invalid frames as bulk (`saveFrames`) or incrementally
   (`initializeDatasets` + `appendFrames`).
 - Stores experiment metadata: start/end time (ns), totals, `ProcessingConfig`,
-  ROI, optional background image, and the exact `ProcessingCoreIdentity` used;
-  plus raw config JSON via `writeConfigJson`.
+  ROI, optional background image; plus raw config JSON via `writeConfigJson`.
 - Append hot paths (`appendFrames`, `appendRecordingFrames`) flush via
   `maybeIntervalFlush()`: an `H5Fflush(H5F_SCOPE_GLOBAL)` at most once per
   `MIB_HDF5_FLUSH_INTERVAL_MS` (default 5000 ms). This keeps the recorder
@@ -90,28 +73,6 @@ Blocking I/O on whichever thread calls it. In practice:
 - Review reads: called from Qt main thread via [[../frontend/HdfReviewTab]].
 - Frame recording writes: called from `AppBackend`'s recording thread.
 
-## Processing-core provenance
-
-`writeExperimentInfo(..., processingCore)` and
-`writeRecordingInfo(..., processingCore)` write the selected core identity as
-attributes on `/experiment_info` and `/recording_info`, respectively:
-
-- `processing_core_version`, `processing_contract_version`,
-  `processing_engine_abi_version`
-- `processing_core_sha256`, `processing_manifest_sha256`,
-  `processing_release_tag`
-- `processing_core_source`, `processing_core_build_id`,
-  `processing_runtime_fingerprint`
-
-Callers hold a `ProcessingService::CoreOperationLease` and pass its identity,
-so a core cannot be swapped between processing/empty classification and final
-metadata. Offline mask regeneration uses the identity captured by
-`processBatch`. `readProcessingCoreIdentity` reads either group (with scalar,
-bounded variable/fixed-string handling) and returns `false` for a legacy file
-that predates provenance. The writer records the bundled identity when no
-explicit identity is supplied, preserving deterministic metadata for older
-call sites.
-
 ## Gotchas
 
 - `openFile(path)` creates the destination's parent directory tree
@@ -145,9 +106,6 @@ call sites.
   `knowledge_map/task/review_2gb_scalability.md`.
 - PIMPL means you can't see HDF5 types in headers — look at
   `src/backend/recording/Hdf5Service.cpp` for dataset paths and dtypes.
-- The optional `H5Pset_file_locking` call is compiled only for HDF5 1.10.7+.
-  This keeps the processing-only manylinux build compatible with the 1.10.5
-  development package while preserving locking on newer desktop libraries.
 - If a primary `.h5` opens only after `h5clear --increment`, check recorder
   logs for final flush/close errors and whether the app or host was killed
   before `stopFrameRecording()` returned. With interval flushing, a kill

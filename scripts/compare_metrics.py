@@ -12,11 +12,6 @@ Usage:
         (gold path from GOLD_STANDARD_JSON env or scripts/gold_standard_dataset.json)
     python scripts/compare_metrics.py gold.json qt.json --tolerance deformability 0.001
     python scripts/compare_metrics.py gold.json qt.json -o report.txt
-
-The committed conformance reference also carries exact SHA-256 digests for
-masks and multi-image series plus target/tracking metadata. Those optional
-fields are enforced whenever the reference contains them, while older
-metrics-only documents remain comparable.
 """
 
 from __future__ import annotations
@@ -29,43 +24,29 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 # Gold-standard frame keys that are numeric (use tolerance)
-REQUIRED_NUMERIC_KEYS = [
+NUMERIC_KEYS = [
     "deformability", "area", "area_um2", "area_ratio", "ring_ratio",
     "brightness_q1", "brightness_q2", "brightness_q3", "brightness_q4",
 ]
 
-OPTIONAL_NUMERIC_KEYS = ["youngs_modulus"]
-NUMERIC_KEYS = REQUIRED_NUMERIC_KEYS + OPTIONAL_NUMERIC_KEYS
-
 # Keys that must match exactly (boolean or integer)
-REQUIRED_EXACT_KEYS = [
+EXACT_KEYS = [
     "frame_type", "index", "timestamp_ns",
-    "object_id", "object_count", "is_valid", "touches_border",
-    "has_single_inner_contour", "in_range", "inner_contour_count",
+    "is_valid", "touches_border", "has_single_inner_contour", "in_range", "inner_contour_count",
 ]
-
-OPTIONAL_EXACT_KEYS = [
-    "is_target_group", "track_id", "track_first_frame", "track_last_frame",
-    "track_observation_count", "mask_sha256", "series_images_sha256",
-]
-EXACT_KEYS = REQUIRED_EXACT_KEYS + OPTIONAL_EXACT_KEYS
 
 # Default absolute tolerance for numeric fields (conservative)
 DEFAULT_NUMERIC_TOLERANCE = 1e-6
 
 # Keys to compare (subset of frame that we diff)
-REQUIRED_COMPARE_KEYS = set(REQUIRED_NUMERIC_KEYS + REQUIRED_EXACT_KEYS)
-OPTIONAL_COMPARE_KEYS = set(OPTIONAL_NUMERIC_KEYS + OPTIONAL_EXACT_KEYS)
-COMPARE_KEYS = REQUIRED_COMPARE_KEYS | OPTIONAL_COMPARE_KEYS
+COMPARE_KEYS = set(NUMERIC_KEYS + EXACT_KEYS)
 
 
 def get_default_gold_path() -> Optional[Path]:
     """
     Resolve default gold-standard JSON path from GOLD_STANDARD_JSON env or
-    scripts/gold_standard_dataset.json. The committed file is a reference
-    document; for backward compatibility a local object containing
-    ``reference_json_path`` is also accepted. Paths in that config form are
-    relative to repo root (parent of script dir).
+    scripts/gold_standard_dataset.json (reference_json_path). Paths in config
+    are relative to repo root (parent of script dir).
     """
     env_path = os.environ.get("GOLD_STANDARD_JSON")
     if env_path:
@@ -81,8 +62,6 @@ def get_default_gold_path() -> Optional[Path]:
     try:
         with open(config_path, encoding="utf-8") as f:
             data = json.load(f)
-        if isinstance(data, dict) and isinstance(data.get("frames"), list):
-            return config_path.resolve()
         ref = data.get("reference_json_path")
         if not ref:
             return None
@@ -137,10 +116,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--match-by",
         type=str,
-        choices=["index", "index_and_type", "index_type_object"],
-        default="index_type_object",
-        help=("Match records by index only, index + frame_type, or index + "
-              "frame_type + object_id. Default: index_type_object"),
+        choices=["index", "index_and_type"],
+        default="index",
+        help="Match frames by index only, or index and frame_type. Default: index",
     )
     return parser.parse_args()
 
@@ -150,25 +128,15 @@ def load_json(path: Path) -> dict[str, Any]:
         return json.load(f)
 
 
-def frame_key(frame: dict, match_by: str) -> Tuple[Any, ...]:
-    """Return the configured stable identity for one output record."""
-    if match_by == "index":
-        return (frame["index"],)
-    if match_by == "index_and_type":
-        return (frame["index"], frame["frame_type"])
-    return (frame["index"], frame["frame_type"], frame.get("object_id", -1))
-
-
-def build_frame_index(frames: List[dict], match_by: str) -> Dict[Tuple[Any, ...], dict]:
-    """Index records and reject ambiguous duplicate identities."""
-    out: Dict[Tuple[Any, ...], dict] = {}
+def build_frame_index(frames: List[dict], match_by: str) -> Dict[Tuple[int, str], dict]:
+    """Index frames by (index,) or (index, frame_type)."""
+    out: Dict[Tuple[int, str], dict] = {}
     for fr in frames:
-        key = frame_key(fr, match_by)
+        idx = fr["index"]
+        key = (idx, fr["frame_type"]) if match_by == "index_and_type" else (idx, "")
         if key in out:
-            raise ValueError(
-                f"duplicate record identity {key!r}; use --match-by "
-                "index_type_object or fix duplicate object_id values"
-            )
+            # Duplicate index: keep first (or we could error)
+            continue
         out[key] = fr
     return out
 
@@ -186,17 +154,9 @@ def compare_frames(
     details: Dict[str, Any] = {}
     all_ok = True
 
-    keys_to_compare = REQUIRED_COMPARE_KEYS | {
-        key for key in OPTIONAL_COMPARE_KEYS if key in gold_frame
-    }
-
-    for key in sorted(keys_to_compare):
-        if key not in gold_frame:
-            details[key] = {"match": False, "reason": "missing_in_reference"}
-            all_ok = False
-            continue
-        if key not in cand_frame:
-            details[key] = {"match": False, "reason": "missing_in_candidate"}
+    for key in COMPARE_KEYS:
+        if key not in gold_frame or key not in cand_frame:
+            details[key] = {"match": False, "reason": "missing"}
             all_ok = False
             continue
 
@@ -254,47 +214,21 @@ def run_comparison(
     cand_data = load_json(cand_path)
 
     gold_frames = gold_data.get("frames", [])
-    build_frame_index(gold_frames, match_by)  # validate reference identities too
     cand_index = build_frame_index(cand_data.get("frames", []), match_by)
-    used_keys = set()
 
     results: List[Tuple[dict, dict, bool, Dict[str, Any]]] = []
     matched_count = 0
 
     for gf in gold_frames:
-        key = frame_key(gf, match_by)
+        idx = gf["index"]
+        key = (idx, gf["frame_type"]) if match_by == "index_and_type" else (idx, "")
         cf = cand_index.get(key)
         if cf is None:
             results.append((gf, {}, False, {"_reason": "no_matching_candidate_frame"}))
             continue
         matched_count += 1
-        used_keys.add(key)
         ok, details = compare_frames(gf, cf, tolerances, default_tol)
         results.append((gf, cf, ok, details))
-
-    for key, candidate_only in cand_index.items():
-        if key not in used_keys:
-            results.append(({}, candidate_only, False, {"_reason": "candidate_only_record"}))
-
-    document_details: Dict[str, Any] = {}
-    for key in ("version", "contract_version", "fixture", "input_frame_count"):
-        if key in gold_data and gold_data.get(key) != cand_data.get(key):
-            document_details[key] = {
-                "match": False,
-                "gold": gold_data.get(key),
-                "candidate": cand_data.get(key),
-            }
-    if "pixel_to_micron" in gold_data:
-        gold_pixel = float(gold_data["pixel_to_micron"])
-        candidate_pixel = cand_data.get("pixel_to_micron")
-        if candidate_pixel is None or abs(float(candidate_pixel) - gold_pixel) > default_tol:
-            document_details["pixel_to_micron"] = {
-                "match": False,
-                "gold": gold_pixel,
-                "candidate": candidate_pixel,
-            }
-    if document_details:
-        results.append(({}, {}, False, {"_reason": "document_metadata_mismatch", **document_details}))
 
     return matched_count, len(gold_frames), results
 
@@ -318,10 +252,6 @@ def format_report(
     missing = total_gold - matched_count
     if missing:
         lines.append(f"Frames missing in candidate: {missing}")
-    candidate_only = sum(1 for _g, _c, _ok, details in results
-                         if details.get("_reason") == "candidate_only_record")
-    if candidate_only:
-        lines.append(f"Extra records in candidate: {candidate_only}")
     lines.append("")
 
     failed = [r for r in results if not r[2]]
@@ -345,7 +275,7 @@ def format_report(
                 field_deltas[key].append(d["delta"])
 
     lines.append("Per-field failure count:")
-    for k in sorted(COMPARE_KEYS):
+    for k in COMPARE_KEYS:
         n = field_failures.get(k, 0)
         if n > 0:
             lines.append(f"  {k}: {n}")
@@ -362,10 +292,7 @@ def format_report(
     if failed and len(failed) <= 20:
         lines.append("First few differing frames (index, gold vs candidate):")
         for gf, cf, _ok, details in failed[:10]:
-            idx = gf.get("index", cf.get("index", "?"))
-            if "_reason" in details:
-                lines.append(f"  index {idx}: {details['_reason']}")
-                continue
+            idx = gf.get("index", "?")
             diffs = [k for k, d in details.items() if isinstance(d, dict) and not d.get("match", True)]
             lines.append(f"  index {idx}: diffs in {diffs}")
     elif failed:
@@ -404,26 +331,19 @@ def main() -> int:
 
     tolerances: Dict[str, float] = {}
     for field, val in args.tolerance:
-        if field not in NUMERIC_KEYS:
-            print(f"ERROR: Unknown numeric tolerance field: {field}", file=sys.stderr)
-            return 1
         try:
             tolerances[field] = float(val)
         except ValueError:
             print(f"ERROR: Invalid tolerance value for {field}: {val}", file=sys.stderr)
             return 1
 
-    try:
-        matched_count, total_gold, results = run_comparison(
-            gold_path,
-            cand_path,
-            tolerances,
-            args.default_tolerance,
-            args.match_by,
-        )
-    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-        print(f"ERROR: Cannot compare documents: {exc}", file=sys.stderr)
-        return 1
+    matched_count, total_gold, results = run_comparison(
+        gold_path,
+        cand_path,
+        tolerances,
+        args.default_tolerance,
+        args.match_by,
+    )
 
     report = format_report(
         gold_path,

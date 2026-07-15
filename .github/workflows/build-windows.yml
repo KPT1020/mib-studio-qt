@@ -33,77 +33,66 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # This must run before the prospective version is written into the local
-      # workspace. Git refs are not mutated until every build/package gate has
-      # succeeded near the end of the job.
-      - name: Validate processing-core signer trust pin
-        shell: pwsh
-        env:
-          PROCESSING_CORE_SIGNER_SPKI_SHA256: ${{ vars.MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256 }}
+      # ── Version ────────────────────────────────────────────────
+      - name: Determine version
+        id: version
         run: |
-          if ($env:PROCESSING_CORE_SIGNER_SPKI_SHA256 -notmatch '^[0-9A-Fa-f]{64}$') {
-            throw 'Repository variable MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256 must be a non-empty 64-hex DER-SPKI SHA-256 before a desktop release can build'
+          $versionFile = "cmake/MIBVersion.cmake"
+          $content = Get-Content $versionFile -Raw
+          if ($content -match 'set\(DEFAULT_VERSION\s+"(\d+)\.(\d+)\.(\d+)"\)') {
+            $major = [int]$matches[1]
+            $minor = [int]$matches[2]
+            $patch = [int]$matches[3]
+          } else {
+            Write-Host "ERROR: Could not find DEFAULT_VERSION in $versionFile" -ForegroundColor Red
+            exit 1
+          }
+          $current = "$major.$minor.$patch"
+
+          if ("${{ inputs.mode }}" -eq "release") {
+            # Bump version
+            switch ("${{ inputs.bump }}") {
+              "major" { $major++; $minor = 0; $patch = 0 }
+              "minor" { $minor++; $patch = 0 }
+              "patch" { $patch++ }
+            }
+            $version = "$major.$minor.$patch"
+            $tag = "v$version"
+            $channel = "stable"
+
+            # Update fallback CMake version module, commit, tag, push
+            $content = $content -replace "set\(DEFAULT_VERSION\s+`"$current`"\)", "set(DEFAULT_VERSION `"$version`")"
+            Set-Content -Path $versionFile -Value $content -NoNewline
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add $versionFile
+            git commit -m "chore: bump version to $version"
+            git tag -a $tag -m "Version $version"
+            git push origin HEAD:main --follow-tags
+            Write-Host "Release: $current -> $version"
+          } else {
+            # Beta: use current version + short SHA, no commit
+            $sha = git rev-parse --short HEAD
+            $version = "$current-beta.$sha"
+            $tag = "v$version"
+            $channel = "beta"
+            Write-Host "Beta: $version (no version bump)"
           }
 
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "channel=$channel" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
+      # ── Build environment ──────────────────────────────────────
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      # ── Version ────────────────────────────────────────────────
-      - name: Determine prospective version
-        id: version
-        shell: pwsh
-        run: |
-          $bump = if ('${{ inputs.mode }}' -eq 'release') { '${{ inputs.bump }}' } else { 'none' }
-          $versionInfoJson = python scripts/resolve_desktop_release_version.py --bump $bump
-          if ($LASTEXITCODE -ne 0) { throw 'Desktop release version resolution failed' }
-          $versionInfo = $versionInfoJson | ConvertFrom-Json
-          $versionFile = "cmake/MIBVersion.cmake"
-          $content = Get-Content $versionFile -Raw
-          $default = [string]$versionInfo.default_version
-          $current = [string]$versionInfo.current_version
-
-          if ("${{ inputs.mode }}" -eq "release") {
-            $version = [string]$versionInfo.next_version
-            $tag = "v$version"
-            $channel = "stable"
-            $artifactVersion = $version
-
-            # Configure/build/package the prospective tree, but do not commit,
-            # tag, or push until every gate has passed.
-            $updated = $content -replace "set\(DEFAULT_VERSION\s+`"$([regex]::Escape($default))`"\)", "set(DEFAULT_VERSION `"$version`")"
-            if ($updated -eq $content) {
-              throw "Could not replace DEFAULT_VERSION $default with $version"
-            }
-            Set-Content -Path $versionFile -Value $updated -NoNewline
-            Write-Host "Prospective release: effective $current -> $version (fallback was $default; refs unchanged)"
-          } else {
-            # Beta: use the effective reachable version + short SHA, no commit.
-            $sha = (git rev-parse --short HEAD).Trim()
-            if ($LASTEXITCODE -ne 0 -or -not $sha) { throw 'Could not resolve beta commit SHA' }
-            $version = "$current-beta.$sha"
-            $tag = "v$version"
-            $channel = "beta"
-            $artifactVersion = $current
-            Write-Host "Beta: $version (effective numeric version $current; no version bump)"
-          }
-
-          $existingTag = @(git tag --list $tag)
-          if ($LASTEXITCODE -ne 0) { throw "Could not check release tag $tag" }
-          if ($existingTag.Count -ne 0) { throw "Release tag already exists: $tag" }
-
-          "version=$version" >> $env:GITHUB_OUTPUT
-          "tag=$tag" >> $env:GITHUB_OUTPUT
-          "channel=$channel" >> $env:GITHUB_OUTPUT
-          "artifact_version=$artifactVersion" >> $env:GITHUB_OUTPUT
-          "current_version=$current" >> $env:GITHUB_OUTPUT
-
-      # ── Build environment ──────────────────────────────────────
-
       - name: Install Conan
         run: |
-          pip install conan boto3 numpy
+          pip install conan boto3
           conan profile detect --force
           # Create CI profile pinned to msvc 194 to match prebuilt binaries on conancenter
           @"
@@ -210,7 +199,6 @@ jobs:
         env:
           MIB_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           MIB_SENTRY_ENV: ${{ steps.version.outputs.channel == 'stable' && 'production' || 'beta' }}
-          PROCESSING_CORE_SIGNER_SPKI_SHA256: ${{ vars.MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256 }}
         run: |
           # Bake the Sentry DSN into the installer (HKLM env var) so installed
           # builds report crashes without per-user configuration. The DSN is a
@@ -219,15 +207,7 @@ jobs:
           # against quota.
           # Hosted GitHub runners do not have the proprietary MindVision SDK.
           # Keep this explicit so CI continues to exercise the portable stub.
-          $args = @(
-            '--preset',
-            'windows-default',
-            '-DMIB_ENABLE_MINDVISION=OFF',
-            '-DMIB_REQUIRE_PROCESSING_CORE_SIGNER_SPKI=ON',
-            "-DMIB_PROCESSING_CORE_SIGNER_SPKI_SHA256=$env:PROCESSING_CORE_SIGNER_SPKI_SHA256",
-            '-DMIB_RELEASE_VERSION_OVERRIDE=${{ steps.version.outputs.artifact_version }}',
-            '-DMIB_RELEASE_VERSION_FULL_OVERRIDE=${{ steps.version.outputs.version }}'
-          )
+          $args = @('--preset', 'windows-default', '-DMIB_ENABLE_MINDVISION=OFF')
           if ($env:MIB_SENTRY_DSN) {
             $args += "-DMIB_SENTRY_DSN=$env:MIB_SENTRY_DSN"
             $args += "-DMIB_SENTRY_ENVIRONMENT=$env:MIB_SENTRY_ENV"
@@ -238,23 +218,8 @@ jobs:
           cmake @args
         shell: pwsh
 
-      - name: Validate configured release identity
-        shell: pwsh
-        run: |
-          $identity = @{}
-          Get-Content -LiteralPath build\mib-release-identity.txt | ForEach-Object {
-            $parts = $_ -split '=', 2
-            if ($parts.Count -eq 2) { $identity[$parts[0]] = $parts[1] }
-          }
-          if ($identity.version -ne '${{ steps.version.outputs.artifact_version }}' -or
-              $identity.full_version -ne '${{ steps.version.outputs.version }}') {
-            throw "Configured release identity diverged: numeric=$($identity.version), full=$($identity.full_version)"
-          }
-
       - name: CMake build
-        # CTest registers independent executables; build the default/all target
-        # so every registered test binary exists before the test gate.
-        run: cmake --build build --config Release
+        run: cmake --build build --config Release --target mib_studio_qt
 
       - name: Verify crash-reporting artifacts
         run: |
@@ -282,9 +247,6 @@ jobs:
             exit 1
           }
         shell: pwsh
-
-      - name: Run tests
-        run: ctest --test-dir build --build-config Release --output-on-failure --timeout 30
 
       # ── Sentry symbol upload ──────────────────────────────────
       # Upload mib_studio_qt.pdb (and the sentry-native runtime PDBs if
@@ -341,55 +303,9 @@ jobs:
           sentry-cli releases finalize $release
         shell: pwsh
 
-      # ── User-manual screenshots ────────────────────────────────
-      # screenshot_tour drives the real UI headless in mock-camera mode and
-      # regenerates docs/manual/images (see docs/manual/README.md). Failures
-      # warn instead of blocking the release, but they are never silent.
-      - name: Build screenshot tour
-        run: cmake --build build --config Release --target screenshot_tour
-
-      # The native platform is deliberate: the Conan Qt offscreen plugin
-      # deadlocks inside QApplication on Windows runners (rehearsal run
-      # 29334787107 hung here for the 6-hour job limit). Screenshots are
-      # optional for a release, so a bounded failure degrades to the
-      # existing warning path instead of consuming the job.
-      - name: Generate user-manual screenshots
-        id: screenshots
-        timeout-minutes: 20
-        continue-on-error: true
-        env:
-          QT_QPA_PLATFORM: windows
-          MIB_MOCK_CAMERA_DIR: ${{ github.workspace }}\data\mock_frames
-        run: |
-          & build\Release\screenshot_tour.exe --out docs\manual\images
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::warning::screenshot_tour failed (exit $LASTEXITCODE) - user-manual screenshots were NOT refreshed for this build"
-            "ok=false" >> $env:GITHUB_OUTPUT
-            exit 0
-          }
-          "ok=true" >> $env:GITHUB_OUTPUT
-        shell: pwsh
-
-      - name: Upload manual screenshots
-        if: steps.screenshots.outputs.ok == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: manual-screenshots-${{ steps.version.outputs.version }}
-          path: docs/manual/images/
-          if-no-files-found: error
-
       - name: Install InnoSetup
         run: choco install innosetup -y --no-progress
         shell: pwsh
-
-      - name: Clean installer output directory
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force build\dist | Out-Null
-          Get-ChildItem -LiteralPath build\dist -Filter 'MIB_Studio_Qt_*' -File `
-            -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -match '^MIB_Studio_Qt_(Setup|Update)_v.+\.exe$' } |
-            Remove-Item -Force
 
       - name: Build full installer
         run: cmake --build build --config Release --target package_installer
@@ -398,85 +314,12 @@ jobs:
         run: cmake --build build --config Release --target package_installer_update
 
       # ── Artifacts ──────────────────────────────────────────────
-      - name: Validate exact installer artifacts
-        id: installers
-        shell: pwsh
-        run: |
-          $artifactVersion = '${{ steps.version.outputs.artifact_version }}'
-          $setupPath = Join-Path $PWD "build\dist\MIB_Studio_Qt_Setup_v$artifactVersion.exe"
-          $updatePath = Join-Path $PWD "build\dist\MIB_Studio_Qt_Update_v$artifactVersion.exe"
-          foreach ($path in @($setupPath, $updatePath)) {
-            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-              throw "Expected exact installer artifact was not produced: $path"
-            }
-          }
-          $expected = @($setupPath, $updatePath)
-          $unexpected = Get-ChildItem -LiteralPath build\dist -Filter 'MIB_Studio_Qt_*' -File |
-            Where-Object {
-              $_.Name -match '^MIB_Studio_Qt_(Setup|Update)_v.+\.exe$' -and
-              $_.FullName -notin $expected
-            }
-          if ($unexpected) {
-            throw "Unexpected installer artifacts were produced: $($unexpected.Name -join ', ')"
-          }
-          $setupHash = (Get-FileHash -Algorithm SHA256 $setupPath).Hash.ToLowerInvariant()
-          $updateHash = (Get-FileHash -Algorithm SHA256 $updatePath).Hash.ToLowerInvariant()
-          "setup_hash=$setupHash" >> $env:GITHUB_OUTPUT
-          "update_hash=$updateHash" >> $env:GITHUB_OUTPUT
-          Write-Host "Setup SHA-256:  $setupHash"
-          Write-Host "Update SHA-256: $updateHash"
-
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-installers-${{ steps.version.outputs.version }}
-          path: |
-            build/dist/MIB_Studio_Qt_Setup_v${{ steps.version.outputs.artifact_version }}.exe
-            build/dist/MIB_Studio_Qt_Update_v${{ steps.version.outputs.artifact_version }}.exe
+          path: build/dist/*.exe
           if-no-files-found: error
-
-      # Stable release mode is allowed to mutate refs only after configure,
-      # build, tests, screenshot artifact handling, packaging, exact-artifact
-      # validation, and artifact upload have all succeeded.
-      - name: Publish verified release refs
-        if: inputs.mode == 'release'
-        shell: pwsh
-        env:
-          RELEASE_TAG: ${{ steps.version.outputs.tag }}
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
-          TRIGGER_SHA: ${{ github.sha }}
-          SCREENSHOTS_OK: ${{ steps.screenshots.outputs.ok }}
-        run: |
-          if ('${{ github.ref }}' -ne 'refs/heads/main') {
-            throw 'Stable release mode must be dispatched from refs/heads/main'
-          }
-          git fetch origin main --tags --force
-          $remoteMain = (git rev-parse refs/remotes/origin/main).Trim()
-          if ($remoteMain -ne $env:TRIGGER_SHA) {
-            throw "origin/main moved from tested SHA $env:TRIGGER_SHA to $remoteMain; rerun the release"
-          }
-
-          git config user.name 'github-actions[bot]'
-          git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git add -- cmake/MIBVersion.cmake
-          if ($env:SCREENSHOTS_OK -eq 'true') {
-            git add -- docs/manual/images
-          }
-          git diff --cached --check
-          if ($LASTEXITCODE -ne 0) { throw 'Release commit failed whitespace validation' }
-          git diff --cached --quiet
-          if ($LASTEXITCODE -eq 0) { throw 'Prospective release produced no version commit' }
-          git commit -m "chore: bump version to $env:RELEASE_VERSION"
-          if ($LASTEXITCODE -ne 0) { throw 'Release commit failed' }
-
-          git show-ref --verify --quiet "refs/tags/$env:RELEASE_TAG"
-          if ($LASTEXITCODE -eq 0) {
-            throw "Release tag $env:RELEASE_TAG already exists; refusing to move it"
-          }
-          git tag -a "$env:RELEASE_TAG" -m "Version $env:RELEASE_VERSION"
-          if ($LASTEXITCODE -ne 0) { throw 'Release tag creation failed' }
-          git push --atomic origin HEAD:main "refs/tags/$env:RELEASE_TAG"
-          if ($LASTEXITCODE -ne 0) { throw 'Atomic main/tag push failed' }
 
       # ── GitHub Release ─────────────────────────────────────────
       - name: Create GitHub Release
@@ -486,20 +329,15 @@ jobs:
           $version = "${{ steps.version.outputs.version }}"
           $tag = "${{ steps.version.outputs.tag }}"
           $channel = "${{ steps.version.outputs.channel }}"
-          $artifactVersion = '${{ steps.version.outputs.artifact_version }}'
-          $installers = @(
-            (Get-Item -LiteralPath "build\dist\MIB_Studio_Qt_Setup_v$artifactVersion.exe").FullName,
-            (Get-Item -LiteralPath "build\dist\MIB_Studio_Qt_Update_v$artifactVersion.exe").FullName
-          )
+          $installers = Get-ChildItem "build\dist\*.exe"
 
           if ($channel -eq "beta") {
             # Beta: pre-release; gh creates the tag server-side on this commit
-            & gh release create $tag @installers --title "v$version" --generate-notes --prerelease --target ${{ github.sha }}
+            gh release create $tag $installers --title "v$version" --generate-notes --prerelease --target ${{ github.sha }}
           } else {
-            # Release: full release (verified main + tag were atomically pushed above)
-            & gh release create $tag @installers --title "v$version" --generate-notes
+            # Release: full release (tag already pushed in version step)
+            gh release create $tag $installers --title "v$version" --generate-notes
           }
-          if ($LASTEXITCODE -ne 0) { throw 'GitHub Release creation failed' }
         shell: pwsh
 
       - name: Check Cloudflare R2 publishing credentials
@@ -520,23 +358,28 @@ jobs:
         run: |
           $version = "${{ steps.version.outputs.version }}"
           $channel = "${{ steps.version.outputs.channel }}"
-          $artifactVersion = '${{ steps.version.outputs.artifact_version }}'
-          $updateInstaller = Get-Item -LiteralPath "build\dist\MIB_Studio_Qt_Update_v$artifactVersion.exe"
-          python publish-update.py `
-            --installer $updateInstaller.FullName `
-            --version $version `
-            --channel $channel `
-            --upload-method s3 `
-            --release-notes-url "https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }}"
-          if ($LASTEXITCODE -ne 0) { throw 'Cloudflare R2 update publish failed' }
+          $updateInstaller = Get-ChildItem "build\dist\MIB_Studio_Qt_Update_v*.exe" | Select-Object -First 1
+          if ($updateInstaller) {
+            python publish-update.py `
+              --installer $updateInstaller.FullName `
+              --version $version `
+              --channel $channel `
+              --upload-method s3 `
+              --release-notes-url "https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.tag }}"
+          } else {
+            Write-Host "WARNING: Update package not found, skipping" -ForegroundColor Yellow
+          }
         shell: pwsh
 
       - name: Skip full installer Cloudflare R2 publish
         run: |
-          $artifactVersion = '${{ steps.version.outputs.artifact_version }}'
-          $setupInstaller = Get-Item -LiteralPath "build\dist\MIB_Studio_Qt_Setup_v$artifactVersion.exe"
-          $sizeMb = [math]::Round($setupInstaller.Length / 1MB, 1)
-          Write-Host "Full installer: $($setupInstaller.Name) ($sizeMb MiB)"
-          Write-Host "Skipping Cloudflare R2 upload for the full installer because large installers are attached to GitHub Release only."
-          Write-Host "The full installer remains attached to the GitHub Release; Cloudflare R2 latest.json points to the update package."
+          $setupInstaller = Get-ChildItem "build\dist\MIB_Studio_Qt_Setup_v*.exe" | Select-Object -First 1
+          if ($setupInstaller) {
+            $sizeMb = [math]::Round($setupInstaller.Length / 1MB, 1)
+            Write-Host "Full installer: $($setupInstaller.Name) ($sizeMb MiB)"
+            Write-Host "Skipping Cloudflare R2 upload for the full installer because large installers are attached to GitHub Release only."
+            Write-Host "The full installer remains attached to the GitHub Release; Cloudflare R2 latest.json points to the update package."
+          } else {
+            Write-Host "WARNING: Full installer not found, skipping" -ForegroundColor Yellow
+          }
         shell: pwsh

@@ -148,9 +148,3 @@ this is safe because every hot-path op acquires the shared structural lock
 - With the empty-frame filter enabled, AVI frame count is smaller than
   the requested buffer range — 1:1 buffer-index-to-AVI-index mapping is
   lost. Acceptable for mask regen; don't depend on it elsewhere.
-- OpenCV 5 changed `cv::Exception::code` from an integer-like value to an enum;
-  the TIFF error log casts it explicitly so the Qt-free wheel remains buildable
-  with both OpenCV 4 and 5 (no behavior change to frame storage).
-- Portable manylinux builds may use fmt 6 through the distribution spdlog;
-  exception logging passes `cv::Exception::func/file` as C strings so both
-  that older formatter and current Conan builds compile identically.

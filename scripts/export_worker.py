@@ -18,14 +18,9 @@ from export_hdf5 import (
     read_experiment_info,
     export_metrics_to_csv,
     export_images_to_tiff,
-    export_series_images_to_tiff,
-    ensure_output_root,
-    resolve_export_targets,
     HAS_CV2,
-    HAS_HDF5_DEPS,
-    HDF5_IMPORT_ERROR,
-    h5py,
 )
+import h5py
 
 
 class ExportWorker(QObject):
@@ -74,32 +69,17 @@ class ExportWorker(QObject):
                 self.finished.emit(False, f"Input path is not a file: {input_path}")
                 return
             
-            ok, error = ensure_output_root(output_dir)
-            if not ok:
-                self.finished.emit(False, error)
+            # Create output directory
+            try:
+                output_dir.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                self.finished.emit(False, f"Failed to create output directory: {e}")
                 return
-
-            if not HAS_HDF5_DEPS:
-                self.finished.emit(
-                    False,
-                    "Required dependencies not installed. Install with: pip install h5py numpy. "
-                    f"Details: {HDF5_IMPORT_ERROR}"
-                )
-                return
-
-            csv_path, data_output_dir = resolve_export_targets(input_path, output_dir, format_type)
-
+            
             # Check if cv2 is needed
             if format_type in ("images", "all") and not HAS_CV2:
                 self.finished.emit(False, "opencv-python (cv2) is required for image export.")
                 return
-
-            if format_type in ("images", "all"):
-                try:
-                    data_output_dir.mkdir(parents=True, exist_ok=False)
-                except OSError as e:
-                    self.finished.emit(False, f"Failed to create export directory: {e}")
-                    return
             
             self.progress_message.emit("Opening HDF5 file...")
             self.progress_value.emit(10)
@@ -141,9 +121,7 @@ class ExportWorker(QObject):
                     self.progress_message.emit("Exporting metrics to CSV...")
                     self.progress_value.emit(30)
                     
-                    if csv_path is None:
-                        self.finished.emit(False, "CSV output path was not resolved")
-                        return
+                    csv_path = output_dir / "metrics.csv"
                     valid_count, invalid_count = export_metrics_to_csv(
                         metadata_valid,
                         metadata_invalid,
@@ -175,20 +153,13 @@ class ExportWorker(QObject):
                             exported = export_images_to_tiff(
                                 images_valid,
                                 metadata_valid,
-                                data_output_dir,
+                                output_dir,
                                 "valid"
                             )
                             total_exported += exported
                             self.progress_message.emit(f"Exported {exported} valid frame images")
                         else:
                             self.progress_message.emit("WARNING: /valid_frames/images dataset not found")
-
-                        series_exported = export_series_images_to_tiff(
-                            h5_file, metadata_valid, data_output_dir
-                        )
-                        if series_exported > 0:
-                            total_exported += series_exported
-                            self.progress_message.emit(f"Exported {series_exported} series images")
                         
                         if self._cancel_requested:
                             self.finished.emit(False, "Export cancelled by user")
@@ -202,7 +173,7 @@ class ExportWorker(QObject):
                             exported = export_images_to_tiff(
                                 images_invalid,
                                 metadata_invalid,
-                                data_output_dir,
+                                output_dir,
                                 "invalid"
                             )
                             total_exported += exported
@@ -225,8 +196,7 @@ class ExportWorker(QObject):
                     self.progress_message.emit(info_text)
                 
                 self.progress_value.emit(100)
-                final_output = data_output_dir if format_type in ("images", "all") else output_dir
-                self.finished.emit(True, f"Export complete. Output directory: {final_output}")
+                self.finished.emit(True, f"Export complete. Output directory: {output_dir}")
         
         except IOError as e:
             self.finished.emit(False, f"Failed to open HDF5 file: {e}")

@@ -48,10 +48,7 @@
 - **`ProfileManager`** — profile catalog/metadata helper for
   `ConfigTabs`. Scans local profiles, lazily generates `profile.meta.json`,
   parses public R2 catalogs, computes SHA-256, stages/installs updates, and
-  produces field-level JSON diffs for manual update review. An optional
-  `processing_contract_version` is round-tripped through catalog/local
-  metadata and marks the profile incompatible when it differs from the active
-  core; it never selects a core.
+  produces field-level JSON diffs for manual update review.
 - **`DeviceInitManager`** — runs [[../services/CameraControlService]]
   `discoverCameras()` off the UI thread. Emits a signal when discovery
   completes (including "no cameras found").
@@ -82,17 +79,6 @@ of a channel `index.json` into a newest-first version list + downgrade check;
 tested by `tests/frontend/update_catalog_test.cpp`), `OverlayRenderer`,
 `RoiManager`, `SidebarWidget`, `SimpleImageCanvas`, `StatisticsPanel`,
 `StatsDisplayManager`.
-
-- **`ApplicationSettings`** — establishes the stable `MIB Studio` /
-  `MIB Studio Qt` identity before any default `QSettings` access. Its one-time,
-  versioned migration copies every missing user key from the former
-  `Unknown Organization` namespace, never overwrites stable values or deletes
-  the legacy store, and marks completion only after a successful sync. Desktop
-  startup fails closed if this cannot be written.
-- **`ProcessingCoreSettings`** — synchronizes the complete explicit native-core
-  selection as one pre-activation commit. It snapshots and restores the prior
-  logical values if `QSettings::sync()` fails; the backend does not swap the
-  kernel unless this helper returns success.
 
 ## Widgets (`src/frontend/widgets/`)
 

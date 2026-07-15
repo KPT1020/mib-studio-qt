@@ -9,9 +9,6 @@ Usage:
     # Export CSV metrics only
     python scripts/export_hdf5.py -i experiment.h5 -o ./export --format csv
 
-    # Export gold-standard metrics JSON (docs/gold_standard_metrics.schema.json)
-    python scripts/export_hdf5.py -i experiment.h5 -o ./export --format json
-
     # Export CSV + images
     python scripts/export_hdf5.py -i experiment.h5 -o ./export --format all
 
@@ -30,27 +27,18 @@ Install dependencies:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-
-# Schema version for the gold-standard metrics JSON document
-# (docs/gold_standard_metrics.schema.json). Bump alongside the schema file
-# whenever the frame field set changes; see docs/gold_standard_metrics.md.
-GOLD_STANDARD_SCHEMA_VERSION = 1
+from typing import Optional, Tuple
 
 try:
     import h5py
     import numpy as np
 except ImportError as e:
-    h5py = None
-    np = None
-    HDF5_IMPORT_ERROR = e
-    HAS_HDF5_DEPS = False
-else:
-    HDF5_IMPORT_ERROR = None
-    HAS_HDF5_DEPS = True
+    print("ERROR: Required dependencies not installed.", file=sys.stderr)
+    print("Install with: pip install h5py numpy", file=sys.stderr)
+    print(f"Details: {e}", file=sys.stderr)
+    sys.exit(1)
 
 
 # Try to import cv2 only if needed for image export
@@ -59,90 +47,6 @@ try:
     HAS_CV2 = True
 except ImportError:
     HAS_CV2 = False
-
-
-def source_base_name(input_path: Path) -> str:
-    """Return the HDF5 source filename without only its final suffix."""
-    base = input_path.stem.strip()
-    return base if base else "hdf_export"
-
-
-def unique_path(parent_dir: Path, first_name: str, numbered_pattern: str) -> Path:
-    """Return a deterministic non-existing path under parent_dir."""
-    candidate = parent_dir / first_name
-    if not candidate.exists():
-        return candidate
-
-    for suffix in range(2, 1_000_000):
-        candidate = parent_dir / numbered_pattern.format(suffix=suffix)
-        if not candidate.exists():
-            return candidate
-
-    return candidate
-
-
-def validate_output_root(output_root: Path) -> Tuple[bool, str]:
-    """Validate that --output is an output directory path, not a file path."""
-    if output_root.suffix.lower() == ".csv":
-        return False, f"Output path must be a directory, not a CSV file: {output_root}"
-
-    if output_root.exists() and not output_root.is_dir():
-        return False, f"Output path exists and is not a directory: {output_root}"
-
-    return True, ""
-
-
-def ensure_output_root(output_root: Path) -> Tuple[bool, str]:
-    """Create the output root if needed after validating directory semantics."""
-    valid, error = validate_output_root(output_root)
-    if not valid:
-        return False, error
-
-    try:
-        output_root.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        return False, f"Failed to create output directory {output_root}: {e}"
-
-    return True, ""
-
-
-def metrics_csv_path(input_path: Path, output_root: Path) -> Path:
-    """Return the collision-safe CSV path for a metrics-only export."""
-    base = source_base_name(input_path)
-    return unique_path(
-        output_root,
-        f"{base}_metrics.csv",
-        f"{base}_metrics_{{suffix}}.csv",
-    )
-
-
-def metrics_json_path(input_path: Path, output_root: Path) -> Path:
-    """Return the collision-safe gold-standard JSON path for a metrics-only export."""
-    base = source_base_name(input_path)
-    return unique_path(
-        output_root,
-        f"{base}_metrics.json",
-        f"{base}_metrics_{{suffix}}.json",
-    )
-
-
-def export_folder_path(input_path: Path, output_root: Path) -> Path:
-    """Return the collision-safe source-specific folder path for image/all exports."""
-    base = source_base_name(input_path)
-    return unique_path(output_root, base, f"{base}_{{suffix}}")
-
-
-def resolve_export_targets(input_path: Path, output_root: Path, format_type: str) -> Tuple[Optional[Path], Path]:
-    """Resolve generated output paths for the selected export format."""
-    if format_type == "csv":
-        return metrics_csv_path(input_path, output_root), output_root
-
-    if format_type == "json":
-        return metrics_json_path(input_path, output_root), output_root
-
-    data_output_dir = export_folder_path(input_path, output_root)
-    csv_path = data_output_dir / "metrics.csv" if format_type == "all" else None
-    return csv_path, data_output_dir
 
 
 def parse_args() -> argparse.Namespace:
@@ -167,13 +71,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--format", "-f",
         type=str,
-        choices=["csv", "json", "images", "all"],
+        choices=["csv", "images", "all"],
         default="csv",
-        help=(
-            "Export format: csv (metrics only), json (gold-standard metrics "
-            "JSON per docs/gold_standard_metrics.schema.json), images "
-            "(images only), or all (csv + images). Default: csv"
-        )
+        help="Export format: csv (metrics only), images (images only), or all (both). Default: csv"
     )
     parser.add_argument(
         "--pixel-to-micron", "-p",
@@ -212,11 +112,6 @@ def read_hdf5_metadata(h5_file: h5py.File, dataset_path: str) -> Optional[np.nda
 def metadata_value(row: np.void, field: str, default):
     names = row.dtype.names or ()
     return row[field] if field in names else default
-
-
-def metadata_has(row: np.void, field: str) -> bool:
-    """Return whether an HDF5 compound metadata row carries ``field``."""
-    return field in (row.dtype.names or ())
 
 
 def read_hdf5_images(h5_file: h5py.File, dataset_path: str) -> Optional[np.ndarray]:
@@ -340,94 +235,7 @@ def export_metrics_to_csv(
                 f.write(f"{row['brightness_q3']:.2f},")
                 f.write(f"{row['brightness_q4']:.2f}\n")
                 invalid_count += 1
-
-    return valid_count, invalid_count
-
-
-def _frame_to_gold_standard_dict(row: "np.void", frame_type: str, pixel_to_micron: float) -> Dict[str, Any]:
-    """Map one metadata row to a gold-standard JSON frame object (schema v1)."""
-    area = float(row['area'])
-    document: Dict[str, Any] = {
-        "frame_type": frame_type,
-        "index": int(row['index']),
-        "timestamp_ns": int(row['timestampNs']),
-        "object_id": int(metadata_value(row, 'objectId', -1)),
-        "object_count": int(metadata_value(row, 'objectCount', 0)),
-        "deformability": float(row['deformability']),
-        "area": area,
-        "area_um2": area * pixel_to_micron * pixel_to_micron,
-        "area_ratio": float(row['areaRatio']),
-        "ring_ratio": float(row['ringRatio']),
-        "is_valid": bool(row['isValid']),
-        "touches_border": bool(row['touchesBorder']),
-        "has_single_inner_contour": bool(row['hasSingleInnerContour']),
-        "in_range": bool(row['inRange']),
-        "inner_contour_count": int(row['innerContourCount']),
-        "brightness_q1": float(row['brightness_q1']),
-        "brightness_q2": float(row['brightness_q2']),
-        "brightness_q3": float(row['brightness_q3']),
-        "brightness_q4": float(row['brightness_q4']),
-    }
-    # youngsModulus is only present in HDF5 metadata written by newer builds;
-    # omit (rather than emit non-JSON NaN) when absent or out of LUT coverage.
-    youngs_modulus = float(metadata_value(row, 'youngsModulus', float('nan')))
-    if youngs_modulus == youngs_modulus:  # not NaN
-        document["youngs_modulus"] = youngs_modulus
-    if metadata_has(row, "isTargetGroup"):
-        document["is_target_group"] = bool(row["isTargetGroup"])
-    if metadata_has(row, "trackId"):
-        document["track_id"] = int(row["trackId"])
-        document["track_first_frame"] = int(metadata_value(row, "trackFirstFrame", 0))
-        document["track_last_frame"] = int(metadata_value(row, "trackLastFrame", 0))
-        document["track_observation_count"] = int(metadata_value(row, "trackObservationCount", 0))
-    return document
-
-
-def export_metrics_to_json(
-    metadata_valid: Optional[np.ndarray],
-    metadata_invalid: Optional[np.ndarray],
-    output_path: Path,
-    pixel_to_micron: float,
-    frame_type: str,
-    source_label: str,
-) -> Tuple[int, int]:
-    """
-    Export metrics to gold-standard JSON matching
-    docs/gold_standard_metrics.schema.json (the portable processing contract).
-
-    Args:
-        metadata_valid: Valid frames metadata array, or None
-        metadata_invalid: Invalid frames metadata array, or None
-        output_path: Path to output JSON file
-        pixel_to_micron: Pixel to micron conversion factor
-        frame_type: "valid", "invalid", or "both"
-        source_label: Value for the document's "source" field
-
-    Returns:
-        Tuple of (valid_count, invalid_count) frames exported
-    """
-    frames: List[Dict[str, Any]] = []
-    valid_count = 0
-    invalid_count = 0
-
-    if metadata_valid is not None and frame_type in ("valid", "both"):
-        for row in metadata_valid:
-            frames.append(_frame_to_gold_standard_dict(row, "valid", pixel_to_micron))
-            valid_count += 1
-
-    if metadata_invalid is not None and frame_type in ("invalid", "both"):
-        for row in metadata_invalid:
-            frames.append(_frame_to_gold_standard_dict(row, "invalid", pixel_to_micron))
-            invalid_count += 1
-
-    document = {
-        "version": GOLD_STANDARD_SCHEMA_VERSION,
-        "contract_version": GOLD_STANDARD_SCHEMA_VERSION,
-        "pixel_to_micron": pixel_to_micron,
-        "source": source_label,
-        "frames": frames,
-    }
-    output_path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    
     return valid_count, invalid_count
 
 
@@ -569,7 +377,7 @@ def export_hdf5(
     Args:
         input_path: Path to input HDF5 file
         output_dir: Output directory
-        format_type: "csv", "json", "images", or "all"
+        format_type: "csv", "images", or "all"
         frame_type: "valid", "invalid", or "both"
         pixel_to_micron: Pixel to micron conversion factor
         
@@ -585,31 +393,18 @@ def export_hdf5(
         print(f"ERROR: Input path is not a file: {input_path}", file=sys.stderr)
         return 1
     
-    ok, error = ensure_output_root(output_dir)
-    if not ok:
-        print(f"ERROR: {error}", file=sys.stderr)
+    # Create output directory
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        print(f"ERROR: Failed to create output directory {output_dir}: {e}", file=sys.stderr)
         return 1
-
-    if not HAS_HDF5_DEPS:
-        print("ERROR: Required dependencies not installed.", file=sys.stderr)
-        print("Install with: pip install h5py numpy", file=sys.stderr)
-        print(f"Details: {HDF5_IMPORT_ERROR}", file=sys.stderr)
-        return 1
-
-    csv_path, data_output_dir = resolve_export_targets(input_path, output_dir, format_type)
-
+    
     # Check if cv2 is needed
     if format_type in ("images", "all") and not HAS_CV2:
         print("ERROR: opencv-python (cv2) is required for image export.", file=sys.stderr)
         print("Install with: pip install opencv-python", file=sys.stderr)
         return 1
-
-    if format_type in ("images", "all"):
-        try:
-            data_output_dir.mkdir(parents=True, exist_ok=False)
-        except OSError as e:
-            print(f"ERROR: Failed to create export directory {data_output_dir}: {e}", file=sys.stderr)
-            return 1
     
     # Open HDF5 file
     try:
@@ -635,9 +430,7 @@ def export_hdf5(
             
             # Export CSV if requested
             if format_type in ("csv", "all"):
-                if csv_path is None:
-                    print("ERROR: CSV output path was not resolved", file=sys.stderr)
-                    return 1
+                csv_path = output_dir / "metrics.csv"
                 valid_count, invalid_count = export_metrics_to_csv(
                     metadata_valid,
                     metadata_invalid,
@@ -648,24 +441,7 @@ def export_hdf5(
                 total_count = valid_count + invalid_count
                 print(f"Exported {total_count} frames to CSV (Valid: {valid_count}, Invalid: {invalid_count})")
                 print(f"CSV file: {csv_path}")
-
-            # Export gold-standard JSON if requested
-            if format_type == "json":
-                if csv_path is None:
-                    print("ERROR: JSON output path was not resolved", file=sys.stderr)
-                    return 1
-                valid_count, invalid_count = export_metrics_to_json(
-                    metadata_valid,
-                    metadata_invalid,
-                    csv_path,
-                    pixel_to_micron,
-                    frame_type,
-                    source_base_name(input_path),
-                )
-                total_count = valid_count + invalid_count
-                print(f"Exported {total_count} frames to JSON (Valid: {valid_count}, Invalid: {invalid_count})")
-                print(f"JSON file: {csv_path}")
-
+            
             # Export images if requested
             if format_type in ("images", "all"):
                 total_exported = 0
@@ -677,7 +453,7 @@ def export_hdf5(
                         exported = export_images_to_tiff(
                             images_valid,
                             metadata_valid,
-                            data_output_dir,
+                            output_dir,
                             "valid"
                         )
                         total_exported += exported
@@ -687,7 +463,7 @@ def export_hdf5(
 
                     # Export multi-image series if present
                     series_exported = export_series_images_to_tiff(
-                        h5_file, metadata_valid, data_output_dir
+                        h5_file, metadata_valid, output_dir
                     )
                     if series_exported > 0:
                         total_exported += series_exported
@@ -700,7 +476,7 @@ def export_hdf5(
                         exported = export_images_to_tiff(
                             images_invalid,
                             metadata_invalid,
-                            data_output_dir,
+                            output_dir,
                             "invalid"
                         )
                         total_exported += exported
@@ -726,8 +502,7 @@ def export_hdf5(
         traceback.print_exc()
         return 1
     
-    final_output = data_output_dir if format_type in ("images", "all") else output_dir
-    print(f"\nExport complete. Output directory: {final_output}")
+    print(f"\nExport complete. Output directory: {output_dir}")
     return 0
 
 

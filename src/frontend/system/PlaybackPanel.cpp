@@ -988,6 +988,16 @@ void PlaybackPanel::computeProcessedOverlay()
 
     // Pull processing config to ensure parity with backend
     backend::services::ProcessingConfig cfg = backend_.processing().getProcessingConfig();
+    auto odd = [](int v) -> int {
+        if (v < 1) v = 1;
+        if ((v % 2) == 0) v += 1;
+        return v;
+    };
+    const int blurK = odd(cfg.gaussian_blur_size);
+    const int morphK = odd(cfg.morph_kernel_size);
+    const int morphIter = std::max(1, cfg.morph_iterations);
+    const int threshVal = std::max(0, cfg.bg_subtract_threshold);
+
     // ROI
     QRect roi = roiActive_ ? imageRoi_ : QRect(0, 0, frameImage_.width(), frameImage_.height());
     roi = roi.intersected(QRect(0, 0, frameImage_.width(), frameImage_.height()));
@@ -1007,23 +1017,35 @@ void PlaybackPanel::computeProcessedOverlay()
         bg = qimageToCvGrayClone(backgroundGray_);
     }
 
-    // Both replay and live-following masks go through the active backend core.
-    // This deliberately removes the frontend's duplicate blur/threshold/
-    // morphology implementation, which could otherwise disagree after a core
-    // version switch.
-    auto processed = backend_.processing().computeProcessedFrame(
-        current, canUseBg ? bg : cv::Mat(), cfg,
-        {roi.x(), roi.y(), roi.width(), roi.height()});
-    if (processed.processedImage.empty())
-        return;
-    cv::Mat mask = processed.processedImage;
+    // Process mask in full-size buffer
+    cv::Mat mask(current.rows, current.cols, CV_8UC1, cv::Scalar(0));
+    cv::Rect cvRoi(roi.x(), roi.y(), roi.width(), roi.height());
+    cv::Mat currR = current(cvRoi);
+    cv::Mat dstR = mask(cvRoi);
+    cv::Mat tmpCurr, tmpBg, diff, thresh;
+    // Blur both
+    cv::GaussianBlur(currR, tmpCurr, cv::Size(blurK, blurK), 0);
+    if (canUseBg)
+    {
+        cv::Mat bgR = bg(cvRoi);
+        cv::GaussianBlur(bgR, tmpBg, cv::Size(blurK, blurK), 0);
+        cv::subtract(tmpCurr, tmpBg, diff);
+    }
+    else
+    {
+        diff = tmpCurr;
+    }
+    cv::threshold(diff, thresh, threshVal, 255, cv::THRESH_BINARY);
+    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+    cv::morphologyEx(thresh, dstR, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
+    cv::morphologyEx(dstR, dstR, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
     // Determine overlay color from the displayed frame's classification.
     QColor overlayColor(0, 255, 0); // default green
     const bool liveFollowing =
         backend_.capture().isRunning() && followLive_ && !scrubbing_;
-    backend::services::FilterResult validation = processed.validation;
-    bool haveValidation = true;
+    backend::services::FilterResult validation;
+    bool haveValidation = false;
     if (liveFollowing) {
         // Following live: the on-screen frame is the latest captured frame,
         // so the live snapshot is authoritative (it also carries cross-frame
@@ -1033,6 +1055,16 @@ void PlaybackPanel::computeProcessedOverlay()
             validation = snapshot.validation;
             haveValidation = true;
         }
+    } else {
+        // Stopped / scrubbing / review: the on-screen frame is a buffered
+        // replay frame unrelated to the latest live snapshot, so classify it
+        // directly instead of reusing the stale snapshot (which would leave
+        // the cell stuck on the last live frame's color, usually red).
+        auto pf = backend_.processing().computeProcessedFrame(
+            current, canUseBg ? bg : cv::Mat(), cfg,
+            {roi.x(), roi.y(), roi.width(), roi.height()});
+        validation = pf.validation;
+        haveValidation = true;
     }
     if (haveValidation) {
         if (validation.isTargetGroup) {
