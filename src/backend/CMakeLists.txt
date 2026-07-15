@@ -231,9 +231,10 @@ else()
     )
 endif()
 
-# Explicitly enable AUTOMOC for this target to ensure MOC files are generated.
+# The backend is Qt-free (epic #246): no Q_OBJECT, so AUTOMOC has nothing to
+# generate and is disabled.
 set_target_properties(mib_backend PROPERTIES
-    AUTOMOC ON
+    AUTOMOC OFF
     ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
 )
 
@@ -277,7 +278,6 @@ endif()
 
 target_link_libraries(mib_backend PUBLIC
     spdlog::spdlog
-    Qt6::Core
 )
 
 if(TARGET nlohmann_json::nlohmann_json)

@@ -1,8 +1,9 @@
 # Qt decoupling and React + Tauri migration
 
-Status: active (2026-07-15) — Phase 1 slices 1–4 landed; backend links only
-`Qt6::Core` (Gui + SerialPort + Network dropped). Only the crash-reporter
-`QString` glue remains before the final Core/AUTOMOC drop.
+Status: active (2026-07-15) — Phase 1 slices 1–5 landed; **`mib_backend` is
+fully Qt-free** (no Qt link, `AUTOMOC OFF`). The `linux-backend-only` build
+still `find_package`s `Qt6::Core` only for 7 `frontend;utility` tests — de-Qt-ing
+those is the final step to a Qt-SDK-free backend build (the Phase 1 exit gate).
 
 Tracks epic #246. The platform decision is recorded in ADR
 [`../../decisions/0001-react-tauri-migration.md`](../../decisions/0001-react-tauri-migration.md).
@@ -41,14 +42,16 @@ these clusters. "Contract" = Qt appears in a public header.
 | 3 | Syringe-pump serial I/O | `src/backend/services/SyringePumpService.cpp` (+ new `ISerialPort.h`, `SerialPort{Posix,Win32}.cpp`) | `QSerialPort` | now Qt-free | `ISerialPort` interface + factory + POSIX/Win32 impls | **done (slice 3)** — `Qt6::SerialPort` dropped; fake-serial + pty-loopback tests |
 | 4 | LUT catalog | `include/backend/processing/EModulusLutCatalog.{h,cpp}` (+ frontend `LutHttpFetcher`) | `QNetworkAccessManager`, `QStandardPaths`, `QDir/QFile/QSaveFile`, `QDateTime`, `QUrl`, `QCryptographicHash`, `QEventLoop/QTimer` | yes | injected `HttpGetFn` seam (ADR 0002); nlohmann; `std::filesystem`; `processingCore*Sha256`; ISO strings; injected app-data dir | **done (slice 4)** — `Qt6::Network` dropped |
 | 5 | Mock-camera decode | `src/backend/camera/mock/MockCamera.cpp` | `QImage`/`QImageReader` | no | OpenCV `imread` (fallback already present) | **done (slice 2)** — `Qt6::Gui` dropped from the backend link + moved to frontend-only in `MIBDependencies.cmake` |
-| 6 | Crash-reporter glue | `src/backend/app/CrashReporter.cpp` (+ incidental `QString` in `AppBackend.cpp`) | `qtMessageHandler`, `QString` | no | spdlog-native sink; std::string paths | pending (falls away with #4) |
+| 6 | Crash-reporter glue | `src/backend/services/CrashReporter.cpp` (+ dead `QString` include in `AppBackend.cpp`) | `qtMessageHandler`, `QString` | no | Qt log handler moved to frontend `QtLogBridge` (installs `qInstallMessageHandler`, calls back to `captureMessage`) | **done (slice 5)** — `Qt6::Core` dropped, `AUTOMOC OFF`; `mib_backend` fully Qt-free |
 
-When cluster 6 lands, drop the remaining `Qt6::Core` and `AUTOMOC` from
-`src/backend/CMakeLists.txt` and stop `find_package`-ing Qt for
-`MIB_BUILD_BACKEND_ONLY` in `cmake/MIBDependencies.cmake` — that is the Phase 1
-exit gate (`linux-backend-only` builds with no Qt SDK). Slices 2–4 already
-removed `Gui`, `SerialPort`, and `Network` from the backend-only Qt component
-set (now `Core` only).
+`mib_backend` now links **no Qt** (`Qt6::Core` dropped, `AUTOMOC OFF`). The one
+thing still forcing `find_package(Qt6 Core)` in the `linux-backend-only` build
+is the 7 `frontend;utility` tests that link `Qt6::Core` directly
+(`json_flatten_roundtrip`, `json_config_merge`, `processing_core_catalog`,
+`application_settings`, `processing_core_settings`, `hdf_review_export_paths`,
+`update_catalog`). De-Qt-ing or relocating those, then removing the
+`find_package(Qt6)` from `MIBDependencies.cmake` for backend-only, is the
+**Phase 1 exit gate** (`linux-backend-only` builds with no Qt SDK).
 
 ## Feature-parity matrix
 
@@ -103,11 +106,18 @@ Phase 1 — backend Qt-free (one PR per cluster, each with tests + vault):
    `LutHttpFetcher` now, Rust later); app-data dir injected for cache-path
    parity. Dropped `Qt6::Network`. Test rewritten Qt-free (file:// state
    machine).
-5. Crash-reporter/`QString` glue (cluster 6) — **next**. The last backend Qt
-   user (a `qtMessageHandler` sink + incidental `QString`).
-6. Drop the remaining `Qt6::Core` + `AUTOMOC` from the backend; make
-   `MIB_BUILD_BACKEND_ONLY` configure/build/test with no Qt SDK.
-   **Phase 1 exit gate.**
+5. **[done]** Crash-reporter glue (cluster 6): the Qt log handler moved to the
+   frontend `QtLogBridge` (installs `qInstallMessageHandler`, calls back to
+   `CrashReporter::captureMessage`); removed the dead `QString` include in
+   `AppBackend.cpp`; **dropped `Qt6::Core` and turned `AUTOMOC OFF`** — so
+   `mib_backend` links no Qt. Also de-Qt-ed 6 backend/integration/hardware tests
+   that only constructed a throwaway `QCoreApplication` (dead since the LUT
+   catalog stopped checking for a Qt app instance). Full suite green (73/73);
+   `nm`/`ldd` confirm the backend references zero Qt symbols.
+6. **[next — exit gate]** De-Qt (or relocate out of the backend-only build) the
+   7 `frontend;utility` tests that still link `Qt6::Core`, then remove the
+   `find_package(Qt6)` for `MIB_BUILD_BACKEND_ONLY` — so `linux-backend-only`
+   configures/builds/tests with **no Qt SDK**. **Phase 1 exit gate.**
 
 Phase 2 defines the production Rust ↔ C++ bridge (own ADR); Phase 3 is the
 first Tauri vertical slice (mock camera end to end); Phase 4 migrates the

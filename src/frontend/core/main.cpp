@@ -10,6 +10,7 @@
 
 #include "backend/app/AppBackend.h"
 #include "frontend/system/LutHttpFetcher.h"
+#include "frontend/system/QtLogBridge.h"
 #include "backend/diagnostics/CrashStateMirror.h"
 #include "backend/recording/Hdf5Service.h"
 #include "backend/services/CrashReporter.h"
@@ -220,6 +221,10 @@ int main(int argc, char* argv[]) {
         // AppBackend::initialize() and CrashReporter uses spdlog for its own
         // diagnostic messages once Logger comes online.
         installCrashReporter(exeDir, dataDirStd);
+        // Route Qt's process-wide log stream to spdlog/Sentry. The handler used
+        // to live in the backend CrashReporter; it now lives here so the backend
+        // links no Qt (epic #246).
+        mib::frontend::installQtLogBridge();
 
         // Early diagnostic output
         std::cout << "MIB Studio Qt starting..." << std::endl;

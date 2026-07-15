@@ -30,7 +30,6 @@
 #include <limits>
 #include <string>
 #include <utility>
-#include <QString>
 #include <spdlog/spdlog.h>
 #ifdef _WIN32
 #ifndef NOMINMAX

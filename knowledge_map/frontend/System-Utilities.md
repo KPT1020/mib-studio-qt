@@ -7,6 +7,12 @@
 
 ## System (`src/frontend/system/`)
 
+- **`QtLogBridge`** — `mib::frontend::installQtLogBridge()` installs a
+  `qInstallMessageHandler` that routes Qt's process-wide log stream into spdlog
+  (criticals/fatals also go to Sentry via
+  `[[../services/CrashReporter]]::captureMessage`). Moved out of the backend
+  CrashReporter so the backend links no Qt (epic #246); `main.cpp` installs it
+  after `CrashReporter::init()`.
 - **`LutHttpFetcher`** — `mib::frontend::makeQtLutHttpGet()` returns a
   `backend::HttpGetFn` (a blocking QtNetwork GET: single-shot event loop +
   transfer timeout). `main.cpp` injects it via `AppBackend::setLutHttpFetcher`
