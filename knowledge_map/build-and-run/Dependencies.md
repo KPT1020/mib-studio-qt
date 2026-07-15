@@ -89,6 +89,16 @@ SQLite / spdlog / fmt / crypto. Runtime needs
 `LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/hdf5/serial` on Ubuntu. CI:
 `.github/workflows/bridge-ci.yml` (headless `cargo test`).
 
+**Phase 3 — React + Tauri desktop app:** `desktop/` is the Tauri v2 shell — see
+[[../architecture/Desktop-Shell]]. Toolchain: Node 22 + npm (React + Vite + TS
+frontend), Rust stable + Tauri v2, and the Linux WebKitGTK stack
+(`libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libsoup-3.0-dev`,
+`libjavascriptcoregtk-4.1-dev`) — all install cleanly on `ubuntu-24.04`. The GUI
+is smoke-tested headless under `xvfb` (`desktop/scripts/xvfb-smoke.sh`) with the
+container WebKitGTK workarounds (`WEBKIT_DISABLE_DMABUF_RENDERER=1`,
+`WEBKIT_DISABLE_COMPOSITING_MODE=1`, `LIBGL_ALWAYS_SOFTWARE=1`). CI:
+`.github/workflows/desktop-ci.yml`.
+
 ## Linux cloud build notes
 
 - If CMake fails before project checks with

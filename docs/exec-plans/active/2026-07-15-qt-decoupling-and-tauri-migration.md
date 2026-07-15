@@ -1,12 +1,13 @@
 # Qt decoupling and React + Tauri migration
 
-Status: active (2026-07-15) — **Phase 1 COMPLETE; Phase 2 bridge landed.** The
-C++ backend is fully Qt-free and `MIB_BUILD_BACKEND_ONLY` configures/builds/tests
-with **no Qt SDK** (verified by uninstalling Qt6 locally; enforced by
-`backend-ci.yml` installing no `qt6-*` packages). Phase 2 delivered the
-production Rust ↔ C++ bridge (`crates/mib-bridge`, `cxx` over `BackendFacade`,
-ADR 0003) with a headless `cargo test` contract lane (`bridge-ci.yml`, no Qt / no
-webkit). Next: Phase 3 (first Tauri vertical slice — mock camera end to end).
+Status: active (2026-07-15) — **Phases 1–3 landed.** The C++ backend is fully
+Qt-free and `MIB_BUILD_BACKEND_ONLY` configures/builds/tests with **no Qt SDK**
+(verified by uninstalling Qt6 locally; enforced by `backend-ci.yml`). Phase 2
+delivered the Rust ↔ C++ bridge (`crates/mib-bridge`, `cxx` over `BackendFacade`,
+ADR 0003) with a headless `cargo test` contract lane (`bridge-ci.yml`). Phase 3
+delivered the first React + Tauri v2 vertical slice (`desktop/`, mock camera end
+to end) — headless-tested via `cargo test` + an Xvfb GUI smoke
+(`desktop-ci.yml`). Next: Phase 4 (migrate remaining workflows).
 
 Tracks epic #246. The platform decision is recorded in ADR
 [`../../decisions/0001-react-tauri-migration.md`](../../decisions/0001-react-tauri-migration.md).
@@ -143,8 +144,27 @@ Phase 2 — production Rust ↔ C++ bridge (ADR 0003):
    webkit, no display). The command/event set is versioned
    (`bridge_abi_version() == 1`).
 
-Phase 3 is the first Tauri vertical slice (mock camera end to end); Phase 4
-migrates the remaining workflows; Phase 5 packages, documents, and cuts over.
+Phase 3 — first Tauri vertical slice (mock camera end to end):
+
+8. **[done]** `desktop/` — a React + Tauri v2 app driving the backend through
+   `mib-bridge`. `src-tauri` exposes the bridge as `#[tauri::command]`s
+   (`init`, `configure_mock`, `start_capture`/`stop_capture`, `seek_latest`,
+   `poll_events`, `fetch_frame`, `frame_bytes`); frame pixels ship as a binary
+   `tauri::ipc::Response` (**no base64**, principle #4). The React frontend
+   (`bridge.ts` + `App.tsx`) configures a mock camera, starts capture, and
+   renders live Mono8 frames to a canvas while draining status events.
+   Verified headless two ways: a `cargo test` bridge round-trip
+   (`mock_camera_slice_round_trip`, asserts 512×96 frames) and an Xvfb GUI
+   smoke launch (`desktop/scripts/xvfb-smoke.sh`, WebKitGTK container
+   workarounds). CI: `desktop-ci.yml` (frontend build + Tauri build + test +
+   Xvfb smoke). Crate-type is `rlib` (binary), since the non-PIC C++ archives
+   can't link a `cdylib`. See [[../../knowledge_map/architecture/Desktop-Shell]].
+   The webkit deps that were feared to be a hard block install cleanly on
+   `ubuntu-24.04`; the GUI runs headless under Xvfb.
+
+Phase 4 migrates the remaining workflows (hardware camera, recording, review,
+experiment/processing UI, syringe pump, autofocus); Phase 5 packages,
+documents, and cuts over.
 
 **PR #59** stays open as reference; it is superseded when the first production
 Tauri slice (Phase 3) lands, at which point it is closed with a pointer here.

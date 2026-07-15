@@ -13,6 +13,7 @@ following `[[WikiLinks]]`. If you are a new agent, start here:
 - [[architecture/Threading-Model]]
 - [[architecture/Data-Flow]]
 - [[architecture/Rust-Bridge]] — Rust ↔ C++ bridge (React + Tauri migration)
+- [[architecture/Desktop-Shell]] — React + Tauri v2 desktop app (Phase 3)
 
 ### Services (`src/backend/services/`)
 - [[services/_MOC|Services MOC]]
