@@ -1,0 +1,20 @@
+[package]
+name = "mib-bridge"
+version = "0.1.0"
+edition = "2021"
+description = "Rust <-> C++ bridge over the Qt-free mib_backend BackendFacade (epic #246, ADR 0003)"
+license = "MIT"
+publish = false
+
+[lib]
+name = "mib_bridge"
+crate-type = ["rlib"]
+
+[dependencies]
+cxx = "1"
+
+[build-dependencies]
+cxx-build = "1"
+
+# The bridge links the static mib_backend / mib_processing archives, which pull
+# in OpenCV / HDF5 / SQLite / spdlog. Those are built by CMake (see build.rs).
