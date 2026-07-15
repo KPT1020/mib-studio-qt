@@ -18,8 +18,18 @@ The repo root `src/` is the C++ tree, so the whole Tauri app lives under
 `desktop/`:
 
 - `desktop/src/` — React frontend. `bridge.ts` is the typed IPC client
-  (mirrors the `src-tauri` command DTOs); `App.tsx` is the mock-camera slice UI
-  (init → configure mock dir → start/stop → live canvas + event log).
+  (mirrors the `src-tauri` command DTOs); `App.tsx` + `App.css` are the
+  operator shell aligned with the Qt UI on `main` (UI-1, issue #266): a
+  File/Settings/Help menu row, a persistent collapsible telemetry sidebar
+  (collapse state in `localStorage`), Connect / Overview / Experiment / Review
+  tabs with Start/Stop Camera in the tab header, nested Preview / Monitoring
+  and App-config / Camera-script tabs, a Review frame + metrics-table split,
+  and a metrics status bar with a toggleable log drawer. The backend
+  auto-initializes on boot. Every bridged schema-v3 action stays wired
+  (Configure Mock…, start/stop capture, live canvas, record, processing
+  toggle + px→µm, review load/scrub); controls whose backend surface is not
+  bridged yet render disabled with a tooltip naming the blocking issue
+  (BE-2…BE-9, #272–#279) — backend/hardware state is never simulated.
 - `desktop/src-tauri/` — the Tauri v2 app. `src/lib.rs` holds `AppState`
   (`Mutex<UniquePtr<BackendBridge>>` + a cached last-frame buffer) and the
   `#[tauri::command]` layer; `main.rs` calls `run()`.

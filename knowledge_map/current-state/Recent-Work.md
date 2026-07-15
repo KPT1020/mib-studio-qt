@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Qt → React/Tauri migration: UI-1 — operator shell parity with the Qt UI**
+  (2026-07-16, epic #246, issue #266) — Replaced the developer-oriented
+  Phase 3/4 form in `desktop/src/App.tsx` with the Qt operator layout: menu
+  row, collapsible telemetry sidebar, Connect / Overview / Experiment / Review
+  tabs (Start/Stop Camera in the header), nested Preview / Monitoring and
+  config tabs, Review frame/table split, and a metrics status bar. All bridge
+  schema-v3 actions stay wired; un-bridged controls are visible but disabled
+  with tooltips naming the blocking backend issue (BE-2…BE-9, #272–#279).
+  New `desktop/src/App.css`. Details:
+  `knowledge_map/task/2026-07-16-react-tauri-qt-ui-parity.md`.
+
 - **Qt → React/Tauri migration: Phase 4 slice 2 — processing settings + stats
   overlay** (2026-07-15, epic #246) — Added a `BackendFacade::fetchProcessingStats`
   const pull (fps + pixel→micron over `ProcessingService`) and exposed bridge
