@@ -184,9 +184,11 @@ Phase 4 — migrate the remaining operator workflows (one slice per PR):
     `mib-bridge` `processing_settings_and_stats` + desktop
     `processing_settings_round_trip`.
 
-Remaining Phase 4 slices: hardware/MindVision camera selection, experiment run +
-monitoring, syringe pump, autofocus/nanopositioner. Phase 5 packages,
-documents, and cuts over.
+Remaining Phase 4 slices (camera selection, experiment run + monitoring, syringe
+pump, autofocus/nanopositioner) are specced with per-slice verification notes in
+[`2026-07-15-phase4-remaining-slices.md`](2026-07-15-phase4-remaining-slices.md)
+— they are hardware-dependent or large/visual, past the point that is fully
+verifiable in headless CI. Phase 5 packages, documents, and cuts over.
 
 **PR #59** stays open as reference; it is superseded when the first production
 Tauri slice (Phase 3) lands, at which point it is closed with a pointer here.
