@@ -5,6 +5,19 @@
 
 ## Features shipped
 
+- **Qt → React/Tauri migration: Phase 1 COMPLETE — backend-only builds with no
+  Qt SDK** (2026-07-15, epic #246) — Reached the Phase 1 exit gate. The 7
+  `frontend;utility` tests (which link `Qt6::Core` and compile
+  `src/frontend/utils` sources that legitimately use Qt — QSettings,
+  QCryptographicHash, QUrl, QDir) are gated behind `if(NOT MIB_BUILD_BACKEND_ONLY)`
+  in `tests/CMakeLists.txt` (they still build/run in the full/Windows build);
+  `cmake/MIBDependencies.cmake` no longer `find_package`s Qt6 for backend-only;
+  the global `CMAKE_AUTOMOC/UIC/RCC` are gated off; and `backend-ci.yml` installs
+  no `qt6-*` packages. Proven by **uninstalling the Qt6 SDK locally** and running
+  `cmake --preset linux-backend-only` → build → `ctest`: 66/66 green with zero Qt
+  present. Details:
+  `knowledge_map/task/2026-07-15-qt-decoupling-exit-gate.md`.
+
 - **Qt → React/Tauri migration: backend de-Qt slice 5 — `mib_backend` is now
   Qt-free** (2026-07-15, epic #246) — The crash-reporter's Qt log handler
   (`qInstallMessageHandler` → spdlog / Sentry) moved out of the backend into the

@@ -1,9 +1,10 @@
 # Qt decoupling and React + Tauri migration
 
-Status: active (2026-07-15) — Phase 1 slices 1–5 landed; **`mib_backend` is
-fully Qt-free** (no Qt link, `AUTOMOC OFF`). The `linux-backend-only` build
-still `find_package`s `Qt6::Core` only for 7 `frontend;utility` tests — de-Qt-ing
-those is the final step to a Qt-SDK-free backend build (the Phase 1 exit gate).
+Status: active (2026-07-15) — **Phase 1 COMPLETE.** The C++ backend is fully
+Qt-free and `MIB_BUILD_BACKEND_ONLY` configures/builds/tests with **no Qt SDK**
+(verified by uninstalling Qt6 locally; enforced by `backend-ci.yml` installing
+no `qt6-*` packages). Next: Phase 2 (production Rust ↔ C++ bridge) and Phase 3
+(first Tauri vertical slice).
 
 Tracks epic #246. The platform decision is recorded in ADR
 [`../../decisions/0001-react-tauri-migration.md`](../../decisions/0001-react-tauri-migration.md).
@@ -114,10 +115,14 @@ Phase 1 — backend Qt-free (one PR per cluster, each with tests + vault):
    that only constructed a throwaway `QCoreApplication` (dead since the LUT
    catalog stopped checking for a Qt app instance). Full suite green (73/73);
    `nm`/`ldd` confirm the backend references zero Qt symbols.
-6. **[next — exit gate]** De-Qt (or relocate out of the backend-only build) the
-   7 `frontend;utility` tests that still link `Qt6::Core`, then remove the
-   `find_package(Qt6)` for `MIB_BUILD_BACKEND_ONLY` — so `linux-backend-only`
-   configures/builds/tests with **no Qt SDK**. **Phase 1 exit gate.**
+6. **[done — Phase 1 exit gate reached]** Gated the 7 `frontend;utility` tests
+   (they link `Qt6::Core` and compile `src/frontend/utils` sources that
+   legitimately use Qt — QSettings/QCryptographicHash/QUrl/etc.) behind
+   `if(NOT MIB_BUILD_BACKEND_ONLY)` (they still run in the full/Windows build);
+   removed `find_package(Qt6)` for backend-only and gated the global
+   `CMAKE_AUTOMOC/UIC/RCC` off. `backend-ci.yml` installs no `qt6-*` packages.
+   **`linux-backend-only` configures/builds/tests with no Qt SDK** — verified by
+   uninstalling Qt6 locally (66/66 green).
 
 Phase 2 defines the production Rust ↔ C++ bridge (own ADR); Phase 3 is the
 first Tauri vertical slice (mock camera end to end); Phase 4 migrates the

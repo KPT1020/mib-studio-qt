@@ -64,8 +64,9 @@
 - `task/2026-07-15-qt-decoupling-serial-abstraction.md`
 - `task/2026-07-15-qt-decoupling-lut-catalog.md`
 - `task/2026-07-15-qt-decoupling-crashreporter.md`
+- `task/2026-07-15-qt-decoupling-exit-gate.md`
 
-## By filename (all 38)
+## By filename (all 39)
 
 ```
 2025-11-14-safe-start-stop-egrabber.md
@@ -92,6 +93,7 @@
 2026-07-15-qt-decoupling-serial-abstraction.md
 2026-07-15-qt-decoupling-lut-catalog.md
 2026-07-15-qt-decoupling-crashreporter.md
+2026-07-15-qt-decoupling-exit-gate.md
 camera-reset.md
 diagnostic-logging.md
 external-config-browse.md

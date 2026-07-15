@@ -316,6 +316,14 @@ mib_add_backend_test_executable(hw_egrabber_script_test hardware/hw_egrabber_scr
 add_test(NAME hardware.egrabber_script COMMAND $<TARGET_FILE:hw_egrabber_script_test>)
 set_tests_properties(hardware.egrabber_script PROPERTIES LABELS "hardware;camera" SKIP_RETURN_CODE 77 TIMEOUT 60)
 
+# Frontend utility tests exercise src/frontend/utils code that legitimately uses
+# Qt (Qt-JSON, QSettings, QCryptographicHash, QDir, ...) and is only built in the
+# full (frontend) build. They link Qt6::Core directly, so gate them out of
+# MIB_BUILD_BACKEND_ONLY — that lets the backend-only build require no Qt SDK
+# (epic #246 Phase 1 exit gate). They still build/run in the full build
+# (Windows CI), the only place the frontend is compiled.
+if(NOT MIB_BUILD_BACKEND_ONLY)
+
 add_executable(json_flatten_roundtrip_test
     ${PROJECT_SOURCE_DIR}/tests/frontend/json_flatten_roundtrip_test.cpp
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/JsonFlatten.cpp
@@ -426,6 +434,8 @@ set_target_properties(update_catalog_test PROPERTIES
 )
 add_test(NAME frontend.update_catalog COMMAND $<TARGET_FILE:update_catalog_test>)
 set_tests_properties(frontend.update_catalog PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
+
+endif() # NOT MIB_BUILD_BACKEND_ONLY (frontend;utility tests)
 
 if(Python3_Interpreter_FOUND)
     add_test(
