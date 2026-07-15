@@ -1,9 +1,12 @@
 # Optional sentry-native integration (CMake-managed clone).
 include(Sentry)
 
-set(MIB_QT_COMPONENTS Core Gui SerialPort Network)
+# Gui is a frontend-only component now that the backend no longer uses QImage
+# (epic #246: the mock camera decodes via OpenCV). Backend-only builds require
+# only Core + SerialPort + Network. Widgets/Charts pull Gui transitively.
+set(MIB_QT_COMPONENTS Core SerialPort Network)
 if(NOT MIB_BUILD_BACKEND_ONLY)
-    list(APPEND MIB_QT_COMPONENTS Widgets Charts Concurrent)
+    list(APPEND MIB_QT_COMPONENTS Gui Widgets Charts Concurrent)
 endif()
 if(NOT MIB_BUILD_PROCESSING_ONLY)
     find_package(Qt6 COMPONENTS ${MIB_QT_COMPONENTS} REQUIRED)

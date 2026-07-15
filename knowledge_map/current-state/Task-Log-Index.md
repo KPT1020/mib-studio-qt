@@ -60,8 +60,9 @@
 
 ### Qt → React/Tauri migration (epic #246)
 - `task/2026-07-15-qt-decoupling-phase1-slice1.md`
+- `task/2026-07-15-qt-decoupling-mockcamera-decode.md`
 
-## By filename (all 34)
+## By filename (all 35)
 
 ```
 2025-11-14-safe-start-stop-egrabber.md
@@ -84,6 +85,7 @@
 2026-07-13-processing-core-registry.md
 2026-07-13-hot-swappable-processing-core-native.md
 2026-07-15-qt-decoupling-phase1-slice1.md
+2026-07-15-qt-decoupling-mockcamera-decode.md
 camera-reset.md
 diagnostic-logging.md
 external-config-browse.md

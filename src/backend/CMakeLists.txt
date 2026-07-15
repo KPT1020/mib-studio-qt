@@ -265,7 +265,6 @@ endif()
 target_link_libraries(mib_backend PUBLIC
     spdlog::spdlog
     Qt6::Core
-    Qt6::Gui
     Qt6::Network
     Qt6::SerialPort
 )

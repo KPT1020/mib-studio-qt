@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Qt → React/Tauri migration: backend de-Qt slice 2 (mock-camera decode)**
+  (2026-07-15, epic #246) — `MockCamera::loadFrameFromPath` now decodes every
+  supported format with OpenCV `cv::imread` (Qt-free), replacing the
+  `QImageReader` primary path; output stays PFNC Mono8 with rows packed tightly
+  (`linePitch == width`). This removed the last backend `QImage` use, so
+  `Qt6::Gui` is dropped from the `mib_backend` link and moved to the
+  frontend-only Qt component set in `cmake/MIBDependencies.cmake` —
+  `MIB_BUILD_BACKEND_ONLY` no longer needs Qt Gui. `mock_camera_smoke_test`
+  gained pixel-value and TIFF-decode assertions. Details:
+  `knowledge_map/task/2026-07-15-qt-decoupling-mockcamera-decode.md`.
+
 - **Qt → React/Tauri migration: Phase 0 + first backend de-Qt slice**
   (2026-07-15, epic #246) — Recorded the platform decision in ADR
   `docs/decisions/0001-react-tauri-migration.md` (React + Tauri v2;
