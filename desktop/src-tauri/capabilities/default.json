@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Core permissions for the main window. App-defined commands (init, configure_mock, start_capture, …) are allowed by default in Tauri v2.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

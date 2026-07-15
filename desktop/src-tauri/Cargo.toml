@@ -1,0 +1,24 @@
+[package]
+name = "mib-studio-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "MIB Studio desktop shell (React + Tauri v2) — Phase 3 of epic #246"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+cxx = "1"
+mib-bridge = { path = "../../crates/mib-bridge" }
+
+# Desktop-only: an rlib consumed by the binary (main.rs) that links the C++
+# backend archives into an executable. The mobile crate-types (cdylib/staticlib)
+# are intentionally omitted — the non-PIC C++ archives cannot link into a
+# shared object (see knowledge_map/architecture/Rust-Bridge.md).
+[lib]
+name = "mib_studio_desktop_lib"
+crate-type = ["rlib"]

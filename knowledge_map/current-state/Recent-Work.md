@@ -5,6 +5,22 @@
 
 ## Features shipped
 
+- **Qt → React/Tauri migration: Phase 3 — first Tauri vertical slice (mock
+  camera)** (2026-07-15, epic #246) — New `desktop/` React + Tauri v2 app that
+  drives the Qt-free backend through `mib-bridge`. `src-tauri` exposes the bridge
+  as `#[tauri::command]`s (`init`, `configure_mock`, `start_capture`/`stop`,
+  `seek_latest`, `poll_events`, `fetch_frame`, `frame_bytes`); frame pixels ship
+  as a binary `tauri::ipc::Response` (no base64). The React frontend
+  (`bridge.ts` + `App.tsx`) configures a mock camera, starts capture, and renders
+  live Mono8 frames to a canvas. Verified headless via a `cargo test` bridge
+  round-trip and an Xvfb GUI smoke (`desktop/scripts/xvfb-smoke.sh`); CI in
+  `desktop-ci.yml`. The feared webkit/display hard block was surmountable
+  (webkit installs on ubuntu-24.04; GUI runs under Xvfb). Two findings fed back
+  to Phase 2: the bridge is now `Send` (for Tauri `State`), and desktop uses a
+  binary+`rlib` crate-type (non-PIC archives can't link a `cdylib`). Details:
+  `knowledge_map/architecture/Desktop-Shell.md`,
+  `knowledge_map/task/2026-07-15-tauri-desktop-phase3-slice.md`.
+
 - **Qt → React/Tauri migration: Phase 2 — production Rust ↔ C++ bridge (cxx)**
   (2026-07-15, epic #246) — New crate `crates/mib-bridge`: a `cxx` bridge that
   wraps `backend::bridge::BackendFacade` so a Rust shell can drive the Qt-free
