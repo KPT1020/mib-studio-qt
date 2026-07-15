@@ -85,3 +85,15 @@ Two gates, both without a real display:
 - `dist/` must exist before `cargo build` — build the frontend first (CI does).
 - Keep frame pixels on the `frame_bytes` binary channel; do not JSON/base64
   them through `poll_events` or a command return (ADR 0003 hot-path rule).
+- **Debug binaries load `devUrl`, not `dist/`** — Tauri embeds
+  `build.devUrl` in dev profiles, so running `target/debug/mib-studio-desktop`
+  without `npm run dev` on :1420 shows "Could not connect to localhost". The
+  Xvfb smoke therefore only proves the shell boots; driving the real UI
+  headless needs Vite running (or a release build, which embeds `dist/`).
+- **Vite must not watch `src-tauri/`** — cxx-build creates a `crate` symlink
+  loop under `src-tauri/target/**/cxxbridge` that crashes Vite's watcher with
+  `ELOOP` seconds after startup. `vite.config.ts` sets
+  `server.watch.ignored: ["**/src-tauri/**"]`.
+- An **empty `data_dir`** passed to the `init` command resolves to Tauri's
+  `app_data_dir` — `AppBackend::initialize("")` rejects an empty path (found
+  by driving the UI under Xvfb: init always failed before this).

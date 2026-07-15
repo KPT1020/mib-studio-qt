@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use mib_bridge::ffi::{self, BridgeEventKind};
 use serde::Serialize;
 use tauri::ipc::Response;
-use tauri::State;
+use tauri::{Manager, State};
 
 struct AppState {
     bridge: Mutex<cxx::UniquePtr<ffi::BackendBridge>>,
@@ -100,9 +100,25 @@ fn is_initialized(state: State<AppState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn init(state: State<AppState>, data_dir: String) -> Result<bool, String> {
+fn init(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    data_dir: String,
+) -> Result<bool, String> {
+    // An empty data_dir means "use the platform app-data dir" — AppBackend
+    // rejects an empty path, so resolve it here (found by the Xvfb E2E run:
+    // the UI passed "" and init always failed).
+    let dir = if data_dir.trim().is_empty() {
+        app.path()
+            .app_data_dir()
+            .map_err(|e| format!("resolve app data dir: {e}"))?
+            .to_string_lossy()
+            .into_owned()
+    } else {
+        data_dir
+    };
     let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
-    Ok(guard.pin_mut().initialize(&data_dir))
+    Ok(guard.pin_mut().initialize(&dir))
 }
 
 #[tauri::command]

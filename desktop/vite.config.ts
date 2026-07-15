@@ -9,6 +9,12 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    watch: {
+      // Never watch the Rust build tree: cxx-build creates a `crate` symlink
+      // loop under src-tauri/target/**/cxxbridge that crashes the watcher
+      // with ELOOP (kills the dev server moments after startup).
+      ignored: ["**/src-tauri/**"],
+    },
   },
   build: {
     outDir: "dist",
