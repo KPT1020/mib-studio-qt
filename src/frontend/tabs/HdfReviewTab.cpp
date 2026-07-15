@@ -14,8 +14,11 @@
 #include <QFile>
 #include <QTextStream>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QMessageBox>
 #include <QInputDialog>
+#include <QSettings>
+#include <QStringList>
 #include <QScrollBar>
 #include <QEventLoop>
 #include <QComboBox>
@@ -51,6 +54,7 @@
 #include "frontend/dialogs/FrameViewerDialog.h"
 #include "frontend/models/HdfMetricsModel.h"
 #include "frontend/utils/OverlayRenderer.h"
+#include "frontend/utils/HdfReviewExportPaths.h"
 
 #include <spdlog/spdlog.h>
 #include <opencv2/core.hpp>
@@ -64,6 +68,147 @@
 #endif
 
 namespace {
+
+constexpr const char* kLastExportDirSetting = "HdfReviewTab/lastExportDir";
+
+struct HdfReviewLoadData {
+    std::unique_ptr<backend::services::Hdf5Service> reader;
+    std::vector<backend::services::ProcessedFrame> validFrames;
+    std::vector<backend::services::ProcessedFrame> invalidFrames;
+    bool isRecordingMode{false};
+    bool recordingMultiImageEnabled{false};
+    size_t recordingMultiImageCount{1};
+};
+
+bool writeMetricsCsvData(const QString& filePath,
+                         const std::vector<backend::services::ProcessedFrame>& validFrames,
+                         const std::vector<backend::services::ProcessedFrame>& invalidFrames,
+                         double conversionFactor,
+                         QString* errorMessage)
+{
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        if (errorMessage) {
+            *errorMessage = QObject::tr("Failed to open file for writing: %1").arg(filePath);
+        }
+        return false;
+    }
+
+    QTextStream out(&file);
+    const double areaConversionFactor = conversionFactor * conversionFactor;
+
+    out << "Frame Type,Index,Timestamp,Object Id,Object Count,Track Id,Track First,Track Last,Track Observations,"
+        << "Deformability,Area,Area (um²),Area Ratio,Ring Ratio,"
+        << "Valid,Touches Border,Single Inner,In Range,Inner Count,"
+        << "Bright Q1,Bright Q2,Bright Q3,Bright Q4\n";
+
+    auto writeFrame = [&](const char* frameType, const backend::services::ProcessedFrame& frame) {
+        const auto& val = frame.validation;
+        const double areaMicrons = val.area * areaConversionFactor;
+        out << frameType << ",";
+        out << frame.index << ",";
+        out << frame.timestampNs << ",";
+        out << val.objectId << ",";
+        out << val.objectCount << ",";
+        out << val.trackId << ",";
+        out << val.trackFirstFrame << ",";
+        out << val.trackLastFrame << ",";
+        out << val.trackObservationCount << ",";
+        out << QString::number(val.deformability, 'f', 3) << ",";
+        out << QString::number(val.area, 'f', 2) << ",";
+        out << QString::number(areaMicrons, 'f', 2) << ",";
+        out << QString::number(val.areaRatio, 'f', 3) << ",";
+        out << QString::number(val.ringRatio, 'f', 3) << ",";
+        out << (val.isValid ? "Yes" : "No") << ",";
+        out << (val.touchesBorder ? "Yes" : "No") << ",";
+        out << (val.hasSingleInnerContour ? "Yes" : "No") << ",";
+        out << (val.inRange ? "Yes" : "No") << ",";
+        out << val.innerContourCount << ",";
+        out << QString::number(val.brightness.q1, 'f', 2) << ",";
+        out << QString::number(val.brightness.q2, 'f', 2) << ",";
+        out << QString::number(val.brightness.q3, 'f', 2) << ",";
+        out << QString::number(val.brightness.q4, 'f', 2) << "\n";
+    };
+
+    for (const auto& frame : validFrames) {
+        writeFrame("Valid", frame);
+    }
+    for (const auto& frame : invalidFrames) {
+        writeFrame("Invalid", frame);
+    }
+
+    if (out.status() != QTextStream::Ok) {
+        if (errorMessage) {
+            *errorMessage = QObject::tr("Failed while writing CSV: %1").arg(filePath);
+        }
+        return false;
+    }
+    return true;
+}
+
+bool loadHdfReviewData(const QString& filePath, HdfReviewLoadData& outData, QString* errorMessage)
+{
+    HdfReviewLoadData loaded;
+    loaded.reader = std::make_unique<backend::services::Hdf5Service>();
+    if (!loaded.reader->loadFile(filePath.toStdString())) {
+        if (errorMessage) {
+            *errorMessage = QFile::exists(filePath)
+                ? QObject::tr("File exists but could not be opened as HDF5")
+                : QObject::tr("File not found");
+        }
+        return false;
+    }
+
+    loaded.isRecordingMode = loaded.reader->isRecordingFile();
+    if (loaded.isRecordingMode) {
+        uint64_t startTimeNs = 0;
+        uint64_t endTimeNs = 0;
+        uint64_t totalFrames = 0;
+        uint64_t filteredFrames = 0;
+        bool multiImageEnabled = false;
+        uint64_t multiImageCount = 1;
+        loaded.reader->readRecordingInfo(startTimeNs,
+                                         endTimeNs,
+                                         totalFrames,
+                                         filteredFrames,
+                                         &multiImageEnabled,
+                                         &multiImageCount);
+        loaded.recordingMultiImageEnabled = multiImageEnabled;
+        loaded.recordingMultiImageCount = static_cast<size_t>(std::max<uint64_t>(multiImageCount, 1));
+        if (!loaded.reader->readRecordingMetadata(loaded.validFrames)) {
+            if (errorMessage) {
+                *errorMessage = QObject::tr("Failed to read recording metadata");
+            }
+            return false;
+        }
+    } else {
+        if (!loaded.reader->readValidMetadata(loaded.validFrames)) {
+            if (errorMessage) {
+                *errorMessage = QObject::tr("Failed to read valid-frame metadata");
+            }
+            return false;
+        }
+        if (!loaded.reader->readInvalidMetadata(loaded.invalidFrames)) {
+            if (errorMessage) {
+                *errorMessage = QObject::tr("Failed to read invalid-frame metadata");
+            }
+            return false;
+        }
+    }
+
+    outData = std::move(loaded);
+    return true;
+}
+
+QString trimmedFailureList(const QStringList& failures)
+{
+    constexpr int kMaxShown = 8;
+    QStringList shown = failures.mid(0, kMaxShown);
+    if (failures.size() > kMaxShown) {
+        shown << QObject::tr("...and %1 more").arg(failures.size() - kMaxShown);
+    }
+    return shown.join(QStringLiteral("\n"));
+}
 
 struct SeriesExportSelection {
     bool exportSeriesImages{false};
@@ -208,6 +353,9 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
     : QWidget(parent), ui(new Ui::HdfReviewTab), backend_(backend) {
     ui->setupUi(this);
 
+    QSettings settings;
+    lastExportDir_ = settings.value(kLastExportDirSetting, QDir::homePath()).toString();
+
     // Configure thumbnail cache (store up to ~2048 thumbnails)
     thumbnailCache_.setMaxCost(2048);
     SPDLOG_INFO("HdfReviewTab: thumbnail cache size set to {}", 2048);
@@ -217,6 +365,8 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
     connect(ui->closeFileBtn, &QPushButton::clicked, this, &HdfReviewTab::onCloseFile);
     connect(ui->exportMetricsBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportMetrics);
     connect(ui->exportAllBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportAll);
+    connect(ui->batchExportMetricsBtn, &QPushButton::clicked, this, &HdfReviewTab::onBatchExportMetrics);
+    connect(ui->batchExportAllBtn, &QPushButton::clicked, this, &HdfReviewTab::onBatchExportAll);
     connect(ui->exportChartsBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportCharts);
     connect(ui->regenerateMasksBtn, &QPushButton::clicked, this, &HdfReviewTab::onRegenerateMasks);
     connect(ui->overlayModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -362,6 +512,7 @@ void HdfReviewTab::onSelectFile() {
 void HdfReviewTab::onCloseFile() {
     clearDisplay();
     hdfReader_.reset();
+    loadedHdfFilePath_.clear();
     ui->filePathLabel->setText(tr("No file selected"));
     ui->statusLabel->setText(tr("Ready"));
     ui->closeFileBtn->setEnabled(false);
@@ -392,8 +543,12 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
         QMessageBox::critical(this, tr("Cannot Open HDF5 File"),
                               tr("Failed to open:\n%1\n\n%2").arg(filePath).arg(detail));
         ui->statusLabel->setText(tr("Error loading file"));
+        hdfReader_.reset();
+        loadedHdfFilePath_.clear();
         return;
     }
+
+    loadedHdfFilePath_ = filePath;
 
     // Detect recording-mode file. Recording files have no valid/invalid
     // categorization, no masks, no per-frame metrics — just raw frames
@@ -1043,110 +1198,117 @@ void HdfReviewTab::onExportMetrics() {
         return;
     }
 
-    QString filePath = QFileDialog::getSaveFileName(
+    const QString initialPath = frontend::hdfreviewexport::metricsCsvPath(
+        loadedHdfFilePath_, metricsExportDir());
+    const QString filePath = QFileDialog::getSaveFileName(
         this,
         tr("Export Metrics to CSV"),
-        "",
+        initialPath,
         tr("CSV Files (*.csv);;All Files (*)")
     );
 
-    if (!filePath.isEmpty()) {
-        exportMetricsToCsv(filePath);
-    }
-}
-
-void HdfReviewTab::exportMetricsToCsv(const QString& filePath) {
-    QFile file(filePath);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        QMessageBox::critical(this, tr("Export Error"),
-                             tr("Failed to open file for writing:\n%1").arg(filePath));
+    if (filePath.isEmpty()) {
         return;
     }
 
-    QTextStream out(&file);
-    
-    // Get conversion factor from backend (pixels to microns)
+    if (exportMetricsToCsv(filePath)) {
+        rememberMetricsExportDir(QFileInfo(filePath).absolutePath());
+    }
+}
+
+void HdfReviewTab::onBatchExportMetrics() {
+    const QStringList filePaths = QFileDialog::getOpenFileNames(
+        this,
+        tr("Select HDF Files for Metrics Export"),
+        loadedHdfFilePath_.isEmpty() ? QString() : QFileInfo(loadedHdfFilePath_).absolutePath(),
+        tr("HDF5 Files (*.h5 *.hdf5);;All Files (*)")
+    );
+    if (filePaths.isEmpty()) {
+        return;
+    }
+
+    const QString dirPath = QFileDialog::getExistingDirectory(
+        this,
+        tr("Select Directory for Metrics CSV Files"),
+        metricsExportDir(),
+        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+    if (dirPath.isEmpty()) {
+        return;
+    }
+
+    const QStringList outputPaths = frontend::hdfreviewexport::batchMetricsCsvPaths(filePaths, dirPath);
+    QStringList failures;
+    int exportedCount = 0;
     const double conversionFactor = backend_.processing().getPixelToMicronFactor();
-    // Area conversion: pixels² to microns² = pixels² * (microns/pixel)²
-    const double areaConversionFactor = conversionFactor * conversionFactor;
-    
-    // CSV header
-    out << "Frame Type,Index,Timestamp,Object Id,Object Count,Track Id,Track First,Track Last,Track Observations,"
-        << "Deformability,Area,Area (um²),Area Ratio,Ring Ratio,"
-        << "Valid,Touches Border,Single Inner,In Range,Inner Count,"
-        << "Bright Q1,Bright Q2,Bright Q3,Bright Q4\n";
 
-    // Export valid frames
-    for (const auto& frame : validFrames_) {
-        const auto& val = frame.validation;
-        // Convert area from pixels² to microns²
-        double areaMicrons = val.area * areaConversionFactor;
-        out << "Valid,";
-        out << frame.index << ",";
-        out << frame.timestampNs << ",";
-        out << val.objectId << ",";
-        out << val.objectCount << ",";
-        out << val.trackId << ",";
-        out << val.trackFirstFrame << ",";
-        out << val.trackLastFrame << ",";
-        out << val.trackObservationCount << ",";
-        out << QString::number(val.deformability, 'f', 3) << ",";
-        out << QString::number(val.area, 'f', 2) << ",";
-        out << QString::number(areaMicrons, 'f', 2) << ",";
-        out << QString::number(val.areaRatio, 'f', 3) << ",";
-        out << QString::number(val.ringRatio, 'f', 3) << ",";
-        out << (val.isValid ? "Yes" : "No") << ",";
-        out << (val.touchesBorder ? "Yes" : "No") << ",";
-        out << (val.hasSingleInnerContour ? "Yes" : "No") << ",";
-        out << (val.inRange ? "Yes" : "No") << ",";
-        out << val.innerContourCount << ",";
-        out << QString::number(val.brightness.q1, 'f', 2) << ",";
-        out << QString::number(val.brightness.q2, 'f', 2) << ",";
-        out << QString::number(val.brightness.q3, 'f', 2) << ",";
-        out << QString::number(val.brightness.q4, 'f', 2) << "\n";
+    for (int i = 0; i < filePaths.size(); ++i) {
+        const QString& filePath = filePaths[i];
+        HdfReviewLoadData data;
+        QString error;
+        if (!loadHdfReviewData(filePath, data, &error)) {
+            failures << tr("%1: %2").arg(QFileInfo(filePath).fileName(), error);
+            continue;
+        }
+        if (data.isRecordingMode) {
+            failures << tr("%1: recording files do not contain metrics").arg(QFileInfo(filePath).fileName());
+            continue;
+        }
+        if (data.validFrames.empty() && data.invalidFrames.empty()) {
+            failures << tr("%1: no metrics data found").arg(QFileInfo(filePath).fileName());
+            continue;
+        }
+        if (!writeMetricsCsvData(outputPaths[i], data.validFrames, data.invalidFrames, conversionFactor, &error)) {
+            failures << tr("%1: %2").arg(QFileInfo(filePath).fileName(), error);
+            continue;
+        }
+        ++exportedCount;
+        SPDLOG_INFO("Batch exported metrics from {} to {}", filePath.toStdString(), outputPaths[i].toStdString());
     }
 
-    // Export invalid frames
-    for (const auto& frame : invalidFrames_) {
-        const auto& val = frame.validation;
-        // Convert area from pixels² to microns²
-        double areaMicrons = val.area * areaConversionFactor;
-        out << "Invalid,";
-        out << frame.index << ",";
-        out << frame.timestampNs << ",";
-        out << val.objectId << ",";
-        out << val.objectCount << ",";
-        out << val.trackId << ",";
-        out << val.trackFirstFrame << ",";
-        out << val.trackLastFrame << ",";
-        out << val.trackObservationCount << ",";
-        out << QString::number(val.deformability, 'f', 3) << ",";
-        out << QString::number(val.area, 'f', 2) << ",";
-        out << QString::number(areaMicrons, 'f', 2) << ",";
-        out << QString::number(val.areaRatio, 'f', 3) << ",";
-        out << QString::number(val.ringRatio, 'f', 3) << ",";
-        out << (val.isValid ? "Yes" : "No") << ",";
-        out << (val.touchesBorder ? "Yes" : "No") << ",";
-        out << (val.hasSingleInnerContour ? "Yes" : "No") << ",";
-        out << (val.inRange ? "Yes" : "No") << ",";
-        out << val.innerContourCount << ",";
-        out << QString::number(val.brightness.q1, 'f', 2) << ",";
-        out << QString::number(val.brightness.q2, 'f', 2) << ",";
-        out << QString::number(val.brightness.q3, 'f', 2) << ",";
-        out << QString::number(val.brightness.q4, 'f', 2) << "\n";
+    if (exportedCount > 0) {
+        rememberMetricsExportDir(dirPath);
     }
 
-    file.close();
+    if (failures.isEmpty()) {
+        QMessageBox::information(this, tr("Batch Metrics Export Complete"),
+                                 tr("Exported metrics for %1 files to:\n%2")
+                                     .arg(exportedCount)
+                                     .arg(dirPath));
+    } else {
+        QMessageBox::warning(this, tr("Batch Metrics Export Complete"),
+                             tr("Exported metrics for %1 of %2 files to:\n%3\n\nFailures:\n%4")
+                                 .arg(exportedCount)
+                                 .arg(filePaths.size())
+                                 .arg(dirPath)
+                                 .arg(trimmedFailureList(failures)));
+    }
+}
 
-    size_t totalFrames = validFrames_.size() + invalidFrames_.size();
-    QMessageBox::information(this, tr("Export Complete"),
-                           tr("Exported %1 frames (Valid: %2, Invalid: %3) to:\n%4")
-                           .arg(totalFrames)
-                           .arg(validFrames_.size())
-                           .arg(invalidFrames_.size())
-                           .arg(filePath));
-    
+bool HdfReviewTab::exportMetricsToCsv(const QString& filePath, bool showCompletionMessage) {
+    QString error;
+    if (!writeMetricsCsvData(filePath,
+                             validFrames_,
+                             invalidFrames_,
+                             backend_.processing().getPixelToMicronFactor(),
+                             &error)) {
+        if (showCompletionMessage) {
+            QMessageBox::critical(this, tr("Export Error"), error);
+        }
+        return false;
+    }
+
+    const size_t totalFrames = validFrames_.size() + invalidFrames_.size();
+    if (showCompletionMessage) {
+        QMessageBox::information(this, tr("Export Complete"),
+                               tr("Exported %1 frames (Valid: %2, Invalid: %3) to:\n%4")
+                               .arg(totalFrames)
+                               .arg(validFrames_.size())
+                               .arg(invalidFrames_.size())
+                               .arg(filePath));
+    }
+
     SPDLOG_INFO("Exported {} frames to CSV: {}", totalFrames, filePath.toStdString());
+    return true;
 }
 
 void HdfReviewTab::onOverlayModeChanged(int index) {
@@ -1604,13 +1766,108 @@ void HdfReviewTab::onExportAll() {
         return;
     }
 
-    QString dirPath = QFileDialog::getExistingDirectory(this, tr("Select Directory to Export All Data"),
-                                                        "", QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
-    if (dirPath.isEmpty()) {
+    const QString rootPath = QFileDialog::getExistingDirectory(this,
+        tr("Select Export Root Directory"),
+        exportAllRootDir(),
+        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+    if (rootPath.isEmpty()) {
         return;
     }
 
-    exportAllData(dirPath);
+    const QString targetDir = frontend::hdfreviewexport::exportAllDirectoryPath(loadedHdfFilePath_, rootPath);
+    if (exportAllData(targetDir)) {
+        rememberExportAllRootDir(rootPath);
+    }
+}
+
+void HdfReviewTab::onBatchExportAll() {
+    const QStringList filePaths = QFileDialog::getOpenFileNames(
+        this,
+        tr("Select HDF Files for Batch Export All"),
+        loadedHdfFilePath_.isEmpty() ? QString() : QFileInfo(loadedHdfFilePath_).absolutePath(),
+        tr("HDF5 Files (*.h5 *.hdf5);;All Files (*)")
+    );
+    if (filePaths.isEmpty()) {
+        return;
+    }
+
+    const QString rootPath = QFileDialog::getExistingDirectory(
+        this,
+        tr("Select Export Root Directory"),
+        exportAllRootDir(),
+        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+    if (rootPath.isEmpty()) {
+        return;
+    }
+
+    const QStringList outputDirs = frontend::hdfreviewexport::batchExportAllDirectoryPaths(filePaths, rootPath);
+    QStringList failures;
+    int exportedCount = 0;
+
+    auto savedReader = std::move(hdfReader_);
+    auto savedValidFrames = std::move(validFrames_);
+    auto savedInvalidFrames = std::move(invalidFrames_);
+    const bool savedRecordingMode = isRecordingMode_;
+    const bool savedRecordingMultiImageEnabled = recordingMultiImageEnabled_;
+    const size_t savedRecordingMultiImageCount = recordingMultiImageCount_;
+
+    for (int i = 0; i < filePaths.size(); ++i) {
+        const QString& filePath = filePaths[i];
+        HdfReviewLoadData data;
+        QString error;
+        if (!loadHdfReviewData(filePath, data, &error)) {
+            failures << tr("%1: %2").arg(QFileInfo(filePath).fileName(), error);
+            continue;
+        }
+        if (data.validFrames.empty() && data.invalidFrames.empty()) {
+            failures << tr("%1: no exportable frame data found").arg(QFileInfo(filePath).fileName());
+            continue;
+        }
+
+        hdfReader_ = std::move(data.reader);
+        validFrames_ = std::move(data.validFrames);
+        invalidFrames_ = std::move(data.invalidFrames);
+        isRecordingMode_ = data.isRecordingMode;
+        recordingMultiImageEnabled_ = data.recordingMultiImageEnabled;
+        recordingMultiImageCount_ = data.recordingMultiImageCount;
+
+        if (!exportAllData(outputDirs[i], false)) {
+            failures << tr("%1: export failed").arg(QFileInfo(filePath).fileName());
+            continue;
+        }
+        ++exportedCount;
+        SPDLOG_INFO("Batch exported all HDF review data from {} to {}",
+                    filePath.toStdString(),
+                    outputDirs[i].toStdString());
+    }
+
+    hdfReader_ = std::move(savedReader);
+    validFrames_ = std::move(savedValidFrames);
+    invalidFrames_ = std::move(savedInvalidFrames);
+    isRecordingMode_ = savedRecordingMode;
+    recordingMultiImageEnabled_ = savedRecordingMultiImageEnabled;
+    recordingMultiImageCount_ = savedRecordingMultiImageCount;
+    if (hdfReader_ && (!validFrames_.empty() || !invalidFrames_.empty())) {
+        updateCharts();
+    }
+
+    if (exportedCount > 0) {
+        rememberExportAllRootDir(rootPath);
+    }
+
+    if (failures.isEmpty()) {
+        QMessageBox::information(this, tr("Batch Export All Complete"),
+                                 tr("Exported %1 files to source-specific folders under:\n%2")
+                                     .arg(exportedCount)
+                                     .arg(rootPath));
+    } else {
+        QMessageBox::warning(this, tr("Batch Export All Complete"),
+                             tr("Exported %1 of %2 files to source-specific folders under:\n%3\n\nFailures:\n%4")
+                                 .arg(exportedCount)
+                                 .arg(filePaths.size())
+                                 .arg(rootPath)
+                                 .arg(trimmedFailureList(failures)));
+    }
 }
 
 void HdfReviewTab::onExportCharts() {
@@ -1812,16 +2069,18 @@ bool HdfReviewTab::exportChartFromHdf5(const std::string& datasetPath, const QSt
     return true;
 }
 
-void HdfReviewTab::exportAllData(const QString& baseDir) {
+bool HdfReviewTab::exportAllData(const QString& baseDir, bool showCompletionMessage) {
     if (!hdfReader_) {
-        return;
+        return false;
     }
 
     QDir dir(baseDir);
-    if (!dir.exists()) {
-        QMessageBox::critical(this, tr("Export Error"),
-                              tr("Directory does not exist: %1").arg(baseDir));
-        return;
+    if (!dir.exists() && !dir.mkpath(QStringLiteral("."))) {
+        if (showCompletionMessage) {
+            QMessageBox::critical(this, tr("Export Error"),
+                                  tr("Failed to create directory: %1").arg(baseDir));
+        }
+        return false;
     }
 
     int exportedImages = 0;
@@ -1838,7 +2097,7 @@ void HdfReviewTab::exportAllData(const QString& baseDir) {
     if (hasSeriesImages) {
         if (!promptSeriesExportSelection(this, seriesCount, seriesSelection)) {
             SPDLOG_INFO("HdfReviewTab: export-all cancelled while selecting series range");
-            return;
+            return false;
         }
     }
     const int seriesDigits = std::max(2, static_cast<int>(QString::number(
@@ -1847,8 +2106,7 @@ void HdfReviewTab::exportAllData(const QString& baseDir) {
     // Export CSV metrics (recording files have no per-frame metrics)
     if (!isRecordingMode_) {
         QString csvPath = dir.filePath("metrics.csv");
-        exportMetricsToCsv(csvPath);
-        csvExported = QFile::exists(csvPath);
+        csvExported = exportMetricsToCsv(csvPath, false) && QFile::exists(csvPath);
     }
 
     // Export all images
@@ -1905,10 +2163,12 @@ void HdfReviewTab::exportAllData(const QString& baseDir) {
     if (isRecordingMode_) {
         QString message = tr("Export complete:\n- Images: %1 of %2\n\nLocation: %3")
             .arg(exportedImages).arg(totalImages).arg(baseDir);
-        QMessageBox::information(this, tr("Export Complete"), message);
+        if (showCompletionMessage) {
+            QMessageBox::information(this, tr("Export Complete"), message);
+        }
         SPDLOG_INFO("Exported recording data: Images={}/{}, Location={}",
                     exportedImages, totalImages, baseDir.toStdString());
-        return;
+        return exportedImages > 0 || totalImages == 0;
     }
     generateScatterPlot(validFrames_);
     generateHistogram(validFrames_);
@@ -1969,17 +2229,50 @@ void HdfReviewTab::exportAllData(const QString& baseDir) {
     message += tr("- Charts: %1\n").arg(chartsExported ? tr("Yes") : tr("Partial/No"));
     message += tr("\nLocation: %1").arg(baseDir);
 
-    QMessageBox::information(this, tr("Export Complete"), message);
-    SPDLOG_INFO("Exported all data: CSV={}, Images={}/{}, Series={} (enabled={}, start={}, end={}), Charts={}, Location={}",
-                csvExported,
-                exportedImages,
-                totalImages,
-                exportedSeriesImages,
-                seriesSelection.exportSeriesImages,
-                seriesSelection.startInclusive + 1,
-                seriesSelection.endInclusive + 1,
-                chartsExported,
-                baseDir.toStdString());
+    if (showCompletionMessage) {
+        QMessageBox::information(this, tr("Export Complete"), message);
+    }
+    SPDLOG_INFO(
+        "Exported all data: CSV={}, Images={}/{}, Series={} (enabled={}, start={}, end={}), "
+        "Charts={}, Location={}",
+        csvExported,
+        exportedImages,
+        totalImages,
+        exportedSeriesImages,
+        seriesSelection.exportSeriesImages,
+        seriesSelection.startInclusive + 1,
+        seriesSelection.endInclusive + 1,
+        chartsExported,
+        baseDir.toStdString());
+    return csvExported && exportedImages == totalImages && chartsExported;
+}
+
+
+QString HdfReviewTab::metricsExportDir() const {
+    if (!lastExportDir_.isEmpty()) {
+        return lastExportDir_;
+    }
+    if (!loadedHdfFilePath_.isEmpty()) {
+        return QFileInfo(loadedHdfFilePath_).absolutePath();
+    }
+    return QDir::homePath();
+}
+
+QString HdfReviewTab::exportAllRootDir() const {
+    return metricsExportDir();
+}
+
+void HdfReviewTab::rememberMetricsExportDir(const QString& dirPath) {
+    if (dirPath.isEmpty()) {
+        return;
+    }
+    lastExportDir_ = dirPath;
+    QSettings settings;
+    settings.setValue(kLastExportDirSetting, dirPath);
+}
+
+void HdfReviewTab::rememberExportAllRootDir(const QString& dirPath) {
+    rememberMetricsExportDir(dirPath);
 }
 
 void HdfReviewTab::updateCharts() {

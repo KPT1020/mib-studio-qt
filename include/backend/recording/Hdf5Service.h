@@ -4,6 +4,8 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
+#include <functional>
+#include <string_view>
 
 namespace cv {
     class Mat;
@@ -17,6 +19,19 @@ namespace backend::services {
 #include "backend/processing/ProcessingService.h"
 
 namespace backend::services {
+
+// Optional telemetry hook for HDF5 I/O performance events (file close,
+// frame append). No-op until set, so Hdf5Service carries no CrashReporter
+// (and therefore no Qt) dependency -- it lives in the Qt-free mib_processing
+// target. The desktop app wires this to
+// CrashReporter::capturePerformanceTransaction during startup
+// (src/frontend/core/main.cpp); tests and portable consumers may leave it
+// unset or set their own sink.
+using PerformanceTraceFn = std::function<void(std::string_view name,
+                                              std::string_view operation,
+                                              double durationMs,
+                                              std::string_view jsonData)>;
+void setHdf5PerformanceTraceHook(PerformanceTraceFn fn);
 
 class Hdf5Service {
 public:
@@ -50,10 +65,15 @@ public:
                              size_t totalValidFrames, size_t totalInvalidFrames,
                              const ProcessingConfig& processingConfig,
                              const ProcessingService::Roi& roi,
-                             const cv::Mat* background = nullptr);
+                             const cv::Mat* background = nullptr,
+                             const backend::processing::ProcessingCoreIdentity* processingCore = nullptr);
     bool readExperimentInfo(uint64_t& startTimeNs, uint64_t& endTimeNs,
                              size_t& totalValidFrames, size_t& totalInvalidFrames,
                              ProcessingService::Roi* roi = nullptr);
+    // Reads /experiment_info, or /recording_info for raw recordings. Returns
+    // false for legacy files that predate processing-core provenance.
+    bool readProcessingCoreIdentity(
+        backend::processing::ProcessingCoreIdentity& processingCore) const;
 
     // Save raw config JSON as a string attribute on /experiment_info.
     // Precondition: writeExperimentInfo() must have been called first.
@@ -122,7 +142,8 @@ public:
     bool writeRecordingInfo(uint64_t startTimeNs, uint64_t endTimeNs,
                             uint64_t totalFrames, uint64_t filteredFrames,
                             bool multiImageEnabled = false,
-                            uint64_t multiImageCount = 1);
+                            uint64_t multiImageCount = 1,
+                            const backend::processing::ProcessingCoreIdentity* processingCore = nullptr);
 
     // Recording-mode readers (counterparts to the write* functions above).
     // isRecordingFile() detects a recording-mode file via the presence of

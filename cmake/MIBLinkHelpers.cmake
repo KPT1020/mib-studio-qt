@@ -3,6 +3,11 @@ function(mib_link_opencv target visibility)
         target_link_libraries(${target} ${visibility} opencv_world)
     elseif(TARGET opencv_core)
         target_link_libraries(${target} ${visibility} opencv_core opencv_imgproc opencv_imgcodecs opencv_videoio)
+        if(TARGET opencv_geometry)
+            # OpenCV 5 split contour/shape primitives (boundingRect,
+            # moments, contourArea, convexHull, arcLength) from imgproc.
+            target_link_libraries(${target} ${visibility} opencv_geometry)
+        endif()
     elseif(DEFINED OpenCV_LIBS)
         target_include_directories(${target} ${visibility} ${OpenCV_INCLUDE_DIRS})
         target_link_libraries(${target} ${visibility} ${OpenCV_LIBS})
@@ -32,6 +37,11 @@ function(mib_link_hdf5 target visibility)
         target_link_libraries(${target} ${visibility} hdf5::hdf5-cpp)
     elseif(TARGET HDF5::HDF5)
         target_link_libraries(${target} ${visibility} HDF5::HDF5)
+    elseif(TARGET hdf5-shared)
+        # Upstream/Homebrew HDF5 2.x config exports un-namespaced targets.
+        target_link_libraries(${target} ${visibility} hdf5-shared)
+    elseif(TARGET hdf5-static)
+        target_link_libraries(${target} ${visibility} hdf5-static)
     else()
         # Fallback: manually link HDF5 libraries from Conan.
         set(CONAN_LIB_PATHS

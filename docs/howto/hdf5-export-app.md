@@ -191,16 +191,18 @@ Run from command line:
 
 5. **Completion:**
    - A message box will appear when export completes
-   - Check the output directory for exported files:
-     - `metrics.csv` (if CSV format selected)
-     - `valid_frame_XXXXXX.tiff` (if images selected)
-     - `invalid_frame_XXXXXX.tiff` (if images selected)
+   - Check the output directory for exported files. Generated names are derived from the selected HDF5 filename and avoid existing files/folders by appending `_2`, `_3`, and so on:
+     - `<input-basename>_metrics.csv` for CSV-only export
+     - `<input-basename>/metrics.csv` for All export
+     - `<input-basename>/valid_frame_XXXXXX.tiff` and `<input-basename>/invalid_frame_XXXXXX.tiff` for image exports
 
 ## Output Files
 
 ### CSV Export
 
-The CSV file (`metrics.csv`) contains the following columns:
+CSV-only exports write `<input-basename>_metrics.csv` under the selected output directory. All exports write `metrics.csv` inside a source-specific `<input-basename>/` folder. Existing generated names are not overwritten; the exporter appends `_2`, `_3`, and so on before writing.
+
+The CSV file contains the following columns:
 - Frame Type (Valid/Invalid)
 - Index
 - Timestamp
@@ -218,7 +220,7 @@ The CSV file (`metrics.csv`) contains the following columns:
 
 ### Image Export
 
-Images are exported as TIFF files with the naming pattern:
+Images are exported into a source-specific folder (`<input-basename>/`, suffixed if needed) as TIFF files with the naming pattern:
 - `valid_frame_XXXXXX.tiff` for valid frames
 - `invalid_frame_XXXXXX.tiff` for invalid frames
 
@@ -273,6 +275,8 @@ The original command-line script (`export_hdf5.py`) remains available for automa
 ```bash
 python scripts/export_hdf5.py -i experiment.h5 -o ./export --format all
 ```
+
+`--output` / `-o` is always an output directory. It is required, created when missing, and must not be an existing file or a path ending in `.csv`; explicit output-file mode is not supported. CSV-only exports create `<input-basename>_metrics.csv` under that directory, while image/all exports create a collision-safe `<input-basename>/` folder.
 
 See `scripts/export_hdf5.py --help` for all options.
 

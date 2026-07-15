@@ -5,6 +5,317 @@
 
 ## Features shipped
 
+- **Kernel-owned scientific pipeline** (2026-07-14, A7/#242) — Moved contour
+  extraction, per-object metrics/LUT/target gating, brightness quantiles, and
+  batch track matching behind `IProcessingKernel`
+  (`analyzeObjects`/`matchTrack`), with the single shared implementation in
+  `src/backend/processing/ProcessingScience.cpp` and plain data contracts in
+  `ProcessingTypes.h`. `ProcessingService` routes every batch/offline/
+  realtime scientific decision through the selected kernel; threads,
+  callbacks, track lifecycle state, and HDF5 stay host-owned. A
+  pre-migration golden test (`processing.science_golden`) pins exact outputs
+  and a spy kernel (`processing.science_seam`) proves the routing. The native
+  plugin now compiles the science sources; the C ABI remains v1 (mask/empty),
+  so ABI v2 object-record marshalling is the remaining A7 step.
+
+- **Linux Ed25519 detached-signature trust adapter** (2026-07-14, A13/#245) —
+  Implemented `verifyProcessingCoreEd25519` behind the injected trust seam:
+  the immutable manifest transports a 44-byte DER SPKI and raw 64-byte
+  Ed25519 signature over the artifact bytes, trusted only against the
+  compiled `MIB_PROCESSING_CORE_ED25519_SPKI_SHA256` pin (OpenSSL libcrypto,
+  Linux desktop builds only; wheel builds stay OpenSSL-optional and fail
+  closed). The plugin now builds with hidden symbol visibility and a
+  release-named `.so` + sidecar; catalog/settings/publisher/verify tooling
+  validate the signature transport; CI gained a Linux build/audit/
+  sign-rehearsal lane and the `processing.core_ed25519` CTest matrix with a
+  cache→`dlopen` load. Spec:
+  `docs/architecture/processing-core-linux-signing.md`. Live signed
+  publication (real keypair, repository pin, Production job) remains open.
+
+- **Cross-platform processing-core seams** (2026-07-14, A13/#245) — Removed
+  DLL-only assumptions from registry publication/verification, made native
+  signature scheme and requirement part of catalog/persisted identity, and
+  gave Linux x86_64/aarch64 runtime fingerprints explicit platform identity.
+  The C ABI, cache, and `dlopen` loader already exercise real `.so` fixtures;
+  production Linux activation remains fail-closed until A13 supplies an
+  audited detached-signature and release lane. Authenticode remains only the
+  Windows trust adapter.
+
+- **Processing-core release gate closure** (2026-07-14, A8/A10/A11/A12) —
+  Added repaired `manylinux_2_28` wheels proven in a clean Python 3.12 base,
+  independent native ABI fixtures, exact export/import auditing, secret-free
+  Authenticode rejection tests, flat signed release assets, and a separate
+  Production signing job. Release channels now follow stable/prerelease wheel
+  identity; an authenticated Production workflow promotes or rolls back
+  existing immutable versions and verifies public cross-links. Activation now
+  rejects leases before reset, clears stale scientific state, and passes
+  watchdog-protected A→B→A concurrency stress. Profile metadata carries an
+  optional processing contract, downgrades require confirmation, and HDF
+  regeneration warns on identity drift. Stable LUT revision `2026.07.14-1`
+  is live at `updates.yofo.bio`. The remaining blockers are the A7 full-kernel
+  boundary and A12's real production certificate/Windows hardware proof.
+
+- **Portable CI guards for processing-core release tests** (2026-07-14) —
+  Required C11 for the pure-C ABI layout test so MSVC evaluates its compile-time
+  assertions, installed NumPy in backend and sanitizer CI for the HDF5
+  conformance-input regression, and made the public Hugging Face Dataset Viewer
+  integration skip only after exhausted transient HTTP/network retries.
+  Payload-shape and scientific failures remain fatal.
+
+- **Desktop release identity/artifact gates** (2026-07-14,
+  [A12 #240](https://github.com/KPT1020/mib-studio-qt/issues/240)) — Hardened
+  every desktop publisher against mismatched source refs and stale installer
+  reuse. Manual tag dispatch validates and checks out the exact tag; manual
+  stable CI defers commit/tag/push until tests, installer builds, exact-file
+  checks, and artifact upload pass, then atomically pushes the tested main and
+  tag. Local and Actions publishers clear old outputs and consume only the
+  exact numeric-version Setup/Update files (including beta releases). One
+  resolver now bumps from the highest reachable release line, and paired CMake
+  overrides/readback keep the binary's numeric/full identity equal to its tag.
+  Every entrypoint builds all tests and runs CTest before external publication;
+  the local path requires a clean tree/main for stable, atomically pushes refs,
+  and treats GitHub/R2 errors as fatal.
+  Beta R2 keys include the full prerelease identity, and equal numeric SHA
+  betas sort by publication time. Focused resolver/CMake/publisher regressions
+  cover these invariants. Real PowerShell/Windows execution, production
+  signing, GitHub/R2 publication, and hardware proof remain A12 gates.
+
+- **Offline processing-core identity visibility** (2026-07-14,
+  [A11 #243](https://github.com/KPT1020/mib-studio-qt/issues/243)) — Fixed the
+  selector E2E defect where its active-core label remained blank until both
+  registry documents loaded successfully. The dialog now renders the local
+  active identity before starting the first request and keeps registry/network
+  failures in the separate status label. A real offscreen Qt dialog regression
+  proves both messages coexist when registry loading is refused.
+
+- **User-guide website** (2026-07-13, issue #233) — `docs/manual/` is now
+  published as a searchable site at
+  <https://kpt1020.github.io/mib-studio-qt/>: new `mkdocs.yml` (Material,
+  `docs_dir: docs/manual`), a visual-tour landing page
+  (`docs/manual/index.md`) built from the generated screenshots, and
+  `.github/workflows/docs-site.yml` deploying to GitHub Pages on pushes to
+  `main` that touch `docs/manual/**` — including the screenshot-refresh
+  commits from `build-windows.yml`, so the site tracks each release.
+  Details: `knowledge_map/task/2026-07-13-user-guide-website.md`.
+
+- **User manual + generated screenshots** (2026-07-13, issue #229) —
+  New operator manual under `docs/manual/` (connect, acquire & record,
+  review & post-process, troubleshooting) whose screenshots are generated
+  by a new `screenshot_tour` executable
+  (`src/frontend/tools/screenshot_tour_main.cpp`) that drives the real UI
+  headless in mock-camera mode. `scripts/check_screenshots.py` (run by
+  `docs-ci.yml`) fails when manual image references drift from the harness
+  registry; `build-windows.yml` regenerates the PNGs each release and
+  commits them back to `main`. Details:
+  `knowledge_map/task/2026-07-13-user-manual-screenshots.md` and
+  [[../frontend/Screenshot-Tour]].
+
+- **Release-time processing-core signer trust gate** (2026-07-14,
+  [A12 #240](https://github.com/KPT1020/mib-studio-qt/issues/240)) — All three
+  maintained Windows desktop publishers now require the same GitHub repository
+  `MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256` before shipping stable/beta
+  installers. CMake normalizes and validates exact 64-hex DER-SPKI pins while
+  keeping the requirement disabled for ordinary development/fork builds; the
+  manual workflow checks before its version commit/tag/push and the local
+  publisher reads the destination repository variable before every
+  non-skipped build and before bumping. The native-core tag job derives
+  DER-SPKI SHA-256 from the DLL's actual
+  Authenticode signer and rejects a repository-pin mismatch before upload.
+  Eight focused tests cover CMake rejection/normalization and cross-path
+  wiring. Real certificate secrets, repository pin provisioning, R2 publish,
+  and Windows hardware proof remain A12 live gates.
+
+- **Transactional processing-core settings persistence** (2026-07-14,
+  [A10 #241](https://github.com/KPT1020/mib-studio-qt/issues/241)) — Fixed the
+  desktop E2E defect where a native core became live before `QSettings::sync()`
+  failed and was then marked unavailable. The persistence callback now runs
+  under the core-selection lock after every operation guard and before the
+  pointer swap, so failure preserves the prior usable core. The app now sets a
+  stable `MIB Studio` settings identity, migrates all missing keys from Qt's
+  former `Unknown Organization` namespace once without overwriting or deleting
+  user data, and refuses startup if that migration cannot be synchronized.
+  Filesystem-backed fault injection covers previous-selection restoration;
+  activation tests cover commit ordering and old-kernel preservation. Live
+  A→B→A and TSan stress remain A10 exit gates. Task record:
+  `knowledge_map/task/2026-07-13-hot-swappable-processing-core-native.md`.
+
+- **Native processing-core selector foundation** (2026-07-13,
+  [A7 #242](https://github.com/KPT1020/mib-studio-qt/issues/242),
+  [A8 #239](https://github.com/KPT1020/mib-studio-qt/issues/239),
+  [A10 #241](https://github.com/KPT1020/mib-studio-qt/issues/241), and
+  [A11 #243](https://github.com/KPT1020/mib-studio-qt/issues/243)) — Added a
+  POD-only C engine ABI, independently built versioned native module, strict
+  hash/Authenticode/identity/self-test loader, per-call context pool, resident
+  module policy, and atomically prepared content-addressed cache. The new
+  [[../frontend/ProcessingCoreDialog]] enumerates stable/beta history,
+  derives channel-active state only from independently fetched `latest.json`
+  (never the ahead-of-pointer index field), cross-checks immutable manifests,
+  respects app ranges and administrator
+  pins, restores verified selections at startup, and activates only between
+  operations. Live/offline/playback mask paths plus recording/buffer empty
+  filtering use the selected core; HDF5 stores exact operation provenance.
+  ABI v1 deliberately leaves contour metrics, tracking, target decisions, and
+  orchestration host-owned, so A7 remains open rather than claiming full
+  pipeline replacement. Production signing/R2/Windows hardware proof remains
+  the A12 live gate. Task record:
+  `knowledge_map/task/2026-07-13-hot-swappable-processing-core-native.md`.
+
+- **Versioned processing-core registry and automatic release publication**
+  (2026-07-13, [A6 #238](https://github.com/KPT1020/mib-studio-qt/issues/238)
+  + [A9 #237](https://github.com/KPT1020/mib-studio-qt/issues/237), under the
+  [hot-swap epic #236](https://github.com/KPT1020/mib-studio-qt/issues/236)) —
+  Extended the existing full `processing-core/latest.json` into an enumerable,
+  rollback-safe registry: immutable `versions/<version>.json`, short-cache
+  `index.json` with an independent `active_version`, and a channel-scoped PEP
+  503 page with SHA-qualified links. Schema v2 adds canonical identity,
+  filename/size metadata, and optional native plugin descriptors while
+  retaining every schema-v1 consumer field. `--from-release` now derives and
+  hashes the actual GitHub Release assets, validates wheel/tag/sidecar identity,
+  refuses conflicting immutable keys or unreadable catalogs, and promotes
+  `latest.json` last. Added atomic wheel/package version bump tooling with a
+  post-commit tag guard and 27 unit tests across manifest/index/native/PEP 503,
+  verifier shape, dry-run release derivation, bump/tag, and consistency
+  behavior. The existing
+  conformance workflow now covers CPython 3.10–3.13, gates a Windows native
+  artifact and Authenticode signing, attaches one release set, and publishes
+  R2 automatically. Real certificate/R2 execution remains the explicit A12
+  live gate; it is not claimed from sandbox tests.
+
+- **Installed-wheel full-parity conformance harness** (2026-07-13, issue #225,
+  the final planned anti-drift stage of the [Biowork portability epic
+  #220](https://github.com/KPT1020/mib-studio-qt/issues/220)) —
+  `scripts/run_processing_conformance.py` runs the installed
+  `mib-processing` wheel over a deterministic nested-contour/multi-image
+  sequence and compares it with the committed
+  `scripts/gold_standard_dataset.json`. `compare_metrics.py` now uses
+  `(index, frame_type, object_id)` identities (so multi-object records cannot
+  be silently collapsed), rejects extra candidate records, compares
+  `youngs_modulus`, contract metadata, target-group/tracking fields, and exact
+  SHA-256 evidence for every mask and ordered series image. The wheel's
+  previously exposed `include_series_images=True` option is now functional:
+  `ProcessingService::processBatch` attaches the trigger + available following
+  frames for retained valid tracks, and binding dicts expose target/tracking
+  metadata. `.github/workflows/python-wheel.yml` runs the harness against each
+  wheel it builds and uploads the candidate for failure diagnosis. Local wheel
+  verification also added conditional compatibility for OpenCV 5's new
+  `opencv_geometry` split and upstream/Homebrew HDF5 2.x's un-namespaced CMake
+  targets. The unavailable PANC1 input was replaced, with user approval, by a
+  revision- and SHA-pinned eight-frame detection window from the private
+  `gavinlouuu/z_adjustment-data` 50V in-focus HDF5 recording. The runner reads
+  bounded HDF5 windows directly; only its metrics/output-hash reference is
+  committed, while the 1.52 GB input remains ignored runtime data.
+
+- **Processing-core sync manifest (`publish-processing-core.py`)** (2026-07-13,
+  issue #224, part of the [Biowork portability epic
+  #220](https://github.com/KPT1020/mib-studio-qt/issues/220)) — New
+  `{channel}/processing-core/latest.json` manifest pinning the
+  `mib-processing` wheel version (#223) + `contract_version` together and
+  cross-linking the existing profile-catalog and emodulus-LUT manifests, so
+  a non-Qt consumer (Biowork's `services/mib-processing`) resolves config +
+  LUT + engine as one set from a single GET. `publish-processing-core.py`
+  (uploads via the existing `scripts/s3_upload.py`, supports `--dry-run`)
+  and `verify-processing-core-manifest.py` (stdlib-only reachability +
+  shape check, mirrors `verify-emodulus-lut-manifest.py`) both live at repo
+  root alongside their siblings. New doc
+  `docs/portable-processing-sync.md` documents all three manifest schemas
+  together; `docs/howto/auto-update-r2.md` gets the operational
+  publish/verify runbook. Added `test_contract_version_consistency.py` as a
+  drift guard: `contract_version`/`CONTRACT_VERSION` is currently declared
+  independently in six places (surfaced while adding this manifest's own
+  `DEFAULT_CONTRACT_VERSION` as a seventh candidate for drift) with no single
+  source of truth; the test fails CI if any declaration is bumped without
+  the others. Verified against live infrastructure: the manifest, wheel
+  sha256 computation, and reachability checks (including a real 404 vs.
+  real 200 on `updates.yofo.bio`) were exercised directly, not just unit
+  tested; 6/6 new Python tests pass.
+
+- **Python bindings for `mib_processing` (`bindings/python/`)** (2026-07-13,
+  issue #223, part of the [Biowork portability epic
+  #220](https://github.com/KPT1020/mib-studio-qt/issues/220)) — pybind11
+  module (`_mib_processing`) wrapping `process_batch`, `compute_processed_frame`,
+  `EModulusLut`, and the `BatchMaskSources` load/save functions over the
+  Qt-free `mib_processing` core, all speaking the gold-standard metrics dict
+  shape (`docs/gold_standard_metrics.md`). Packaged via scikit-build-core
+  (`bindings/python/pyproject.toml`), which drives the *same* root
+  `CMakeLists.txt` via a new `MIB_BUILD_PYTHON_BINDINGS` option
+  (`cmake/MIBOptions.cmake`) rather than a separate CMake project. Required
+  making `mib_processing` `POSITION_INDEPENDENT_CODE ON` (a static library
+  linked into a shared `.so` needs `-fPIC`) and fixing a real bug caught by
+  testing: `save_masks_to_hdf5` needs both the source image *and* the mask
+  per record (`Hdf5Service::saveFrames` writes both `<group>/images` and
+  `<group>/masks`); the binding originally only forwarded the mask, leaving
+  `originalImage` empty and making HDF5 reject the zero-dimension dataset.
+  Verified end-to-end: full pytest suite (14 tests) against a real compiled
+  wheel, built three ways (editable install, `python -m build` with real PEP
+  517 build isolation, and a from-scratch venv install) — all pass, plus the
+  existing 48-test C++ suite and full GUI build re-verified unaffected. CI:
+  `.github/workflows/python-wheel.yml` builds + tests on relevant PRs and
+  publishes wheels to GitHub Releases (not a native GitHub Packages registry
+  type; see `bindings/python/README.md`) on `mib-processing-v*` tags. Not
+  yet auditwheel/manylinux-portable — the wheel dynamically links the same
+  apt-installed OpenCV/HDF5/spdlog as `backend-ci.yml`, so a consumer's
+  runtime (e.g. Biowork's `services/mib-processing` container) needs matching
+  system packages, not just `pip install`.
+
+- **Added `youngs_modulus` to the gold-standard metrics contract** (2026-07-13,
+  amendment to issue #222/`contract_version: 1`) — `FilterResult::youngsModulus`
+  is persisted per-frame in HDF5 metadata (`Hdf5Service.cpp`) but was missing
+  from `docs/gold_standard_metrics.schema.json` entirely; surfaced while
+  implementing the A3 Python bindings, whose whole point is exposing
+  deformability + area + Young's modulus. Added as an **optional** field
+  (schema + `docs/gold_standard_metrics.md` + `export_hdf5.py --format json`,
+  omitted rather than emitted as non-JSON `NaN` when the LUT lookup misses
+  coverage or an older HDF5 file lacks the field). Not yet wired into
+  `compare_metrics.py`'s comparison set — left for A5, which needs to decide
+  optional-field skip semantics rather than hard-failing on absence.
+
+- **Extracted the Qt-free `mib_processing` core library** (2026-07-13, issue
+  #221, part of the [Biowork portability epic
+  #220](https://github.com/KPT1020/mib-studio-qt/issues/220)) — New CMake
+  target `mib_processing` (`src/backend/CMakeLists.txt`) compiling
+  `ProcessingService`, `EModulusLut`, `BatchMaskSources`, `Hdf5Service`,
+  `FrameStore`, `Tools`, and `CrashStateMirror`, linking only OpenCV + HDF5 +
+  spdlog + STL (`AUTOMOC`/`AUTOUIC`/`AUTORCC` explicitly off). `mib_backend`
+  now links `mib_processing` publicly instead of compiling those sources
+  itself, so the desktop app is unaffected. Severed the one real Qt leak in
+  the closure: `Hdf5Service`'s optional performance-trace calls to
+  `CrashReporter::capturePerformanceTransaction` (which pulls in
+  `QtGlobal`/`QString` via `CrashReporter.cpp`'s `qInstallMessageHandler`)
+  became an injectable `setHdf5PerformanceTraceHook`, wired to the real
+  `CrashReporter` from `src/frontend/core/main.cpp` at startup — the only
+  place the two are connected. `backend-ci.yml` now builds `mib_processing`
+  explicitly and greps its symbols to fail CI on any Qt regression. Verified
+  locally: full `linux-backend-only` test suite (47 tests) and the full GUI
+  build (`linux-system-release`, `mib_studio_qt`) both pass unchanged.
+
+- **Portable processing contract frozen (`contract_version: 1`)** (2026-07-13,
+  issue #222, part of the [Biowork portability epic
+  #220](https://github.com/KPT1020/mib-studio-qt/issues/220)) — Committed
+  `docs/gold_standard_metrics.schema.json` (closes TD-6). Added
+  `export_hdf5.py --format json`, producing schema-conformant gold-standard
+  metrics JSON with a collision-safe `<h5-basename>_metrics.json` filename.
+  Added `scripts/convert_legacy_csv_to_json.py` to convert legacy MIB-Studio
+  metrics CSV exports to the same JSON contract, with configurable column
+  names and documented defaults for fields the legacy CSV never carried
+  (`area_ratio`, brightness quantiles, `touches_border`, `object_id`,
+  `object_count`). Documented the `ProcessingConfig` JSON ↔ struct field
+  mapping and introduced `contract_version` in `docs/gold_standard_metrics.md`
+  to bundle the metrics schema, config schema, and Young's-modulus LUT format
+  under one version number for portable (non-Qt) consumers.
+
+- **HDF review export naming and batch export** (2026-07-09) -
+  `HdfReviewTab` now suggests source-derived metrics filenames
+  (`<h5-basename>_metrics.csv`) with collision suffixes, writes Export All
+  output into source-specific folders, adds batch Metrics and batch Export All
+  actions for multiple `.h5` / `.hdf5` files, remembers one shared successful
+  output directory with `QSettings`, and reports per-file batch failures in a final
+  summary. The standalone Python exporter and PySide wrapper now share the
+  source-derived output policy: CSV-only writes `<h5-basename>_metrics.csv`,
+  image/all exports write under a collision-safe `<h5-basename>/` folder, and
+  `--output` remains directory-only. Added `frontend.hdf_review_export_paths`
+  and `scripts.export_hdf5_paths` coverage for basename, suffix, folder, and
+  output-root validation policy.
+
 - **Realtime-performance benchmark parts C/D/E** (2026-07-02, PR1 of
   `docs/exec-plans/active/2026-07-02-realtime-performance.md`) —
   Extended `tests/performance/pipeline_timing_benchmark.cpp` (CTest

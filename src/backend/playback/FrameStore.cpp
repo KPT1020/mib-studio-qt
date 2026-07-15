@@ -30,13 +30,8 @@ void FrameStore::reserveFrameBytes(size_t frameBytes) {
     SPDLOG_INFO("FrameStore: reserved {} bytes per slot across {} slots", frameBytes, ring_.size());
 }
 
-void FrameStore::pushFrame(const uint8_t* src,
-                           size_t size,
-                           uint64_t width,
-                           uint64_t height,
-                           size_t linePitch,
-                           uint64_t pixelFormat,
-                           uint64_t timestamp) {
+void FrameStore::pushFrame(const uint8_t* src, size_t size, uint64_t width, uint64_t height,
+                           size_t linePitch, uint64_t pixelFormat, uint64_t timestamp) {
     if (capacity_.load(std::memory_order_acquire) == 0 || src == nullptr || size == 0) return;
 
     const uint64_t w = totalWritten_.fetch_add(1) + 1; // next write count
@@ -44,7 +39,9 @@ void FrameStore::pushFrame(const uint8_t* src,
         auto& fs = backend::diagnostics::CrashStateMirror::instance().frameStore;
         fs.totalWritten.store(w, std::memory_order_relaxed);
         fs.latestIndex.store(w - 1, std::memory_order_relaxed);
-        fs.earliestIndex.store(w > capacity_.load(std::memory_order_acquire) ? w - capacity_.load(std::memory_order_acquire) : 0,
+        fs.earliestIndex.store(w > capacity_.load(std::memory_order_acquire)
+                                   ? w - capacity_.load(std::memory_order_acquire)
+                                   : 0,
                                std::memory_order_relaxed);
     }
     // Copy into the ring under the structural SHARED lock (so a concurrent
@@ -70,7 +67,8 @@ void FrameStore::pushFrame(const uint8_t* src,
     if ((w % 5000ULL) == 0ULL) {
         const size_t avail = availableCount();
         SPDLOG_DEBUG("FrameStore: totalWritten={} available={} capacity={}",
-                     static_cast<unsigned long long>(w), avail, capacity_.load(std::memory_order_acquire));
+                     static_cast<unsigned long long>(w), avail,
+                     capacity_.load(std::memory_order_acquire));
     }
 }
 
@@ -109,7 +107,8 @@ bool FrameStore::getByWriteIndex(uint64_t writeIndex, Frame& out) const {
     return !out.data.empty();
 }
 
-bool FrameStore::getByWriteIndexROI(uint64_t writeIndex, int roiX, int roiY, int roiW, int roiH, Frame& out) const {
+bool FrameStore::getByWriteIndexROI(uint64_t writeIndex, int roiX, int roiY, int roiW, int roiH,
+                                    Frame& out) const {
     const uint64_t w = totalWritten_.load();
     if (writeIndex >= w || capacity_.load(std::memory_order_acquire) == 0) return false;
     // Reject indices already evicted from the ring (see getByWriteIndex) so we
@@ -131,7 +130,7 @@ bool FrameStore::getByWriteIndexROI(uint64_t writeIndex, int roiX, int roiY, int
     }
     const Frame& src = ring_[idx];
     if (src.data.empty() || src.width == 0 || src.height == 0) return false;
-    
+
     // Clamp ROI to frame bounds
     const int frameW = static_cast<int>(src.width);
     const int frameH = static_cast<int>(src.height);
@@ -139,14 +138,14 @@ bool FrameStore::getByWriteIndexROI(uint64_t writeIndex, int roiX, int roiY, int
     const int clampedY = std::max(0, std::min(roiY, frameH - 1));
     const int clampedW = std::max(1, std::min(roiW, frameW - clampedX));
     const int clampedH = std::max(1, std::min(roiH, frameH - clampedY));
-    
+
     // Copy frame metadata
     out.width = static_cast<uint64_t>(clampedW);
     out.height = static_cast<uint64_t>(clampedH);
     out.pixelFormat = src.pixelFormat;
     out.timestamp = src.timestamp;
     out.linePitch = 0; // ROI will be contiguous
-    
+
     // Extract ROI region
     const size_t srcPitch = (src.linePitch == 0 ? static_cast<size_t>(src.width) : src.linePitch);
     // The ROI is clamped to width/height above, but the stride comes from the
@@ -162,14 +161,14 @@ bool FrameStore::getByWriteIndexROI(uint64_t writeIndex, int roiX, int roiY, int
     }
     const size_t roiSize = static_cast<size_t>(clampedW * clampedH);
     out.data.resize(roiSize);
-    
+
     const uint8_t* srcPtr = src.data.data() + (clampedY * srcPitch) + clampedX;
     uint8_t* dstPtr = out.data.data();
-    
+
     for (int y = 0; y < clampedH; ++y) {
         std::memcpy(dstPtr + y * clampedW, srcPtr + y * srcPitch, static_cast<size_t>(clampedW));
     }
-    
+
     return true;
 }
 
@@ -189,10 +188,12 @@ uint64_t FrameStore::latestAvailableIndex() const {
 size_t FrameStore::availableCount() const {
     const uint64_t w = totalWritten_.load();
     if (capacity_.load(std::memory_order_acquire) == 0) return 0;
-    return static_cast<size_t>(std::min<uint64_t>(w, static_cast<uint64_t>(capacity_.load(std::memory_order_acquire))));
+    return static_cast<size_t>(
+        std::min<uint64_t>(w, static_cast<uint64_t>(capacity_.load(std::memory_order_acquire))));
 }
 
-bool FrameStore::saveFramesToDisk(const std::string& outputDir, std::function<bool(const Frame&)> filterFn) const {
+bool FrameStore::saveFramesToDisk(const std::string& outputDir,
+                                  std::function<bool(const Frame&)> filterFn) const {
     const uint64_t earliest = earliestAvailableIndex();
     const uint64_t latest = latestAvailableIndex();
     if (latest < earliest) {
@@ -202,7 +203,8 @@ bool FrameStore::saveFramesToDisk(const std::string& outputDir, std::function<bo
     return saveFramesToDisk(outputDir, earliest, latest, filterFn);
 }
 
-bool FrameStore::saveFramesToDisk(const std::string& outputDir, uint64_t startIndex, uint64_t endIndex,
+bool FrameStore::saveFramesToDisk(const std::string& outputDir, uint64_t startIndex,
+                                  uint64_t endIndex,
                                   std::function<bool(const Frame&)> filterFn) const {
     std::unique_lock<std::shared_mutex> lk(structureMutex_);
 
@@ -217,13 +219,14 @@ bool FrameStore::saveFramesToDisk(const std::string& outputDir, uint64_t startIn
 
     // Validate range
     if (startIndex > endIndex) {
-        SPDLOG_ERROR("FrameStore: Invalid range: startIndex ({}) > endIndex ({})", startIndex, endIndex);
+        SPDLOG_ERROR("FrameStore: Invalid range: startIndex ({}) > endIndex ({})", startIndex,
+                     endIndex);
         return false;
     }
 
     if (endIndex < earliest || startIndex > latest) {
-        SPDLOG_ERROR("FrameStore: Range [{}, {}] is outside available range [{}, {}]", 
-                     startIndex, endIndex, earliest, latest);
+        SPDLOG_ERROR("FrameStore: Range [{}, {}] is outside available range [{}, {}]", startIndex,
+                     endIndex, earliest, latest);
         return false;
     }
 
@@ -241,7 +244,7 @@ bool FrameStore::saveFramesToDisk(const std::string& outputDir, uint64_t startIn
         if (idx >= w) continue;
         const size_t ringIdx = static_cast<size_t>(idx % capacity_.load(std::memory_order_acquire));
         if (ringIdx < ring_.size() && !ring_[ringIdx].data.empty()) {
-            frame = ring_[ringIdx];  // Copy frame while holding lock
+            frame = ring_[ringIdx]; // Copy frame while holding lock
             framesToSave.emplace_back(idx, std::move(frame));
         } else {
             SPDLOG_WARN("FrameStore: Frame at index {} is not available", idx);
@@ -267,18 +270,19 @@ bool FrameStore::saveFramesToDisk(const std::string& outputDir, uint64_t startIn
     for (const auto& pair : framesToSave) {
         const uint64_t idx = pair.first;
         const Frame& frame = pair.second;
-        
+
         // Apply filter if provided
         if (filterFn && filterFn(frame)) {
             ++filteredCount;
             continue;
         }
-        
+
         // Format filename with zero-padded 6-digit index: frame_000000.tiff
         char filenameBuf[64];
-        std::snprintf(filenameBuf, sizeof(filenameBuf), "frame_%06llu.tiff", static_cast<unsigned long long>(idx));
+        std::snprintf(filenameBuf, sizeof(filenameBuf), "frame_%06llu.tiff",
+                      static_cast<unsigned long long>(idx));
         std::string filename = (std::filesystem::path(outputDir) / filenameBuf).string();
-        
+
         SPDLOG_DEBUG("FrameStore: Saving frame {} to {}", idx, filename);
         if (saveFrameAsTiff(frame, filename)) {
             ++savedCount;
@@ -287,12 +291,13 @@ bool FrameStore::saveFramesToDisk(const std::string& outputDir, uint64_t startIn
             SPDLOG_WARN("FrameStore: Failed to save frame at index {} to {}", idx, filename);
         }
     }
-    
+
     if (filteredCount > 0) {
         SPDLOG_INFO("FrameStore: Filtered out {} empty frames", filteredCount);
     }
 
-    SPDLOG_INFO("FrameStore: Saved {}/{} frames to {}", savedCount, clampedEnd - clampedStart + 1, outputDir);
+    SPDLOG_INFO("FrameStore: Saved {}/{} frames to {}", savedCount, clampedEnd - clampedStart + 1,
+                outputDir);
     if (failedCount > 0) {
         SPDLOG_WARN("FrameStore: Failed to save {} frames", failedCount);
     }
@@ -300,7 +305,8 @@ bool FrameStore::saveFramesToDisk(const std::string& outputDir, uint64_t startIn
     return failedCount == 0;
 }
 
-bool FrameStore::saveFramesToDisk(const std::string& outputDir, uint64_t startTimestamp, uint64_t endTimestamp, bool useTimestamps,
+bool FrameStore::saveFramesToDisk(const std::string& outputDir, uint64_t startTimestamp,
+                                  uint64_t endTimestamp, bool useTimestamps,
                                   std::function<bool(const Frame&)> filterFn) const {
     if (!useTimestamps) {
         // If useTimestamps is false, treat as indices
@@ -310,15 +316,15 @@ bool FrameStore::saveFramesToDisk(const std::string& outputDir, uint64_t startTi
     uint64_t startIndex = 0;
     uint64_t endIndex = 0;
     if (!findIndicesByTimestampRange(startTimestamp, endTimestamp, startIndex, endIndex)) {
-        SPDLOG_ERROR("FrameStore: No frames found in timestamp range [{}, {}]", startTimestamp, endTimestamp);
+        SPDLOG_ERROR("FrameStore: No frames found in timestamp range [{}, {}]", startTimestamp,
+                     endTimestamp);
         return false;
     }
 
     return saveFramesToDisk(outputDir, startIndex, endIndex, filterFn);
 }
 
-bool FrameStore::saveFramesToAvi(const std::string& outputPath,
-                                 double fps,
+bool FrameStore::saveFramesToAvi(const std::string& outputPath, double fps,
                                  std::function<bool(const Frame&)> filterFn) const {
     const uint64_t earliest = earliestAvailableIndex();
     const uint64_t latest = latestAvailableIndex();
@@ -329,9 +335,8 @@ bool FrameStore::saveFramesToAvi(const std::string& outputPath,
     return saveFramesToAvi(outputPath, earliest, latest, fps, filterFn);
 }
 
-bool FrameStore::saveFramesToAvi(const std::string& outputPath,
-                                 uint64_t startIndex, uint64_t endIndex,
-                                 double fps,
+bool FrameStore::saveFramesToAvi(const std::string& outputPath, uint64_t startIndex,
+                                 uint64_t endIndex, double fps,
                                  std::function<bool(const Frame&)> filterFn) const {
     std::unique_lock<std::shared_mutex> lk(structureMutex_);
 
@@ -345,13 +350,14 @@ bool FrameStore::saveFramesToAvi(const std::string& outputPath,
     }
 
     if (startIndex > endIndex) {
-        SPDLOG_ERROR("FrameStore: Invalid range: startIndex ({}) > endIndex ({})", startIndex, endIndex);
+        SPDLOG_ERROR("FrameStore: Invalid range: startIndex ({}) > endIndex ({})", startIndex,
+                     endIndex);
         return false;
     }
 
     if (endIndex < earliest || startIndex > latest) {
-        SPDLOG_ERROR("FrameStore: Range [{}, {}] is outside available range [{}, {}]",
-                     startIndex, endIndex, earliest, latest);
+        SPDLOG_ERROR("FrameStore: Range [{}, {}] is outside available range [{}, {}]", startIndex,
+                     endIndex, earliest, latest);
         return false;
     }
 
@@ -381,16 +387,16 @@ bool FrameStore::saveFramesToAvi(const std::string& outputPath,
             std::filesystem::create_directories(p.parent_path());
         }
     } catch (const std::exception& ex) {
-        SPDLOG_ERROR("FrameStore: Failed to create parent directory for {}: {}", outputPath, ex.what());
+        SPDLOG_ERROR("FrameStore: Failed to create parent directory for {}: {}", outputPath,
+                     ex.what());
         return false;
     }
 
     return writeFramesAsAvi(framesToSave, outputPath, fps, filterFn);
 }
 
-bool FrameStore::saveFramesToAvi(const std::string& outputPath,
-                                 uint64_t startTimestamp, uint64_t endTimestamp, bool useTimestamps,
-                                 double fps,
+bool FrameStore::saveFramesToAvi(const std::string& outputPath, uint64_t startTimestamp,
+                                 uint64_t endTimestamp, bool useTimestamps, double fps,
                                  std::function<bool(const Frame&)> filterFn) const {
     if (!useTimestamps) {
         return saveFramesToAvi(outputPath, startTimestamp, endTimestamp, fps, filterFn);
@@ -399,7 +405,8 @@ bool FrameStore::saveFramesToAvi(const std::string& outputPath,
     uint64_t startIndex = 0;
     uint64_t endIndex = 0;
     if (!findIndicesByTimestampRange(startTimestamp, endTimestamp, startIndex, endIndex)) {
-        SPDLOG_ERROR("FrameStore: No frames found in timestamp range [{}, {}]", startTimestamp, endTimestamp);
+        SPDLOG_ERROR("FrameStore: No frames found in timestamp range [{}, {}]", startTimestamp,
+                     endTimestamp);
         return false;
     }
 
@@ -407,8 +414,7 @@ bool FrameStore::saveFramesToAvi(const std::string& outputPath,
 }
 
 bool FrameStore::writeFramesAsAvi(const std::vector<std::pair<uint64_t, Frame>>& frames,
-                                  const std::string& outputPath,
-                                  double fps,
+                                  const std::string& outputPath, double fps,
                                   std::function<bool(const Frame&)> filterFn) const {
     if (frames.empty()) {
         SPDLOG_WARN("FrameStore: No frames to write to AVI");
@@ -445,7 +451,8 @@ bool FrameStore::writeFramesAsAvi(const std::vector<std::pair<uint64_t, Frame>>&
     }
 
     if (!writer.isOpened()) {
-        SPDLOG_INFO("FrameStore: Y800 AVI writer unavailable; falling back to uncompressed BGR (DIB )");
+        SPDLOG_INFO(
+            "FrameStore: Y800 AVI writer unavailable; falling back to uncompressed BGR (DIB )");
         const int fourccDib = cv::VideoWriter::fourcc('D', 'I', 'B', ' ');
         try {
             writer.open(outputPath, fourccDib, fps, frameSize, /*isColor=*/true);
@@ -460,9 +467,8 @@ bool FrameStore::writeFramesAsAvi(const std::vector<std::pair<uint64_t, Frame>>&
         return false;
     }
 
-    SPDLOG_INFO("FrameStore: Writing AVI {} ({}x{} @ {:.2f} fps, {})",
-                outputPath, frameWidth, frameHeight, fps,
-                useColorFallback ? "DIB/BGR" : "Y800/GRAY");
+    SPDLOG_INFO("FrameStore: Writing AVI {} ({}x{} @ {:.2f} fps, {})", outputPath, frameWidth,
+                frameHeight, fps, useColorFallback ? "DIB/BGR" : "Y800/GRAY");
 
     size_t writtenCount = 0;
     size_t filteredCount = 0;
@@ -484,7 +490,8 @@ bool FrameStore::writeFramesAsAvi(const std::vector<std::pair<uint64_t, Frame>>&
 
             if (static_cast<int>(frame.width) != frameWidth ||
                 static_cast<int>(frame.height) != frameHeight) {
-                SPDLOG_WARN("FrameStore: Frame at index {} has mismatched dimensions ({}x{} vs {}x{}); skipping",
+                SPDLOG_WARN("FrameStore: Frame at index {} has mismatched dimensions ({}x{} vs "
+                            "{}x{}); skipping",
                             pair.first, frame.width, frame.height, frameWidth, frameHeight);
                 ++skippedCount;
                 continue;
@@ -497,8 +504,8 @@ bool FrameStore::writeFramesAsAvi(const std::vector<std::pair<uint64_t, Frame>>&
             // (h-1)*pitch + w bytes, more than w*h when pitch > w.
             const size_t expectedSize = static_cast<size_t>(h - 1) * pitch + static_cast<size_t>(w);
             if (frame.data.size() < expectedSize) {
-                SPDLOG_WARN("FrameStore: Frame {} data too small ({} < {}); skipping",
-                            pair.first, frame.data.size(), expectedSize);
+                SPDLOG_WARN("FrameStore: Frame {} data too small ({} < {}); skipping", pair.first,
+                            frame.data.size(), expectedSize);
                 ++skippedCount;
                 continue;
             }
@@ -535,8 +542,8 @@ bool FrameStore::writeFramesAsAvi(const std::vector<std::pair<uint64_t, Frame>>&
 
     writer.release();
 
-    SPDLOG_INFO("FrameStore: Wrote {} frames to AVI {} (filtered {}, skipped {})",
-                writtenCount, outputPath, filteredCount, skippedCount);
+    SPDLOG_INFO("FrameStore: Wrote {} frames to AVI {} (filtered {}, skipped {})", writtenCount,
+                outputPath, filteredCount, skippedCount);
 
     return writtenCount > 0;
 }
@@ -560,9 +567,11 @@ bool FrameStore::resize(size_t newCapacity) {
     if (newCapacity >= currentAvailable && w > 0) {
         // Preserve existing frames - access ring buffer directly since we hold the lock
         size_t preservedCount = 0;
-        for (uint64_t idx = earliest; idx < earliest + currentAvailable && preservedCount < newCapacity; ++idx) {
+        for (uint64_t idx = earliest;
+             idx < earliest + currentAvailable && preservedCount < newCapacity; ++idx) {
             if (idx >= w) break;
-            const size_t ringIdx = static_cast<size_t>(idx % capacity_.load(std::memory_order_acquire));
+            const size_t ringIdx =
+                static_cast<size_t>(idx % capacity_.load(std::memory_order_acquire));
             if (ringIdx < ring_.size() && !ring_[ringIdx].data.empty()) {
                 newRing[preservedCount] = ring_[ringIdx];
                 // Frames are renumbered 0..preservedCount-1 after a resize.
@@ -575,12 +584,14 @@ bool FrameStore::resize(size_t newCapacity) {
         // After resize, frames will be at indices 0 to preservedCount-1
         totalWritten_.store(static_cast<uint64_t>(preservedCount));
 
-        SPDLOG_INFO("FrameStore: Resized from {} to {} capacity, preserved {}/{} frames", 
-                    capacity_.load(std::memory_order_acquire), newCapacity, preservedCount, currentAvailable);
+        SPDLOG_INFO("FrameStore: Resized from {} to {} capacity, preserved {}/{} frames",
+                    capacity_.load(std::memory_order_acquire), newCapacity, preservedCount,
+                    currentAvailable);
     } else {
         // New capacity is smaller than available frames, clear buffer
         totalWritten_.store(0);
-        SPDLOG_INFO("FrameStore: Resized from {} to {} capacity, cleared buffer (new size < available frames)", 
+        SPDLOG_INFO("FrameStore: Resized from {} to {} capacity, cleared buffer (new size < "
+                    "available frames)",
                     capacity_.load(std::memory_order_acquire), newCapacity);
     }
 
@@ -646,9 +657,11 @@ size_t FrameStore::estimateMemoryBytesForCapacity(size_t capacity) const {
         const size_t sampleStep = std::max<size_t>(1, available / maxSamples);
 
         size_t totalSize = 0;
-        for (uint64_t idx = earliest; idx <= latest && sampleCount < maxSamples; idx += sampleStep) {
+        for (uint64_t idx = earliest; idx <= latest && sampleCount < maxSamples;
+             idx += sampleStep) {
             if (idx >= w) break;
-            const size_t ringIdx = static_cast<size_t>(idx % capacity_.load(std::memory_order_acquire));
+            const size_t ringIdx =
+                static_cast<size_t>(idx % capacity_.load(std::memory_order_acquire));
             if (ringIdx < ring_.size() && !ring_[ringIdx].data.empty()) {
                 // Frame size = data size + overhead (Frame struct + vector overhead)
                 // Frame struct: ~48 bytes (width, height, pixelFormat, linePitch, timestamp)
@@ -681,10 +694,11 @@ size_t FrameStore::estimateMemoryBytesForCapacity(size_t capacity) const {
 
 bool FrameStore::saveFrameAsTiff(const Frame& frame, const std::string& filepath) const {
     SPDLOG_DEBUG("FrameStore: Attempting to save frame to {}", filepath);
-    
+
     if (frame.data.empty() || frame.width == 0 || frame.height == 0) {
-        SPDLOG_WARN("FrameStore: Invalid frame data for saving to {} (empty={}, width={}, height={})", 
-                    filepath, frame.data.empty(), frame.width, frame.height);
+        SPDLOG_WARN(
+            "FrameStore: Invalid frame data for saving to {} (empty={}, width={}, height={})",
+            filepath, frame.data.empty(), frame.width, frame.height);
         return false;
     }
 
@@ -695,25 +709,27 @@ bool FrameStore::saveFrameAsTiff(const Frame& frame, const std::string& filepath
         const size_t pitch = frame.linePitch == 0 ? static_cast<size_t>(width) : frame.linePitch;
         // Pitch-aware: the strided access below reads up to
         // (height-1)*pitch + width bytes, more than width*height when pitch > width.
-        const size_t expectedSize = static_cast<size_t>(height - 1) * pitch + static_cast<size_t>(width);
+        const size_t expectedSize =
+            static_cast<size_t>(height - 1) * pitch + static_cast<size_t>(width);
 
         if (frame.data.size() < expectedSize) {
             SPDLOG_ERROR("FrameStore: Frame data size ({}) is less than expected ({})",
-                        frame.data.size(), expectedSize);
+                         frame.data.size(), expectedSize);
             return false;
         }
-        
+
         // If pitch equals width, data is contiguous - we can use it directly
         // Otherwise, we need to copy to make it contiguous
         cv::Mat img;
-        
+
         if (pitch == static_cast<size_t>(width)) {
             // Contiguous data - create Mat with reference to data
             SPDLOG_DEBUG("FrameStore: Creating Mat from contiguous data ({}x{})", width, height);
             img = cv::Mat(height, width, CV_8UC1, const_cast<uint8_t*>(frame.data.data()));
         } else {
             // Non-contiguous data - copy to make it contiguous
-            SPDLOG_DEBUG("FrameStore: Copying non-contiguous data (pitch={}, width={})", pitch, width);
+            SPDLOG_DEBUG("FrameStore: Copying non-contiguous data (pitch={}, width={})", pitch,
+                         width);
             img = cv::Mat(height, width, CV_8UC1);
             uint8_t* dst = img.data;
             const uint8_t* src = frame.data.data();
@@ -730,7 +746,9 @@ bool FrameStore::saveFrameAsTiff(const Frame& frame, const std::string& filepath
 
         // Handle PFNC Mono8 format (0x01080001) or attempt anyway
         if (frame.pixelFormat != 0x01080001) {
-            SPDLOG_WARN("FrameStore: Pixel format 0x{:016X} may not be Mono8, attempting save anyway", frame.pixelFormat);
+            SPDLOG_WARN(
+                "FrameStore: Pixel format 0x{:016X} may not be Mono8, attempting save anyway",
+                frame.pixelFormat);
         }
 
         // Save as TIFF
@@ -747,8 +765,10 @@ bool FrameStore::saveFrameAsTiff(const Frame& frame, const std::string& filepath
         SPDLOG_DEBUG("FrameStore: Successfully saved frame to {}", filepath);
         return true;
     } catch (const cv::Exception& ex) {
-        SPDLOG_ERROR("FrameStore: OpenCV exception while saving frame to {}: {} (code={}, func={}, file={}, line={})", 
-                    filepath, ex.what(), ex.code, ex.func, ex.file, ex.line);
+        SPDLOG_ERROR("FrameStore: OpenCV exception while saving frame to {}: {} (code={}, func={}, "
+                     "file={}, line={})",
+                     filepath, ex.what(), static_cast<int>(ex.code), ex.func.c_str(),
+                     ex.file.c_str(), ex.line);
         return false;
     } catch (const std::exception& ex) {
         SPDLOG_ERROR("FrameStore: Exception while saving frame to {}: {}", filepath, ex.what());
@@ -759,7 +779,8 @@ bool FrameStore::saveFrameAsTiff(const Frame& frame, const std::string& filepath
     }
 }
 
-bool FrameStore::findIndicesByTimestampRange(uint64_t startTimestamp, uint64_t endTimestamp, uint64_t& startIndex, uint64_t& endIndex) const {
+bool FrameStore::findIndicesByTimestampRange(uint64_t startTimestamp, uint64_t endTimestamp,
+                                             uint64_t& startIndex, uint64_t& endIndex) const {
     if (startTimestamp > endTimestamp) {
         return false;
     }
@@ -794,5 +815,3 @@ bool FrameStore::findIndicesByTimestampRange(uint64_t startTimestamp, uint64_t e
 }
 
 } // namespace backend::playback
-
-

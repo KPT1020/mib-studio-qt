@@ -5,11 +5,15 @@
 > outside the live camera path — saved HDF5 experiments or a folder of
 > image files.
 
-**Source:** `src/backend/services/BatchMaskSources.cpp`,
-`include/backend/services/BatchMaskSources.h`
+**Source:** `src/backend/processing/BatchMaskSources.cpp`,
+`include/backend/processing/BatchMaskSources.h`
 **Namespace:** `backend::services::batch_masks`
 **Related:** [[ProcessingService]], [[Hdf5Service]],
 [[../frontend/HdfReviewTab]]
+
+**Build target:** compiled into `mib_processing`, the Qt-free static library
+(`src/backend/CMakeLists.txt`) `mib_backend` links publicly. Same portable
+core as [[ProcessingService]].
 
 ## API
 

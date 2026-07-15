@@ -1,4 +1,5 @@
 #include "frontend/system/ProfileManager.h"
+#include "frontend/utils/ProcessingCoreCatalog.h"
 
 #include <algorithm>
 
@@ -373,6 +374,8 @@ std::optional<ProfileManager::Catalog> ProfileManager::fetchCatalog(const QUrl& 
         entry.cameraScriptSha256 = profileObj.value(QStringLiteral("camera_script_sha256")).toString().trimmed().toLower();
         entry.appMinVersion = profileObj.value(QStringLiteral("app_min_version")).toString();
         entry.appMaxVersion = profileObj.value(QStringLiteral("app_max_version")).toString();
+        entry.processingContractVersion =
+            profileObj.value(QStringLiteral("processing_contract_version")).toInt(0);
 
         if (entry.profileId.isEmpty() || !entry.configUrl.isValid()) {
             continue;
@@ -445,6 +448,12 @@ QJsonObject ProfileManager::metadataToJson(const Metadata& metadata) {
     } else {
         obj.insert(QStringLiteral("app_max_version"), QJsonValue::Null);
     }
+    if (metadata.processingContractVersion > 0) {
+        obj.insert(QStringLiteral("processing_contract_version"),
+                   metadata.processingContractVersion);
+    } else {
+        obj.insert(QStringLiteral("processing_contract_version"), QJsonValue::Null);
+    }
     if (metadata.lastCheckedUtc.isValid()) {
         obj.insert(QStringLiteral("last_checked_utc"), metadata.lastCheckedUtc.toString(Qt::ISODateWithMs));
     } else {
@@ -476,6 +485,8 @@ std::optional<ProfileManager::Metadata> ProfileManager::metadataFromJson(const Q
     metadata.appMinVersion = obj.value(QStringLiteral("app_min_version")).toString();
     const QString maxVersion = obj.value(QStringLiteral("app_max_version")).toString();
     metadata.appMaxVersion = maxVersion;
+    metadata.processingContractVersion =
+        obj.value(QStringLiteral("processing_contract_version")).toInt(0);
     const QString lastChecked = obj.value(QStringLiteral("last_checked_utc")).toString();
     if (!lastChecked.trimmed().isEmpty()) {
         metadata.lastCheckedUtc = QDateTime::fromString(lastChecked, Qt::ISODateWithMs);
@@ -534,12 +545,18 @@ bool ProfileManager::writeProfileMetadata(const LocalProfile& profile, const Cat
             metadata.appMinVersion = profile.remoteEntry->appMinVersion;
         }
         metadata.appMaxVersion = profile.remoteEntry->appMaxVersion;
+        metadata.processingContractVersion =
+            profile.remoteEntry->processingContractVersion;
         metadata.revision = profile.remoteEntry->revision;
     }
     return writeMetadataFile(profile.metaPath, metadata, errorOut);
 }
 
-QVector<ProfileManager::LocalProfile> ProfileManager::scanLocalProfiles(bool ensureMetadata, const Catalog* catalog, QString* errorOut) const {
+QVector<ProfileManager::LocalProfile> ProfileManager::scanLocalProfiles(
+    bool ensureMetadata,
+    const Catalog* catalog,
+    QString* errorOut,
+    int activeProcessingContractVersion) const {
     QVector<LocalProfile> out;
     QDir baseDir(profilesBaseDir());
     if (!baseDir.exists()) {
@@ -666,6 +683,14 @@ QVector<ProfileManager::LocalProfile> ProfileManager::scanLocalProfiles(bool ens
                 }
                 profile.incompatible = !compatible;
             }
+        }
+        const int requiredProcessingContract = profile.remoteEntry.has_value()
+            ? profile.remoteEntry->processingContractVersion
+            : profile.metadata.processingContractVersion;
+        if (!processingcorecatalog::isProcessingContractCompatible(
+                requiredProcessingContract,
+                activeProcessingContractVersion)) {
+            profile.incompatible = true;
         }
 
         out.append(profile);

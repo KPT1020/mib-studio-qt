@@ -14,6 +14,7 @@
 | Capture | [[../services/CaptureService]] `run()` | `camera->grabFrame()` | Acquires frames, pushes to FrameStore, fires callback |
 | Processing workers | [[../services/ProcessingService]] pool | job queue | Generic job executor (size = `hardware_concurrency()` by default) |
 | Realtime processing | [[../services/ProcessingService]] `realtimeLoop()` | FrameStore writeIndex | Low-latency per-frame analysis; drop-frames mode skips to latest |
+| Native processing-core contexts | selected `IProcessingKernel` | short context-pool mutex | Each concurrent processing call leases one plugin-owned context; a context is never shared concurrently |
 | Autofocus stats | [[../services/AutofocusService]] `statsLoop()` | `pendingSamplesCV_` + 10 ms drain interval | Drains ring-ratio samples pushed by `ProcessingService` realtime thread, maintains 1000-sample deque, refreshes `{median,average,min,max}RingRatio_` atomics. Runs for the full lifetime of the service, not just while connected. |
 | Autofocus control | [[../services/AutofocusService]] `controlLoop()` | serial COM | Reads ring-ratio stats atomics, writes voltage to nanopositioner. Runs only between `connect()` / `disconnect()`. |
 | Trigger | [[../services/TriggerService]] `triggerLoop()` | `triggerCV_` | Issues camera digital-output pulse on target-group events |
@@ -27,6 +28,12 @@
   [[../data-model/FrameStore]].
 - `ProcessingService` uses `std::condition_variable_any` for the worker
   queue; realtime loop polls FrameStore by absolute write-index.
+- `processingKernelMutex_` is the operation/activation boundary. Realtime,
+  experiment/batch, raw-recording, and buffer-export paths hold a shared
+  `CoreOperationLease` for their full operation and provenance lifetime;
+  activation takes exclusive ownership and is rejected while realtime,
+  experiment, async batch, or synchronous batch state is active. Dynamic
+  modules remain loaded until process exit to avoid teardown races.
 - Qt signals from non-GUI threads go through
   [[../frontend/System-Utilities]] `BackgroundCaptureNotifier` (signal bridge).
 
@@ -48,3 +55,8 @@
 Stopping capture first drains the realtime loop safely. See
 `docs/howto/safe-start-stop-egrabber.md` for EGrabber-specific shutdown
 requirements (including `StreamModule` stat refresh — see [[../conventions/Code-Conventions]]).
+
+Processing-core changes are never applied mid-operation. The GUI requires all
+capture/experiment/recording/batch work to stop, then activates the prepared
+kernel transactionally. Existing plugin modules are retained rather than
+unloaded while thread teardown could still hold function pointers.

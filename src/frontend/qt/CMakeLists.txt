@@ -55,6 +55,8 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/src/frontend/dialogs/ProcessingSettingsDialog.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/dialogs/ProcessingSettingsDialog.h
     ${PROJECT_SOURCE_DIR}/resources/ui/ProcessingSettingsDialog.ui
+    ${PROJECT_SOURCE_DIR}/src/frontend/dialogs/ProcessingCoreDialog.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/dialogs/ProcessingCoreDialog.h
     ${PROJECT_SOURCE_DIR}/src/frontend/dialogs/SyringePumpSettingsDialog.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/dialogs/SyringePumpSettingsDialog.h
     ${PROJECT_SOURCE_DIR}/resources/ui/SyringePumpSettingsDialog.ui
@@ -68,6 +70,8 @@ set(FRONTEND_COMMON_SOURCES
     # Utils
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/ConfigPathManager.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/ConfigPathManager.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/ApplicationSettings.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/utils/ApplicationSettings.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/OverlayRenderer.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/OverlayRenderer.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/EgrabberConfigParser.cpp
@@ -80,6 +84,12 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/JsonConfigMerge.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/UpdateCatalog.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/UpdateCatalog.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/ProcessingCoreCatalog.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/utils/ProcessingCoreCatalog.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/ProcessingCoreSettings.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/utils/ProcessingCoreSettings.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/HdfReviewExportPaths.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/utils/HdfReviewExportPaths.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/RoiManager.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/RoiManager.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/RoiDrawCanvas.cpp
@@ -114,37 +124,26 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/resources/defaults.qrc
 )
 
-set(MIB_STUDIO_QT_EXTRA_SOURCES)
-if(WIN32)
-    list(APPEND MIB_STUDIO_QT_EXTRA_SOURCES ${PROJECT_SOURCE_DIR}/resources/app_icon.rc)
-    add_executable(mib_studio_qt WIN32
-        ${PROJECT_SOURCE_DIR}/src/frontend/core/main.cpp
-        ${FRONTEND_COMMON_SOURCES}
-        ${MIB_STUDIO_QT_EXTRA_SOURCES}
-    )
-else()
-    add_executable(mib_studio_qt
-        ${PROJECT_SOURCE_DIR}/src/frontend/core/main.cpp
-        ${FRONTEND_COMMON_SOURCES}
-        ${MIB_STUDIO_QT_EXTRA_SOURCES}
-    )
-endif()
+# All UI code is compiled once into a static library shared by the app and
+# the screenshot_tour harness. The .qrc stays out of the library: Qt resources
+# in a static library need a Q_INIT_RESOURCE call to survive linking, so each
+# executable compiles the .qrc itself instead.
+add_library(mib_frontend_common STATIC ${FRONTEND_COMMON_SOURCES})
 
-set_target_properties(mib_studio_qt PROPERTIES
+set_target_properties(mib_frontend_common PROPERTIES
     AUTOUIC_SEARCH_PATHS "${PROJECT_SOURCE_DIR}/resources/ui"
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
 )
 
-target_include_directories(mib_studio_qt PRIVATE
+target_include_directories(mib_frontend_common PUBLIC
     ${PROJECT_SOURCE_DIR}/include
 )
 if(MIB_HAS_EGRABBER)
-    target_include_directories(mib_studio_qt PRIVATE
+    target_include_directories(mib_frontend_common PUBLIC
         "C:/Program Files/Euresys/eGrabber/include"
     )
 endif()
 
-target_link_libraries(mib_studio_qt PRIVATE
+target_link_libraries(mib_frontend_common PUBLIC
     Qt6::Widgets
     Qt6::Charts
     Qt6::Network
@@ -156,13 +155,86 @@ target_link_libraries(mib_studio_qt PRIVATE
 # App version exported from CMake (used for update checks, About dialogs, etc.).
 # _FULL retains any pre-release suffix (e.g. 1.0.4-beta.1) so the app knows its
 # channel; the plain one stays numeric for anything needing strict X.Y.Z.
-target_compile_definitions(mib_studio_qt PRIVATE
+target_compile_definitions(mib_frontend_common PUBLIC
     MIB_STUDIO_QT_VERSION="${PROJECT_VERSION}"
     MIB_STUDIO_QT_VERSION_FULL="${PROJECT_VERSION_FULL}"
+    MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256="${MIB_PROCESSING_CORE_SIGNER_SPKI_SHA256}"
+    MIB_PROCESSING_CORE_ED25519_SPKI_SHA256="${MIB_PROCESSING_CORE_ED25519_SPKI_SHA256}"
 )
 
-mib_link_opencv(mib_studio_qt PRIVATE)
+mib_link_opencv(mib_frontend_common PUBLIC)
+
+if(BUILD_TESTING)
+    add_executable(processing_core_dialog_test
+        ${PROJECT_SOURCE_DIR}/tests/frontend/processing_core_dialog_test.cpp
+    )
+    target_include_directories(processing_core_dialog_test PRIVATE
+        ${PROJECT_SOURCE_DIR}/tests
+    )
+    target_link_libraries(processing_core_dialog_test PRIVATE mib_frontend_common)
+    set_target_properties(processing_core_dialog_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+        AUTOUIC OFF
+    )
+    add_test(NAME frontend.processing_core_dialog
+        COMMAND $<TARGET_FILE:processing_core_dialog_test>)
+    # The test binary selects the QPA platform itself: offscreen everywhere
+    # except Windows, where the Conan Qt offscreen plugin deadlocks in the
+    # QApplication constructor on release runners; the native windows
+    # platform boots headlessly and the dialog is never shown. 120 s bounds
+    # first-time Qt widgets/network bring-up on those runners.
+    set_tests_properties(frontend.processing_core_dialog PROPERTIES
+        LABELS "frontend;processing"
+        TIMEOUT 120
+    )
+endif()
+
+set(MIB_STUDIO_QT_EXTRA_SOURCES)
+if(WIN32)
+    list(APPEND MIB_STUDIO_QT_EXTRA_SOURCES ${PROJECT_SOURCE_DIR}/resources/app_icon.rc)
+    add_executable(mib_studio_qt WIN32
+        ${PROJECT_SOURCE_DIR}/src/frontend/core/main.cpp
+        ${PROJECT_SOURCE_DIR}/resources/defaults.qrc
+        ${MIB_STUDIO_QT_EXTRA_SOURCES}
+    )
+else()
+    add_executable(mib_studio_qt
+        ${PROJECT_SOURCE_DIR}/src/frontend/core/main.cpp
+        ${PROJECT_SOURCE_DIR}/resources/defaults.qrc
+        ${MIB_STUDIO_QT_EXTRA_SOURCES}
+    )
+endif()
+
+# AUTOUIC stays off for the executables: the ui_*.h headers are generated
+# once by mib_frontend_common, and CMake would otherwise emit duplicate
+# generation rules for the same headers on every target in this directory.
+set_target_properties(mib_studio_qt PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+    AUTOUIC OFF
+)
+
+target_link_libraries(mib_studio_qt PRIVATE mib_frontend_common)
+
 mib_configure_windows_deployment(mib_studio_qt)
+
+# screenshot_tour: console app that drives the UI in mock-camera mode and
+# regenerates the user-manual screenshots under docs/manual/images (see
+# docs/manual/README.md). Runs headless with QT_QPA_PLATFORM=offscreen.
+add_executable(screenshot_tour
+    ${PROJECT_SOURCE_DIR}/src/frontend/tools/screenshot_tour_main.cpp
+    ${PROJECT_SOURCE_DIR}/resources/defaults.qrc
+)
+
+set_target_properties(screenshot_tour PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+    AUTOUIC OFF
+)
+
+target_link_libraries(screenshot_tour PRIVATE mib_frontend_common)
+
+# Reuse the Qt/Conan runtime DLLs that mib_studio_qt's deployment step copies
+# next to the executables instead of running windeployqt a second time.
+add_dependencies(screenshot_tour mib_studio_qt)
 
 # Ensure the .pdb for the application ends up next to the .exe so it can
 # be archived per release for later symbolication of remote crashes.

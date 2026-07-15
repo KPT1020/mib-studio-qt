@@ -53,7 +53,12 @@
 - `task/2026-04-16-thread-performance-audit.md`
 - `task/2026-07-02-realtime-performance-plan.md`
 
-## By filename (all 30)
+### Portable processing / Biowork
+- `task/2026-07-13-hot-swappable-processing-core-native.md`
+- `task/2026-07-13-processing-conformance.md`
+- `task/2026-07-13-processing-core-registry.md`
+
+## By filename (all 32)
 
 ```
 2025-11-14-safe-start-stop-egrabber.md
@@ -72,6 +77,9 @@
 2026-06-01-backend-only-build-test-mode.md
 2026-06-01-hdf5-crash-recovery-checkpoints.md
 2026-06-02-long-run-frame-growth.md
+2026-07-13-processing-conformance.md
+2026-07-13-processing-core-registry.md
+2026-07-13-hot-swappable-processing-core-native.md
 camera-reset.md
 diagnostic-logging.md
 external-config-browse.md

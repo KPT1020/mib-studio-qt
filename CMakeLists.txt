@@ -4,7 +4,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(MIBVersion)
 
-project(MIB_Studio_Qt VERSION ${PROJECT_VERSION} LANGUAGES CXX)
+project(MIB_Studio_Qt VERSION ${PROJECT_VERSION} LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -22,6 +22,10 @@ add_subdirectory(src/backend)
 
 if(BUILD_TESTING)
     add_subdirectory(tests)
+endif()
+
+if(MIB_BUILD_PYTHON_BINDINGS)
+    add_subdirectory(bindings/python)
 endif()
 
 if(NOT MIB_BUILD_BACKEND_ONLY)
