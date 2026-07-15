@@ -61,6 +61,17 @@
     snapshot is stale and unrelated to the on-screen frame, so the color is
     re-derived per displayed frame via `computeProcessedFrame()` — otherwise
     the cell stays stuck on the last live frame's color (usually red).
+  - `computeProcessedOverlay()` **reuses the live snapshot's `mask`** (not just
+    its validation) when following live, instead of re-running
+    blur→subtract→threshold→morphology on the UI thread — the backend already
+    segmented that frame for the realtime loop (issue #259 §5). Off the live
+    path (scrub/replay) it calls `computeProcessedFrame()` once and takes both
+    the mask and the classification from it. The snapshot mask is treated as
+    read-only (`findContours` clones; tint paths never write it). Trade-off:
+    while following live the overlay mask now tracks the newest *processed*
+    frame rather than being re-segmented from the exact on-screen frame — with
+    drop-frames ON (the live-view default) the processed frame is the newest
+    frame, so they normally coincide; verify visually after changes.
 
 ## Models (`src/frontend/models/`)
 

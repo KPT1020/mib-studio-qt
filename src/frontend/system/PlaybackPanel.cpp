@@ -988,15 +988,6 @@ void PlaybackPanel::computeProcessedOverlay()
 
     // Pull processing config to ensure parity with backend
     backend::services::ProcessingConfig cfg = backend_.processing().getProcessingConfig();
-    auto odd = [](int v) -> int {
-        if (v < 1) v = 1;
-        if ((v % 2) == 0) v += 1;
-        return v;
-    };
-    const int blurK = odd(cfg.gaussian_blur_size);
-    const int morphK = odd(cfg.morph_kernel_size);
-    const int morphIter = std::max(1, cfg.morph_iterations);
-    const int threshVal = std::max(0, cfg.bg_subtract_threshold);
 
     // ROI
     QRect roi = roiActive_ ? imageRoi_ : QRect(0, 0, frameImage_.width(), frameImage_.height());
@@ -1017,35 +1008,17 @@ void PlaybackPanel::computeProcessedOverlay()
         bg = qimageToCvGrayClone(backgroundGray_);
     }
 
-    // Process mask in full-size buffer
-    cv::Mat mask(current.rows, current.cols, CV_8UC1, cv::Scalar(0));
-    cv::Rect cvRoi(roi.x(), roi.y(), roi.width(), roi.height());
-    cv::Mat currR = current(cvRoi);
-    cv::Mat dstR = mask(cvRoi);
-    cv::Mat tmpCurr, tmpBg, diff, thresh;
-    // Blur both
-    cv::GaussianBlur(currR, tmpCurr, cv::Size(blurK, blurK), 0);
-    if (canUseBg)
-    {
-        cv::Mat bgR = bg(cvRoi);
-        cv::GaussianBlur(bgR, tmpBg, cv::Size(blurK, blurK), 0);
-        cv::subtract(tmpCurr, tmpBg, diff);
-    }
-    else
-    {
-        diff = tmpCurr;
-    }
-    cv::threshold(diff, thresh, threshVal, 255, cv::THRESH_BINARY);
-    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
-    cv::morphologyEx(thresh, dstR, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
-    cv::morphologyEx(dstR, dstR, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
-
-    // Determine overlay color from the displayed frame's classification.
+    // Determine overlay color from the displayed frame's classification, and get
+    // the segmentation mask. When following live, the backend has *already*
+    // segmented and classified this frame for the realtime loop, so reuse its
+    // snapshot (mask + validation) instead of re-running the whole
+    // blur/subtract/threshold/morph pipeline on the UI thread (issue #259 §5).
     QColor overlayColor(0, 255, 0); // default green
     const bool liveFollowing =
         backend_.capture().isRunning() && followLive_ && !scrubbing_;
     backend::services::FilterResult validation;
     bool haveValidation = false;
+    cv::Mat mask;
     if (liveFollowing) {
         // Following live: the on-screen frame is the latest captured frame,
         // so the live snapshot is authoritative (it also carries cross-frame
@@ -1054,18 +1027,33 @@ void PlaybackPanel::computeProcessedOverlay()
         if (backend_.processing().getLatestSnapshot(snapshot)) {
             validation = snapshot.validation;
             haveValidation = true;
+            // Reuse the backend's full-size mask for this frame (read-only below;
+            // findContours clones its input and the tint paths never write it).
+            if (!snapshot.mask.empty() &&
+                snapshot.mask.rows == current.rows &&
+                snapshot.mask.cols == current.cols) {
+                mask = snapshot.mask;
+            }
         }
-    } else {
-        // Stopped / scrubbing / review: the on-screen frame is a buffered
-        // replay frame unrelated to the latest live snapshot, so classify it
-        // directly instead of reusing the stale snapshot (which would leave
-        // the cell stuck on the last live frame's color, usually red).
+    }
+    if (mask.empty()) {
+        // Not following live (stopped / scrubbing / review), or no usable live
+        // snapshot: segment the on-screen frame directly. computeProcessedFrame
+        // runs the identical blur → subtract → threshold → morphology pipeline
+        // and also returns the classification, so it doubles as the classifier
+        // for the scrubbing path (which must not reuse the stale live snapshot,
+        // else the cell stays stuck on the last live frame's color).
         auto pf = backend_.processing().computeProcessedFrame(
             current, canUseBg ? bg : cv::Mat(), cfg,
             {roi.x(), roi.y(), roi.width(), roi.height()});
-        validation = pf.validation;
-        haveValidation = true;
+        mask = std::move(pf.processedImage);
+        if (!haveValidation && !liveFollowing) {
+            validation = pf.validation;
+            haveValidation = true;
+        }
     }
+    if (mask.empty())
+        return;
     if (haveValidation) {
         if (validation.isTargetGroup) {
             overlayColor = QColor(0, 120, 255);  // Blue

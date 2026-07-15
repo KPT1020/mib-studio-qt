@@ -109,6 +109,16 @@ mib_add_backend_test_executable(processing_fault_injection_test processing/proce
 add_test(NAME processing.fault_injection COMMAND $<TARGET_FILE:processing_fault_injection_test>)
 set_tests_properties(processing.fault_injection PROPERTIES LABELS "processing;backend")
 
+mib_add_backend_test_executable(realtime_background_cache_test processing/realtime_background_cache_test.cpp)
+target_link_libraries(realtime_background_cache_test PRIVATE Threads::Threads)
+add_test(NAME processing.realtime_background_cache COMMAND $<TARGET_FILE:realtime_background_cache_test>)
+set_tests_properties(processing.realtime_background_cache PROPERTIES LABELS "processing;backend" TIMEOUT 60)
+
+mib_add_backend_test_executable(experiment_dropped_frame_accounting_test processing/experiment_dropped_frame_accounting_test.cpp)
+target_link_libraries(experiment_dropped_frame_accounting_test PRIVATE Threads::Threads)
+add_test(NAME processing.experiment_dropped_frame_accounting COMMAND $<TARGET_FILE:experiment_dropped_frame_accounting_test>)
+set_tests_properties(processing.experiment_dropped_frame_accounting PROPERTIES LABELS "processing;backend" TIMEOUT 60)
+
 mib_add_backend_test_executable(recording_lifecycle_test recording/recording_lifecycle_test.cpp)
 add_test(NAME recording.lifecycle COMMAND $<TARGET_FILE:recording_lifecycle_test>)
 set_tests_properties(recording.lifecycle PROPERTIES LABELS "recording;backend")

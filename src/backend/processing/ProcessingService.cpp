@@ -414,6 +414,7 @@ void ProcessingService::startExperiment() {
     totalValidFlushed_.store(0, std::memory_order_relaxed);
     droppedValidFrames_.store(0, std::memory_order_relaxed);
     droppedInvalidFrames_.store(0, std::memory_order_relaxed);
+    experimentDroppedFrames_.store(0, std::memory_order_relaxed);
     lastDropLogUs_.store(0, std::memory_order_relaxed);
     resetRealtimeMetrics();
     // Reset auto-capture counter when experiment starts
@@ -433,8 +434,15 @@ void ProcessingService::endExperiment() {
         counts.valid = validFrames_.size();
         counts.invalid = invalidFrames_.size();
     }
-    SPDLOG_INFO("ProcessingService: experiment ended, valid frames: {}, invalid frames: {}",
-                counts.valid, counts.invalid);
+    const uint64_t silentlyDropped = experimentDroppedFrames_.load(std::memory_order_relaxed);
+    SPDLOG_INFO("ProcessingService: experiment ended, valid frames: {}, invalid frames: {}, silently-dropped frames: {}",
+                counts.valid, counts.invalid, silentlyDropped);
+    if (silentlyDropped > 0) {
+        SPDLOG_WARN("ProcessingService: {} frame(s) were skipped during the experiment because "
+                    "processing fell behind capture (ring window advanced past the read pointer); "
+                    "recorded data has gaps. Reduce per-frame cost or lower capture fps.",
+                    silentlyDropped);
+    }
 }
 
 std::vector<ProcessedFrame> ProcessingService::getValidFrames() const {
@@ -2069,6 +2077,43 @@ void ProcessingService::realtimeInlineLoop() {
     std::shared_ptr<cv::Mat> rtCachedBg;
     ProcessingConfig rtCachedConfig;
 
+    // Cached blurred background ROI (issue #259 §2 + §3): the background image
+    // only changes on Set-Background / auto-capture (rare), yet the pre-swap code
+    // re-blurred it on every frame at three near-identical sites. Recompute the
+    // blur only when the background identity, the ROI rect, or the blur kernel
+    // size changes; otherwise reuse the cached result. Blurring the identical ROI
+    // view with the identical kernel is byte-for-byte deterministic, so detection
+    // counts and HDF5 metrics are unchanged. The destination Mat is reused, so it
+    // does not reallocate in steady state. This loop is single-threaded, so the
+    // cache needs no locking.
+    std::shared_ptr<cv::Mat> rtBlurBgSrc;
+    cv::Rect rtBlurBgRoi{};
+    int rtBlurBgK = -1;
+    cv::Mat rtBlurredBgRoi;
+    auto blurredBackgroundRoi =
+        [&](const std::shared_ptr<cv::Mat>& bg, const cv::Rect& r, int k) -> const cv::Mat& {
+        if (bg != rtBlurBgSrc || r != rtBlurBgRoi || k != rtBlurBgK) {
+            cv::GaussianBlur((*bg)(r), rtBlurredBgRoi, cv::Size(k, k), 0);
+            rtBlurBgSrc = bg;
+            rtBlurBgRoi = r;
+            rtBlurBgK = k;
+        }
+        return rtBlurredBgRoi;
+    };
+
+    // Cached morphology structuring element (issue #259 §3): depends only on the
+    // configured kernel size, so rebuild it only when that size changes instead of
+    // allocating a fresh element every frame.
+    int rtMorphK = -1;
+    cv::Mat rtMorphKernel;
+    auto morphKernel = [&](int k) -> const cv::Mat& {
+        if (k != rtMorphK) {
+            rtMorphKernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(k, k));
+            rtMorphK = k;
+        }
+        return rtMorphKernel;
+    };
+
     while (rtRunning_.load()) {
         // Refresh config/roi/background only when something changed
         const uint64_t curRtConfigVer = configVersion_.load(std::memory_order_acquire);
@@ -2108,7 +2153,16 @@ void ProcessingService::realtimeInlineLoop() {
             uint64_t skipped = earliest - (last + 1);
             framesSkippedSinceSummary += skipped;
             last = earliest - 1;
-            SPDLOG_DEBUG("Processing fell behind, skipping {} frames (last={}, earliest={})", skipped, last, earliest);
+            // During an experiment these are recordable frames lost to a
+            // processing-can't-keep-up backlog — track them so the run reports
+            // its data gaps instead of dropping frames silently (issue #259 §7).
+            if (experimentActive_.load()) {
+                experimentDroppedFrames_.fetch_add(skipped, std::memory_order_relaxed);
+                SPDLOG_WARN("Processing fell behind DURING EXPERIMENT, skipping {} recordable frames "
+                            "(last={}, earliest={})", skipped, last, earliest);
+            } else {
+                SPDLOG_DEBUG("Processing fell behind, skipping {} frames (last={}, earliest={})", skipped, last, earliest);
+            }
         }
         if (last >= latest) {
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -2158,7 +2212,7 @@ void ProcessingService::realtimeInlineLoop() {
                 
                 // Create ROI-sized mask (much smaller than full frame)
                 cv::Mat mask(roi.h, roi.w, CV_8UC1, cv::Scalar(0));
-                cv::Mat blurredCurr, blurredBg, thresh;
+                cv::Mat blurredCurr, thresh;
                 const auto algoStart = clock::now();
                 auto toOdd = [](int v) -> int { if (v < 1) v = 1; if ((v % 2) == 0) v += 1; return v; };
                 const int blurK = toOdd(config.gaussian_blur_size);
@@ -2173,9 +2227,8 @@ void ProcessingService::realtimeInlineLoop() {
                 cv::Mat diffForProcessing;
                 if (hasBackground) {
                     cv::Rect bgRoi(roi.x, roi.y, roi.w, roi.h);
-                    cv::Mat bgROI = (*bgShared)(bgRoi);
-                    cv::GaussianBlur(bgROI, blurredBg, cv::Size(blurK, blurK), 0);
-                    cv::subtract(blurredCurr, blurredBg, diffForProcessing);
+                    cv::subtract(blurredCurr, blurredBackgroundRoi(bgShared, bgRoi, blurK),
+                                 diffForProcessing);
                 } else {
                     diffForProcessing = blurredCurr;
                 }
@@ -2198,7 +2251,8 @@ void ProcessingService::realtimeInlineLoop() {
                 }
                 
                 // Use frame-to-frame diff for empty frame detection when auto-capture is enabled
-                cv::Mat diff = (config.auto_background_enabled && !experimentActive_.load()) ? diffForAutoCapture : diffForProcessing;
+                const bool usedAutoCaptureDiff = config.auto_background_enabled && !experimentActive_.load();
+                cv::Mat diff = usedAutoCaptureDiff ? diffForAutoCapture : diffForProcessing;
                 cv::threshold(diff, thresh, threshVal, 255, cv::THRESH_BINARY);
                 
                 // Check for empty frame: count non-zero pixels after binary threshold
@@ -2264,9 +2318,14 @@ void ProcessingService::realtimeInlineLoop() {
                     previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
                 }
                 
-                // Use background subtraction diff for actual processing (morphology, contours, etc.)
-                cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
-                cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+                // Use background subtraction diff for actual processing (morphology, contours, etc.).
+                // When auto-capture is off, `diff` above already aliased `diffForProcessing`, so
+                // `thresh` still holds threshold(diffForProcessing) from the empty-frame check and
+                // re-thresholding would be redundant (issue #259 §1/§8).
+                if (usedAutoCaptureDiff) {
+                    cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+                }
+                const cv::Mat& kernel = morphKernel(morphK);
                 cv::morphologyEx(thresh, mask, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
                 cv::morphologyEx(mask, mask, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
@@ -2504,7 +2563,7 @@ void ProcessingService::realtimeInlineLoop() {
                 cv::Mat mask(gray.rows, gray.cols, CV_8UC1, cv::Scalar(0));
                 cv::Mat roiCurr = gray(cvRoi);
                 cv::Mat roiDst = mask(cvRoi);
-                cv::Mat blurredCurr, blurredBg, thresh;
+                cv::Mat blurredCurr, thresh;
                 const auto algoStart = clock::now();
                 auto toOdd = [](int v) -> int { if (v < 1) v = 1; if ((v % 2) == 0) v += 1; return v; };
                 const int blurK = toOdd(config.gaussian_blur_size);
@@ -2518,8 +2577,8 @@ void ProcessingService::realtimeInlineLoop() {
                 // For processing: use background subtraction if available
                 cv::Mat diffForProcessing;
                 if (hasBackground) {
-                    cv::GaussianBlur((*bgShared)(cvRoi), blurredBg, cv::Size(blurK, blurK), 0);
-                    cv::subtract(blurredCurr, blurredBg, diffForProcessing);
+                    cv::subtract(blurredCurr, blurredBackgroundRoi(bgShared, cvRoi, blurK),
+                                 diffForProcessing);
                 } else {
                     diffForProcessing = blurredCurr;
                 }
@@ -2542,7 +2601,8 @@ void ProcessingService::realtimeInlineLoop() {
                 }
                 
                 // Use frame-to-frame diff for empty frame detection when auto-capture is enabled
-                cv::Mat diff = (config.auto_background_enabled && !experimentActive_.load()) ? diffForAutoCapture : diffForProcessing;
+                const bool usedAutoCaptureDiff = config.auto_background_enabled && !experimentActive_.load();
+                cv::Mat diff = usedAutoCaptureDiff ? diffForAutoCapture : diffForProcessing;
                 cv::threshold(diff, thresh, threshVal, 255, cv::THRESH_BINARY);
                 
                 // Check for empty frame: count non-zero pixels after binary threshold
@@ -2608,8 +2668,13 @@ void ProcessingService::realtimeInlineLoop() {
                     previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
                 }
                 
-                // Use background subtraction diff for actual processing (morphology, contours, etc.)
-                cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+                // Use background subtraction diff for actual processing (morphology, contours, etc.).
+                // When auto-capture is off, `diff` above already aliased `diffForProcessing`, so
+                // `thresh` still holds threshold(diffForProcessing) from the empty-frame check and
+                // re-thresholding would be redundant (issue #259 §1/§8).
+                if (usedAutoCaptureDiff) {
+                    cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+                }
                 
                 // Update previous frame for frame-to-frame comparison (when no background and auto-capture enabled)
                 if (!hasBackground && config.auto_background_enabled && !experimentActive_.load()) {
@@ -2617,7 +2682,7 @@ void ProcessingService::realtimeInlineLoop() {
                     previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
                 }
                 
-                cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+                const cv::Mat& kernel = morphKernel(morphK);
                 cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
                 cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 
@@ -2806,7 +2871,7 @@ void ProcessingService::realtimeInlineLoop() {
                 cv::Mat mask(gray.rows, gray.cols, CV_8UC1, cv::Scalar(0));
                 cv::Mat roiCurr = gray(cvRoi);
                 cv::Mat roiDst = mask(cvRoi);
-                cv::Mat blurredCurr, blurredBg, thresh;
+                cv::Mat blurredCurr, thresh;
                 const auto algoStart = clock::now();
                 auto toOdd = [](int v) -> int { if (v < 1) v = 1; if ((v % 2) == 0) v += 1; return v; };
                 const int blurK = toOdd(config.gaussian_blur_size);
@@ -2820,8 +2885,8 @@ void ProcessingService::realtimeInlineLoop() {
                 // For processing: use background subtraction if available
                 cv::Mat diffForProcessing;
                 if (hasBackground) {
-                    cv::GaussianBlur((*bgShared)(cvRoi), blurredBg, cv::Size(blurK, blurK), 0);
-                    cv::subtract(blurredCurr, blurredBg, diffForProcessing);
+                    cv::subtract(blurredCurr, blurredBackgroundRoi(bgShared, cvRoi, blurK),
+                                 diffForProcessing);
                 } else {
                     diffForProcessing = blurredCurr;
                 }
@@ -2844,7 +2909,8 @@ void ProcessingService::realtimeInlineLoop() {
                 }
                 
                 // Use frame-to-frame diff for empty frame detection when auto-capture is enabled
-                cv::Mat diff = (config.auto_background_enabled && !experimentActive_.load()) ? diffForAutoCapture : diffForProcessing;
+                const bool usedAutoCaptureDiff = config.auto_background_enabled && !experimentActive_.load();
+                cv::Mat diff = usedAutoCaptureDiff ? diffForAutoCapture : diffForProcessing;
                 cv::threshold(diff, thresh, threshVal, 255, cv::THRESH_BINARY);
 
                 // Check for empty frame: count non-zero pixels after binary threshold
@@ -2924,8 +2990,13 @@ void ProcessingService::realtimeInlineLoop() {
                     previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
                 }
 
-                // Use background subtraction diff for actual processing (morphology, contours, etc.)
-                cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+                // Use background subtraction diff for actual processing (morphology, contours, etc.).
+                // When auto-capture is off, `diff` above already aliased `diffForProcessing`, so
+                // `thresh` still holds threshold(diffForProcessing) from the empty-frame check and
+                // re-thresholding would be redundant (issue #259 §1/§8).
+                if (usedAutoCaptureDiff) {
+                    cv::threshold(diffForProcessing, thresh, threshVal, 255, cv::THRESH_BINARY);
+                }
 
                 // Update previous frame for frame-to-frame comparison (when no background and auto-capture enabled)
                 if (!hasBackground && config.auto_background_enabled && !experimentActive_.load()) {
@@ -2933,7 +3004,7 @@ void ProcessingService::realtimeInlineLoop() {
                     previousFrameForAutoCapture_ = blurredCurr; // share refcount; blurredCurr reallocs next iter
                 }
 
-                cv::Mat kernel = cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(morphK, morphK));
+                const cv::Mat& kernel = morphKernel(morphK);
                 cv::morphologyEx(thresh, roiDst, cv::MORPH_CLOSE, kernel, cv::Point(-1, -1), morphIter);
                 cv::morphologyEx(roiDst, roiDst, cv::MORPH_OPEN, kernel, cv::Point(-1, -1), morphIter);
 

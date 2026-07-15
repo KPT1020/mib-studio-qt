@@ -256,6 +256,11 @@ public:
     uint64_t getTotalValidFlushed() const { return totalValidFlushed_.load(std::memory_order_relaxed); }
     uint64_t getDroppedValidFrames() const { return droppedValidFrames_.load(std::memory_order_relaxed); }
     uint64_t getDroppedInvalidFrames() const { return droppedInvalidFrames_.load(std::memory_order_relaxed); }
+    // Frames the realtime loop skipped because its read pointer fell behind the
+    // FrameStore ring window *while an experiment was active* — i.e. capture
+    // outran processing and recordable frames were silently lost (issue #259 §7).
+    // Reset at startExperiment; a healthy run at target fps holds this at 0.
+    uint64_t getExperimentDroppedFrameCount() const { return experimentDroppedFrames_.load(std::memory_order_relaxed); }
     // Average algorithm processing time per frame over last 1s window (microseconds)
     double getAlgoAvgUs1s() const { return algoAvgUs1s_.load(std::memory_order_relaxed); }
     // Monotonic timestamp (microseconds) when algoAvgUs1s_ was last published; 0 if never
@@ -587,6 +592,9 @@ private:
     std::atomic<uint64_t> totalValidFlushed_{0};
     std::atomic<uint64_t> droppedValidFrames_{0};
     std::atomic<uint64_t> droppedInvalidFrames_{0};
+    // Frames skipped because the realtime read pointer fell behind the ring
+    // window while an experiment was active (silent data loss). See §7.
+    std::atomic<uint64_t> experimentDroppedFrames_{0};
     std::atomic<uint64_t> lastDropLogUs_{0};
     
     // Pixel to micron conversion factor (default: 0.4886)

@@ -137,6 +137,15 @@ cache refreshes when the background changes.
 `getAlgoAvgUs1s`. Plus `getBufferedFrameCounts()` for cheap UI/status polling,
 `getTotalValidFlushed` for experiment totals, and dropped-frame counters for
 the bounded experiment backlog.
+- `getExperimentDroppedFrameCount()` (issue #259 §7) — frames the realtime
+  loop skipped because its read pointer fell behind the `FrameStore` ring window
+  **while an experiment was active** (capture outran processing → recordable
+  frames silently lost). Reset at `startExperiment`; incremented (with a WARN)
+  at the ring-fall-behind site; a healthy run at target fps holds it at 0.
+  `endExperiment` logs the total and WARNs if non-zero. This is separate from
+  the backlog `droppedValid/InvalidFrames_` counters (those are the RAM-cap
+  eviction path). Guarded by
+  `tests/processing/experiment_dropped_frame_accounting_test.cpp`.
 
 ## Batch processing (offline / re-runs)
 
@@ -236,6 +245,24 @@ current/max queue depth, batch size, worker count, and running state. See
   refcounted shallow copy (`= blurredCurr`, **not** `.clone()`). Cloning
   every non-empty frame was an allocator-pressure source for algo-time
   variance when auto-background was enabled.
+- **Blurred-background cache (issue #259 §2/§3):** the static background only
+  changes on Set-Background / auto-capture, so `realtimeInlineLoop` caches the
+  *blurred* background ROI (`blurredBackgroundRoi` lambda) keyed on
+  `(bg shared_ptr identity, ROI rect, blur kernel size)` and reuses it every
+  frame instead of re-running `GaussianBlur` on the background per frame at three
+  near-identical sites. The morph structuring element (`morphKernel` lambda,
+  keyed on kernel size) and the empty-check threshold are likewise reused — when
+  auto-background is off, `thresh` from the empty-frame check already equals
+  `threshold(diffForProcessing)`, so the second threshold is skipped. Blurring
+  the identical ROI view with the identical kernel is byte-for-byte
+  deterministic, so detection counts and HDF5 metrics are unchanged; only wasted
+  work is removed (~44% of that CV block at a 512×96 ROI). The cache lives in
+  loop scope (single-threaded loop, no locking) and invalidates automatically
+  because `setRealtimeBackgroundGray` bumps `configVersion_`, which refreshes the
+  loop's cached `rtCachedBg` shared_ptr → new identity → recompute. Guarded by
+  `tests/processing/realtime_background_cache_test.cpp`
+  (`processing.realtime_background_cache`): a stale cache would keep subtracting
+  the old background after Set-Background and is caught by the test.
 - `computeProcessedFrame` intentionally omits the auto-background /
   previous-frame-diff path used in `realtimeLoop()`. Callers needing that
   should continue to drive frames through `FrameStore` + `startRealtime`.
