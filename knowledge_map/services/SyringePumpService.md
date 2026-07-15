@@ -31,6 +31,17 @@ Private: CRC-16, `buildReadRequest`, `buildWriteSingleRequest`,
 `readHoldingRegisters`, `writeSingleRegister`,
 `writeMultipleRegisters`.
 
+The pure framing primitives live in `include/backend/services/ModbusRtu.h`
+(`backend::services::modbus`), unit-tested by
+`tests/backend/modbus_rtu_test.cpp`. As of the Qt-decoupling work (epic #246)
+they are **Qt-free**: frames are `std::vector<uint8_t>` (`modbus::Frame`), not
+`QByteArray`. `SyringePumpService` converts to/from `QByteArray` only at the
+`QSerialPort` read/write seam inside the `.cpp`; `SyringePumpService.h` no
+longer forward-declares or exposes `QByteArray`. Serial I/O itself still uses
+`QSerialPort` — moving that behind a platform-neutral interface is a later
+migration slice (see
+[the Qt-decoupling exec-plan](../../docs/exec-plans/active/2026-07-15-qt-decoupling-and-tauri-migration.md)).
+
 Public scan helper probes `REG_RUN_COMMAND` (`0x0001`) with Modbus function
 `0x03` over an address range (default 1..8) and returns responsive addresses.
 

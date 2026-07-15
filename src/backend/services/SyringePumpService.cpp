@@ -44,6 +44,19 @@ namespace {
     const char* pumpName(SyringePumpService::PumpId id) {
         return id == SyringePumpService::PumpId::Sample ? "Sample" : "Sheath";
     }
+
+    // Space-separated hex dump for debug logging (replaces QByteArray::toHex).
+    std::string toHexString(const std::vector<uint8_t>& bytes) {
+        static const char* kHex = "0123456789abcdef";
+        std::string out;
+        out.reserve(bytes.size() * 3);
+        for (size_t i = 0; i < bytes.size(); ++i) {
+            if (i) out.push_back(' ');
+            out.push_back(kHex[bytes[i] >> 4]);
+            out.push_back(kHex[bytes[i] & 0x0F]);
+        }
+        return out;
+    }
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -56,7 +69,7 @@ uint16_t SyringePumpService::crc16(const uint8_t* data, size_t len) {
 // ---------------------------------------------------------------------------
 // Float32 <-> Modbus register conversion (big-endian ABCD word order)
 // ---------------------------------------------------------------------------
-QByteArray SyringePumpService::floatToRegisters(float value) {
+std::vector<uint8_t> SyringePumpService::floatToRegisters(float value) {
     return modbus::floatToRegisters(value);
 }
 
@@ -67,22 +80,22 @@ float SyringePumpService::registersToFloat(const uint8_t* data) {
 // ---------------------------------------------------------------------------
 // Modbus RTU frame builders
 // ---------------------------------------------------------------------------
-QByteArray SyringePumpService::buildReadRequest(uint8_t addr, uint16_t startReg, uint16_t count) {
+std::vector<uint8_t> SyringePumpService::buildReadRequest(uint8_t addr, uint16_t startReg, uint16_t count) {
     return modbus::buildReadRequest(addr, startReg, count);
 }
 
-QByteArray SyringePumpService::buildWriteSingleRequest(uint8_t addr, uint16_t reg, uint16_t value) {
+std::vector<uint8_t> SyringePumpService::buildWriteSingleRequest(uint8_t addr, uint16_t reg, uint16_t value) {
     return modbus::buildWriteSingleRequest(addr, reg, value);
 }
 
-QByteArray SyringePumpService::buildWriteMultipleRequest(uint8_t addr, uint16_t startReg, const QByteArray& regData) {
+std::vector<uint8_t> SyringePumpService::buildWriteMultipleRequest(uint8_t addr, uint16_t startReg, const std::vector<uint8_t>& regData) {
     return modbus::buildWriteMultipleRequest(addr, startReg, regData);
 }
 
 // ---------------------------------------------------------------------------
 // Serial send/receive
 // ---------------------------------------------------------------------------
-bool SyringePumpService::sendRequest(int pumpIdx, const QByteArray& request, QByteArray& response, int expectedBytes) {
+bool SyringePumpService::sendRequest(int pumpIdx, const std::vector<uint8_t>& request, std::vector<uint8_t>& response, int expectedBytes) {
     auto& pump = pumps_[static_cast<size_t>(pumpIdx)];
     if (!pump.serial || !pump.serial->isOpen()) {
         return false;
@@ -95,11 +108,12 @@ bool SyringePumpService::sendRequest(int pumpIdx, const QByteArray& request, QBy
     std::this_thread::sleep_for(std::chrono::milliseconds(INTER_FRAME_DELAY_MS));
 
     SPDLOG_DEBUG("SyringePumpService: TX pump {} [{}]: {}",
-                pumpIdx, request.size(), request.toHex(' ').constData());
+                pumpIdx, request.size(), toHexString(request));
 
-    // Write request
-    qint64 written = pump.serial->write(request);
-    if (written != request.size()) {
+    // Write request — convert to QByteArray only here, at the serial seam.
+    const qint64 written = pump.serial->write(
+        reinterpret_cast<const char*>(request.data()), static_cast<qint64>(request.size()));
+    if (written != static_cast<qint64>(request.size())) {
         SPDLOG_ERROR("SyringePumpService: Failed to write {} bytes to pump {}", request.size(), pumpIdx);
         return false;
     }
@@ -114,28 +128,30 @@ bool SyringePumpService::sendRequest(int pumpIdx, const QByteArray& request, QBy
     while (remaining > 0) {
         if (!pump.serial->waitForReadyRead(SERIAL_TIMEOUT_MS)) {
             SPDLOG_ERROR("SyringePumpService: Read timeout for pump {} (got {}/{} bytes): {}",
-                        pumpIdx, response.size(), expectedBytes, response.toHex(' ').constData());
+                        pumpIdx, response.size(), expectedBytes, toHexString(response));
             return false;
         }
-        QByteArray chunk = pump.serial->readAll();
-        response.append(chunk);
+        const QByteArray chunk = pump.serial->readAll();
+        response.insert(response.end(),
+                        reinterpret_cast<const uint8_t*>(chunk.constData()),
+                        reinterpret_cast<const uint8_t*>(chunk.constData()) + chunk.size());
 
         // Detect Modbus exception early (always 5 bytes)
-        if (response.size() >= 5 && (static_cast<uint8_t>(response[1]) & 0x80)) {
-            response.truncate(5);
+        if (response.size() >= 5 && (response[1] & 0x80)) {
+            response.resize(5);
             break;
         }
 
-        remaining = expectedBytes - response.size();
+        remaining = expectedBytes - static_cast<int>(response.size());
     }
 
     SPDLOG_DEBUG("SyringePumpService: RX pump {} [{}]: {}",
-                pumpIdx, response.size(), response.toHex(' ').constData());
+                pumpIdx, response.size(), toHexString(response));
 
     // Verify CRC (also rejects frames shorter than 4 bytes).
     if (!modbus::responseCrcValid(response)) {
         SPDLOG_ERROR("SyringePumpService: bad/short response ({} bytes) from pump {}: {}",
-                    response.size(), pumpIdx, response.toHex(' ').constData());
+                    response.size(), pumpIdx, toHexString(response));
         return false;
     }
 
@@ -152,12 +168,12 @@ bool SyringePumpService::sendRequest(int pumpIdx, const QByteArray& request, QBy
 // ---------------------------------------------------------------------------
 // High-level Modbus read/write
 // ---------------------------------------------------------------------------
-bool SyringePumpService::readHoldingRegisters(int pumpIdx, uint16_t startReg, uint16_t count, QByteArray& data) {
+bool SyringePumpService::readHoldingRegisters(int pumpIdx, uint16_t startReg, uint16_t count, std::vector<uint8_t>& data) {
     auto& pump = pumps_[static_cast<size_t>(pumpIdx)];
-    QByteArray request = buildReadRequest(pump.config.modbusAddress, startReg, count);
+    std::vector<uint8_t> request = buildReadRequest(pump.config.modbusAddress, startReg, count);
     // Expected response: addr(1) + func(1) + byteCount(1) + data(count*2) + crc(2)
     int expectedBytes = 3 + count * 2 + 2;
-    QByteArray response;
+    std::vector<uint8_t> response;
     if (!sendRequest(pumpIdx, request, response, expectedBytes)) {
         return false;
     }
@@ -174,17 +190,17 @@ bool SyringePumpService::readHoldingRegisters(int pumpIdx, uint16_t startReg, ui
 
 bool SyringePumpService::writeSingleRegister(int pumpIdx, uint16_t reg, uint16_t value) {
     auto& pump = pumps_[static_cast<size_t>(pumpIdx)];
-    QByteArray request = buildWriteSingleRequest(pump.config.modbusAddress, reg, value);
+    std::vector<uint8_t> request = buildWriteSingleRequest(pump.config.modbusAddress, reg, value);
     // Expected response: echo of request (8 bytes)
-    QByteArray response;
+    std::vector<uint8_t> response;
     return sendRequest(pumpIdx, request, response, 8);
 }
 
-bool SyringePumpService::writeMultipleRegisters(int pumpIdx, uint16_t startReg, const QByteArray& regData) {
+bool SyringePumpService::writeMultipleRegisters(int pumpIdx, uint16_t startReg, const std::vector<uint8_t>& regData) {
     auto& pump = pumps_[static_cast<size_t>(pumpIdx)];
-    QByteArray request = buildWriteMultipleRequest(pump.config.modbusAddress, startReg, regData);
+    std::vector<uint8_t> request = buildWriteMultipleRequest(pump.config.modbusAddress, startReg, regData);
     // Expected response: addr(1) + func(1) + startReg(2) + count(2) + crc(2) = 8
-    QByteArray response;
+    std::vector<uint8_t> response;
     return sendRequest(pumpIdx, request, response, 8);
 }
 
@@ -248,13 +264,13 @@ bool SyringePumpService::connect(PumpId id, int comPort, int baudRate, uint8_t m
     }
 
     // Read min/max flow rates
-    QByteArray minData, maxData;
+    std::vector<uint8_t> minData, maxData;
     if (readHoldingRegisters(idx, REG_MIN_FLOW_RATE, 2, minData)) {
-        pump.status.minFlowRate = registersToFloat(reinterpret_cast<const uint8_t*>(minData.constData()));
+        pump.status.minFlowRate = registersToFloat(minData.data());
         SPDLOG_INFO("SyringePumpService: {} pump min flow rate: {}", pumpName(id), pump.status.minFlowRate);
     }
     if (readHoldingRegisters(idx, REG_MAX_FLOW_RATE, 2, maxData)) {
-        pump.status.maxFlowRate = registersToFloat(reinterpret_cast<const uint8_t*>(maxData.constData()));
+        pump.status.maxFlowRate = registersToFloat(maxData.data());
         SPDLOG_INFO("SyringePumpService: {} pump max flow rate: {}", pumpName(id), pump.status.maxFlowRate);
     }
 
@@ -593,18 +609,16 @@ void SyringePumpService::pollStatus(PumpId id) {
     }
 
     // Read run state (0=stopped, 1=running)
-    QByteArray runData;
+    std::vector<uint8_t> runData;
     if (readHoldingRegisters(idx, REG_RUN_COMMAND, 1, runData)) {
-        uint16_t running = static_cast<uint16_t>(
-            (static_cast<uint8_t>(runData[0]) << 8) | static_cast<uint8_t>(runData[1]));
+        uint16_t running = static_cast<uint16_t>((runData[0] << 8) | runData[1]);
         if (running == 0) {
             pump.status.runStatus = RunStatus::Stop;
         } else {
             // Read direction to distinguish forward/backward
-            QByteArray dirData;
+            std::vector<uint8_t> dirData;
             if (readHoldingRegisters(idx, REG_DIRECTION_STATUS, 1, dirData)) {
-                uint16_t dir = static_cast<uint16_t>(
-                    (static_cast<uint8_t>(dirData[0]) << 8) | static_cast<uint8_t>(dirData[1]));
+                uint16_t dir = static_cast<uint16_t>((dirData[0] << 8) | dirData[1]);
                 pump.status.runStatus = (dir == 2) ? RunStatus::Backward : RunStatus::Forward;
             } else {
                 pump.status.runStatus = RunStatus::Forward;
@@ -613,25 +627,22 @@ void SyringePumpService::pollStatus(PumpId id) {
     }
 
     // Read error status (bit3 = stall/blockage)
-    QByteArray errData;
+    std::vector<uint8_t> errData;
     if (readHoldingRegisters(idx, REG_ERROR_STATUS, 1, errData)) {
-        uint16_t err = static_cast<uint16_t>(
-            (static_cast<uint8_t>(errData[0]) << 8) | static_cast<uint8_t>(errData[1]));
+        uint16_t err = static_cast<uint16_t>((errData[0] << 8) | errData[1]);
         pump.status.stalled = (err & 0x0008) != 0;
     }
 
     // Read current flow rate (uint16 from realtime register)
-    QByteArray flowData;
+    std::vector<uint8_t> flowData;
     if (readHoldingRegisters(idx, REG_REALTIME_INFUSE_FLOW, 1, flowData)) {
-        pump.status.currentFlowRate = static_cast<double>(
-            (static_cast<uint8_t>(flowData[0]) << 8) | static_cast<uint8_t>(flowData[1]));
+        pump.status.currentFlowRate = static_cast<double>((flowData[0] << 8) | flowData[1]);
     }
 
     // Read accumulated volume
-    QByteArray volData;
+    std::vector<uint8_t> volData;
     if (readHoldingRegisters(idx, REG_ACCUM_VOLUME, 2, volData)) {
-        pump.status.accumulatedVolume = registersToFloat(
-            reinterpret_cast<const uint8_t*>(volData.constData()));
+        pump.status.accumulatedVolume = registersToFloat(volData.data());
     }
 }
 

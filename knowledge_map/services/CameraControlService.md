@@ -16,8 +16,9 @@
 - `discoverMindVisionCameras()` / `discoverAllCameras()` — enumerate
   MindVision devices and merge them with the EGrabber list for the connect UI.
 - `applyMindVisionConfig(cameraIndex, configPath, errorOut)` — apply a JSON
-  config to a selected MindVision device before capture starts. The parse +
-  bounds validation is the shared pure `parseConfig` documented in
+  config to a selected MindVision device before capture starts. The file is
+  read with `std::ifstream` (Qt-free, epic #246) and the parse + bounds
+  validation is the shared pure `parseConfig(const std::string&)` documented in
   [[../camera/MindVisionCamera]] (`MindVisionConfig.h`); this service applies
   only its historical field subset (resolution/exposure/trigger/gain).
 - `applyScriptToDevice(ifIdx, devIdx, scriptPath, errorOut)` — push a

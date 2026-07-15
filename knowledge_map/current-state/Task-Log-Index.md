@@ -53,7 +53,10 @@
 - `task/2026-04-16-thread-performance-audit.md`
 - `task/2026-07-02-realtime-performance-plan.md`
 
-## By filename (all 30)
+### Qt → React/Tauri migration (epic #246)
+- `task/2026-07-15-qt-decoupling-phase1-slice1.md`
+
+## By filename (all 31)
 
 ```
 2025-11-14-safe-start-stop-egrabber.md
@@ -72,6 +75,7 @@
 2026-06-01-backend-only-build-test-mode.md
 2026-06-01-hdf5-crash-recovery-checkpoints.md
 2026-06-02-long-run-frame-growth.md
+2026-07-15-qt-decoupling-phase1-slice1.md
 camera-reset.md
 diagnostic-logging.md
 external-config-browse.md

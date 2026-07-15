@@ -25,9 +25,8 @@
 
 #include "backend/camera/mindvision/MindVisionConfig.h"
 
-#include <QFile>
-#include <QJsonDocument>
-#include <QJsonObject>
+#include <fstream>
+#include <iterator>
 
 #include <spdlog/spdlog.h>
 
@@ -66,15 +65,15 @@ bool MindVisionCamera::applyJsonConfig(int hCamera)
         return true;
     }
 
-    QFile file(QString::fromStdString(configPath_));
-    if (!file.open(QIODevice::ReadOnly))
+    std::ifstream file(configPath_, std::ios::binary);
+    if (!file)
     {
         SPDLOG_WARN("MindVisionCamera: cannot open config file {}", configPath_);
         return false;
     }
 
-    const QByteArray bytes = file.readAll();
-    file.close();
+    const std::string bytes((std::istreambuf_iterator<char>(file)),
+                            std::istreambuf_iterator<char>());
 
     const auto parsed = backend::camera::mindvision::parseConfig(bytes);
     if (!parsed.ok)

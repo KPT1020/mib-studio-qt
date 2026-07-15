@@ -28,7 +28,7 @@ What becomes easier/harder; what future agents must respect.
 
 | ADR | Title | Status |
 |-----|-------|--------|
-| _none yet_ | | |
+| [0001](0001-react-tauri-migration.md) | Migrate the desktop application from Qt to React + Tauri | accepted |
 
 Decisions made before this index existed live implicitly in
 [`../architecture/`](../architecture/) and the vault

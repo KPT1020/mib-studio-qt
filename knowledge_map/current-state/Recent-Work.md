@@ -5,6 +5,22 @@
 
 ## Features shipped
 
+- **Qt → React/Tauri migration: Phase 0 + first backend de-Qt slice**
+  (2026-07-15, epic #246) — Recorded the platform decision in ADR
+  `docs/decisions/0001-react-tauri-migration.md` (React + Tauri v2;
+  `BackendFacade` is the UI-neutral C++ seam) with the living breakdown,
+  Qt inventory, feature-parity matrix, and performance budgets in
+  `docs/exec-plans/active/2026-07-15-qt-decoupling-and-tauri-migration.md`.
+  First code slice removes Qt from two backend header contracts:
+  `ModbusRtu.h` frames are now `std::vector<uint8_t>` (was `QByteArray`), and
+  `MindVisionConfig.h` parses with `nlohmann_json` (was Qt JSON), with callers
+  reading files via `std::ifstream`. `SyringePumpService` converts to/from
+  `QByteArray` only at the `QSerialPort` seam. Existing
+  `modbus_rtu_test`/`mindvision_config_test` updated and pass (behavior
+  unchanged); both are now Qt-free. Backend still links Qt pending later
+  clusters. Details:
+  `knowledge_map/task/2026-07-15-qt-decoupling-phase1-slice1.md`.
+
 - **User-guide website** (2026-07-13, issue #233) — `docs/manual/` is now
   published as a searchable site at
   <https://kpt1020.github.io/mib-studio-qt/>: new `mkdocs.yml` (Material,

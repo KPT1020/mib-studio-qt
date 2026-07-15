@@ -48,6 +48,18 @@
 - `QtNetwork` is linked by the backend library so `AppBackend` can manage the
   Young's modulus LUT manifest/cache directly during startup.
 
+## Qt decoupling in progress (epic #246)
+
+The backend still links Qt `Core+Gui+SerialPort+Network`, but the migration to
+React + Tauri (ADR `docs/decisions/0001-react-tauri-migration.md`) is removing
+Qt from backend contracts cluster by cluster. Landed so far: `ModbusRtu.h`
+frames are `std::vector<uint8_t>` (was `QByteArray`), and `MindVisionConfig.h`
+parses with `nlohmann_json` (was Qt JSON). Remaining clusters — syringe-pump
+`QSerialPort`, the LUT-catalog `QtNetwork`/paths, mock-camera `QImage` decode,
+and the crash-reporter glue — plus the CMake Qt drop are tracked in
+`docs/exec-plans/active/2026-07-15-qt-decoupling-and-tauri-migration.md`. Only
+after those land will `MIB_BUILD_BACKEND_ONLY` build with no Qt SDK.
+
 ## Linux cloud build notes
 
 - If CMake fails before project checks with
