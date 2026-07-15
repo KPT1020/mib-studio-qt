@@ -4,7 +4,7 @@
 
 | Package | Version | Shared? | Notes |
 |---|---|---|---|
-| qt | 6.7.3 | ✓ | **`mib_backend` links no Qt** (epic #246, all clusters done). Frontend adds Core + Gui + Network + Widgets + Charts + Concurrent + ImageFormats. The `linux-backend-only` build still `find_package`s `Qt6::Core` only because 7 `frontend;utility` tests link it directly — de-Qt-ing those is the last step to a truly Qt-SDK-free backend build. |
+| qt | 6.7.3 | ✓ | **Frontend-only** (epic #246 Phase 1 complete). The backend is fully Qt-free and `MIB_BUILD_BACKEND_ONLY` does **not** `find_package(Qt6)` at all — `linux-backend-only` configures/builds/tests with **no Qt SDK installed** (proven by `backend-ci.yml`, which installs no `qt6-*` packages). The full/frontend build uses Core + Gui + Network + Widgets + Charts + Concurrent + ImageFormats. |
 | spdlog | 1.17.0 | | Logging ([[../conventions/Logging]]) |
 | sqlite3 | 3.51.0 | | [[../services/SqliteService]] |
 | hdf5 | 1.14.6 | ✓ | C++ API enabled — [[../services/Hdf5Service]] |
@@ -32,10 +32,14 @@
 - `mib_backend` links **no Qt** and has `AUTOMOC OFF` (epic #246): `Gui`,
   `Network`, `SerialPort` were all removed (OpenCV mock-camera decode;
   [[../services/ISerialPort]]; injected LUT HTTP seam, ADR 0002), and `Core`
-  went with the crash-reporter handler moving to the frontend. The
-  `MIB_BUILD_BACKEND_ONLY=ON` build still `find_package`s `Qt6::Core` **only**
-  for the 7 `frontend;utility` tests that link it directly; making those Qt-free
-  is the last step before backend-only needs no Qt SDK at all.
+  went with the crash-reporter handler moving to the frontend.
+- **`MIB_BUILD_BACKEND_ONLY=ON` requires no Qt at all** (Phase 1 exit gate):
+  `MIBDependencies.cmake` skips `find_package(Qt6)` entirely, the global
+  `CMAKE_AUTOMOC/UIC/RCC` are gated off, and the 7 `frontend;utility` tests
+  (which link `Qt6::Core` and compile `src/frontend/utils` sources) are gated
+  behind `if(NOT MIB_BUILD_BACKEND_ONLY)` in `tests/CMakeLists.txt` — they still
+  build/run in the full/Windows build. Verified by uninstalling the Qt SDK and
+  configuring/building/testing `linux-backend-only` clean.
 - Qt shared DLLs + plugins are deployed next to the exe via
   `windeployqt.exe` in a post-build step.
 - Full frontend test builds use Qt Widgets in offscreen mode for the
@@ -68,10 +72,11 @@ dropped); the syringe pump uses [[../services/ISerialPort]] (was `QSerialPort` �
 shell-injected seam (ADR 0002 → `Qt6::Network` dropped); and the crash-reporter
 Qt log handler moved to the frontend `[[../frontend/System-Utilities]]`
 (`QtLogBridge`) so the last `QString`/`qtMessageHandler` usage left the backend
-→ `Qt6::Core` dropped and `AUTOMOC` turned off. Remaining before a Qt-SDK-free
-backend-only build: de-Qt the 7 `frontend;utility` tests. Tracked in
-`docs/exec-plans/active/2026-07-15-qt-decoupling-and-tauri-migration.md`. Only
-after those land will `MIB_BUILD_BACKEND_ONLY` build with no Qt SDK.
+→ `Qt6::Core` dropped and `AUTOMOC` turned off. Finally the 7 `frontend;utility`
+tests (which link `Qt6::Core`) were gated behind `if(NOT MIB_BUILD_BACKEND_ONLY)`
+and `find_package(Qt6)` was removed for backend-only — so **`MIB_BUILD_BACKEND_ONLY`
+now builds and tests with no Qt SDK**, the Phase 1 exit gate. Tracked in
+`docs/exec-plans/active/2026-07-15-qt-decoupling-and-tauri-migration.md`.
 
 ## Linux cloud build notes
 
