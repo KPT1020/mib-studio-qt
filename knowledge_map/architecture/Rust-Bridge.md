@@ -31,10 +31,10 @@ Rust owns an opaque `BackendBridge` (`UniquePtr`) that composes an `AppBackend`
   the backend.
 - **Commands (flat submitters over `BackendFacade::dispatch`):**
   `configure_mock_camera`, `start_capture`, `stop_capture`,
-  `start_frame_recording`, `stop_frame_recording`, `playback_seek_latest`. Each
-  returns a flattened `BridgeCommandResult { ok, command, message }`. No
-  exceptions cross the boundary — the shim catches any C++ exception and returns
-  `ok=false`.
+  `start_frame_recording`, `stop_frame_recording`, `playback_seek_latest`, and
+  the v2 review commands `load_recording`, `playback_seek_index`. Each returns a
+  flattened `BridgeCommandResult { ok, command, message }`. No exceptions cross
+  the boundary — the shim catches any C++ exception and returns `ok=false`.
 - **Events (poll-drained queue):** `poll_events() -> Vec<BridgeEvent>`. The
   facade emits `BackendEvent`s from **backend threads** (the background-capture
   callback runs on the capture/processing thread). The shim's event sink does
@@ -42,9 +42,10 @@ Rust owns an opaque `BackendBridge` (`UniquePtr`) that composes an `AppBackend`
   onto a mutex-guarded queue — then returns; Rust drains it. This is the
   non-blocking-sink rule from ADR 0003.
 - **Frame pull:** `fetch_latest_frame() -> BridgeFrame` (metadata + one owned
-  byte copy out of the playback store). Live-capture frames are **pulled on
-  demand, never pushed** through the event channel and **never base64-encoded
-  per frame** (epic principle #4 / ADR 0003 hot-path rule).
+  byte copy out of the playback store), and `fetch_frame_by_index(index)` for
+  review scrubbing. Frames are **pulled on demand, never pushed** through the
+  event channel and **never base64-encoded per frame** (epic principle #4 /
+  ADR 0003 hot-path rule).
 
 ### `BridgeEvent` typed slots
 
@@ -57,13 +58,16 @@ contract — new fields append slots, never repurpose them.
 
 ## Versioned contract + test
 
-The command/event set is a versioned schema: `bridge_abi_version()` returns `1`;
-additive changes bump it. `tests/contract.rs` is the Phase 2 gate and boundary
-regression guard — it drives a real
+The command/event set is a versioned schema: `bridge_abi_version()` returns `2`
+(v2 added the review commands — `load_recording`, `playback_seek_index`,
+`fetch_frame_by_index` — additively over the v1 live-capture set); additive
+changes bump it. `tests/contract.rs` is the boundary gate and regression guard:
+`lifecycle_produces_status_and_frame_events` drives
 init → configure mock camera → start → poll `fetch_latest_frame` (asserts the
 512×96 sample dims and `stride×height` byte count) → `playback_seek_latest` →
-observe a `FrameReady` event → stop → shutdown lifecycle against the linked
-backend, headless.
+observe a `FrameReady` event → stop → shutdown, and
+`record_then_load_and_review` drives record → `load_recording` →
+`playback_seek_index(0)` → `fetch_frame_by_index(0)` — all headless.
 
 ## Build
 

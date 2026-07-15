@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Qt → React/Tauri migration: Phase 4 slice 1 — recording + review**
+  (2026-07-15, epic #246) — Extended `mib-bridge` to schema **v2** with additive
+  review commands (`load_recording`, `playback_seek_index`,
+  `fetch_frame_by_index`) and exposed them + `start/stop_recording` as Tauri
+  commands. The `desktop/` app gained a Recording panel (record the live mock
+  stream to HDF5) and a Review panel (load a recording + scrub by frame index,
+  bounded by `PlaybackPosition` events). Headless tests:
+  `mib-bridge::record_then_load_and_review` + desktop
+  `record_and_review_round_trip`; Xvfb smoke green. Details:
+  `knowledge_map/task/2026-07-15-tauri-phase4-recording-review.md`.
+
 - **Qt → React/Tauri migration: Phase 3 — first Tauri vertical slice (mock
   camera)** (2026-07-15, epic #246) — New `desktop/` React + Tauri v2 app that
   drives the Qt-free backend through `mib-bridge`. `src-tauri` exposes the bridge

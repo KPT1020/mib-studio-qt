@@ -237,6 +237,32 @@ BridgeCommandResult BackendBridge::playback_seek_latest() {
     }
 }
 
+BridgeCommandResult BackendBridge::load_recording(rust::Str file_path) {
+    try {
+        backend::bridge::RecordingLoadCommand cmd;
+        cmd.filePath = toStd(file_path);
+        cmd.readMetadata = true;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("load_recording: ") + e.what());
+    } catch (...) {
+        return errorResult("load_recording: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::playback_seek_index(std::uint64_t frame_index) {
+    try {
+        backend::bridge::PlaybackSeekCommand cmd;
+        cmd.mode = backend::bridge::PlaybackSeekMode::AbsoluteIndex;
+        cmd.frameIndex = frame_index;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("playback_seek_index: ") + e.what());
+    } catch (...) {
+        return errorResult("playback_seek_index: unknown error");
+    }
+}
+
 rust::Vec<BridgeEvent> BackendBridge::poll_events() {
     std::vector<BridgeEvent> drained;
     {
@@ -250,13 +276,10 @@ rust::Vec<BridgeEvent> BackendBridge::poll_events() {
     return out;
 }
 
-BridgeFrame BackendBridge::fetch_latest_frame() {
+namespace {
+
+BridgeFrame toBridgeFrame(const backend::bridge::BackendFrame& frame) {
     BridgeFrame out{};
-    backend::bridge::BackendFrame frame;
-    if (!impl_->facade.fetchLatestFrame(frame)) {
-        out.valid = false;
-        return out;
-    }
     out.valid = true;
     out.frame_index = frame.frameIndex;
     out.timestamp_ns = frame.timestampNs;
@@ -271,11 +294,31 @@ BridgeFrame BackendBridge::fetch_latest_frame() {
     return out;
 }
 
+} // namespace
+
+BridgeFrame BackendBridge::fetch_latest_frame() {
+    backend::bridge::BackendFrame frame;
+    if (!impl_->facade.fetchLatestFrame(frame)) {
+        return BridgeFrame{};
+    }
+    return toBridgeFrame(frame);
+}
+
+BridgeFrame BackendBridge::fetch_frame_by_index(std::uint64_t frame_index) {
+    backend::bridge::BackendFrame frame;
+    if (!impl_->facade.fetchFrameByIndex(frame_index, frame)) {
+        return BridgeFrame{};
+    }
+    return toBridgeFrame(frame);
+}
+
 std::unique_ptr<BackendBridge> new_backend_bridge() {
     return std::make_unique<BackendBridge>();
 }
 
-// Schema version of the command/event contract. Bump on additive changes.
-std::uint32_t bridge_abi_version() { return 1; }
+// Schema version of the command/event contract. Bumped to 2 when the review
+// commands (load_recording, playback_seek_index, fetch_frame_by_index) were
+// added — additive over v1 (ADR 0003).
+std::uint32_t bridge_abi_version() { return 2; }
 
 } // namespace mib_bridge

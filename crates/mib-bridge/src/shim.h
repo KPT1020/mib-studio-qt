@@ -38,9 +38,12 @@ public:
     BridgeCommandResult start_frame_recording(rust::Str file_path);
     BridgeCommandResult stop_frame_recording();
     BridgeCommandResult playback_seek_latest();
+    BridgeCommandResult load_recording(rust::Str file_path);
+    BridgeCommandResult playback_seek_index(std::uint64_t frame_index);
 
     rust::Vec<BridgeEvent> poll_events();
     BridgeFrame fetch_latest_frame();
+    BridgeFrame fetch_frame_by_index(std::uint64_t frame_index);
 
 private:
     struct Impl;
