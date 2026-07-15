@@ -8,6 +8,12 @@ publish = false
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[dev-dependencies]
+# Backend-constructing tests must run serially: the C++ backend has
+# process-global state, so cargo's default parallel test execution can SIGSEGV
+# when two AppBackends race in one process.
+serial_test = "3"
+
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"

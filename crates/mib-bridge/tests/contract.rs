@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use mib_bridge::ffi::{self, BridgeEventKind};
+use serial_test::serial;
 
 /// Copy the committed sample frame into a fresh temp dir under OUT-of-tree
 /// scratch, enough times for the mock camera (looping) to produce a stream.
@@ -55,6 +56,7 @@ fn abi_version_is_stable() {
 }
 
 #[test]
+#[serial]
 fn processing_settings_and_stats() {
     let frame_dir = make_frame_dir();
     let data_dir = std::env::temp_dir().join(format!("mib_bridge_proc_data_{}", std::process::id()));
@@ -85,6 +87,7 @@ fn processing_settings_and_stats() {
 }
 
 #[test]
+#[serial]
 fn lifecycle_produces_status_and_frame_events() {
     let frame_dir = make_frame_dir();
     let data_dir = std::env::temp_dir().join(format!("mib_bridge_data_{}", std::process::id()));
@@ -168,6 +171,7 @@ fn lifecycle_produces_status_and_frame_events() {
 }
 
 #[test]
+#[serial]
 fn record_then_load_and_review() {
     let frame_dir = make_frame_dir();
     let data_dir = std::env::temp_dir().join(format!("mib_bridge_rec_data_{}", std::process::id()));
