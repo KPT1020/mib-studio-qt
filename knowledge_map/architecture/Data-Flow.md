@@ -20,7 +20,7 @@
                                ▼
                      ┌───────────────────┐
                      │ ProcessingService │
-                     │  realtimeLoop()   │──▶ Ring ratio ─▶ AutofocusService
+                     │ selected mask core│──▶ Ring ratio ─▶ AutofocusService
                      └─────────┬─────────┘
                                │
                    target-group result
@@ -45,7 +45,19 @@ While an experiment is active
 5. If HDF5 is slow or failing and the backlog reaches its cap, sampled invalid
    frames are dropped before valid frames to avoid unbounded RAM growth.
 6. On stop, any remaining accumulated frames are flushed and
-   `writeExperimentInfo` / `writeConfigJson` record metadata.
+   `writeExperimentInfo` / `writeConfigJson` record metadata, including the
+   exact selected processing-core identity.
+
+## Processing-core boundary
+
+All live, offline-batch, playback-regeneration, raw-recording empty filtering,
+and buffer-save empty filtering enter the currently selected
+`IProcessingKernel` for mask/empty decisions. The host then derives contours,
+metrics, tracking, target groups, callbacks, and persistence from that mask.
+The selector can swap the kernel only when no operation owns it. Lifecycle
+leases keep the exact identity stable through realtime, synchronous/async
+batch, raw-recording, and buffer-export work and through provenance
+finalization.
 
 ## Monitoring path
 

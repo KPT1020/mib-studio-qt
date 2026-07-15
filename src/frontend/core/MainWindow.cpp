@@ -65,6 +65,7 @@
 #include <QMenuBar>
 #include <QMenu>
 #include "frontend/dialogs/ProcessingSettingsDialog.h"
+#include "frontend/dialogs/ProcessingCoreDialog.h"
 #include "frontend/dialogs/ConversionFactorDialog.h"
 #include "frontend/dialogs/SyringePumpSettingsDialog.h"
 #include "backend/app/Tools.h"
@@ -181,6 +182,23 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         SPDLOG_INFO("Opening Syringe Pump Settings dialog");
         SyringePumpSettingsDialog dlg(backend_, this);
         dlg.exec(); });
+
+    auto* processingCoreAct = new QAction(tr("Processing Core..."), this);
+    ui->settingsMenu->addAction(processingCoreAct);
+    connect(processingCoreAct, &QAction::triggered, this, [this]() {
+        SPDLOG_INFO("Opening Processing Core dialog");
+        frontend::ProcessingCoreDialog dialog(backend_, this);
+        dialog.exec();
+        const auto identity = backend_.processing().activeProcessingCoreIdentity();
+        if (processingCoreLabel_) {
+            processingCoreLabel_->setText(
+                backend_.processing().isProcessingCorePinSatisfied()
+                    ? tr("Core: %1 · contract %2")
+                          .arg(QString::fromStdString(identity.version))
+                          .arg(identity.contractVersion)
+                    : tr("Core: unavailable (selection failed)"));
+        }
+    });
     connect(ui->aboutAct, &QAction::triggered, this, [this]()
             {
         const QString v = QCoreApplication::applicationVersion();
@@ -333,6 +351,25 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
 
     statusLabel_ = new QLabel("Idle");
     ui->statusbar->addPermanentWidget(statusLabel_);
+    processingCoreLabel_ = new QLabel(this);
+    processingCoreLabel_->setToolTip(
+        tr("Active deformability-cytometry processing core; click Settings > Processing Core to change it."));
+    ui->statusbar->addPermanentWidget(processingCoreLabel_);
+    QString processingCoreRestoreError;
+    const bool processingCoreReady = frontend::ProcessingCoreDialog::restorePersistedCore(
+        backend_, &processingCoreRestoreError);
+    if (!processingCoreReady) {
+        SPDLOG_ERROR("MainWindow: persisted processing core could not be restored: {}",
+                     processingCoreRestoreError.toStdString());
+        statusBar()->showMessage(
+            tr("Pinned processing core unavailable: %1").arg(processingCoreRestoreError));
+    }
+    const auto startupCore = backend_.processing().activeProcessingCoreIdentity();
+    processingCoreLabel_->setText(processingCoreReady
+        ? tr("Core: %1 · contract %2")
+              .arg(QString::fromStdString(startupCore.version))
+              .arg(startupCore.contractVersion)
+        : tr("Core: unavailable (selection failed)"));
 
     statsTimer_ = new QTimer(this);
     statsTimer_->setInterval(500);
@@ -685,6 +722,18 @@ void MainWindow::onStartExperiment()
         return;
     }
 
+    if (!backend_.processing().isProcessingCorePinSatisfied())
+    {
+        const QString required = QString::fromStdString(
+            backend_.processing().requiredProcessingCoreVersion());
+        QMessageBox::critical(this, tr("Processing Core Required"),
+                              tr("Experiment start is blocked because administrator-pinned "
+                                 "processing core %1 is not active.")
+                                  .arg(required));
+        statusLabel_->setText(tr("Required processing core unavailable"));
+        return;
+    }
+
     // Guard: Experiment cannot start without first starting camera
     if (!backend_.capture().isRunning())
     {
@@ -874,17 +923,26 @@ void MainWindow::onStopExperiment()
         auto processingConfig = processing.getProcessingConfig();
         auto roi = processing.getRealtimeRoi();
         cv::Mat bg = processing.getRealtimeBackgroundGray();
+        const auto processingCore = processing.activeProcessingCoreIdentity();
+        bool metadataOk = false;
         {
             const auto t0 = stop_clock::now();
-            hdf5.writeExperimentInfo(experimentStartTimeNs_, experimentEndTimeNs,
-                                     totalValid, totalInvalid, processingConfig, roi,
-                                     bg.empty() ? nullptr : &bg);
+            metadataOk = hdf5.writeExperimentInfo(
+                experimentStartTimeNs_, experimentEndTimeNs, totalValid, totalInvalid,
+                processingConfig, roi, bg.empty() ? nullptr : &bg, &processingCore);
             SPDLOG_INFO("stop-lag: writeExperimentInfo took {:.3f} ms", sinceMs(t0));
+        }
+        if (!metadataOk) {
+            SPDLOG_ERROR("Experiment metadata/provenance write failed");
+            QMessageBox::critical(
+                this, tr("Save Error"),
+                tr("Experiment frame data was written, but mandatory metadata and "
+                   "processing-core provenance could not be saved."));
         }
 
         // Save full config.json content for backtracking
         std::string configJson = backend_.getLastConfigJson();
-        if (!configJson.empty()) {
+        if (metadataOk && !configJson.empty()) {
             const auto t0 = stop_clock::now();
             hdf5.writeConfigJson(configJson);
             SPDLOG_INFO("stop-lag: writeConfigJson took {:.3f} ms (bytes={})",
@@ -894,9 +952,12 @@ void MainWindow::onStopExperiment()
         // Note: Chart snapshots are no longer saved during experiment stop.
         // Charts are now generated on-demand from HDF5 data in the Review tab.
 
-        statusLabel_->setText(QString("Experiment saved: %1 valid, %2 invalid frames")
-                                  .arg(totalValid)
-                                  .arg(totalInvalid));
+        statusLabel_->setText(
+            metadataOk
+                ? QString("Experiment saved: %1 valid, %2 invalid frames")
+                      .arg(totalValid)
+                      .arg(totalInvalid)
+                : tr("Experiment save incomplete: metadata/provenance failed"));
         {
             const auto t0 = stop_clock::now();
             hdf5.closeFile();

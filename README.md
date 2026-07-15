@@ -4,6 +4,14 @@
 See `docs/README.md` for structure and links. Active tasks live in `knowledge_map/task/`.
 Agents start at [AGENTS.md](AGENTS.md), then the knowledge vault (`knowledge_map/`).
 
+**Operators:** the user guide is published at
+<https://kpt1020.github.io/mib-studio-qt/> — an intro tour plus workflow
+guides (connect, acquire & record, review, troubleshooting) with
+screenshots regenerated from the app itself on every release. The same
+pages live in-repo at [docs/manual/README.md](docs/manual/README.md); the
+site is built from them by
+[.github/workflows/docs-site.yml](.github/workflows/docs-site.yml).
+
 
 ## Algorithm Experiments & MLflow
 

@@ -5,11 +5,15 @@ set(MIB_QT_COMPONENTS Core Gui SerialPort Network)
 if(NOT MIB_BUILD_BACKEND_ONLY)
     list(APPEND MIB_QT_COMPONENTS Widgets Charts Concurrent)
 endif()
-find_package(Qt6 COMPONENTS ${MIB_QT_COMPONENTS} REQUIRED)
+if(NOT MIB_BUILD_PROCESSING_ONLY)
+    find_package(Qt6 COMPONENTS ${MIB_QT_COMPONENTS} REQUIRED)
+endif()
 find_package(spdlog CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG QUIET)
 find_package(OpenCV CONFIG REQUIRED)
-find_package(onnxruntime CONFIG QUIET)
+if(NOT MIB_BUILD_PROCESSING_ONLY)
+    find_package(onnxruntime CONFIG QUIET)
+endif()
 
 # Hardware SDKs (EGrabber/Coremor) are Windows-only in this project. Non-Windows
 # builds compile against service stubs so Linux can be used for fast local

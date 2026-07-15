@@ -11,6 +11,7 @@ import platform
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any, Dict, List, Mapping, Optional
@@ -21,10 +22,21 @@ DEFAULT_CONFIG = "default"
 DEFAULT_SPLIT = "train"
 DEFAULT_ROWS = "0,1,2,2500,4999"
 BASE_URL = "https://datasets-server.huggingface.co"
+SKIP_EXIT_CODE = 77
+
+
+class RemoteServiceUnavailable(RuntimeError):
+    """The remote dataset service remained transiently unavailable."""
 
 
 def api_url(path: str, params: Mapping[str, object]) -> str:
     return f"{BASE_URL}{path}?{urllib.parse.urlencode(params)}"
+
+
+def is_transient_remote_error(error: Exception) -> bool:
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code == 429 or 500 <= error.code < 600
+    return isinstance(error, (urllib.error.URLError, TimeoutError))
 
 
 def fetch_bytes(url: str, retries: int = 5) -> bytes:
@@ -40,7 +52,10 @@ def fetch_bytes(url: str, retries: int = 5) -> bytes:
         except Exception as exc:  # noqa: BLE001 - final error includes URL context
             last_error = exc
             time.sleep(min(10, 2**attempt))
-    raise RuntimeError(f"failed after {retries} attempts: {url}: {last_error}")
+    detail = f"failed after {retries} attempts: {url}: {last_error}"
+    if last_error is not None and is_transient_remote_error(last_error):
+        raise RemoteServiceUnavailable(detail) from last_error
+    raise RuntimeError(detail) from last_error
 
 
 def fetch_json(url: str) -> Dict[str, Any]:
@@ -273,6 +288,9 @@ def main(argv: List[str]) -> int:
             config=args.config,
             split=args.split,
         )
+    except RemoteServiceUnavailable as exc:
+        print(f"skipping HF dataset integration: {exc}", file=sys.stderr)
+        return SKIP_EXIT_CODE
     except Exception as exc:  # noqa: BLE001 - command-line runner should report concise context
         print(f"failed to prepare HF dataset manifest: {exc}", file=sys.stderr)
         return 1

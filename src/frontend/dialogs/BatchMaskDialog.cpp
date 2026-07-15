@@ -963,6 +963,28 @@ void BatchMaskDialog::onRun() {
         if (answer != QMessageBox::Yes) return;
     }
 
+    if (srcHdf5_->isChecked() && !hdf5LoadedPath_.isEmpty()) {
+        backend::services::Hdf5Service reader;
+        backend::processing::ProcessingCoreIdentity recordedCore;
+        if (reader.loadFile(hdf5LoadedPath_.toStdString()) &&
+            reader.readProcessingCoreIdentity(recordedCore)) {
+            const auto activeCore = backend_.processing().activeProcessingCoreIdentity();
+            if (recordedCore != activeCore) {
+                const QString warning = tr(
+                    "This file was recorded with processing core %1 (contract %2), but "
+                    "regeneration will use the currently active core %3 (contract %4).\n\n"
+                    "The application will not switch cores automatically; the regenerated "
+                    "output records the active identity.")
+                    .arg(QString::fromStdString(recordedCore.version))
+                    .arg(recordedCore.contractVersion)
+                    .arg(QString::fromStdString(activeCore.version))
+                    .arg(activeCore.contractVersion);
+                logView_->appendPlainText(warning);
+                QMessageBox::warning(this, tr("Processing-core mismatch"), warning);
+            }
+        }
+    }
+
     statusLabel_->setText(tr("Loading images..."));
     progressBar_->setValue(0);
     setRunning(true);
@@ -1005,7 +1027,8 @@ void BatchMaskDialog::onRun() {
         }
     };
 
-    results_ = proc.processBatch(images, config, background, roi, progressCb);
+    backend::processing::ProcessingCoreIdentity processingCore;
+    results_ = proc.processBatch(images, config, background, roi, progressCb, &processingCore);
     applySourceMetadata();
 
     size_t validCount = 0;
@@ -1017,7 +1040,7 @@ void BatchMaskDialog::onRun() {
     const bool ok = backend::services::batch_masks::saveMasksToHdf5(
         results_, outputPath.toStdString(), config,
         roi.x, roi.y, roi.w, roi.h, background,
-        srcHdf5_->isChecked());
+        srcHdf5_->isChecked(), &processingCore);
 
     if (ok) {
         savedHdf5Path_ = outputPath;

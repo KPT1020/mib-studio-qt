@@ -26,11 +26,13 @@ following `[[WikiLinks]]`. If you are a new agent, start here:
 ### Frontend (`src/frontend/`)
 - [[frontend/_MOC|Frontend MOC]]
 - [[frontend/MainWindow]], [[frontend/Controllers]]
+- Native core selection: [[frontend/ProcessingCoreDialog]]
 - Tabs: [[frontend/ConnectTab]], [[frontend/PreviewPage]],
   [[frontend/ConfigTabs]], [[frontend/ExperimentMonitoringTab]],
   [[frontend/HdfReviewTab]], [[frontend/NanopositionerTab]],
   [[frontend/SyringePumpTab]]
-- Support: [[frontend/Dialogs]], [[frontend/System-Utilities]]
+- Support: [[frontend/Dialogs]], [[frontend/System-Utilities]],
+  [[frontend/Screenshot-Tour]]
 
 ### Camera (`src/camera/`)
 - [[camera/_MOC|Camera MOC]]
