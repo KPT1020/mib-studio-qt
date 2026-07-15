@@ -30,7 +30,6 @@ from ._mib_processing import (
 )
 
 __version__ = "0.1.0"
-
 #: Default ProcessingConfig, taken from the C++ struct's own field defaults
 #: (include/backend/processing/ProcessingService.h), not from the desktop
 #: app's resources/defaults/config.json. Callers should generally pull the
