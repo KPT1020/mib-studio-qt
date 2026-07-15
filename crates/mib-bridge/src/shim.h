@@ -17,6 +17,7 @@ namespace mib_bridge {
 struct BridgeCommandResult;
 struct BridgeEvent;
 struct BridgeFrame;
+struct BridgeProcessingStats;
 
 class BackendBridge {
 public:
@@ -40,10 +41,12 @@ public:
     BridgeCommandResult playback_seek_latest();
     BridgeCommandResult load_recording(rust::Str file_path);
     BridgeCommandResult playback_seek_index(std::uint64_t frame_index);
+    BridgeCommandResult apply_processing(bool realtime_enabled, double pixel_to_micron);
 
     rust::Vec<BridgeEvent> poll_events();
     BridgeFrame fetch_latest_frame();
     BridgeFrame fetch_frame_by_index(std::uint64_t frame_index);
+    BridgeProcessingStats fetch_processing_stats();
 
 private:
     struct Impl;

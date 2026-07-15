@@ -274,6 +274,21 @@ namespace backend::bridge
         return true;
     }
 
+    bool BackendFacade::fetchProcessingStats(BackendProcessingStats &out) const
+    {
+        if (!initialized_)
+        {
+            return false;
+        }
+
+        auto &processing = backend_.processing();
+        out.algoFps1s = processing.getAlgoFps1s();
+        out.validFps1s = processing.getValidFps1s();
+        out.invalidFps1s = processing.getInvalidFps1s();
+        out.pixelToMicronFactor = processing.getPixelToMicronFactor();
+        return true;
+    }
+
     BackendCommandResult BackendFacade::handleCameraCommand(const CameraCommand &command)
     {
         switch (command.action)

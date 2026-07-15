@@ -49,8 +49,39 @@ fn drain_until<F: Fn(&ffi::BridgeEvent) -> bool>(
 #[test]
 fn abi_version_is_stable() {
     // The command/event schema is versioned (ADR 0003). v2 added the review
-    // commands (load_recording / playback_seek_index / fetch_frame_by_index).
-    assert_eq!(ffi::bridge_abi_version(), 2);
+    // commands; v3 added the processing commands (apply_processing /
+    // fetch_processing_stats).
+    assert_eq!(ffi::bridge_abi_version(), 3);
+}
+
+#[test]
+fn processing_settings_and_stats() {
+    let frame_dir = make_frame_dir();
+    let data_dir = std::env::temp_dir().join(format!("mib_bridge_proc_data_{}", std::process::id()));
+
+    let mut bridge = ffi::new_backend_bridge();
+    assert!(bridge.pin_mut().initialize(&data_dir.to_string_lossy()));
+    assert!(bridge
+        .pin_mut()
+        .configure_mock_camera(&frame_dir.to_string_lossy(), 5, true)
+        .ok);
+
+    // Apply processing settings (enable realtime + a pixel→micron scale).
+    let res = bridge.pin_mut().apply_processing(true, 2.5);
+    assert!(res.ok, "apply_processing failed: {}", res.message);
+
+    assert!(bridge.pin_mut().start_capture().ok);
+    std::thread::sleep(Duration::from_millis(200));
+
+    let stats = bridge.pin_mut().fetch_processing_stats();
+    assert!(stats.valid, "fetch_processing_stats returned invalid");
+    // The scale we set should round-trip.
+    assert!((stats.pixel_to_micron - 2.5).abs() < 1e-9, "pixel_to_micron not applied");
+
+    assert!(bridge.pin_mut().stop_capture().ok);
+    bridge.pin_mut().shutdown();
+    let _ = std::fs::remove_dir_all(&frame_dir);
+    let _ = std::fs::remove_dir_all(&data_dir);
 }
 
 #[test]

@@ -47,6 +47,16 @@ struct FrameMeta {
     byte_len: u64,
 }
 
+/// Realtime processing stats snapshot for the webview.
+#[derive(Serialize, Clone, Default)]
+struct ProcessingStats {
+    valid: bool,
+    algo_fps1s: f64,
+    valid_fps1s: f64,
+    invalid_fps1s: f64,
+    pixel_to_micron: f64,
+}
+
 /// Serde mirror of `BridgeEvent` for the webview. `kind` is a stable string;
 /// the typed slots carry the per-kind fields (see the bridge's `shim.cpp`).
 #[derive(Serialize, Clone)]
@@ -219,6 +229,32 @@ fn frame_bytes(state: State<AppState>) -> Result<Response, String> {
     Ok(Response::new(last.clone()))
 }
 
+#[tauri::command]
+fn apply_processing(
+    state: State<AppState>,
+    realtime_enabled: bool,
+    pixel_to_micron: f64,
+) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard
+        .pin_mut()
+        .apply_processing(realtime_enabled, pixel_to_micron)
+        .into())
+}
+
+#[tauri::command]
+fn fetch_processing_stats(state: State<AppState>) -> Result<ProcessingStats, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    let s = guard.pin_mut().fetch_processing_stats();
+    Ok(ProcessingStats {
+        valid: s.valid,
+        algo_fps1s: s.algo_fps1s,
+        valid_fps1s: s.valid_fps1s,
+        invalid_fps1s: s.invalid_fps1s,
+        pixel_to_micron: s.pixel_to_micron,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::kind_name;
@@ -316,6 +352,38 @@ mod tests {
         let _ = std::fs::remove_dir_all(&data);
         let _ = std::fs::remove_file(&rec);
     }
+
+    // Headless proof of the processing slice: apply settings, then pull stats.
+    #[test]
+    fn processing_settings_round_trip() {
+        let sample = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../data/mock_frames/frame_00000.tiff");
+        let dir = std::env::temp_dir().join(format!("mib_desktop_proc_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for i in 0..4 {
+            std::fs::copy(&sample, dir.join(format!("frame_{i:04}.tiff"))).unwrap();
+        }
+        let data = std::env::temp_dir().join(format!("mib_desktop_proc_data_{}", std::process::id()));
+
+        let mut bridge = ffi::new_backend_bridge();
+        assert!(bridge.pin_mut().initialize(&data.to_string_lossy()));
+        assert!(bridge
+            .pin_mut()
+            .configure_mock_camera(&dir.to_string_lossy(), 5, true)
+            .ok);
+        assert!(bridge.pin_mut().apply_processing(true, 3.0).ok);
+        assert!(bridge.pin_mut().start_capture().ok);
+        std::thread::sleep(Duration::from_millis(150));
+
+        let stats = bridge.pin_mut().fetch_processing_stats();
+        assert!(stats.valid);
+        assert!((stats.pixel_to_micron - 3.0).abs() < 1e-9);
+
+        assert!(bridge.pin_mut().stop_capture().ok);
+        bridge.pin_mut().shutdown();
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&data);
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -341,6 +409,8 @@ pub fn run() {
             load_recording,
             seek_index,
             fetch_frame_by_index,
+            apply_processing,
+            fetch_processing_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

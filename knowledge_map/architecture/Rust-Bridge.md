@@ -31,10 +31,11 @@ Rust owns an opaque `BackendBridge` (`UniquePtr`) that composes an `AppBackend`
   the backend.
 - **Commands (flat submitters over `BackendFacade::dispatch`):**
   `configure_mock_camera`, `start_capture`, `stop_capture`,
-  `start_frame_recording`, `stop_frame_recording`, `playback_seek_latest`, and
-  the v2 review commands `load_recording`, `playback_seek_index`. Each returns a
-  flattened `BridgeCommandResult { ok, command, message }`. No exceptions cross
-  the boundary — the shim catches any C++ exception and returns `ok=false`.
+  `start_frame_recording`, `stop_frame_recording`, `playback_seek_latest`, the
+  v2 review commands `load_recording`, `playback_seek_index`, and the v3
+  `apply_processing` (realtime enable + pixel→micron). Each returns a flattened
+  `BridgeCommandResult { ok, command, message }`. No exceptions cross the
+  boundary — the shim catches any C++ exception and returns `ok=false`.
 - **Events (poll-drained queue):** `poll_events() -> Vec<BridgeEvent>`. The
   facade emits `BackendEvent`s from **backend threads** (the background-capture
   callback runs on the capture/processing thread). The shim's event sink does
@@ -46,6 +47,11 @@ Rust owns an opaque `BackendBridge` (`UniquePtr`) that composes an `AppBackend`
   review scrubbing. Frames are **pulled on demand, never pushed** through the
   event channel and **never base64-encoded per frame** (epic principle #4 /
   ADR 0003 hot-path rule).
+- **Processing stats pull:** `fetch_processing_stats() -> BridgeProcessingStats`
+  (fps + pixel→micron). Backed by a new `BackendFacade::fetchProcessingStats`
+  const accessor over `backend_.processing()` — a pull (symmetric with the frame
+  pull), not a callback stream, so the shell polls live metrics without any
+  event-sink wiring.
 
 ### `BridgeEvent` typed slots
 
@@ -58,9 +64,10 @@ contract — new fields append slots, never repurpose them.
 
 ## Versioned contract + test
 
-The command/event set is a versioned schema: `bridge_abi_version()` returns `2`
+The command/event set is a versioned schema: `bridge_abi_version()` returns `3`
 (v2 added the review commands — `load_recording`, `playback_seek_index`,
-`fetch_frame_by_index` — additively over the v1 live-capture set); additive
+`fetch_frame_by_index`; v3 added the processing commands — `apply_processing`,
+`fetch_processing_stats` — all additive over the v1 live-capture set); additive
 changes bump it. `tests/contract.rs` is the boundary gate and regression guard:
 `lifecycle_produces_status_and_frame_events` drives
 init → configure mock camera → start → poll `fetch_latest_frame` (asserts the

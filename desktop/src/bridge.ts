@@ -19,6 +19,14 @@ export interface FrameMeta {
   byte_len: number;
 }
 
+export interface ProcessingStats {
+  valid: boolean;
+  algo_fps1s: number;
+  valid_fps1s: number;
+  invalid_fps1s: number;
+  pixel_to_micron: number;
+}
+
 export interface BridgeEvent {
   kind: string;
   u0: number; u1: number; u2: number; u3: number; u4: number; u5: number;
@@ -45,6 +53,10 @@ export const bridge = {
   seekIndex: (frameIndex: number) => invoke<CmdResult>("seek_index", { frameIndex }),
   fetchFrameByIndex: (frameIndex: number) =>
     invoke<FrameMeta>("fetch_frame_by_index", { frameIndex }),
+  // Processing (bridge schema v3).
+  applyProcessing: (realtimeEnabled: boolean, pixelToMicron: number) =>
+    invoke<CmdResult>("apply_processing", { realtimeEnabled, pixelToMicron }),
+  fetchProcessingStats: () => invoke<ProcessingStats>("fetch_processing_stats"),
   // Binary IPC response — raw Mono8 bytes, never base64 (ADR 0003).
   frameBytes: async (): Promise<Uint8Array> => {
     const buf = await invoke<ArrayBuffer>("frame_bytes");
