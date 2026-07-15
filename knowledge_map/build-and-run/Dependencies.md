@@ -4,7 +4,7 @@
 
 | Package | Version | Shared? | Notes |
 |---|---|---|---|
-| qt | 6.7.3 | ✓ | Backend: Core + Network. Frontend adds Gui + Widgets + Charts + Concurrent + ImageFormats. (epic #246: Gui went frontend-only when the mock camera moved to OpenCV; SerialPort was dropped when the syringe pump moved to [[../services/ISerialPort]].) |
+| qt | 6.7.3 | ✓ | Backend: **Core only**. Frontend adds Gui + Network + Widgets + Charts + Concurrent + ImageFormats. (epic #246: Gui went frontend-only with the OpenCV mock-camera decode; SerialPort dropped with [[../services/ISerialPort]]; Network dropped with the injected LUT HTTP seam, ADR 0002.) |
 | spdlog | 1.17.0 | | Logging ([[../conventions/Logging]]) |
 | sqlite3 | 3.51.0 | | [[../services/SqliteService]] |
 | hdf5 | 1.14.6 | ✓ | C++ API enabled — [[../services/Hdf5Service]] |
@@ -29,11 +29,12 @@
 
 - `CMakeLists.txt` calls `find_package(Qt6 ...)` and so on; Conan
   generates the toolchain (`build/conan_toolchain.cmake`).
-- Backend-only builds (`MIB_BUILD_BACKEND_ONLY=ON`) require Qt `Core+Network`
-  components. `Gui`, `SerialPort`, `Widgets`, `Charts`, and `Concurrent` are
-  frontend-only or gone (epic #246: `Gui` moved out once the mock camera
-  stopped using `QImage`; `SerialPort` was removed once the syringe pump moved
-  to [[../services/ISerialPort]]).
+- Backend-only builds (`MIB_BUILD_BACKEND_ONLY=ON`) require only Qt `Core`.
+  `Gui`, `Network`, `SerialPort`, `Widgets`, `Charts`, and `Concurrent` are
+  frontend-only or gone (epic #246: `Gui` moved out with the OpenCV mock-camera
+  decode; `SerialPort` with [[../services/ISerialPort]]; `Network` with the
+  injected LUT HTTP seam, ADR 0002). Only the crash-reporter `QString` glue and
+  the final `Qt6::Core`/`AUTOMOC` drop remain before backend-only needs no Qt.
 - Qt shared DLLs + plugins are deployed next to the exe via
   `windeployqt.exe` in a post-build step.
 - Full frontend test builds use Qt Widgets in offscreen mode for the
@@ -56,16 +57,18 @@
 
 ## Qt decoupling in progress (epic #246)
 
-The backend now links only Qt `Core+Network`, but the migration to React +
-Tauri (ADR `docs/decisions/0001-react-tauri-migration.md`) is removing Qt from
-backend contracts cluster by cluster. Landed so far: `ModbusRtu.h` frames are
+The backend now links only Qt `Core`, but the migration to React + Tauri (ADR
+`docs/decisions/0001-react-tauri-migration.md`) is removing Qt from backend
+contracts cluster by cluster. Landed so far: `ModbusRtu.h` frames are
 `std::vector<uint8_t>` (was `QByteArray`), `MindVisionConfig.h` parses with
 `nlohmann_json` (was Qt JSON), the mock camera decodes via OpenCV `cv::imread`
-(was `QImage`, which let `Qt6::Gui` drop), and the syringe pump talks through
-the platform [[../services/ISerialPort]] (was `QSerialPort`, which let
-`Qt6::SerialPort` drop). Remaining clusters — the LUT-catalog `QtNetwork`/paths
-and the crash-reporter `QString` glue — plus the final `Qt6::Core`/`AUTOMOC`
-drop are tracked in
+(was `QImage`, which let `Qt6::Gui` drop), the syringe pump talks through the
+platform [[../services/ISerialPort]] (was `QSerialPort`, which let
+`Qt6::SerialPort` drop), and the E-modulus LUT catalog is Qt-free with the HTTP
+GET delegated to a shell-injected seam (ADR 0002; nlohmann JSON, std::filesystem
+paths, `processingCore*Sha256`), which let `Qt6::Network` drop. The last
+cluster — the crash-reporter `QString` glue — plus the final
+`Qt6::Core`/`AUTOMOC` drop are tracked in
 `docs/exec-plans/active/2026-07-15-qt-decoupling-and-tauri-migration.md`. Only
 after those land will `MIB_BUILD_BACKEND_ONLY` build with no Qt SDK.
 

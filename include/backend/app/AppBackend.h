@@ -8,6 +8,7 @@
 #include <thread>
 
 #include "backend/app/BackgroundFrame.h"
+#include "backend/processing/EModulusLutCatalog.h" // HttpGetFn seam (ADR 0002)
 
 namespace backend::services
 {
@@ -45,6 +46,17 @@ namespace backend
         ~AppBackend();
 
         bool initialize(const std::string &dataDir);
+
+        // Inject the HTTP GET used to fetch the E-modulus LUT manifest/blob
+        // (ADR 0002); the shell supplies it so the backend links no Qt
+        // networking. Without a fetcher, remote LUT fetch is skipped and the
+        // cached/bundled LUT is used. Call before initialize().
+        void setLutHttpFetcher(HttpGetFn fetcher) { lutHttpGet_ = std::move(fetcher); }
+        // Base directory for the LUT cache — the shell passes the platform
+        // app-data dir so the on-disk cache location is unchanged. Call before
+        // initialize(). (The env override MIB_STUDIO_EMODULUS_LUT_CACHE_DIR
+        // still takes precedence.)
+        void setLutAppDataDir(std::string dir) { lutAppDataDir_ = std::move(dir); }
 
         // Stop every service-owned thread in dependency order (capture →
         // trigger → recording → realtime/processing). Idempotent; called by
@@ -129,6 +141,10 @@ namespace backend
         std::unique_ptr<services::YoloService> yoloService_;
         std::unique_ptr<services::SyringePumpService> syringePumpService_;
         std::shared_ptr<playback::FrameStore> frameStore_;
+
+        // Shell-injected LUT fetch config (ADR 0002).
+        HttpGetFn lutHttpGet_;
+        std::string lutAppDataDir_;
 
         // Last selected hardware device (for script apply)
         int selectedIfIndex_{-1};

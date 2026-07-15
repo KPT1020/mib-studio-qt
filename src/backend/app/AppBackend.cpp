@@ -315,16 +315,23 @@ namespace backend
         if (bootProcessing)
         {
             std::filesystem::path bundledLutPath = exeDir / "resources" / "isoelastic_curve" / "scaled_isoelastic_data_LUT_6.16-4.24.txt";
-            backend::EModulusLutCatalog lutCatalog;
+            std::string appVersion;
+#ifdef MIB_STUDIO_QT_VERSION
+            appVersion = MIB_STUDIO_QT_VERSION;
+#endif
+            // HTTP GET is injected by the shell (ADR 0002); backend links no Qt
+            // networking. Without a fetcher, remote fetch is skipped (cache/bundled).
+            backend::EModulusLutCatalog lutCatalog(lutHttpGet_, appVersion, lutAppDataDir_);
             backend::EModulusLutCatalog::ManagedLutInfo lutInfo;
-            QString activeLutPath = QString::fromStdString(bundledLutPath.string());
-            QString managedLutPath = activeLutPath;
-            QString managedError;
-            if (!lutCatalog.ensureManagedLut(QString::fromStdString(bundledLutPath.string()), &managedLutPath, &lutInfo, &managedError))
+            const std::string bundledLutStr = bundledLutPath.string();
+            std::string activeLutPath = bundledLutStr;
+            std::string managedLutPath = activeLutPath;
+            std::string managedError;
+            if (!lutCatalog.ensureManagedLut(bundledLutStr, &managedLutPath, &lutInfo, &managedError))
             {
                 SPDLOG_WARN("AppBackend: LUT catalog resolution failed, falling back to bundled path {}: {}",
-                            bundledLutPath.string(), managedError.toStdString());
-                activeLutPath = QString::fromStdString(bundledLutPath.string());
+                            bundledLutStr, managedError);
+                activeLutPath = bundledLutStr;
                 lutInfo.sourceType = "bundled-fallback";
                 lutInfo.revision = "bundled";
                 lutInfo.localPath = activeLutPath;
@@ -335,12 +342,11 @@ namespace backend
                 activeLutPath = managedLutPath;
             }
 
-            if (!processingService_->loadEModulusLut(activeLutPath.toStdString()))
+            if (!processingService_->loadEModulusLut(activeLutPath))
             {
-                const QString bundledLutPathStr = QString::fromStdString(bundledLutPath.string());
-                if (activeLutPath != bundledLutPathStr && processingService_->loadEModulusLut(bundledLutPath.string()))
+                if (activeLutPath != bundledLutStr && processingService_->loadEModulusLut(bundledLutStr))
                 {
-                    activeLutPath = bundledLutPathStr;
+                    activeLutPath = bundledLutStr;
                     lutInfo.sourceType = "bundled-fallback";
                     lutInfo.revision = "bundled";
                     lutInfo.localPath = activeLutPath;
@@ -353,13 +359,13 @@ namespace backend
                 }
             }
             SPDLOG_INFO("AppBackend: Young's modulus LUT source={}, revision={}, path={}, checksum_status={}, remote_updated={}, bundled_fallback={}, manifest={}",
-                        lutInfo.sourceType.toStdString(),
-                        lutInfo.revision.toStdString(),
-                        lutInfo.localPath.toStdString().empty() ? activeLutPath.toStdString() : lutInfo.localPath.toStdString(),
-                        lutInfo.checksumStatus.toStdString(),
+                        lutInfo.sourceType,
+                        lutInfo.revision,
+                        lutInfo.localPath.empty() ? activeLutPath : lutInfo.localPath,
+                        lutInfo.checksumStatus,
                         lutInfo.remoteUpdated,
                         lutInfo.usedBundledFallback,
-                        lutInfo.manifestUrl.toStdString());
+                        lutInfo.manifestUrl);
             processingService_->start();
         }
         else

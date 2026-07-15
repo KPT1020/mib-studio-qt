@@ -5,6 +5,20 @@
 
 ## Features shipped
 
+- **Qt → React/Tauri migration: backend de-Qt slice 4 (LUT catalog HTTP seam)**
+  (2026-07-15, epic #246, ADR 0002) — `EModulusLutCatalog` is now Qt-free: the
+  update/verify/cache/fallback state machine stays in C++ (nlohmann JSON,
+  `std::filesystem`, `processingCore*Sha256`, ISO-8601 strings, a small semver
+  compare), and the raw HTTP GET is delegated to an injected
+  `backend::HttpGetFn`. The Qt shell wires a QtNetwork fetcher
+  (`src/frontend/system/LutHttpFetcher.cpp`) via `AppBackend::setLutHttpFetcher`
+  and passes the app-data dir via `setLutAppDataDir` so the cache location is
+  unchanged; `file://` URLs need no fetcher (tests/headless). This dropped
+  `Qt6::Network`, so the backend now links **only `Qt6::Core`**. The catalog
+  test was rewritten Qt-free; full `linux-backend-only` suite green (73/73);
+  `ldd` confirms no `Qt6Network`. Details:
+  `knowledge_map/task/2026-07-15-qt-decoupling-lut-catalog.md`.
+
 - **Qt → React/Tauri migration: backend de-Qt slice 3 (serial abstraction)**
   (2026-07-15, epic #246) — `SyringePumpService` serial I/O now goes through a
   Qt-free `ISerialPort` (`include/backend/services/ISerialPort.h`) with POSIX

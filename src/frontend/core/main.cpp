@@ -3,11 +3,13 @@
 #include <QDir>
 #include <QMessageBox>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QString>
 #include <QStringList>
 #include <QSysInfo>
 
 #include "backend/app/AppBackend.h"
+#include "frontend/system/LutHttpFetcher.h"
 #include "backend/diagnostics/CrashStateMirror.h"
 #include "backend/recording/Hdf5Service.h"
 #include "backend/services/CrashReporter.h"
@@ -226,6 +228,12 @@ int main(int argc, char* argv[]) {
 
         // Initialize backend with proper path
         backend::AppBackend backend;
+        // Inject the Qt HTTP fetcher + app-data dir so the backend (which links
+        // no Qt networking, ADR 0002) can update the E-modulus LUT and cache it
+        // in the historical location.
+        backend.setLutHttpFetcher(mib::frontend::makeQtLutHttpGet());
+        backend.setLutAppDataDir(
+            QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation).toStdString());
         if (!backend.initialize(dataDirStd)) {
             // Determine log location (may be in user AppData if installed in Program Files)
             QString logLocation = dataDir + "\\logs\\app.log";
