@@ -17,6 +17,7 @@
 - [[AutofocusService]] — nanopositioner voltage via serial (Coremor XMT)
 - [[TriggerService]] — camera digital-output pulse on target-group detection
 - [[SyringePumpService]] — dual-pump Modbus RTU over serial
+- [[ISerialPort]] — Qt-free serial transport interface (POSIX/Win32) + factory
 
 ## Optional / specialised
 - [[YoloService]] — ONNX Runtime session (segmentation; placeholder-ish)

@@ -1,8 +1,7 @@
 #include "backend/services/SyringePumpService.h"
+#include "backend/services/ISerialPort.h"
 #include "backend/services/ModbusRtu.h"
 
-#include <QSerialPort>
-#include <QByteArray>
 #include <spdlog/spdlog.h>
 #include <algorithm>
 #include <cstring>
@@ -110,10 +109,9 @@ bool SyringePumpService::sendRequest(int pumpIdx, const std::vector<uint8_t>& re
     SPDLOG_DEBUG("SyringePumpService: TX pump {} [{}]: {}",
                 pumpIdx, request.size(), toHexString(request));
 
-    // Write request — convert to QByteArray only here, at the serial seam.
-    const qint64 written = pump.serial->write(
-        reinterpret_cast<const char*>(request.data()), static_cast<qint64>(request.size()));
-    if (written != static_cast<qint64>(request.size())) {
+    // Write request
+    const int written = pump.serial->write(request);
+    if (written != static_cast<int>(request.size())) {
         SPDLOG_ERROR("SyringePumpService: Failed to write {} bytes to pump {}", request.size(), pumpIdx);
         return false;
     }
@@ -131,10 +129,8 @@ bool SyringePumpService::sendRequest(int pumpIdx, const std::vector<uint8_t>& re
                         pumpIdx, response.size(), expectedBytes, toHexString(response));
             return false;
         }
-        const QByteArray chunk = pump.serial->readAll();
-        response.insert(response.end(),
-                        reinterpret_cast<const uint8_t*>(chunk.constData()),
-                        reinterpret_cast<const uint8_t*>(chunk.constData()) + chunk.size());
+        const std::vector<uint8_t> chunk = pump.serial->readAll();
+        response.insert(response.end(), chunk.begin(), chunk.end());
 
         // Detect Modbus exception early (always 5 bytes)
         if (response.size() >= 5 && (response[1] & 0x80)) {
@@ -207,12 +203,25 @@ bool SyringePumpService::writeMultipleRegisters(int pumpIdx, uint16_t startReg, 
 // ---------------------------------------------------------------------------
 // Constructor / Destructor
 // ---------------------------------------------------------------------------
-SyringePumpService::SyringePumpService() = default;
+SyringePumpService::SyringePumpService()
+    : serialPortFactory_([] { return makePlatformSerialPort(); }) {}
 
 SyringePumpService::~SyringePumpService() {
     disconnect(PumpId::Sample);
     disconnect(PumpId::Sheath);
 }
+
+void SyringePumpService::setSerialPortFactory(SerialPortFactory factory) {
+    serialPortFactory_ = std::move(factory);
+}
+
+// Create a serial port via the injected factory (falls back to the platform
+// port if a caller cleared the factory).
+namespace {
+    std::unique_ptr<ISerialPort> makeSerial(const SerialPortFactory& factory) {
+        return factory ? factory() : makePlatformSerialPort();
+    }
+} // namespace
 
 // ---------------------------------------------------------------------------
 // Connection management
@@ -234,20 +243,13 @@ bool SyringePumpService::connect(PumpId id, int comPort, int baudRate, uint8_t m
     pump.config.baudRate = baudRate;
     pump.config.modbusAddress = modbusAddress;
 
-    // Create and configure serial port
-    pump.serial = new QSerialPort();
-    pump.serial->setPortName(QString("COM%1").arg(comPort));
-    pump.serial->setBaudRate(baudRate);
-    pump.serial->setDataBits(QSerialPort::Data8);
-    pump.serial->setParity(QSerialPort::NoParity);
-    pump.serial->setStopBits(QSerialPort::OneStop);
-    pump.serial->setFlowControl(QSerialPort::NoFlowControl);
-
-    if (!pump.serial->open(QIODevice::ReadWrite)) {
+    // Create and open the serial port (8N1, no flow control — fixed by the impl).
+    pump.serial = makeSerial(serialPortFactory_);
+    if (!pump.serial || !pump.serial->open(comPort, baudRate)) {
         SPDLOG_ERROR("SyringePumpService: Failed to open COM{} for {} pump: {}",
-                    comPort, pumpName(id), pump.serial->errorString().toStdString());
-        delete pump.serial;
-        pump.serial = nullptr;
+                    comPort, pumpName(id),
+                    pump.serial ? pump.serial->lastError() : std::string("no serial port"));
+        pump.serial.reset();
         return false;
     }
     SPDLOG_INFO("SyringePumpService: COM{} opened for {} pump (baud={}, addr={})",
@@ -258,8 +260,7 @@ bool SyringePumpService::connect(PumpId id, int comPort, int baudRate, uint8_t m
         SPDLOG_ERROR("SyringePumpService: {} pump not responding on COM{} addr={} — check wiring and address",
                      pumpName(id), comPort, modbusAddress);
         pump.serial->close();
-        delete pump.serial;
-        pump.serial = nullptr;
+        pump.serial.reset();
         return false;
     }
 
@@ -297,9 +298,8 @@ void SyringePumpService::disconnect(PumpId id) {
         if (pump.serial->isOpen()) {
             pump.serial->close();
         }
-        delete pump.serial;
+        pump.serial.reset();
     }
-    pump.serial = nullptr;
     pump.status.connected = false;
     pump.status.runStatus = RunStatus::Stop;
     pump.status.currentFlowRate = 0.0;
@@ -515,48 +515,36 @@ std::vector<uint8_t> SyringePumpService::scanModbusAddresses(
         return addresses;
     }
 
-    QSerialPort serial;
-    serial.setPortName(QString("COM%1").arg(comPort));
-    serial.setBaudRate(baudRate);
-    serial.setDataBits(QSerialPort::Data8);
-    serial.setParity(QSerialPort::NoParity);
-    serial.setStopBits(QSerialPort::OneStop);
-    serial.setFlowControl(QSerialPort::NoFlowControl);
-
-    if (!serial.open(QIODevice::ReadWrite)) {
+    std::unique_ptr<ISerialPort> serial = makeSerial(serialPortFactory_);
+    if (!serial || !serial->open(comPort, baudRate)) {
         SPDLOG_WARN("SyringePumpService: scan failed to open COM{}: {}",
-                    comPort, serial.errorString().toStdString());
+                    comPort, serial ? serial->lastError() : std::string("no serial port"));
         return addresses;
     }
 
     for (uint16_t addr = startAddress; addr <= endAddress; ++addr) {
-        QByteArray request(6, 0);
-        request[0] = static_cast<char>(addr);
-        request[1] = static_cast<char>(FUNC_READ_HOLDING);
-        request[2] = static_cast<char>((REG_RUN_COMMAND >> 8) & 0xFF);
-        request[3] = static_cast<char>(REG_RUN_COMMAND & 0xFF);
-        request[4] = 0x00;
-        request[5] = 0x01;
-        uint16_t crc = crc16(reinterpret_cast<const uint8_t*>(request.constData()), 6);
-        request.append(static_cast<char>(crc & 0xFF));
-        request.append(static_cast<char>((crc >> 8) & 0xFF));
+        // FC03 read of REG_RUN_COMMAND (1 register) — a device at `addr` echoes
+        // its own address in a well-formed response.
+        const std::vector<uint8_t> request =
+            modbus::buildReadRequest(static_cast<uint8_t>(addr), REG_RUN_COMMAND, 1);
 
-        serial.readAll();
+        serial->readAll();
         std::this_thread::sleep_for(std::chrono::milliseconds(INTER_FRAME_DELAY_MS));
 
-        if (serial.write(request) != request.size()) {
+        if (serial->write(request) != static_cast<int>(request.size())) {
             continue;
         }
-        if (!serial.waitForBytesWritten(timeoutMs)) {
+        if (!serial->waitForBytesWritten(timeoutMs)) {
             continue;
         }
-        if (!serial.waitForReadyRead(timeoutMs)) {
+        if (!serial->waitForReadyRead(timeoutMs)) {
             continue;
         }
 
-        QByteArray response = serial.readAll();
-        while (serial.waitForReadyRead(20)) {
-            response.append(serial.readAll());
+        std::vector<uint8_t> response = serial->readAll();
+        while (serial->waitForReadyRead(20)) {
+            const std::vector<uint8_t> more = serial->readAll();
+            response.insert(response.end(), more.begin(), more.end());
             if (response.size() >= 7) {
                 break;
             }
@@ -565,8 +553,8 @@ std::vector<uint8_t> SyringePumpService::scanModbusAddresses(
             continue;
         }
 
-        const uint8_t rxAddr = static_cast<uint8_t>(response[0]);
-        const uint8_t rxFunc = static_cast<uint8_t>(response[1]);
+        const uint8_t rxAddr = response[0];
+        const uint8_t rxFunc = response[1];
         if (rxAddr != static_cast<uint8_t>(addr)) {
             continue;
         }
@@ -577,25 +565,20 @@ std::vector<uint8_t> SyringePumpService::scanModbusAddresses(
             continue;
         }
 
-        const int frameSize = 3 + static_cast<int>(static_cast<uint8_t>(response[2])) + 2;
+        const size_t frameSize = 3 + static_cast<size_t>(response[2]) + 2;
         if (response.size() < frameSize || frameSize < 5) {
             continue;
         }
-        response = response.left(frameSize);
+        response.resize(frameSize);
 
-        const size_t dataLen = static_cast<size_t>(response.size()) - 2;
-        const uint16_t receivedCrc = static_cast<uint16_t>(
-            (static_cast<uint8_t>(response[response.size() - 1]) << 8) |
-             static_cast<uint8_t>(response[response.size() - 2]));
-        const uint16_t calculatedCrc = crc16(reinterpret_cast<const uint8_t*>(response.constData()), dataLen);
-        if (receivedCrc != calculatedCrc) {
+        if (!modbus::responseCrcValid(response)) {
             continue;
         }
 
         addresses.push_back(static_cast<uint8_t>(addr));
     }
 
-    serial.close();
+    serial->close();
     return addresses;
 }
 

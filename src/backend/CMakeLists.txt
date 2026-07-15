@@ -219,6 +219,18 @@ else()
     )
 endif()
 
+# Platform serial transport (ISerialPort) — replaces Qt6::SerialPort so the
+# backend links no Qt SerialPort (epic #246).
+if(WIN32)
+    target_sources(mib_backend PRIVATE
+        ${PROJECT_SOURCE_DIR}/src/backend/services/SerialPortWin32.cpp
+    )
+else()
+    target_sources(mib_backend PRIVATE
+        ${PROJECT_SOURCE_DIR}/src/backend/services/SerialPortPosix.cpp
+    )
+endif()
+
 # Explicitly enable AUTOMOC for this target to ensure MOC files are generated.
 set_target_properties(mib_backend PROPERTIES
     AUTOMOC ON
@@ -266,7 +278,6 @@ target_link_libraries(mib_backend PUBLIC
     spdlog::spdlog
     Qt6::Core
     Qt6::Network
-    Qt6::SerialPort
 )
 
 if(TARGET nlohmann_json::nlohmann_json)
