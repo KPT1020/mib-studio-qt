@@ -90,3 +90,14 @@ CI: `.github/workflows/bridge-ci.yml` builds the archives then runs
 - Keep the event sink non-blocking on the C++ thread; do not add a per-frame
   base64/JSON pixel channel — extend the command/event variants (with a version
   bump) instead.
+- `BackendBridge` is `Send` but **not** `Sync` (`unsafe impl Send` in
+  `lib.rs`): it may be moved between threads / held in a Tauri
+  `State<Mutex<UniquePtr<BackendBridge>>>`, but commands funnel through the one
+  owner and are not safe to call concurrently. A `const _` assertion locks in
+  that the `Mutex<UniquePtr<..>>` stays `Send + Sync`.
+- **PIC / crate-type:** the C++ archives are built position-dependent, so they
+  cannot link into a `cdylib`/`staticlib` (Tauri's default mobile crate-types) —
+  the linker fails with `recompile with -fPIC`. A desktop Tauri app must use a
+  binary + `rlib` (an executable, like this crate's own tests). If a mobile
+  target ever needs the `cdylib`, build the backend with
+  `CMAKE_POSITION_INDEPENDENT_CODE=ON` instead.

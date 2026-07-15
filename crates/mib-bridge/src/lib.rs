@@ -118,3 +118,21 @@ pub mod ffi {
         fn fetch_latest_frame(self: Pin<&mut BackendBridge>) -> BridgeFrame;
     }
 }
+
+// The bridge object may be MOVED between threads (e.g. held in a Tauri
+// `State`/`Mutex`, or an async task), but it is NOT `Sync`: commands funnel
+// through the single owner and are not safe to call concurrently. This matches
+// the threading contract in ADR 0003 — events are the only thing that fan out,
+// and they do so through the shim's own mutex-guarded queue, not through shared
+// access to `BackendBridge`. Marking it `Send` (but never `Sync`) is therefore
+// sound and is what lets a `Mutex<UniquePtr<BackendBridge>>` be `Send + Sync`.
+unsafe impl Send for ffi::BackendBridge {}
+
+// Compile-time guard for the Tauri consumption pattern: a
+// `Mutex<UniquePtr<BackendBridge>>` (what a Tauri `State` holds) must be
+// `Send + Sync`. This holds iff `BackendBridge: Send` (above) — and breaks
+// loudly if someone ever adds a `Sync` requirement the type can't meet.
+const _: fn() = || {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<std::sync::Mutex<cxx::UniquePtr<ffi::BackendBridge>>>();
+};
