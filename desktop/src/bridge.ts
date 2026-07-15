@@ -38,6 +38,13 @@ export const bridge = {
   seekLatest: () => invoke<CmdResult>("seek_latest"),
   pollEvents: () => invoke<BridgeEvent[]>("poll_events"),
   fetchFrame: () => invoke<FrameMeta>("fetch_frame"),
+  // Recording + review (bridge schema v2).
+  startRecording: (filePath: string) => invoke<CmdResult>("start_recording", { filePath }),
+  stopRecording: () => invoke<CmdResult>("stop_recording"),
+  loadRecording: (filePath: string) => invoke<CmdResult>("load_recording", { filePath }),
+  seekIndex: (frameIndex: number) => invoke<CmdResult>("seek_index", { frameIndex }),
+  fetchFrameByIndex: (frameIndex: number) =>
+    invoke<FrameMeta>("fetch_frame_by_index", { frameIndex }),
   // Binary IPC response — raw Mono8 bytes, never base64 (ADR 0003).
   frameBytes: async (): Promise<Uint8Array> => {
     const buf = await invoke<ArrayBuffer>("frame_bytes");

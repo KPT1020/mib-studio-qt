@@ -1,13 +1,14 @@
 # Qt decoupling and React + Tauri migration
 
-Status: active (2026-07-15) — **Phases 1–3 landed.** The C++ backend is fully
+Status: active (2026-07-15) — **Phases 1–3 landed; Phase 4 underway.** The C++ backend is fully
 Qt-free and `MIB_BUILD_BACKEND_ONLY` configures/builds/tests with **no Qt SDK**
 (verified by uninstalling Qt6 locally; enforced by `backend-ci.yml`). Phase 2
 delivered the Rust ↔ C++ bridge (`crates/mib-bridge`, `cxx` over `BackendFacade`,
 ADR 0003) with a headless `cargo test` contract lane (`bridge-ci.yml`). Phase 3
 delivered the first React + Tauri v2 vertical slice (`desktop/`, mock camera end
 to end) — headless-tested via `cargo test` + an Xvfb GUI smoke
-(`desktop-ci.yml`). Next: Phase 4 (migrate remaining workflows).
+(`desktop-ci.yml`). Phase 4 slice 1 (recording + review) landed the bridge
+schema-v2 review commands + a record-to-HDF5 / load-and-scrub UI.
 
 Tracks epic #246. The platform decision is recorded in ADR
 [`../../decisions/0001-react-tauri-migration.md`](../../decisions/0001-react-tauri-migration.md).
@@ -162,9 +163,20 @@ Phase 3 — first Tauri vertical slice (mock camera end to end):
    The webkit deps that were feared to be a hard block install cleanly on
    `ubuntu-24.04`; the GUI runs headless under Xvfb.
 
-Phase 4 migrates the remaining workflows (hardware camera, recording, review,
-experiment/processing UI, syringe pump, autofocus); Phase 5 packages,
-documents, and cuts over.
+Phase 4 — migrate the remaining operator workflows (one slice per PR):
+
+9. **[done — slice 1: recording + review]** Extended `mib-bridge` to schema v2
+   with the review commands (`load_recording`, `playback_seek_index`,
+   `fetch_frame_by_index`, additive over v1) and exposed them + `start/stop_
+   recording` as Tauri commands. The `desktop/` UI gained a Recording panel
+   (record the live mock stream to HDF5) and a Review panel (load a recording +
+   scrub by frame index, bounded by `PlaybackPosition` events). Headless tests:
+   `mib-bridge` `record_then_load_and_review` + desktop
+   `record_and_review_round_trip`; Xvfb smoke still green.
+
+Remaining Phase 4 slices: hardware/MindVision camera selection, live processing
+settings + results overlay, experiment run + monitoring, syringe pump,
+autofocus/nanopositioner. Phase 5 packages, documents, and cuts over.
 
 **PR #59** stays open as reference; it is superseded when the first production
 Tauri slice (Phase 3) lands, at which point it is closed with a pointer here.

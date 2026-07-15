@@ -67,8 +67,9 @@
 - `task/2026-07-15-qt-decoupling-exit-gate.md`
 - `task/2026-07-15-rust-cxx-bridge-phase2.md`
 - `task/2026-07-15-tauri-desktop-phase3-slice.md`
+- `task/2026-07-15-tauri-phase4-recording-review.md`
 
-## By filename (all 41)
+## By filename (all 42)
 
 ```
 2025-11-14-safe-start-stop-egrabber.md
@@ -98,6 +99,7 @@
 2026-07-15-qt-decoupling-exit-gate.md
 2026-07-15-rust-cxx-bridge-phase2.md
 2026-07-15-tauri-desktop-phase3-slice.md
+2026-07-15-tauri-phase4-recording-review.md
 camera-reset.md
 diagnostic-logging.md
 external-config-browse.md

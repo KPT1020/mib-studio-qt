@@ -48,8 +48,9 @@ fn drain_until<F: Fn(&ffi::BridgeEvent) -> bool>(
 
 #[test]
 fn abi_version_is_stable() {
-    // The command/event schema is versioned (ADR 0003). v1 is the Phase 2 gate.
-    assert_eq!(ffi::bridge_abi_version(), 1);
+    // The command/event schema is versioned (ADR 0003). v2 added the review
+    // commands (load_recording / playback_seek_index / fetch_frame_by_index).
+    assert_eq!(ffi::bridge_abi_version(), 2);
 }
 
 #[test]
@@ -133,4 +134,46 @@ fn lifecycle_produces_status_and_frame_events() {
 
     let _ = std::fs::remove_dir_all(&frame_dir);
     let _ = std::fs::remove_dir_all(&data_dir);
+}
+
+#[test]
+fn record_then_load_and_review() {
+    let frame_dir = make_frame_dir();
+    let data_dir = std::env::temp_dir().join(format!("mib_bridge_rec_data_{}", std::process::id()));
+    let rec_path = std::env::temp_dir().join(format!("mib_bridge_rec_{}.h5", std::process::id()));
+
+    let mut bridge = ffi::new_backend_bridge();
+    assert!(bridge.pin_mut().initialize(&data_dir.to_string_lossy()));
+    assert!(bridge
+        .pin_mut()
+        .configure_mock_camera(&frame_dir.to_string_lossy(), 5, true)
+        .ok);
+    assert!(bridge.pin_mut().start_capture().ok);
+
+    // Let some frames flow, then record a short clip to HDF5.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && !bridge.pin_mut().fetch_latest_frame().valid {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let rec = bridge.pin_mut().start_frame_recording(&rec_path.to_string_lossy());
+    assert!(rec.ok, "start_frame_recording failed: {}", rec.message);
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(bridge.pin_mut().stop_frame_recording().ok);
+    assert!(bridge.pin_mut().stop_capture().ok);
+
+    // Load the recording back and review it by absolute index.
+    let load = bridge.pin_mut().load_recording(&rec_path.to_string_lossy());
+    assert!(load.ok, "load_recording failed: {}", load.message);
+
+    let seek = bridge.pin_mut().playback_seek_index(0);
+    assert!(seek.ok, "playback_seek_index failed: {}", seek.message);
+
+    let frame = bridge.pin_mut().fetch_frame_by_index(0);
+    assert!(frame.valid, "fetch_frame_by_index(0) returned invalid");
+    assert!(frame.width > 0 && frame.height > 0 && !frame.data.is_empty());
+
+    bridge.pin_mut().shutdown();
+    let _ = std::fs::remove_dir_all(&frame_dir);
+    let _ = std::fs::remove_dir_all(&data_dir);
+    let _ = std::fs::remove_file(&rec_path);
 }

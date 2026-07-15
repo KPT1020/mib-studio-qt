@@ -29,13 +29,19 @@ The repo root `src/` is the C++ tree, so the whole Tauri app lives under
 
 Thin wrappers over the bridge (all take the managed `AppState`):
 
-`abi_version`, `is_initialized`, `init(data_dir)`, `configure_mock(dir,
-interval_ms, loop)`, `start_capture`, `stop_capture`, `seek_latest`,
-`poll_events` (→ serde `EventDto[]`), `fetch_frame` (→ `FrameMeta`, caches the
-pixel bytes), `frame_bytes` (→ `tauri::ipc::Response` — **raw Mono8 bytes as a
-binary IPC response, never base64**, per ADR 0003). The frontend calls
-`fetch_frame` then `frame_bytes` for the same pull, and expands Mono8→RGBA on a
-canvas via `mono8ToImageData` (honouring row stride).
+- **Live capture:** `abi_version`, `is_initialized`, `init(data_dir)`,
+  `configure_mock(dir, interval_ms, loop)`, `start_capture`, `stop_capture`,
+  `seek_latest`, `poll_events` (→ serde `EventDto[]`), `fetch_frame`
+  (→ `FrameMeta`, caches the pixel bytes), `frame_bytes` (→ `tauri::ipc::Response`
+  — **raw Mono8 bytes as a binary IPC response, never base64**, per ADR 0003).
+- **Recording + review (Phase 4 slice 1):** `start_recording(path)`,
+  `stop_recording`, `load_recording(path)`, `seek_index(i)`,
+  `fetch_frame_by_index(i)`.
+
+The frontend calls `fetch_frame` (or `fetch_frame_by_index`) then `frame_bytes`
+for the same pull, and expands Mono8→RGBA on a canvas via `mono8ToImageData`
+(honouring row stride). `PlaybackPosition` events (drained from `poll_events`)
+bound the review scrubber.
 
 ## Build & run
 
@@ -54,7 +60,8 @@ Two gates, both without a real display:
 
 1. `cargo test` — `mock_camera_slice_round_trip` drives init → configure → start
    → pull-frame (asserts 512×96) → stop → shutdown directly on the bridge from
-   the desktop crate, plus `event_kind_names_are_stable`.
+   the desktop crate; `record_and_review_round_trip` drives record → load → seek
+   by index → pull-by-index; plus `event_kind_names_are_stable`.
 2. `xvfb-smoke.sh` — launches the real binary under Xvfb with the container
    WebKitGTK workarounds (`WEBKIT_DISABLE_DMABUF_RENDERER=1`,
    `WEBKIT_DISABLE_COMPOSITING_MODE=1`, `LIBGL_ALWAYS_SOFTWARE=1`) and asserts

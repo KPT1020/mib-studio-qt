@@ -111,11 +111,24 @@ pub mod ffi {
         /// subscribes to).
         fn playback_seek_latest(self: Pin<&mut BackendBridge>) -> BridgeCommandResult;
 
+        /// Load a recorded HDF5 file for review through the playback service.
+        fn load_recording(self: Pin<&mut BackendBridge>, file_path: &str)
+            -> BridgeCommandResult;
+
+        /// Seek playback to an absolute frame index (review scrubbing). Emits a
+        /// FrameReady + PlaybackPosition event pair.
+        fn playback_seek_index(self: Pin<&mut BackendBridge>, frame_index: u64)
+            -> BridgeCommandResult;
+
         /// Drain and return all events queued since the last poll.
         fn poll_events(self: Pin<&mut BackendBridge>) -> Vec<BridgeEvent>;
 
         /// Pull the latest frame's metadata + pixel bytes (one copy).
         fn fetch_latest_frame(self: Pin<&mut BackendBridge>) -> BridgeFrame;
+
+        /// Pull a specific frame by absolute index (metadata + one byte copy).
+        fn fetch_frame_by_index(self: Pin<&mut BackendBridge>, frame_index: u64)
+            -> BridgeFrame;
     }
 }
 

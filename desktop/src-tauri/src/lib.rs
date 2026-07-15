@@ -151,13 +151,32 @@ fn poll_events(state: State<AppState>) -> Result<Vec<EventDto>, String> {
         .collect())
 }
 
-/// Pull the latest frame, cache it, and return its metadata. Call `frame_bytes`
-/// next to get the pixel bytes of this same frame.
 #[tauri::command]
-fn fetch_frame(state: State<AppState>) -> Result<FrameMeta, String> {
-    let mut bridge = state.bridge.lock().map_err(|e| e.to_string())?;
-    let frame = bridge.pin_mut().fetch_latest_frame();
-    let meta = FrameMeta {
+fn start_recording(state: State<AppState>, file_path: String) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().start_frame_recording(&file_path).into())
+}
+
+#[tauri::command]
+fn stop_recording(state: State<AppState>) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().stop_frame_recording().into())
+}
+
+#[tauri::command]
+fn load_recording(state: State<AppState>, file_path: String) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().load_recording(&file_path).into())
+}
+
+#[tauri::command]
+fn seek_index(state: State<AppState>, frame_index: u64) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().playback_seek_index(frame_index).into())
+}
+
+fn frame_to_meta(frame: &ffi::BridgeFrame) -> FrameMeta {
+    FrameMeta {
         valid: frame.valid,
         frame_index: frame.frame_index,
         timestamp_ns: frame.timestamp_ns,
@@ -166,7 +185,27 @@ fn fetch_frame(state: State<AppState>) -> Result<FrameMeta, String> {
         pixel_format: frame.pixel_format,
         stride_bytes: frame.stride_bytes,
         byte_len: frame.data.len() as u64,
-    };
+    }
+}
+
+/// Pull the latest frame, cache it, and return its metadata. Call `frame_bytes`
+/// next to get the pixel bytes of this same frame.
+#[tauri::command]
+fn fetch_frame(state: State<AppState>) -> Result<FrameMeta, String> {
+    let mut bridge = state.bridge.lock().map_err(|e| e.to_string())?;
+    let frame = bridge.pin_mut().fetch_latest_frame();
+    let meta = frame_to_meta(&frame);
+    let mut last = state.last_frame.lock().map_err(|e| e.to_string())?;
+    *last = frame.data;
+    Ok(meta)
+}
+
+/// Pull a specific frame by index (review scrubbing), cache it, return metadata.
+#[tauri::command]
+fn fetch_frame_by_index(state: State<AppState>, frame_index: u64) -> Result<FrameMeta, String> {
+    let mut bridge = state.bridge.lock().map_err(|e| e.to_string())?;
+    let frame = bridge.pin_mut().fetch_frame_by_index(frame_index);
+    let meta = frame_to_meta(&frame);
     let mut last = state.last_frame.lock().map_err(|e| e.to_string())?;
     *last = frame.data;
     Ok(meta)
@@ -235,6 +274,48 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&data);
     }
+
+    // Headless proof of the recording + review slice: record a clip, load it
+    // back, and pull a frame by index.
+    #[test]
+    fn record_and_review_round_trip() {
+        let sample = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../data/mock_frames/frame_00000.tiff");
+        let dir = std::env::temp_dir().join(format!("mib_desktop_rev_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for i in 0..4 {
+            std::fs::copy(&sample, dir.join(format!("frame_{i:04}.tiff"))).unwrap();
+        }
+        let data = std::env::temp_dir().join(format!("mib_desktop_rev_data_{}", std::process::id()));
+        let rec = std::env::temp_dir().join(format!("mib_desktop_rev_{}.h5", std::process::id()));
+
+        let mut bridge = ffi::new_backend_bridge();
+        assert!(bridge.pin_mut().initialize(&data.to_string_lossy()));
+        assert!(bridge
+            .pin_mut()
+            .configure_mock_camera(&dir.to_string_lossy(), 5, true)
+            .ok);
+        assert!(bridge.pin_mut().start_capture().ok);
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline && !bridge.pin_mut().fetch_latest_frame().valid {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(bridge.pin_mut().start_frame_recording(&rec.to_string_lossy()).ok);
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(bridge.pin_mut().stop_frame_recording().ok);
+        assert!(bridge.pin_mut().stop_capture().ok);
+
+        assert!(bridge.pin_mut().load_recording(&rec.to_string_lossy()).ok);
+        assert!(bridge.pin_mut().playback_seek_index(0).ok);
+        let frame = bridge.pin_mut().fetch_frame_by_index(0);
+        assert!(frame.valid && frame.width == 512 && frame.height == 96);
+
+        bridge.pin_mut().shutdown();
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&data);
+        let _ = std::fs::remove_file(&rec);
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -255,6 +336,11 @@ pub fn run() {
             poll_events,
             fetch_frame,
             frame_bytes,
+            start_recording,
+            stop_recording,
+            load_recording,
+            seek_index,
+            fetch_frame_by_index,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
