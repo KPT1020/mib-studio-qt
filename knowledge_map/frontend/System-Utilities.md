@@ -7,6 +7,13 @@
 
 ## System (`src/frontend/system/`)
 
+- **`LutHttpFetcher`** — `mib::frontend::makeQtLutHttpGet()` returns a
+  `backend::HttpGetFn` (a blocking QtNetwork GET: single-shot event loop +
+  transfer timeout). `main.cpp` injects it via `AppBackend::setLutHttpFetcher`
+  so the Qt-free backend catalog ([[../architecture/AppBackend]] LUT
+  management, ADR 0002) can fetch the E-modulus LUT without linking
+  `Qt6::Network`. A Tauri/Rust shell supplies its own fetcher through the same
+  seam.
 - **`AppConfigWatcher`** — `QFileSystemWatcher` over an external JSON
   config. Reloads config and propagates to
   [[../services/ProcessingService]] / [[ConfigTabs]] on change. Monitoring

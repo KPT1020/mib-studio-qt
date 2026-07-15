@@ -239,6 +239,7 @@ set_target_properties(mib_backend PROPERTIES
 
 target_compile_definitions(mib_backend PUBLIC
     $<$<CONFIG:Debug>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG>
+    MIB_STUDIO_QT_VERSION="${PROJECT_VERSION}"
 )
 
 if(MIB_HAS_EGRABBER)
@@ -277,7 +278,6 @@ endif()
 target_link_libraries(mib_backend PUBLIC
     spdlog::spdlog
     Qt6::Core
-    Qt6::Network
 )
 
 if(TARGET nlohmann_json::nlohmann_json)

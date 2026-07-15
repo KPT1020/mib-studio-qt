@@ -29,6 +29,7 @@ What becomes easier/harder; what future agents must respect.
 | ADR | Title | Status |
 |-----|-------|--------|
 | [0001](0001-react-tauri-migration.md) | Migrate the desktop application from Qt to React + Tauri | accepted |
+| [0002](0002-lut-catalog-http-seam.md) | E-modulus LUT catalog fetches through an injected HTTP seam | accepted |
 
 Decisions made before this index existed live implicitly in
 [`../architecture/`](../architecture/) and the vault

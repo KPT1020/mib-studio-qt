@@ -62,8 +62,9 @@
 - `task/2026-07-15-qt-decoupling-phase1-slice1.md`
 - `task/2026-07-15-qt-decoupling-mockcamera-decode.md`
 - `task/2026-07-15-qt-decoupling-serial-abstraction.md`
+- `task/2026-07-15-qt-decoupling-lut-catalog.md`
 
-## By filename (all 36)
+## By filename (all 37)
 
 ```
 2025-11-14-safe-start-stop-egrabber.md
@@ -88,6 +89,7 @@
 2026-07-15-qt-decoupling-phase1-slice1.md
 2026-07-15-qt-decoupling-mockcamera-decode.md
 2026-07-15-qt-decoupling-serial-abstraction.md
+2026-07-15-qt-decoupling-lut-catalog.md
 camera-reset.md
 diagnostic-logging.md
 external-config-browse.md

@@ -1,13 +1,14 @@
 # Optional sentry-native integration (CMake-managed clone).
 include(Sentry)
 
-# Backend-only builds require only Core + Network (epic #246): Gui went
-# frontend-only when the mock camera moved to OpenCV, and SerialPort was dropped
-# when the syringe pump moved to the platform ISerialPort. Widgets/Charts pull
-# Gui transitively.
-set(MIB_QT_COMPONENTS Core Network)
+# Backend-only builds require only Core (epic #246): Gui went frontend-only
+# (mock camera → OpenCV), SerialPort was dropped (syringe pump → ISerialPort),
+# and Network was dropped (LUT catalog fetches through an injected HTTP seam,
+# ADR 0002). Network stays a frontend component (it supplies the LUT fetcher and
+# other UI networking). Widgets/Charts pull Gui transitively.
+set(MIB_QT_COMPONENTS Core)
 if(NOT MIB_BUILD_BACKEND_ONLY)
-    list(APPEND MIB_QT_COMPONENTS Gui Widgets Charts Concurrent)
+    list(APPEND MIB_QT_COMPONENTS Gui Network Widgets Charts Concurrent)
 endif()
 if(NOT MIB_BUILD_PROCESSING_ONLY)
     find_package(Qt6 COMPONENTS ${MIB_QT_COMPONENTS} REQUIRED)
