@@ -36,10 +36,8 @@ using namespace Euresys;
 
 #include "backend/camera/mindvision/MindVisionConfig.h"
 
-#include <QFile>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QString>
+#include <fstream>
+#include <iterator>
 #endif
 
 namespace backend::services
@@ -98,15 +96,15 @@ namespace backend::services
                 }
             };
 
-            QFile file(QString::fromStdString(jsonPath));
-            if (!file.open(QIODevice::ReadOnly))
+            std::ifstream file(jsonPath, std::ios::binary);
+            if (!file)
             {
                 setErr("Failed to open MindVision config file: " + jsonPath);
                 return false;
             }
 
-            const QByteArray bytes = file.readAll();
-            file.close();
+            const std::string bytes((std::istreambuf_iterator<char>(file)),
+                                    std::istreambuf_iterator<char>());
 
             const auto parsed = backend::camera::mindvision::parseConfig(bytes);
             if (!parsed.ok)
