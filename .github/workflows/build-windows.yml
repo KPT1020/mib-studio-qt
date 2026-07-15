@@ -1,6 +1,8 @@
 name: Build Windows
 
 on:
+  push:
+    branches: [develop]
   workflow_dispatch:
     inputs:
       mode:
@@ -19,6 +21,10 @@ on:
           - patch
           - minor
           - major
+
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
