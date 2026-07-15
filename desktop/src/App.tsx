@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { bridge, mono8ToImageData, type BridgeEvent, type FrameMeta } from "./bridge";
+import {
+  bridge,
+  mono8ToImageData,
+  type BridgeEvent,
+  type FrameMeta,
+  type ProcessingStats,
+} from "./bridge";
 
 // Phase 3 + 4 slices: mock camera live view, frame recording to HDF5, and
 // review (load a recording and scrub by frame index) — all through the Tauri
@@ -16,6 +22,11 @@ export default function App() {
   // Recording.
   const [recording, setRecording] = useState(false);
   const [recPath, setRecPath] = useState("");
+
+  // Processing.
+  const [procEnabled, setProcEnabled] = useState(false);
+  const [pixelToMicron, setPixelToMicron] = useState("1.0");
+  const [stats, setStats] = useState<ProcessingStats | null>(null);
 
   // Review.
   const [reviewPath, setReviewPath] = useState("");
@@ -78,10 +89,23 @@ export default function App() {
       applyEvents(await bridge.pollEvents());
       const meta = await bridge.fetchFrame();
       await draw(meta);
+      if (procEnabled) setStats(await bridge.fetchProcessingStats());
     } catch (e) {
       append(`tick error: ${e}`);
     }
-  }, [applyEvents, draw, append]);
+  }, [applyEvents, draw, append, procEnabled]);
+
+  const onApplyProcessing = useCallback(async () => {
+    try {
+      const factor = Number(pixelToMicron) || 1.0;
+      const res = await bridge.applyProcessing(procEnabled, factor);
+      if (!res.ok) return append(`processing failed: ${res.message}`);
+      append(`processing ${procEnabled ? "enabled" : "disabled"} (px→µm ${factor})`);
+      setStats(await bridge.fetchProcessingStats());
+    } catch (e) {
+      append(`processing error: ${e}`);
+    }
+  }, [procEnabled, pixelToMicron, append]);
 
   const onStart = useCallback(async () => {
     try {
@@ -200,6 +224,34 @@ export default function App() {
           <button onClick={onToggleRecord} disabled={!running || !recPath}>
             {recording ? "Stop recording" : "Record"}
           </button>
+        </div>
+      </fieldset>
+
+      <fieldset style={{ margin: "8px 0", padding: 12 }}>
+        <legend>Processing</legend>
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <label>
+            <input
+              type="checkbox"
+              checked={procEnabled}
+              onChange={(e) => setProcEnabled(e.target.checked)}
+            /> realtime processing
+          </label>
+          <label>
+            px→µm{" "}
+            <input
+              style={{ width: 80, padding: 4 }}
+              value={pixelToMicron}
+              onChange={(e) => setPixelToMicron(e.target.value)}
+            />
+          </label>
+          <button onClick={onApplyProcessing} disabled={!ready}>Apply</button>
+          {stats?.valid && (
+            <span style={{ fontFamily: "monospace", fontSize: 12 }}>
+              algo {stats.algo_fps1s.toFixed(1)} · valid {stats.valid_fps1s.toFixed(1)} ·
+              invalid {stats.invalid_fps1s.toFixed(1)} fps · px→µm {stats.pixel_to_micron}
+            </span>
+          )}
         </div>
       </fieldset>
 

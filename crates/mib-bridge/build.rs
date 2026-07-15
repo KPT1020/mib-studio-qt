@@ -88,6 +88,10 @@ fn main() {
     println!("cargo:rerun-if-changed=src/shim.cpp");
     println!("cargo:rerun-if-changed=src/shim.h");
     println!("cargo:rerun-if-env-changed=MIB_BRIDGE_NO_CMAKE");
+    // Relink when the backend archives change (e.g. a facade edit) so a stale
+    // build dir can't silently keep an old symbol set.
+    println!("cargo:rerun-if-changed={}/libmib_backend.a", build_dir.display());
+    println!("cargo:rerun-if-changed={}/libmib_processing.a", build_dir.display());
 
     // Link the static backend archives (order matters: backend before processing).
     println!("cargo:rustc-link-search=native={}", build_dir.display());

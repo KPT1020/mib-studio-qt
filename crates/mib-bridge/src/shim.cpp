@@ -263,6 +263,20 @@ BridgeCommandResult BackendBridge::playback_seek_index(std::uint64_t frame_index
     }
 }
 
+BridgeCommandResult BackendBridge::apply_processing(bool realtime_enabled,
+                                                    double pixel_to_micron) {
+    try {
+        backend::bridge::ProcessingSettingsCommand cmd;
+        cmd.realtimeEnabled = realtime_enabled;
+        cmd.pixelToMicronFactor = pixel_to_micron;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("apply_processing: ") + e.what());
+    } catch (...) {
+        return errorResult("apply_processing: unknown error");
+    }
+}
+
 rust::Vec<BridgeEvent> BackendBridge::poll_events() {
     std::vector<BridgeEvent> drained;
     {
@@ -312,13 +326,29 @@ BridgeFrame BackendBridge::fetch_frame_by_index(std::uint64_t frame_index) {
     return toBridgeFrame(frame);
 }
 
+BridgeProcessingStats BackendBridge::fetch_processing_stats() {
+    BridgeProcessingStats out{};
+    backend::bridge::BackendProcessingStats stats;
+    if (!impl_->facade.fetchProcessingStats(stats)) {
+        out.valid = false;
+        return out;
+    }
+    out.valid = true;
+    out.algo_fps1s = stats.algoFps1s;
+    out.valid_fps1s = stats.validFps1s;
+    out.invalid_fps1s = stats.invalidFps1s;
+    out.pixel_to_micron = stats.pixelToMicronFactor;
+    return out;
+}
+
 std::unique_ptr<BackendBridge> new_backend_bridge() {
     return std::make_unique<BackendBridge>();
 }
 
-// Schema version of the command/event contract. Bumped to 2 when the review
-// commands (load_recording, playback_seek_index, fetch_frame_by_index) were
-// added — additive over v1 (ADR 0003).
-std::uint32_t bridge_abi_version() { return 2; }
+// Schema version of the command/event contract. v2 added the review commands
+// (load_recording, playback_seek_index, fetch_frame_by_index); v3 added the
+// processing commands (apply_processing, fetch_processing_stats). All additive
+// over v1 (ADR 0003).
+std::uint32_t bridge_abi_version() { return 3; }
 
 } // namespace mib_bridge

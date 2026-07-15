@@ -5,6 +5,16 @@
 
 ## Features shipped
 
+- **Qt → React/Tauri migration: Phase 4 slice 2 — processing settings + stats
+  overlay** (2026-07-15, epic #246) — Added a `BackendFacade::fetchProcessingStats`
+  const pull (fps + pixel→micron over `ProcessingService`) and exposed bridge
+  schema **v3** commands `apply_processing` + `fetch_processing_stats`. The
+  `desktop/` app gained a Processing panel (realtime toggle + pixel→micron scale
+  + a live fps overlay polled each tick). `build.rs` now relinks on backend
+  archive changes. Headless tests: `mib-bridge::processing_settings_and_stats` +
+  desktop `processing_settings_round_trip`. Details:
+  `knowledge_map/task/2026-07-15-tauri-phase4-processing-overlay.md`.
+
 - **Qt → React/Tauri migration: Phase 4 slice 1 — recording + review**
   (2026-07-15, epic #246) — Extended `mib-bridge` to schema **v2** with additive
   review commands (`load_recording`, `playback_seek_index`,

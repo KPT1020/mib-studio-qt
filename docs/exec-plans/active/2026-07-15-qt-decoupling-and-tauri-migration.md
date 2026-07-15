@@ -7,8 +7,9 @@ delivered the Rust ↔ C++ bridge (`crates/mib-bridge`, `cxx` over `BackendFacad
 ADR 0003) with a headless `cargo test` contract lane (`bridge-ci.yml`). Phase 3
 delivered the first React + Tauri v2 vertical slice (`desktop/`, mock camera end
 to end) — headless-tested via `cargo test` + an Xvfb GUI smoke
-(`desktop-ci.yml`). Phase 4 slice 1 (recording + review) landed the bridge
-schema-v2 review commands + a record-to-HDF5 / load-and-scrub UI.
+(`desktop-ci.yml`). Phase 4 slices 1–2 landed the bridge
+schema-v2 review commands (record-to-HDF5 / load-and-scrub UI) and schema-v3
+processing commands (realtime toggle + pixel→micron + live fps overlay).
 
 Tracks epic #246. The platform decision is recorded in ADR
 [`../../decisions/0001-react-tauri-migration.md`](../../decisions/0001-react-tauri-migration.md).
@@ -174,9 +175,18 @@ Phase 4 — migrate the remaining operator workflows (one slice per PR):
    `mib-bridge` `record_then_load_and_review` + desktop
    `record_and_review_round_trip`; Xvfb smoke still green.
 
-Remaining Phase 4 slices: hardware/MindVision camera selection, live processing
-settings + results overlay, experiment run + monitoring, syringe pump,
-autofocus/nanopositioner. Phase 5 packages, documents, and cuts over.
+10. **[done — slice 2: processing settings + stats overlay]** Added a
+    `BackendFacade::fetchProcessingStats` const pull (fps + pixel→micron, over
+    `backend_.processing()`), exposed via bridge schema **v3** commands
+    `apply_processing(realtime, px→µm)` + `fetch_processing_stats`. The
+    `desktop/` app gained a Processing panel (enable realtime + set the
+    pixel→micron scale + a live fps overlay polled each tick). Headless tests:
+    `mib-bridge` `processing_settings_and_stats` + desktop
+    `processing_settings_round_trip`.
+
+Remaining Phase 4 slices: hardware/MindVision camera selection, experiment run +
+monitoring, syringe pump, autofocus/nanopositioner. Phase 5 packages,
+documents, and cuts over.
 
 **PR #59** stays open as reference; it is superseded when the first production
 Tauri slice (Phase 3) lands, at which point it is closed with a pointer here.

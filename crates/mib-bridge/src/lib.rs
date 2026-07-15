@@ -62,6 +62,17 @@ pub mod ffi {
         pub text: String,
     }
 
+    /// Pollable snapshot of the realtime processing pipeline. `valid` is false
+    /// when the backend is not initialized.
+    #[derive(Debug, Clone, Default)]
+    pub struct BridgeProcessingStats {
+        pub valid: bool,
+        pub algo_fps1s: f64,
+        pub valid_fps1s: f64,
+        pub invalid_fps1s: f64,
+        pub pixel_to_micron: f64,
+    }
+
     /// A frame pulled on demand: metadata plus a single owned copy of the pixel
     /// bytes. `valid` is false when no frame is available.
     #[derive(Debug, Clone, Default)]
@@ -120,6 +131,14 @@ pub mod ffi {
         fn playback_seek_index(self: Pin<&mut BackendBridge>, frame_index: u64)
             -> BridgeCommandResult;
 
+        /// Apply realtime processing settings (enable/disable + pixel→micron
+        /// scale). Additive schema v3.
+        fn apply_processing(
+            self: Pin<&mut BackendBridge>,
+            realtime_enabled: bool,
+            pixel_to_micron: f64,
+        ) -> BridgeCommandResult;
+
         /// Drain and return all events queued since the last poll.
         fn poll_events(self: Pin<&mut BackendBridge>) -> Vec<BridgeEvent>;
 
@@ -129,6 +148,9 @@ pub mod ffi {
         /// Pull a specific frame by absolute index (metadata + one byte copy).
         fn fetch_frame_by_index(self: Pin<&mut BackendBridge>, frame_index: u64)
             -> BridgeFrame;
+
+        /// Pull the current realtime processing stats (fps + pixel→micron).
+        fn fetch_processing_stats(self: Pin<&mut BackendBridge>) -> BridgeProcessingStats;
     }
 }
 

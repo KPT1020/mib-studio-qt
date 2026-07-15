@@ -37,6 +37,8 @@ Thin wrappers over the bridge (all take the managed `AppState`):
 - **Recording + review (Phase 4 slice 1):** `start_recording(path)`,
   `stop_recording`, `load_recording(path)`, `seek_index(i)`,
   `fetch_frame_by_index(i)`.
+- **Processing (Phase 4 slice 2):** `apply_processing(realtime, px→µm)` and
+  `fetch_processing_stats` (fps + scale, polled each tick for a live overlay).
 
 The frontend calls `fetch_frame` (or `fetch_frame_by_index`) then `frame_bytes`
 for the same pull, and expands Mono8→RGBA on a canvas via `mono8ToImageData`
@@ -61,7 +63,9 @@ Two gates, both without a real display:
 1. `cargo test` — `mock_camera_slice_round_trip` drives init → configure → start
    → pull-frame (asserts 512×96) → stop → shutdown directly on the bridge from
    the desktop crate; `record_and_review_round_trip` drives record → load → seek
-   by index → pull-by-index; plus `event_kind_names_are_stable`.
+   by index → pull-by-index; `processing_settings_round_trip` drives
+   apply-processing → pull-stats (asserts the px→µm scale round-trips); plus
+   `event_kind_names_are_stable`.
 2. `xvfb-smoke.sh` — launches the real binary under Xvfb with the container
    WebKitGTK workarounds (`WEBKIT_DISABLE_DMABUF_RENDERER=1`,
    `WEBKIT_DISABLE_COMPOSITING_MODE=1`, `LIBGL_ALWAYS_SOFTWARE=1`) and asserts

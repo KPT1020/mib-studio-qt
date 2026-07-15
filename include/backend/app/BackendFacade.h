@@ -239,6 +239,16 @@ namespace backend::bridge
         std::vector<std::uint8_t> data;
     };
 
+    // Pollable snapshot of the realtime processing pipeline (pulled on demand by
+    // the shell, symmetric with fetchLatestFrame — no callback wiring).
+    struct BackendProcessingStats
+    {
+        double algoFps1s{0.0};
+        double validFps1s{0.0};
+        double invalidFps1s{0.0};
+        double pixelToMicronFactor{0.0};
+    };
+
     class BackendFacade
     {
     public:
@@ -259,6 +269,7 @@ namespace backend::bridge
 
         bool fetchLatestFrame(BackendFrame &out) const;
         bool fetchFrameByIndex(std::uint64_t frameIndex, BackendFrame &out) const;
+        bool fetchProcessingStats(BackendProcessingStats &out) const;
 
     private:
         BackendCommandResult handleCameraCommand(const CameraCommand &command);
