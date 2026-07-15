@@ -5,6 +5,16 @@
 
 ## Features shipped
 
+- **Ultra96 direct-DDR FPGA pipeline** (2026-07-15) — Replaced the exact
+  4-PPC/250-MHz image core's full-frame AXI-BRAM MMIO path with XRT/CMA buffer
+  objects over the 128-bit PS HP0 DDR port. The board now matches all 171 MIB
+  reference frames exactly (8,404,992 mask pixels, 920 ordered contours, 176
+  records, 21 valid objects, 7 targets), asserts exact masks over the
+  5,000-frame steady pass, and profiles contour extraction, hierarchy,
+  metrics, and tracking separately. Serial performance improved from 260.5 to
+  1,251 fps; two-buffer FPGA/ARM overlap reaches 1,344 fps. Task record:
+  [[../task/2026-07-15-ultra96-direct-ddr]].
+
 - **Kernel-owned scientific pipeline** (2026-07-14, A7/#242) — Moved contour
   extraction, per-object metrics/LUT/target gating, brightness quantiles, and
   batch track matching behind `IProcessingKernel`
