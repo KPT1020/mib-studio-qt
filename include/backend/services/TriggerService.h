@@ -36,6 +36,21 @@ public:
     void setPulseDurationUs(int us) { pulseDurationUs_.store(us, std::memory_order_relaxed); }
     int getPulseDurationUs() const { return pulseDurationUs_.load(std::memory_order_relaxed); }
 
+    // Manual sorter pulse (BE-5): fire one synthetic target-group trigger so
+    // the output chain can be exercised without a detected cell.
+    void manualPulse() { onTargetGroupResult(TargetGroupSignal{true, -1, -1}); }
+
+    // Periodic test pulses (BE-5): fire a synthetic pulse every intervalMs on
+    // a dedicated thread until stopped. Idempotent start/stop.
+    void startPeriodicTest(int intervalMs);
+    void stopPeriodicTest();
+    bool isPeriodicTestActive() const { return periodicRunning_.load(std::memory_order_relaxed); }
+    int getPeriodicTestIntervalMs() const { return periodicIntervalMs_.load(std::memory_order_relaxed); }
+
+    // True when a camera is attached for trigger output (pulses without a
+    // camera are dropped, not counted).
+    bool hasCamera() const { return camera_.load(std::memory_order_acquire) != nullptr; }
+
     // Metrics
     uint64_t getTriggerCount() const { return triggerCount_.load(std::memory_order_relaxed); }
     double getLastOnsetUs() const { return lastOnsetUs_.load(std::memory_order_relaxed); }
@@ -51,9 +66,17 @@ public:
 
 private:
     void triggerLoop();
+    void periodicLoop();
 
     std::thread thread_;
     std::atomic<bool> running_{false};
+
+    // Periodic test pulse generator (BE-5)
+    std::thread periodicThread_;
+    std::atomic<bool> periodicRunning_{false};
+    std::atomic<int> periodicIntervalMs_{1000};
+    std::mutex periodicMutex_;
+    std::condition_variable periodicCv_;
 
     // Trigger request signaling
     std::mutex triggerMutex_;

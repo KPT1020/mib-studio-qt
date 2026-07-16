@@ -85,6 +85,10 @@ jobs:
           cmake --build --preset linux-backend-only-build \
             --target mib_backend mib_processing
 
+      - name: Check bridge contract (drift gate, ADR 0004)
+        shell: bash
+        run: python3 scripts/gen_bridge_contract.py --check
+
       - name: Build frontend
         shell: bash
         working-directory: desktop

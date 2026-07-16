@@ -528,6 +528,11 @@ namespace backend
                 selectedMvCameraIndex_ = -1;
                 selectedLabel_.clear();
                 lastMindVisionConfigPath_.clear();
+                // Keep the selection snapshot authoritative (BE-2).
+                mockFrameDir_ = options.folder.string();
+                mockIntervalMs_ = static_cast<int>(
+                    std::chrono::duration_cast<std::chrono::milliseconds>(options.frameInterval).count());
+                mockLoop_ = options.loopFiles;
             };
 
             if (cameraMode == "mock")
@@ -668,6 +673,38 @@ namespace backend
         selectedLabel_.clear();
         lastMindVisionConfigPath_.clear();
         mockCameraConfigured_ = true;
+        mockFrameDir_ = options.folder.string();
+        mockIntervalMs_ = static_cast<int>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(options.frameInterval).count());
+        mockLoop_ = options.loopFiles;
+    }
+
+    AppBackend::CameraSelectionSnapshot AppBackend::cameraSelection() const
+    {
+        CameraSelectionSnapshot out;
+        if (mockCameraConfigured_)
+        {
+            out.mode = CameraSelectionSnapshot::Mode::Mock;
+        }
+        else if (selectedMvCameraIndex_ >= 0)
+        {
+            out.mode = CameraSelectionSnapshot::Mode::MindVision;
+        }
+        else if (selectedIfIndex_ >= 0 && selectedDevIndex_ >= 0)
+        {
+            out.mode = CameraSelectionSnapshot::Mode::Hardware;
+        }
+        out.interfaceIndex = selectedIfIndex_;
+        out.deviceIndex = selectedDevIndex_;
+        out.label = selectedLabel_;
+        out.mindVisionIndex = selectedMvCameraIndex_;
+        out.mindVisionConfigPath = lastMindVisionConfigPath_;
+        out.cameraScriptPath = lastCameraScriptPath_;
+        out.mockFrameDir = mockFrameDir_;
+        out.mockIntervalMs = mockIntervalMs_;
+        out.mockLoop = mockLoop_;
+        out.configured = isCameraConfigured();
+        return out;
     }
 
     void AppBackend::setHardwareCameraSelection(int interfaceIndex, int deviceIndex, const std::string &label)
@@ -780,7 +817,13 @@ namespace backend
             captureService_->stop();
         }
         SPDLOG_INFO("Applying camera script to {} from {}", selectedLabel_, path);
-        return cameraControlService_->applyScriptToDevice(selectedIfIndex_, selectedDevIndex_, path, errorOut);
+        const bool ok =
+            cameraControlService_->applyScriptToDevice(selectedIfIndex_, selectedDevIndex_, path, errorOut);
+        if (ok)
+        {
+            lastCameraScriptPath_ = path;
+        }
+        return ok;
     }
 
     bool AppBackend::applyMindVisionConfigFromFile(const std::string &path, std::string *errorOut)

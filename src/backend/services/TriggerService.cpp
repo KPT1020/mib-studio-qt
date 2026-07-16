@@ -7,7 +7,45 @@ namespace backend::services {
 
 TriggerService::TriggerService() = default;
 
-TriggerService::~TriggerService() { stop(); }
+TriggerService::~TriggerService() {
+    stopPeriodicTest();
+    stop();
+}
+
+void TriggerService::startPeriodicTest(int intervalMs) {
+    if (intervalMs < 1) intervalMs = 1;
+    periodicIntervalMs_.store(intervalMs, std::memory_order_relaxed);
+    if (periodicRunning_.load()) return; // interval updated above; thread picks it up
+    periodicRunning_.store(true);
+    periodicThread_ = std::thread(&TriggerService::periodicLoop, this);
+    SPDLOG_INFO("TriggerService periodic test started ({} ms)", intervalMs);
+}
+
+void TriggerService::stopPeriodicTest() {
+    if (!periodicRunning_.load()) return;
+    // Same lost-notify guard as stop(): flip the flag under the wait mutex.
+    {
+        std::lock_guard<std::mutex> lk(periodicMutex_);
+        periodicRunning_.store(false);
+    }
+    periodicCv_.notify_all();
+    if (periodicThread_.joinable()) periodicThread_.join();
+    SPDLOG_INFO("TriggerService periodic test stopped");
+}
+
+void TriggerService::periodicLoop() {
+    while (periodicRunning_.load()) {
+        {
+            std::unique_lock<std::mutex> lk(periodicMutex_);
+            periodicCv_.wait_for(
+                lk,
+                std::chrono::milliseconds(periodicIntervalMs_.load(std::memory_order_relaxed)),
+                [this] { return !periodicRunning_.load(); });
+        }
+        if (!periodicRunning_.load()) break;
+        manualPulse();
+    }
+}
 
 void TriggerService::start() {
     if (running_.load()) return;
@@ -17,6 +55,9 @@ void TriggerService::start() {
 }
 
 void TriggerService::stop() {
+    // The periodic test generator feeds this service; stop it first so no
+    // synthetic pulses arrive during (or after) teardown.
+    stopPeriodicTest();
     if (!running_.load()) return;
     // Clear running_ while holding triggerMutex_ (the mutex the trigger thread
     // holds when evaluating its wait predicate) before notifying. Storing it

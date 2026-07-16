@@ -36,12 +36,67 @@ Rust owns an opaque `BackendBridge` (`UniquePtr`) that composes an `AppBackend`
   `apply_processing` (realtime enable + pixel→micron). Each returns a flattened
   `BridgeCommandResult { ok, command, message }`. No exceptions cross the
   boundary — the shim catches any C++ exception and returns `ok=false`.
-- **Events (poll-drained queue):** `poll_events() -> Vec<BridgeEvent>`. The
-  facade emits `BackendEvent`s from **backend threads** (the background-capture
-  callback runs on the capture/processing thread). The shim's event sink does
-  the minimum on that thread — serialise to a typed-slot `BridgeEvent` and push
-  onto a mutex-guarded queue — then returns; Rust drains it. This is the
-  non-blocking-sink rule from ADR 0003.
+- **Events (poll-drained bounded queue):** `poll_events() -> Vec<BridgeEvent>`.
+  The facade emits `BackendEvent`s from **backend threads** (the
+  background-capture callback runs on the capture/processing thread). The
+  shim's event sink does the minimum on that thread — serialise to a
+  typed-slot `BridgeEvent` and push onto a mutex-guarded queue — then returns;
+  Rust drains it. This is the non-blocking-sink rule from ADR 0003. Since v4
+  the queue is **bounded drop-oldest** (default 4096, `MIB_BRIDGE_MAX_QUEUE`
+  override, floor 4): a stalled poller coalesces to the newest state, and the
+  loss is observable — the next poll batch starts with a synthetic
+  `QueueOverflow` event (u0 dropped-since-last-poll, u1 total) and
+  `queue_overflow_total()` exposes the counter (ADR 0004).
+- **Operation state (v4, ADR 0004):** long-running actions are tracked
+  operations. `BackendFacade::beginOperation/reportOperationProgress/
+  finishOperation` emit `OperationStatus` events (u0 id, u1 kind, u2 state,
+  u3/u4 progress/total); command results carry a non-zero `operation_id`;
+  `cancel_operation(id)` requests cancellation and fails safely for
+  unknown/finished IDs; `shutdown()` cancels all active operations first.
+  RecordingLoad is the first tracked operation; BE-4/BE-6 build on this.
+- **Autofocus / nanopositioner (v11, BE-8):** `autofocus_connect/disconnect/
+  set_enabled/jog/set_config`, `fetch_autofocus_status` (explicit ring-ratio
+  freshness/age), `fetch_autofocus_config` (plain-value round-trip). Linux
+  builds the platform stub; connect fails structurally without the Coremor
+  SDK.
+- **Syringe pumps (v10, BE-7):** flat `pump_*` commands (connect/disconnect/
+  flow rate/direction/start/stop/purge/syringe volume/poll) with structured
+  validation + COM-port conflict rules, `fetch_pump_status(pump)` snapshots
+  for both identities, and `pump_scan_addresses` as a tracked `PumpScan`
+  operation (addresses in the Completed event's text).
+- **Paged HDF5 review + export jobs (v9, BE-6):** `fetch_review_metadata`,
+  `fetch_review_metrics_page` (bounded, metadata-only cache),
+  `fetch_review_image(dataset, index)` (contract `review_image_datasets`,
+  hyperslab reads), `review_export_csv` (tracked Export operation on its own
+  read-only reader; Qt-parity CSV; partial outputs cleaned on
+  cancel/failure). RecordingLoad replaces an open file and is rejected during
+  an active experiment.
+- **Processing config/ROI/background/core (v8, BE-3):**
+  `fetch/apply_processing_config_json` (lossless document, merge semantics,
+  monotonic `config_version`), `set_processing_roi`,
+  `fetch_background_image`/`set_background_image`/`clear_background_image`
+  (binary Mono8), `fetch_processing_core_status` (identity + admin pin).
+- **Camera discovery/selection (v7, BE-2):** `fetch_camera_discovery`
+  (EGrabber + MindVision + a synthetic mock entry; typed DTOs),
+  `fetch_camera_selection` (authoritative snapshot incl. mock params, applied
+  script/config paths, configured/running), `select_hardware_camera`,
+  `select_mindvision_camera`, `apply_camera_script`, `reset_hardware_camera`
+  (structured errors for invalid indices/paths/no-selection).
+- **Monitoring + trigger (v6, BE-5):** `monitoring_set_active` /
+  `monitoring_clear` / `fetch_monitoring_snapshot(max_rows)` (bounded,
+  metrics-only rows with stable `(frame_index, object_id)` identity; evictions
+  observable as appended − held) and `trigger_set_pulse_duration` /
+  `trigger_manual_pulse` / `trigger_periodic_start/stop` /
+  `fetch_trigger_status` over `TriggerService` (mock camera emulates the
+  trigger output line for headless tests).
+- **Experiment lifecycle (v5, BE-4):** `experiment_start(path)` /
+  `experiment_stop` / `experiment_cancel` / `fetch_experiment_status` over the
+  backend-owned `backend::ExperimentCoordinator` state machine (see
+  [[AppBackend]]): atomic preconditions, periodic + final flush on a worker
+  thread, metadata/provenance only after data flush, fatal-save recovery.
+  `ExperimentStatus` events (kind 8) push transitions; the running experiment
+  is a tracked operation. Camera stop is rejected while an experiment is
+  active (Qt parity).
 - **Frame pull:** `fetch_latest_frame() -> BridgeFrame` (metadata + one owned
   byte copy out of the playback store), and `fetch_frame_by_index(index)` for
   review scrubbing. Frames are **pulled on demand, never pushed** through the
@@ -58,16 +113,31 @@ Rust owns an opaque `BackendBridge` (`UniquePtr`) that composes an `AppBackend`
 Rather than mirror every `BackendEvent` variant field, events flatten into a
 small pool of typed slots (`u0..u5`, `f0..f2`, `b0..b1`, `text`) whose meaning
 depends on `kind` (`FrameReady` / `CameraStatus` / `RecordingStatus` /
-`ProcessingResult` / `PlaybackPosition` / `BackendError`). The per-kind mapping
-is documented in `event_to_bridge` in `shim.cpp` and is part of the versioned
-contract — new fields append slots, never repurpose them.
+`ProcessingResult` / `PlaybackPosition` / `BackendError` / `OperationStatus` /
+`QueueOverflow`). The per-kind mapping is documented in `toBridgeEvent` in
+`shim.cpp` and is part of the versioned contract — new fields append slots,
+never repurpose them.
 
 ## Versioned contract + test
 
-The command/event set is a versioned schema: `bridge_abi_version()` returns `3`
+Since v4 the identities live in one machine-checked source of truth:
+`crates/mib-bridge/contract/bridge-contract.json` (ADR 0004). C++ pins to it
+via static_asserts in `shim.cpp`, Rust via `rust_enums_match_contract_json`,
+TypeScript via the generated `desktop/src/bridgeContract.ts`
+(`scripts/gen_bridge_contract.py --check` is a desktop-CI drift gate).
+
+The command/event set is a versioned schema: `bridge_abi_version()` returns `11`
 (v2 added the review commands — `load_recording`, `playback_seek_index`,
 `fetch_frame_by_index`; v3 added the processing commands — `apply_processing`,
-`fetch_processing_stats` — all additive over the v1 live-capture set); additive
+`fetch_processing_stats`; v4 added operation state, `cancel_operation`,
+`queue_overflow_total`, the bounded queue, and the extended error sources;
+v5 added the experiment lifecycle (BE-4); v6 added monitoring snapshots and
+the sorter trigger (BE-5); v7 added camera discovery/selection (BE-2); v8
+added the processing-config round-trip, ROI/background, and core status
+(BE-3); v9 added paged HDF5 review and export jobs (BE-6); v10 added the
+syringe-pump surface (BE-7); v11 added the autofocus/nanopositioner surface
+(BE-8) —
+all additive over the v1 live-capture set); additive
 changes bump it. `tests/contract.rs` is the boundary gate and regression guard:
 `lifecycle_produces_status_and_frame_events` drives
 init → configure mock camera → start → poll `fetch_latest_frame` (asserts the

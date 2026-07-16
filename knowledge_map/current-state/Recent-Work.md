@@ -5,6 +5,119 @@
 
 ## Features shipped
 
+- **Qt → React/Tauri migration: BE-9 — Tauri platform services (Linux
+  subset)** (2026-07-16, epic #246, issue #279) — New
+  `desktop/src-tauri/src/platform.rs` (stable app paths, atomic persisted
+  shell preferences, webview log sink into the app log dir) and
+  `updater.rs` (update-manifest SHA-256 verification that fails closed, unit
+  tested). Opener actions are capability-scoped (`https://**` +
+  reveal-in-dir only). Shell: working Open Data Folder / Documentation menu
+  actions, preferences-backed sidebar persistence, log mirroring. Windows
+  packaging/updater/Sentry/QSettings-migration remain open on #279.
+  Details: `knowledge_map/task/2026-07-16-tauri-platform-services.md`.
+
+- **Qt → React/Tauri migration: BE-8 — autofocus/nanopositioner bridge**
+  (2026-07-16, epic #246, issue #278) — Bridge ABI **v11**: facade
+  `AutofocusCommand` surface (connect/disconnect/enable/jog/config) with
+  structured validation, the pump↔autofocus COM-port conflict rule, safe
+  disable-before-disconnect, a full plain-value `Config` round-trip (no
+  QSettings), and a status pull with **explicit focus-metric freshness**
+  (ring-ratio age) so stale metrics are observable. Sidebar now shows live
+  autofocus state. The stub-transport sweep test and real closed-loop
+  acceptance remain open on #278 (Coremor SDK is Windows-only; Linux builds
+  the platform stub). Details:
+  `knowledge_map/task/2026-07-16-autofocus-bridge.md`.
+
+- **Qt → React/Tauri migration: BE-7 — syringe-pump commands/status bridge**
+  (2026-07-16, epic #246, issue #277) — Bridge ABI **v10**: facade
+  `PumpCommand` surface + authoritative per-pump snapshots for the Sample and
+  Sheath dLSP pumps over the Qt-free `ISerialPort` seam, with structured
+  parameter validation, serial-port conflict rules (other pump / autofocus
+  controller), safe stop-on-disconnect, and the Modbus address scan running
+  as a BE-1 tracked operation. Fake-Modbus facade e2e in CTest
+  (`backend.pump_bridge_facade`); real dLSP hardware acceptance stays open on
+  #277. Details: `knowledge_map/task/2026-07-16-syringe-pump-bridge.md`.
+
+- **Qt → React/Tauri migration: BE-6 — paged HDF5 review + export jobs**
+  (2026-07-16, epic #246, issue #276) — Bridge ABI **v9**: review metadata
+  (mode/counts/ROI/provenance/dataset capabilities), bounded metrics pages
+  from a metadata-only cache, single image/mask hyperslab pulls, and a
+  cancellable Qt-parity metrics CSV export job (new Qt-free
+  `backend::review::writeMetricsCsv`) running as a BE-1 tracked operation on
+  its own read-only reader with partial-output cleanup. RecordingLoad now
+  replaces the open file and is rejected during an active experiment. Shell
+  Review tab gains real Valid/Invalid Frames scrubbers, a paged metrics
+  table, and the export action. Batch/reanalysis jobs remain open on #276.
+  Details: `knowledge_map/task/2026-07-16-hdf5-review-bridge.md`.
+
+- **Qt → React/Tauri migration: BE-3 — processing config round-trip,
+  ROI/background, core identity** (2026-07-16, epic #246, issue #273) —
+  Bridge ABI **v8**: lossless config document pull/merge-apply (new Qt-free
+  `backend::processing::config_json` serializer matching the config.json
+  `image_processing` schema; monotonic `config_version` for change
+  detection), ROI set/get, binary background image get/set/clear (+ Tauri
+  "set from current frame"), and processing-core identity/pin status.
+  Profiles + config.json file load/save/watch remain open on #273 (need
+  BE-9 path services). Details:
+  `knowledge_map/task/2026-07-16-processing-config-bridge.md`.
+
+- **Qt → React/Tauri migration: BE-2 — camera discovery/selection/status
+  bridge** (2026-07-16, epic #246, issue #272) — Bridge ABI **v7**: typed
+  discovery (`fetch_camera_discovery` over `CameraControlService`, plus a
+  synthetic mock entry for headless testing), an authoritative selected-device
+  snapshot on `AppBackend` (`cameraSelection()` — mode/indices/labels/config +
+  script paths/mock params, survives capture restarts), flat exports for
+  hardware/MindVision selection, camera-script apply, and hardware reset, with
+  structured errors for invalid indices/paths. The shell's Connect tab lists
+  real devices with Refresh/Connect. Windows hardware acceptance remains open
+  on #272. Details: `knowledge_map/task/2026-07-16-camera-discovery-bridge.md`.
+
+- **Qt → React/Tauri migration: BE-5 — bounded monitoring snapshots + sorter
+  trigger contracts** (2026-07-16, epic #246, issue #275) — Bridge ABI **v6**:
+  monitoring enable/disable/clear commands (visibility-gated accumulation),
+  a bounded metrics-only snapshot pull with stable `(frame, object)` IDs and
+  observable ring evictions, and trigger commands/status (pulse duration,
+  manual pulse, periodic test via a new `TriggerService` generator thread).
+  `MockCamera` gained trigger-output emulation so the chain is
+  headless-testable. Details:
+  `knowledge_map/task/2026-07-16-monitoring-trigger-bridge.md`.
+
+- **Qt → React/Tauri migration: BE-4 — backend-owned experiment coordinator**
+  (2026-07-16, epic #246, issue #274) — New `backend::ExperimentCoordinator`
+  state machine owns experiment preconditions, HDF5 setup, the multi-image
+  inline-mode override, periodic + final flush, write-queue drain ordering,
+  metadata/provenance-after-data-flush, fatal-save recovery, and idempotent
+  shutdown — orchestration formerly in Qt `MainWindow`/`ExperimentController`.
+  Facade `ExperimentCommand{Start,Stop,Cancel,Status}` + `ExperimentStatus`
+  events + status pull; experiments are BE-1 tracked operations. Exact
+  invalid-flushed accounting added to `ProcessingService`. Bridge ABI **v5**;
+  Tauri/TS wired; shell Experiment controls now drive the real backend.
+  Tests: `e2e.experiment_coordinator` (CTest) +
+  `experiment_lifecycle_end_to_end` (cargo). Details:
+  `knowledge_map/task/2026-07-16-experiment-coordinator-bridge.md`.
+
+- **Qt → React/Tauri migration: BE-1 — bridge contract source of truth,
+  operation state, bounded event queue** (2026-07-16, epic #246, issue #271,
+  ADR 0004) — `crates/mib-bridge/contract/bridge-contract.json` is now the
+  machine-checked contract (C++ static_asserts, Rust JSON test, generated
+  `desktop/src/bridgeContract.ts` + CI drift gate). `BackendFacade` tracks
+  long-running actions as operations (IDs, Started/Progress/terminal events,
+  cancel flags, shutdown-cancels-all); the shim event queue is bounded
+  drop-oldest with an observable `QueueOverflow` marker; error sources extended
+  for the remaining workflows. Bridge ABI **v4** (additive). Details:
+  `knowledge_map/task/2026-07-16-bridge-contract-operation-state.md`.
+
+- **Qt → React/Tauri migration: UI-1 — operator shell parity with the Qt UI**
+  (2026-07-16, epic #246, issue #266) — Replaced the developer-oriented
+  Phase 3/4 form in `desktop/src/App.tsx` with the Qt operator layout: menu
+  row, collapsible telemetry sidebar, Connect / Overview / Experiment / Review
+  tabs (Start/Stop Camera in the header), nested Preview / Monitoring and
+  config tabs, Review frame/table split, and a metrics status bar. All bridge
+  schema-v3 actions stay wired; un-bridged controls are visible but disabled
+  with tooltips naming the blocking backend issue (BE-2…BE-9, #272–#279).
+  New `desktop/src/App.css`. Details:
+  `knowledge_map/task/2026-07-16-react-tauri-qt-ui-parity.md`.
+
 - **Qt → React/Tauri migration: Phase 4 slice 2 — processing settings + stats
   overlay** (2026-07-15, epic #246) — Added a `BackendFacade::fetchProcessingStats`
   const pull (fps + pixel→micron over `ProcessingService`) and exposed bridge

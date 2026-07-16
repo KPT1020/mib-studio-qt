@@ -21,6 +21,9 @@ cxx-build = "1"
 # process-global state (spdlog, HDF5, OpenCV). cargo runs tests in parallel by
 # default, so two backends racing in one process can SIGSEGV — serialize them.
 serial_test = "3"
+# Parses contract/bridge-contract.json — the single source of truth the Rust
+# enums are asserted against (BE-1, ADR 0004).
+serde_json = "1"
 
 # The bridge links the static mib_backend / mib_processing archives, which pull
 # in OpenCV / HDF5 / SQLite / spdlog. Those are built by CMake (see build.rs).

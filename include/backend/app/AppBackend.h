@@ -103,6 +103,32 @@ namespace backend
         // Check if a camera is configured (either hardware or mock)
         bool isCameraConfigured() const;
 
+        // Authoritative selected-device snapshot (BE-2, #272): which source is
+        // selected, its identity/labels/indices, applied config/script paths,
+        // and the mock parameters. Values survive capture start/stop.
+        struct CameraSelectionSnapshot
+        {
+            enum class Mode
+            {
+                None,
+                Mock,
+                Hardware,
+                MindVision,
+            };
+            Mode mode{Mode::None};
+            int interfaceIndex{-1};
+            int deviceIndex{-1};
+            std::string label;
+            int mindVisionIndex{-1};
+            std::string mindVisionConfigPath;
+            std::string cameraScriptPath;
+            std::string mockFrameDir;
+            int mockIntervalMs{0};
+            bool mockLoop{true};
+            bool configured{false};
+        };
+        CameraSelectionSnapshot cameraSelection() const;
+
         // Frame recording mode: record non-empty frames directly to HDF5 (images + metadata only, no contour processing)
         // Returns false if recording cannot start (e.g., capture not running, file error)
         bool startFrameRecording(const std::string& hdf5FilePath);
@@ -153,6 +179,12 @@ namespace backend
         int selectedMvCameraIndex_{-1};
         std::string lastMindVisionConfigPath_;
         bool mockCameraConfigured_{false};
+        // Selection-snapshot extras (BE-2): last applied camera script and the
+        // active mock parameters.
+        std::string lastCameraScriptPath_;
+        std::string mockFrameDir_;
+        int mockIntervalMs_{0};
+        bool mockLoop_{true};
 
         // Frame recording state
         std::unique_ptr<std::thread> frameRecordingThread_;

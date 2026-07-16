@@ -152,9 +152,13 @@ All gates in one struct. Notable fields:
   fixed 1000-frame capacity. **Gated** by `setMonitoringActive(bool)` (default
   off). When inactive, `appendRealtimeMonitoringFrame` returns immediately with
   no allocations. Wired to [[../frontend/ExperimentMonitoringTab]] show/hide —
-  the rings only fill while that tab is visible. Stored frames share cv::Mat
-  refcounts with the processing loop (no per-frame clone); consumers are
-  read-only.
+  the rings only fill while that tab is visible (the Tauri shell gates the
+  same way via the bridge `monitoring_set_active` command, BE-5 #275). Stored
+  frames share cv::Mat refcounts with the processing loop (no per-frame
+  clone); consumers are read-only. Appended totals
+  (`getMonitoringValidAppended`/`getMonitoringInvalidAppended`, reset by
+  `clearMonitoringFrames` under the rings' lock) make ring evictions
+  observable (appended − held) for the bridge snapshot.
 - **Experiment accumulation** — bounded `std::deque<ProcessedFrame>` populated
   while `experimentActive_` is true. Deque gives O(1) `pop_front()` when the
   bounded backlog is full under high frame rates. `flushBufferedFrames(Hdf5Service&)`

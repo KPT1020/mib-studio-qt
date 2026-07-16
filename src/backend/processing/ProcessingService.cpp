@@ -473,6 +473,7 @@ void ProcessingService::startExperiment() {
     framesSinceLastFlush_.store(0);
     invalidFrameCounter_.store(0);
     totalValidFlushed_.store(0, std::memory_order_relaxed);
+    totalInvalidFlushed_.store(0, std::memory_order_relaxed);
     droppedValidFrames_.store(0, std::memory_order_relaxed);
     droppedInvalidFrames_.store(0, std::memory_order_relaxed);
     lastDropLogUs_.store(0, std::memory_order_relaxed);
@@ -532,9 +533,13 @@ std::vector<ProcessedFrame> ProcessingService::getMonitoringInvalidFrames() cons
 }
 
 void ProcessingService::clearMonitoringFrames() {
+    // Clear is atomic from the consumer's perspective: buffers and appended
+    // totals reset under the same lock the reader snapshot takes (BE-5).
     std::scoped_lock lk(monitoringFramesMutex_);
     monitoringValidFrames_.clear();
     monitoringInvalidFrames_.clear();
+    monitoringValidAppended_.store(0, std::memory_order_relaxed);
+    monitoringInvalidAppended_.store(0, std::memory_order_relaxed);
 }
 
 void ProcessingService::setMonitoringActive(bool active) {
@@ -1398,6 +1403,10 @@ size_t ProcessingService::flushBufferedFrames(class Hdf5Service& hdf5) {
                 totalValidFlushed_.fetch_add(static_cast<uint64_t>(b.valid.size()),
                                              std::memory_order_relaxed);
             }
+            if (!b.invalid.empty()) {
+                totalInvalidFlushed_.fetch_add(static_cast<uint64_t>(b.invalid.size()),
+                                               std::memory_order_relaxed);
+            }
             return true;
         };
         auto onError = [this](const std::string& msg) {
@@ -1605,8 +1614,10 @@ void ProcessingService::appendRealtimeMonitoringFrame(uint64_t index, uint64_t t
 
     std::scoped_lock monitoringLk(monitoringFramesMutex_);
     if (validation.isValid) {
+        monitoringValidAppended_.fetch_add(1, std::memory_order_relaxed);
         monitoringValidFrames_.push_back(std::move(monitoringFrame));
     } else {
+        monitoringInvalidAppended_.fetch_add(1, std::memory_order_relaxed);
         monitoringInvalidFrames_.push_back(std::move(monitoringFrame));
     }
 }
