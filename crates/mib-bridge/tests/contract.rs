@@ -51,8 +51,9 @@ fn drain_until<F: Fn(&ffi::BridgeEvent) -> bool>(
 fn abi_version_is_stable() {
     // The command/event schema is versioned (ADR 0003). v2 added the review
     // commands; v3 the processing commands; v4 operation state, the bounded
-    // event queue, and the extended error sources (ADR 0004).
-    assert_eq!(ffi::bridge_abi_version(), 4);
+    // event queue, and the extended error sources (ADR 0004); v5 the
+    // experiment lifecycle (BE-4).
+    assert_eq!(ffi::bridge_abi_version(), 5);
 }
 
 // The Rust enum values must match contract/bridge-contract.json — the single
@@ -79,6 +80,7 @@ fn rust_enums_match_contract_json() {
         ("BackendError", BridgeEventKind::BackendError),
         ("OperationStatus", BridgeEventKind::OperationStatus),
         ("QueueOverflow", BridgeEventKind::QueueOverflow),
+        ("ExperimentStatus", BridgeEventKind::ExperimentStatus),
     ];
     assert_eq!(kinds.len(), expected.len(), "event kind count drifted");
     for (name, kind) in expected {
@@ -208,6 +210,105 @@ fn recording_load_emits_operation_lifecycle() {
     let _ = std::fs::remove_dir_all(&frame_dir);
     let _ = std::fs::remove_dir_all(&data_dir);
     let _ = std::fs::remove_file(&rec_path);
+}
+
+// Mock E2E for the experiment lifecycle (BE-4): preconditions, start →
+// accumulate → stop → the finalized HDF5 reopens, and the experiment's
+// operation lifecycle completes.
+#[test]
+#[serial]
+fn experiment_lifecycle_end_to_end() {
+    let frame_dir = make_frame_dir();
+    let data_dir = std::env::temp_dir().join(format!("mib_bridge_exp_data_{}", std::process::id()));
+    let out_path = std::env::temp_dir().join(format!("mib_bridge_exp_{}.h5", std::process::id()));
+
+    let mut bridge = ffi::new_backend_bridge();
+    assert!(bridge.pin_mut().initialize(&data_dir.to_string_lossy()));
+    assert!(bridge
+        .pin_mut()
+        .configure_mock_camera(&frame_dir.to_string_lossy(), 5, true)
+        .ok);
+
+    // Precondition: camera must be running (Qt-parity failure message).
+    let early = bridge.pin_mut().experiment_start(&out_path.to_string_lossy());
+    assert!(!early.ok, "experiment started without a running camera");
+    assert!(
+        early.message.contains("Camera must be running"),
+        "unexpected precondition message: {}",
+        early.message
+    );
+
+    assert!(bridge.pin_mut().apply_processing(true, 1.0).ok);
+    assert!(bridge.pin_mut().start_capture().ok);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && !bridge.pin_mut().fetch_latest_frame().valid {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    let start = bridge.pin_mut().experiment_start(&out_path.to_string_lossy());
+    assert!(start.ok, "experiment_start failed: {}", start.message);
+    assert!(start.operation_id != 0, "experiment has no operation id");
+
+    // Duplicate start must fail without desynchronizing state.
+    assert!(!bridge.pin_mut().experiment_start(&out_path.to_string_lossy()).ok);
+
+    // The camera cannot stop underneath an active experiment (Qt parity).
+    assert!(!bridge.pin_mut().stop_capture().ok);
+
+    let status = bridge.pin_mut().fetch_experiment_status();
+    assert!(status.valid);
+    assert_eq!(status.state, 2, "experiment should be Active");
+    assert!(status.output_path.ends_with(".h5"));
+
+    std::thread::sleep(Duration::from_millis(400)); // let frames accumulate
+
+    let stop = bridge.pin_mut().experiment_stop();
+    assert!(stop.ok, "experiment_stop failed: {}", stop.message);
+
+    // The stop finalizes asynchronously; wait for the terminal Idle status.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut finalized = false;
+    while Instant::now() < deadline {
+        let s = bridge.pin_mut().fetch_experiment_status();
+        if s.valid && s.state == 0 {
+            finalized = true;
+            break;
+        }
+        assert_ne!(s.state, 4, "experiment failed: {}", s.message);
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(finalized, "experiment did not finalize within 10s");
+
+    // Terminal events: an ExperimentStatus(Idle) and the operation Completed.
+    let events = bridge.pin_mut().poll_events();
+    assert!(
+        events
+            .iter()
+            .any(|e| e.kind == BridgeEventKind::ExperimentStatus && e.u0 == 0),
+        "no terminal ExperimentStatus event"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| e.kind == BridgeEventKind::OperationStatus
+                && e.u0 == start.operation_id
+                && e.u2 == 2),
+        "no Completed operation event for the experiment"
+    );
+
+    // Double stop fails safely.
+    assert!(!bridge.pin_mut().experiment_stop().ok);
+
+    // The finalized file reopens through the review path.
+    assert!(bridge.pin_mut().stop_capture().ok);
+    let status = bridge.pin_mut().fetch_experiment_status();
+    let load = bridge.pin_mut().load_recording(&status.output_path);
+    assert!(load.ok, "finalized experiment file failed to load: {}", load.message);
+
+    bridge.pin_mut().shutdown();
+    let _ = std::fs::remove_dir_all(&frame_dir);
+    let _ = std::fs::remove_dir_all(&data_dir);
+    let _ = std::fs::remove_file(&status.output_path);
 }
 
 // The shim event queue is bounded drop-oldest and overflow is observable

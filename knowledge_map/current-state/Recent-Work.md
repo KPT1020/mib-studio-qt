@@ -5,6 +5,20 @@
 
 ## Features shipped
 
+- **Qt → React/Tauri migration: BE-4 — backend-owned experiment coordinator**
+  (2026-07-16, epic #246, issue #274) — New `backend::ExperimentCoordinator`
+  state machine owns experiment preconditions, HDF5 setup, the multi-image
+  inline-mode override, periodic + final flush, write-queue drain ordering,
+  metadata/provenance-after-data-flush, fatal-save recovery, and idempotent
+  shutdown — orchestration formerly in Qt `MainWindow`/`ExperimentController`.
+  Facade `ExperimentCommand{Start,Stop,Cancel,Status}` + `ExperimentStatus`
+  events + status pull; experiments are BE-1 tracked operations. Exact
+  invalid-flushed accounting added to `ProcessingService`. Bridge ABI **v5**;
+  Tauri/TS wired; shell Experiment controls now drive the real backend.
+  Tests: `e2e.experiment_coordinator` (CTest) +
+  `experiment_lifecycle_end_to_end` (cargo). Details:
+  `knowledge_map/task/2026-07-16-experiment-coordinator-bridge.md`.
+
 - **Qt → React/Tauri migration: BE-1 — bridge contract source of truth,
   operation state, bounded event queue** (2026-07-16, epic #246, issue #271,
   ADR 0004) — `crates/mib-bridge/contract/bridge-contract.json` is now the

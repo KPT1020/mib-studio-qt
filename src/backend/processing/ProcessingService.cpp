@@ -473,6 +473,7 @@ void ProcessingService::startExperiment() {
     framesSinceLastFlush_.store(0);
     invalidFrameCounter_.store(0);
     totalValidFlushed_.store(0, std::memory_order_relaxed);
+    totalInvalidFlushed_.store(0, std::memory_order_relaxed);
     droppedValidFrames_.store(0, std::memory_order_relaxed);
     droppedInvalidFrames_.store(0, std::memory_order_relaxed);
     lastDropLogUs_.store(0, std::memory_order_relaxed);
@@ -1397,6 +1398,10 @@ size_t ProcessingService::flushBufferedFrames(class Hdf5Service& hdf5) {
             if (!b.valid.empty()) {
                 totalValidFlushed_.fetch_add(static_cast<uint64_t>(b.valid.size()),
                                              std::memory_order_relaxed);
+            }
+            if (!b.invalid.empty()) {
+                totalInvalidFlushed_.fetch_add(static_cast<uint64_t>(b.invalid.size()),
+                                               std::memory_order_relaxed);
             }
             return true;
         };

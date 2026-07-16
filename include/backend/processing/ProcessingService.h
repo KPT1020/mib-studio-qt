@@ -227,6 +227,7 @@ public:
     
     // Totals for current experiment
     uint64_t getTotalValidFlushed() const { return totalValidFlushed_.load(std::memory_order_relaxed); }
+    uint64_t getTotalInvalidFlushed() const { return totalInvalidFlushed_.load(std::memory_order_relaxed); }
     uint64_t getDroppedValidFrames() const { return droppedValidFrames_.load(std::memory_order_relaxed); }
     uint64_t getDroppedInvalidFrames() const { return droppedInvalidFrames_.load(std::memory_order_relaxed); }
     // Average algorithm processing time per frame over last 1s window (microseconds)
@@ -557,6 +558,7 @@ private:
     
     // Experiment totals
     std::atomic<uint64_t> totalValidFlushed_{0};
+    std::atomic<uint64_t> totalInvalidFlushed_{0};
     std::atomic<uint64_t> droppedValidFrames_{0};
     std::atomic<uint64_t> droppedInvalidFrames_{0};
     std::atomic<uint64_t> lastDropLogUs_{0};

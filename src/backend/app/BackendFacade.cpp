@@ -43,9 +43,13 @@ namespace backend::bridge
                 {
                     return BackendCommandType::PlaybackSeek;
                 }
-                else
+                else if constexpr (std::is_same_v<Command, OperationCommand>)
                 {
                     return BackendCommandType::Operation;
+                }
+                else
+                {
+                    return BackendCommandType::Experiment;
                 }
             }, command);
         }
@@ -94,6 +98,8 @@ namespace backend::bridge
                 return BackendErrorSource::Playback;
             case BackendCommandType::Operation:
                 return BackendErrorSource::Lifecycle;
+            case BackendCommandType::Experiment:
+                return BackendErrorSource::Experiment;
             }
             return BackendErrorSource::Lifecycle;
         }
@@ -132,6 +138,56 @@ namespace backend::bridge
         }
 
         initialized_ = true;
+
+        // Backend-owned experiment coordinator (BE-4): adapt its status stream
+        // into bridge events, tie the running experiment to a tracked
+        // operation, and funnel fatal save errors into experiment events plus
+        // a safe stop.
+        if (!experiment_)
+        {
+            experiment_ = std::make_unique<ExperimentCoordinator>(backend_);
+        }
+        experiment_->setStatusCallback([this](const ExperimentCoordinator::Status &s) {
+            ExperimentStatusEvent event;
+            event.state = s.state;
+            event.startTimeNs = s.startTimeNs;
+            event.endTimeNs = s.endTimeNs;
+            event.validBuffered = s.validBuffered;
+            event.invalidBuffered = s.invalidBuffered;
+            event.validSaved = s.validSaved;
+            event.invalidSaved = s.invalidSaved;
+            event.droppedValid = s.droppedValid;
+            event.droppedInvalid = s.droppedInvalid;
+            event.flushing = s.flushing;
+            event.cancelled = s.cancelled;
+            event.message = s.message;
+            emitEvent(event);
+
+            if (s.state == ExperimentCoordinator::State::Idle ||
+                s.state == ExperimentCoordinator::State::Failed)
+            {
+                if (const std::uint64_t opId = experimentOperationId_.exchange(0))
+                {
+                    finishOperation(opId,
+                                    s.state == ExperimentCoordinator::State::Failed
+                                        ? BackendOperationState::Failed
+                                        : (s.cancelled ? BackendOperationState::Cancelled
+                                                       : BackendOperationState::Completed),
+                                    s.message);
+                }
+            }
+        });
+        backend_.setFatalSaveErrorCallback([this](const std::string &message) {
+            // Fires on writer threads: emit + signal only, never join here.
+            emitEvent(BackendErrorEvent{BackendErrorSource::Experiment,
+                                        BackendCommandType::Experiment,
+                                        message});
+            if (experiment_)
+            {
+                experiment_->onFatalSaveError(message);
+            }
+        });
+
         emitEvent(makeCameraStatus(backend_.isCameraConfigured()
                                        ? CameraState::Configured
                                        : CameraState::Unconfigured));
@@ -145,8 +201,14 @@ namespace backend::bridge
             return;
         }
 
-        // Drain/cancel tracked operations first so their consumers see a
-        // terminal event before service teardown (BE-1 shutdown policy).
+        // Finish/abort an active experiment first (finalizes the HDF5 file so
+        // shutdown never corrupts it — BE-4), then drain/cancel the remaining
+        // tracked operations so their consumers see a terminal event before
+        // service teardown (BE-1 shutdown policy).
+        if (experiment_)
+        {
+            experiment_->shutdown();
+        }
         cancelAllOperations("Backend shutdown");
 
         backend_.stopFrameRecording();
@@ -239,9 +301,13 @@ namespace backend::bridge
             {
                 return handlePlaybackSeekCommand(typedCommand);
             }
-            else
+            else if constexpr (std::is_same_v<Command, OperationCommand>)
             {
                 return handleOperationCommand(typedCommand);
+            }
+            else
+            {
+                return handleExperimentCommand(typedCommand);
             }
         }, command);
     }
@@ -377,6 +443,16 @@ namespace backend::bridge
             emitEvent(makeCameraStatus(CameraState::Running));
             return {true, BackendCommandType::Camera, "Capture started"};
         case CameraCommandAction::StopCapture:
+            // Qt-parity precondition: the camera cannot stop underneath an
+            // active experiment — stop the experiment first (BE-4).
+            if (experiment_ && experiment_->isActive())
+            {
+                const std::string message =
+                    "Cannot stop camera while experiment is active. Please stop the experiment first.";
+                emitEvent(BackendErrorEvent{BackendErrorSource::Camera,
+                                            BackendCommandType::Camera, message});
+                return {false, BackendCommandType::Camera, message};
+            }
             backend_.capture().stop();
             emitEvent(makeCameraStatus(CameraState::Stopped));
             return {true, BackendCommandType::Camera, "Capture stopped"};
@@ -582,6 +658,67 @@ namespace backend::bridge
         return {false, BackendCommandType::Operation, "Unknown operation command"};
     }
 
+    BackendCommandResult BackendFacade::handleExperimentCommand(const ExperimentCommand &command)
+    {
+        if (!experiment_)
+        {
+            return {false, BackendCommandType::Experiment, "Experiment coordinator unavailable"};
+        }
+
+        switch (command.action)
+        {
+        case ExperimentCommandAction::Start:
+        {
+            std::string error;
+            if (!experiment_->start(command.outputPath, &error))
+            {
+                emitEvent(BackendErrorEvent{BackendErrorSource::Experiment,
+                                            BackendCommandType::Experiment, error});
+                return {false, BackendCommandType::Experiment, error};
+            }
+            const std::uint64_t opId =
+                beginOperation(BackendOperationKind::Experiment, nullptr, command.outputPath);
+            experimentOperationId_.store(opId);
+            return {true, BackendCommandType::Experiment, "Experiment started", opId};
+        }
+        case ExperimentCommandAction::Stop:
+        case ExperimentCommandAction::Cancel:
+        {
+            const bool cancel = command.action == ExperimentCommandAction::Cancel;
+            std::string error;
+            if (!experiment_->requestStop(cancel, &error))
+            {
+                return {false, BackendCommandType::Experiment, error};
+            }
+            return {true, BackendCommandType::Experiment,
+                    cancel ? "Experiment cancel requested" : "Experiment stop requested",
+                    experimentOperationId_.load()};
+        }
+        case ExperimentCommandAction::Status:
+        {
+            const auto s = experiment_->status();
+            ExperimentStatusEvent event;
+            event.state = s.state;
+            event.startTimeNs = s.startTimeNs;
+            event.endTimeNs = s.endTimeNs;
+            event.validBuffered = s.validBuffered;
+            event.invalidBuffered = s.invalidBuffered;
+            event.validSaved = s.validSaved;
+            event.invalidSaved = s.invalidSaved;
+            event.droppedValid = s.droppedValid;
+            event.droppedInvalid = s.droppedInvalid;
+            event.flushing = s.flushing;
+            event.cancelled = s.cancelled;
+            event.message = s.message;
+            emitEvent(event);
+            return {true, BackendCommandType::Experiment, "Experiment status emitted",
+                    experimentOperationId_.load()};
+        }
+        }
+
+        return {false, BackendCommandType::Experiment, "Unknown experiment command"};
+    }
+
     BackendCommandResult BackendFacade::handlePlaybackSeekCommand(const PlaybackSeekCommand &command)
     {
         auto &playback = backend_.playback();
@@ -635,6 +772,16 @@ namespace backend::bridge
         {
             sink(event);
         }
+    }
+
+    bool BackendFacade::fetchExperimentStatus(ExperimentCoordinator::Status &out) const
+    {
+        if (!initialized_ || !experiment_)
+        {
+            return false;
+        }
+        out = experiment_->status();
+        return true;
     }
 
     std::uint64_t BackendFacade::beginOperation(BackendOperationKind kind,

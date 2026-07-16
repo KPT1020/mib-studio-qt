@@ -3,7 +3,7 @@
 // Regenerate with: python3 scripts/gen_bridge_contract.py
 // CI verifies this file with: python3 scripts/gen_bridge_contract.py --check
 
-export const BRIDGE_ABI_VERSION = 4;
+export const BRIDGE_ABI_VERSION = 5;
 
 export const EVENT_KINDS = {
   FrameReady: 0,
@@ -14,6 +14,7 @@ export const EVENT_KINDS = {
   BackendError: 5,
   OperationStatus: 6,
   QueueOverflow: 7,
+  ExperimentStatus: 8,
 } as const;
 
 export const COMMAND_TYPES = {
@@ -23,6 +24,15 @@ export const COMMAND_TYPES = {
   RecordingLoad: 3,
   PlaybackSeek: 4,
   Operation: 5,
+  Experiment: 6,
+} as const;
+
+export const EXPERIMENT_STATES = {
+  Idle: 0,
+  Starting: 1,
+  Active: 2,
+  Stopping: 3,
+  Failed: 4,
 } as const;
 
 export const ERROR_SOURCES = {
@@ -85,6 +95,7 @@ export const EVENT_KIND_NAMES: Readonly<Record<number, string>> = {
   5: "BackendError",
   6: "OperationStatus",
   7: "QueueOverflow",
+  8: "ExperimentStatus",
 };
 
 export type BridgeEventKindName = keyof typeof EVENT_KINDS;

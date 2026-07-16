@@ -44,6 +44,12 @@ pub mod ffi {
         /// Synthetic bounded-queue marker (schema v4): u0 events dropped since
         /// the last poll, u1 dropped total. Emitted first in a poll batch.
         QueueOverflow = 7,
+        /// Experiment lifecycle snapshot (schema v5): u0 state, u1
+        /// validBuffered, u2 invalidBuffered, u3 validSaved, u4 invalidSaved,
+        /// u5 startTimeNs; f0 endTimeNs, f1 droppedValid, f2 droppedInvalid;
+        /// b0 flushing, b1 cancelled; text message. Full status (incl. output
+        /// path) via `fetch_experiment_status`.
+        ExperimentStatus = 8,
     }
 
     /// A flattened `BackendEvent`. Rather than mirror every variant field, the
@@ -81,6 +87,27 @@ pub mod ffi {
         pub valid_fps1s: f64,
         pub invalid_fps1s: f64,
         pub pixel_to_micron: f64,
+    }
+
+    /// Pollable experiment lifecycle snapshot (schema v5, BE-4). `valid` is
+    /// false when the backend is not initialized.
+    #[derive(Debug, Clone, Default)]
+    pub struct BridgeExperimentStatus {
+        pub valid: bool,
+        /// Contract `experiment_states` value.
+        pub state: u32,
+        pub start_time_ns: u64,
+        pub end_time_ns: u64,
+        pub valid_buffered: u64,
+        pub invalid_buffered: u64,
+        pub valid_saved: u64,
+        pub invalid_saved: u64,
+        pub dropped_valid: u64,
+        pub dropped_invalid: u64,
+        pub flushing: bool,
+        pub cancelled: bool,
+        pub output_path: String,
+        pub message: String,
     }
 
     /// A frame pulled on demand: metadata plus a single owned copy of the pixel
@@ -153,6 +180,25 @@ pub mod ffi {
         /// safely (`ok == false`) for unknown or already-finished IDs.
         fn cancel_operation(self: Pin<&mut BackendBridge>, operation_id: u64)
             -> BridgeCommandResult;
+
+        /// Start an experiment (schema v5, BE-4): atomic precondition
+        /// validation (processing-core pin, camera running, HDF5 openable) and
+        /// backend-owned accumulation/flush. The result's `operation_id`
+        /// tracks the experiment's operation lifecycle.
+        fn experiment_start(self: Pin<&mut BackendBridge>, output_path: &str)
+            -> BridgeCommandResult;
+
+        /// Request an asynchronous experiment stop: final flush, metadata/
+        /// provenance write (only after data is flushed), close. Never blocks
+        /// on the flush.
+        fn experiment_stop(self: Pin<&mut BackendBridge>) -> BridgeCommandResult;
+
+        /// Like `experiment_stop`, but the terminal status is marked cancelled.
+        /// The HDF5 file is still finalized so it remains readable.
+        fn experiment_cancel(self: Pin<&mut BackendBridge>) -> BridgeCommandResult;
+
+        /// Pull the current experiment lifecycle snapshot (schema v5).
+        fn fetch_experiment_status(self: Pin<&mut BackendBridge>) -> BridgeExperimentStatus;
 
         /// Drain and return all events queued since the last poll. The queue is
         /// bounded drop-oldest (`MIB_BRIDGE_MAX_QUEUE`, default 4096); when

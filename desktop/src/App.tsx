@@ -4,10 +4,11 @@ import {
   bridge,
   mono8ToImageData,
   type BridgeEvent,
+  type ExperimentStatus,
   type FrameMeta,
   type ProcessingStats,
 } from "./bridge";
-import { BRIDGE_ABI_VERSION } from "./bridgeContract";
+import { BRIDGE_ABI_VERSION, EXPERIMENT_STATES } from "./bridgeContract";
 import "./App.css";
 
 const H5_FILTER = [{ name: "HDF5", extensions: ["h5"] }];
@@ -21,13 +22,31 @@ const PENDING = {
   roi: "ROI editing is not bridged yet — backend issue BE-3 (#273)",
   script: "Camera script/config apply is not bridged yet — BE-2 (#272) / BE-3 (#273)",
   config: "App config / profiles are not bridged yet — backend issue BE-3 (#273)",
-  experiment: "Experiment orchestration is not bridged yet — backend issue BE-4 (#274)",
+  saveBuffer: "Preview buffer save is not bridged yet — UI-3 (#268)",
   monitoring: "Monitoring data is not bridged yet — backend issue BE-5 (#275)",
   review: "HDF5 metadata/metrics/export are not bridged yet — backend issue BE-6 (#276)",
   autofocus: "Autofocus/nanopositioner control is not bridged yet — BE-8 (#278)",
   platform: "Platform/shell services are not migrated yet — BE-9 (#279)",
   background: "Background image control is not bridged yet — backend issue BE-3 (#273)",
 };
+
+const EXPERIMENT_STATE_NAMES: Record<number, string> = {
+  [EXPERIMENT_STATES.Idle]: "Inactive",
+  [EXPERIMENT_STATES.Starting]: "Starting",
+  [EXPERIMENT_STATES.Active]: "Active",
+  [EXPERIMENT_STATES.Stopping]: "Stopping",
+  [EXPERIMENT_STATES.Failed]: "Failed",
+};
+
+function formatRuntime(startNs: number, endNs: number): string {
+  if (!startNs) return "00:00:00";
+  const endMs = endNs > 0 ? endNs / 1e6 : Date.now();
+  const totalS = Math.max(0, Math.floor((endMs - startNs / 1e6) / 1000));
+  const h = String(Math.floor(totalS / 3600)).padStart(2, "0");
+  const m = String(Math.floor((totalS % 3600) / 60)).padStart(2, "0");
+  const s = String(totalS % 60).padStart(2, "0");
+  return `${h}:${m}:${s}`;
+}
 
 type MainTab = "connect" | "overview" | "experiment" | "review";
 
@@ -123,6 +142,9 @@ export default function App() {
   const [procEnabled, setProcEnabled] = useState(false);
   const [pixelToMicron, setPixelToMicron] = useState("1.0");
   const [stats, setStats] = useState<ProcessingStats | null>(null);
+
+  // Experiment (bridge schema v5, BE-4 — backend-owned lifecycle).
+  const [expStatus, setExpStatus] = useState<ExperimentStatus | null>(null);
 
   // Review.
   const [reviewPath, setReviewPath] = useState("");
@@ -229,6 +251,12 @@ export default function App() {
           if (e.u2 >= 3) append(`operation ${e.u0} ${e.u2 === 3 ? "failed" : e.u2 === 4 ? "cancelled" : "timed out"}: ${e.text}`);
         } else if (e.kind === "QueueOverflow") {
           append(`event queue overflow: ${e.u0} coalesced (total ${e.u1})`);
+        } else if (e.kind === "ExperimentStatus") {
+          // Transitions surface in the log; the full snapshot is pulled in the
+          // tick loop (fetch_experiment_status) to keep one source of truth.
+          if (e.u0 === EXPERIMENT_STATES.Failed) append(`experiment failed: ${e.text}`);
+          else if (e.text) append(`experiment: ${e.text}`);
+          void bridge.fetchExperimentStatus().then(setExpStatus).catch(() => {});
         }
         // Kinds this build does not know (additive, newer bridge) fall through
         // and are ignored — never fatal (ADR 0004).
@@ -246,6 +274,7 @@ export default function App() {
       const meta = await bridge.fetchFrame();
       await draw(meta, activeLiveCanvas());
       if (procEnabledRef.current) setStats(await bridge.fetchProcessingStats());
+      setExpStatus(await bridge.fetchExperimentStatus());
     } catch (e) {
       append(`tick error: ${e}`);
     }
@@ -349,6 +378,31 @@ export default function App() {
     }
   }, [procEnabled, pixelToMicron, append]);
 
+  // ---- Experiment lifecycle (backend-owned, BE-4) ----
+
+  const onStartExperiment = useCallback(async () => {
+    try {
+      const picked = await save({ title: "Save Experiment Data", filters: H5_FILTER, defaultPath: "experiment.h5" });
+      if (!picked) return;
+      const res = await bridge.experimentStart(picked);
+      if (!res.ok) return append(`experiment start failed: ${res.message}`);
+      append(`experiment started → ${picked}`);
+      setExpStatus(await bridge.fetchExperimentStatus());
+    } catch (e) {
+      append(`experiment start error: ${e}`);
+    }
+  }, [append]);
+
+  const onStopExperiment = useCallback(async () => {
+    try {
+      const res = await bridge.experimentStop();
+      if (!res.ok) return append(`experiment stop failed: ${res.message}`);
+      setExpStatus(await bridge.fetchExperimentStatus());
+    } catch (e) {
+      append(`experiment stop error: ${e}`);
+    }
+  }, [append]);
+
   // ---- Review ----
 
   const onScrub = useCallback(
@@ -396,6 +450,16 @@ export default function App() {
   const algoFps = stats?.valid ? stats.algo_fps1s : 0;
   const validFps = stats?.valid ? stats.valid_fps1s : 0;
   const invalidFps = stats?.valid ? stats.invalid_fps1s : 0;
+
+  const expState = expStatus?.valid ? expStatus.state : EXPERIMENT_STATES.Idle;
+  const expActive = expState === EXPERIMENT_STATES.Active || expState === EXPERIMENT_STATES.Stopping;
+  const startExperimentReason = !ready
+    ? "Backend is not initialized"
+    : !running
+      ? "Camera must be running before starting an experiment"
+      : expActive
+        ? "Experiment is already running"
+        : undefined;
 
   const startCameraReason = !ready
     ? "Backend is not initialized"
@@ -465,13 +529,21 @@ export default function App() {
             <h4>Autofocus</h4>
             <SideRow k="Ring width:" v="—" cls="dim" />
           </div>
-          <div className="side-section" title={PENDING.experiment}>
+          <div className="side-section">
             <h4>Experiment</h4>
-            <SideRow k="Status:" v="Not migrated" cls="dim" />
-            <SideRow k="Valid Buffered:" v="—" cls="dim" />
-            <SideRow k="Invalid Buffered:" v="—" cls="dim" />
-            <SideRow k="Flush Status:" v="—" cls="dim" />
-            <SideRow k="Runtime:" v="—" cls="dim" />
+            <SideRow
+              k="Status:"
+              v={EXPERIMENT_STATE_NAMES[expState] ?? "Inactive"}
+              cls={expActive ? "ok" : expState === EXPERIMENT_STATES.Failed ? "" : "dim"}
+            />
+            <SideRow k="Valid Buffered:" v={String(expStatus?.valid_buffered ?? 0)} />
+            <SideRow k="Invalid Buffered:" v={String(expStatus?.invalid_buffered ?? 0)} />
+            <SideRow k="Flush Status:" v={expStatus?.flushing ? "Flushing" : "Idle"} />
+            <SideRow k="Valid Images Saved:" v={String(expStatus?.valid_saved ?? 0)} />
+            <SideRow
+              k="Runtime:"
+              v={expActive ? formatRuntime(expStatus?.start_time_ns ?? 0, 0) : "00:00:00"}
+            />
           </div>
           <div className="side-section" title={PENDING.autofocus}>
             <h4>Nanopositioner Autofocus</h4>
@@ -510,7 +582,17 @@ export default function App() {
               <button onClick={onStartCamera} disabled={!!startCameraReason} title={startCameraReason}>
                 Start Camera
               </button>
-              <button onClick={onStopCamera} disabled={!running} title={running ? undefined : "Camera is not running"}>
+              <button
+                onClick={onStopCamera}
+                disabled={!running || expActive}
+                title={
+                  !running
+                    ? "Camera is not running"
+                    : expActive
+                      ? "Cannot stop camera while experiment is active. Please stop the experiment first."
+                      : undefined
+                }
+              >
                 Stop Camera
               </button>
             </div>
@@ -610,8 +692,16 @@ export default function App() {
                   </div>
                   <div className="right">
                     <span className="mono" title={PENDING.roi}>ROI: — (not bridged)</span>
-                    <button disabled title={PENDING.experiment}>Start Experiment</button>
-                    <button disabled title={PENDING.experiment}>Stop Experiment</button>
+                    <button onClick={onStartExperiment} disabled={!!startExperimentReason} title={startExperimentReason}>
+                      Start Experiment
+                    </button>
+                    <button
+                      onClick={onStopExperiment}
+                      disabled={expState !== EXPERIMENT_STATES.Active}
+                      title={expState === EXPERIMENT_STATES.Active ? undefined : "No experiment is currently running"}
+                    >
+                      Stop Experiment
+                    </button>
                   </div>
                 </div>
 
@@ -633,13 +723,13 @@ export default function App() {
                         <input type="checkbox" disabled /> Auto
                       </label>
                       <button disabled title={PENDING.roi}>Clear ROI</button>
-                      <button disabled title={PENDING.experiment}>Save Buffer</button>
+                      <button disabled title={PENDING.saveBuffer}>Save Buffer</button>
                       <button onClick={onToggleRecord} disabled={!running} title={running ? "Record raw frames to an HDF5 file" : "Camera is not running"}>
                         {recording ? "Stop Recording" : "Record"}
                       </button>
                       <button onClick={() => setFitWindow((f) => !f)}>{fitWindow ? "Fit: Window" : "Fit: 1:1"}</button>
                     </div>
-                    <input type="range" className="scrub" disabled title={PENDING.experiment} aria-label="Preview buffer scrub (not bridged)" />
+                    <input type="range" className="scrub" disabled title={PENDING.saveBuffer} aria-label="Preview buffer scrub (not bridged)" />
 
                     <div className="subtabs" style={{ marginTop: 8 }} role="tablist" aria-label="Configuration">
                       <button className={configTab === "app" ? "active" : ""} onClick={() => setConfigTab("app")}>
@@ -849,8 +939,9 @@ export default function App() {
         </button>
         <span className="metrics">
           Display={displayFps.toFixed(1)} fps | Algo={algoFps.toFixed(1)}/s | Valid={validFps.toFixed(1)}/s | Invalid=
-          {invalidFps.toFixed(1)}/s | Camera={running ? "running" : camStatus}, {dataRate.toFixed(1)} MB/s | Experiment: not
-          migrated
+          {invalidFps.toFixed(1)}/s | Camera={running ? "running" : camStatus}, {dataRate.toFixed(1)} MB/s | Experiment:{" "}
+          {(EXPERIMENT_STATE_NAMES[expState] ?? "Inactive").toLowerCase()}
+          {expActive ? ` (buffered ${(expStatus?.valid_buffered ?? 0) + (expStatus?.invalid_buffered ?? 0)})` : ""}
         </span>
       </footer>
       {showLog && (

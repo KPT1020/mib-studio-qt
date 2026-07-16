@@ -30,6 +30,25 @@ export interface ProcessingStats {
   pixel_to_micron: number;
 }
 
+/** Experiment lifecycle snapshot (bridge schema v5, BE-4). `state` is a
+ *  contract EXPERIMENT_STATES value. */
+export interface ExperimentStatus {
+  valid: boolean;
+  state: number;
+  start_time_ns: number;
+  end_time_ns: number;
+  valid_buffered: number;
+  invalid_buffered: number;
+  valid_saved: number;
+  invalid_saved: number;
+  dropped_valid: number;
+  dropped_invalid: number;
+  flushing: boolean;
+  cancelled: boolean;
+  output_path: string;
+  message: string;
+}
+
 export interface BridgeEvent {
   kind: string;
   u0: number; u1: number; u2: number; u3: number; u4: number; u5: number;
@@ -64,6 +83,13 @@ export const bridge = {
   cancelOperation: (operationId: number) =>
     invoke<CmdResult>("cancel_operation", { operationId }),
   queueOverflowTotal: () => invoke<number>("queue_overflow_total"),
+  // Experiment lifecycle (bridge schema v5, BE-4) — the backend owns
+  // preconditions, accumulation, flush, metadata ordering, and recovery.
+  experimentStart: (outputPath: string) =>
+    invoke<CmdResult>("experiment_start", { outputPath }),
+  experimentStop: () => invoke<CmdResult>("experiment_stop"),
+  experimentCancel: () => invoke<CmdResult>("experiment_cancel"),
+  fetchExperimentStatus: () => invoke<ExperimentStatus>("fetch_experiment_status"),
   // Binary IPC response — raw Mono8 bytes, never base64 (ADR 0003).
   frameBytes: async (): Promise<Uint8Array> => {
     const buf = await invoke<ArrayBuffer>("frame_bytes");

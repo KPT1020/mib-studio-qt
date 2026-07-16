@@ -28,7 +28,7 @@ namespace {
 // them breaks the build here instead of drifting silently.
 namespace bb = backend::bridge;
 
-static_assert(std::variant_size_v<bb::BackendEvent> == 7,
+static_assert(std::variant_size_v<bb::BackendEvent> == 8,
               "BackendEvent variant changed — update the bridge contract");
 static_assert(std::is_same_v<std::variant_alternative_t<0, bb::BackendEvent>, bb::FrameReadyEvent>);
 static_assert(std::is_same_v<std::variant_alternative_t<1, bb::BackendEvent>, bb::CameraStatusEvent>);
@@ -37,6 +37,7 @@ static_assert(std::is_same_v<std::variant_alternative_t<3, bb::BackendEvent>, bb
 static_assert(std::is_same_v<std::variant_alternative_t<4, bb::BackendEvent>, bb::PlaybackPositionEvent>);
 static_assert(std::is_same_v<std::variant_alternative_t<5, bb::BackendEvent>, bb::BackendErrorEvent>);
 static_assert(std::is_same_v<std::variant_alternative_t<6, bb::BackendEvent>, bb::OperationStatusEvent>);
+static_assert(std::is_same_v<std::variant_alternative_t<7, bb::BackendEvent>, bb::ExperimentStatusEvent>);
 
 static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Camera) == 0);
 static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Recording) == 1);
@@ -44,6 +45,13 @@ static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::ProcessingSetti
 static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::RecordingLoad) == 3);
 static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::PlaybackSeek) == 4);
 static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Operation) == 5);
+static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Experiment) == 6);
+
+static_assert(static_cast<std::uint32_t>(backend::ExperimentCoordinator::State::Idle) == 0);
+static_assert(static_cast<std::uint32_t>(backend::ExperimentCoordinator::State::Starting) == 1);
+static_assert(static_cast<std::uint32_t>(backend::ExperimentCoordinator::State::Active) == 2);
+static_assert(static_cast<std::uint32_t>(backend::ExperimentCoordinator::State::Stopping) == 3);
+static_assert(static_cast<std::uint32_t>(backend::ExperimentCoordinator::State::Failed) == 4);
 
 static_assert(static_cast<std::uint32_t>(bb::BackendErrorSource::Lifecycle) == 0);
 static_assert(static_cast<std::uint32_t>(bb::BackendErrorSource::Playback) == 4);
@@ -173,6 +181,24 @@ BridgeEvent toBridgeEvent(const backend::bridge::BackendEvent& ev) {
                 out.u2 = static_cast<std::uint64_t>(e.state);
                 out.u3 = e.progress;
                 out.u4 = e.total;
+                out.text = rust::String(e.message);
+            } else if constexpr (std::is_same_v<T, ExperimentStatusEvent>) {
+                // u0 state, u1 validBuffered, u2 invalidBuffered,
+                // u3 validSaved, u4 invalidSaved, u5 startTimeNs;
+                // f0 endTimeNs, f1 droppedValid, f2 droppedInvalid;
+                // b0 flushing, b1 cancelled; text message.
+                out.kind = BridgeEventKind::ExperimentStatus;
+                out.u0 = static_cast<std::uint64_t>(e.state);
+                out.u1 = e.validBuffered;
+                out.u2 = e.invalidBuffered;
+                out.u3 = e.validSaved;
+                out.u4 = e.invalidSaved;
+                out.u5 = e.startTimeNs;
+                out.f0 = static_cast<double>(e.endTimeNs);
+                out.f1 = static_cast<double>(e.droppedValid);
+                out.f2 = static_cast<double>(e.droppedInvalid);
+                out.b0 = e.flushing;
+                out.b1 = e.cancelled;
                 out.text = rust::String(e.message);
             }
         },
@@ -401,6 +427,67 @@ BridgeCommandResult BackendBridge::cancel_operation(std::uint64_t operation_id) 
     }
 }
 
+BridgeCommandResult BackendBridge::experiment_start(rust::Str output_path) {
+    try {
+        backend::bridge::ExperimentCommand cmd;
+        cmd.action = backend::bridge::ExperimentCommandAction::Start;
+        cmd.outputPath = toStd(output_path);
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("experiment_start: ") + e.what());
+    } catch (...) {
+        return errorResult("experiment_start: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::experiment_stop() {
+    try {
+        backend::bridge::ExperimentCommand cmd;
+        cmd.action = backend::bridge::ExperimentCommandAction::Stop;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("experiment_stop: ") + e.what());
+    } catch (...) {
+        return errorResult("experiment_stop: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::experiment_cancel() {
+    try {
+        backend::bridge::ExperimentCommand cmd;
+        cmd.action = backend::bridge::ExperimentCommandAction::Cancel;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("experiment_cancel: ") + e.what());
+    } catch (...) {
+        return errorResult("experiment_cancel: unknown error");
+    }
+}
+
+BridgeExperimentStatus BackendBridge::fetch_experiment_status() {
+    BridgeExperimentStatus out{};
+    backend::ExperimentCoordinator::Status status;
+    if (!impl_->facade.fetchExperimentStatus(status)) {
+        out.valid = false;
+        return out;
+    }
+    out.valid = true;
+    out.state = static_cast<std::uint32_t>(status.state);
+    out.start_time_ns = status.startTimeNs;
+    out.end_time_ns = status.endTimeNs;
+    out.valid_buffered = status.validBuffered;
+    out.invalid_buffered = status.invalidBuffered;
+    out.valid_saved = status.validSaved;
+    out.invalid_saved = status.invalidSaved;
+    out.dropped_valid = status.droppedValid;
+    out.dropped_invalid = status.droppedInvalid;
+    out.flushing = status.flushing;
+    out.cancelled = status.cancelled;
+    out.output_path = rust::String(status.outputPath);
+    out.message = rust::String(status.message);
+    return out;
+}
+
 namespace {
 
 BridgeFrame toBridgeFrame(const backend::bridge::BackendFrame& frame) {
@@ -461,8 +548,9 @@ std::unique_ptr<BackendBridge> new_backend_bridge() {
 // processing commands (apply_processing, fetch_processing_stats); v4 added
 // operation state (OperationStatus events, cancel_operation, result
 // operation_id), the bounded event queue with QueueOverflow, and the extended
-// error sources. All additive over v1 (ADR 0003/0004). Must match
-// contract/bridge-contract.json.
-std::uint32_t bridge_abi_version() { return 4; }
+// error sources; v5 added the experiment lifecycle (experiment_start/stop/
+// cancel, fetch_experiment_status, ExperimentStatus events). All additive over
+// v1 (ADR 0003/0004). Must match contract/bridge-contract.json.
+std::uint32_t bridge_abi_version() { return 5; }
 
 } // namespace mib_bridge

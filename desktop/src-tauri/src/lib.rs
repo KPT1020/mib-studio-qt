@@ -94,6 +94,7 @@ fn kind_name(k: BridgeEventKind) -> &'static str {
         BridgeEventKind::BackendError => "BackendError",
         BridgeEventKind::OperationStatus => "OperationStatus",
         BridgeEventKind::QueueOverflow => "QueueOverflow",
+        BridgeEventKind::ExperimentStatus => "ExperimentStatus",
         // Fail-safe for additive kinds this build does not know (ADR 0004):
         // consumers must ignore "Unknown" rather than crash.
         _ => "Unknown",
@@ -268,6 +269,69 @@ fn apply_processing(
         .pin_mut()
         .apply_processing(realtime_enabled, pixel_to_micron)
         .into())
+}
+
+/// Experiment lifecycle snapshot for the webview (schema v5, BE-4).
+#[derive(Serialize, Clone, Default)]
+struct ExperimentStatus {
+    valid: bool,
+    state: u32,
+    start_time_ns: u64,
+    end_time_ns: u64,
+    valid_buffered: u64,
+    invalid_buffered: u64,
+    valid_saved: u64,
+    invalid_saved: u64,
+    dropped_valid: u64,
+    dropped_invalid: u64,
+    flushing: bool,
+    cancelled: bool,
+    output_path: String,
+    message: String,
+}
+
+/// Start an experiment (backend-owned lifecycle; schema v5).
+#[tauri::command]
+fn experiment_start(state: State<AppState>, output_path: String) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().experiment_start(&output_path).into())
+}
+
+/// Request an asynchronous experiment stop (final flush + metadata + close).
+#[tauri::command]
+fn experiment_stop(state: State<AppState>) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().experiment_stop().into())
+}
+
+/// Like stop, but the terminal status is marked cancelled.
+#[tauri::command]
+fn experiment_cancel(state: State<AppState>) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().experiment_cancel().into())
+}
+
+/// Pull the current experiment lifecycle snapshot.
+#[tauri::command]
+fn fetch_experiment_status(state: State<AppState>) -> Result<ExperimentStatus, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    let s = guard.pin_mut().fetch_experiment_status();
+    Ok(ExperimentStatus {
+        valid: s.valid,
+        state: s.state,
+        start_time_ns: s.start_time_ns,
+        end_time_ns: s.end_time_ns,
+        valid_buffered: s.valid_buffered,
+        invalid_buffered: s.invalid_buffered,
+        valid_saved: s.valid_saved,
+        invalid_saved: s.invalid_saved,
+        dropped_valid: s.dropped_valid,
+        dropped_invalid: s.dropped_invalid,
+        flushing: s.flushing,
+        cancelled: s.cancelled,
+        output_path: s.output_path,
+        message: s.message,
+    })
 }
 
 /// Request cancellation of a tracked operation (schema v4). Fails safely for
@@ -466,6 +530,10 @@ pub fn run() {
             fetch_processing_stats,
             cancel_operation,
             queue_overflow_total,
+            experiment_start,
+            experiment_stop,
+            experiment_cancel,
+            fetch_experiment_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

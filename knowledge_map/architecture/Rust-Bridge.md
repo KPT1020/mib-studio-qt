@@ -54,6 +54,14 @@ Rust owns an opaque `BackendBridge` (`UniquePtr`) that composes an `AppBackend`
   `cancel_operation(id)` requests cancellation and fails safely for
   unknown/finished IDs; `shutdown()` cancels all active operations first.
   RecordingLoad is the first tracked operation; BE-4/BE-6 build on this.
+- **Experiment lifecycle (v5, BE-4):** `experiment_start(path)` /
+  `experiment_stop` / `experiment_cancel` / `fetch_experiment_status` over the
+  backend-owned `backend::ExperimentCoordinator` state machine (see
+  [[AppBackend]]): atomic preconditions, periodic + final flush on a worker
+  thread, metadata/provenance only after data flush, fatal-save recovery.
+  `ExperimentStatus` events (kind 8) push transitions; the running experiment
+  is a tracked operation. Camera stop is rejected while an experiment is
+  active (Qt parity).
 - **Frame pull:** `fetch_latest_frame() -> BridgeFrame` (metadata + one owned
   byte copy out of the playback store), and `fetch_frame_by_index(index)` for
   review scrubbing. Frames are **pulled on demand, never pushed** through the
@@ -83,11 +91,12 @@ via static_asserts in `shim.cpp`, Rust via `rust_enums_match_contract_json`,
 TypeScript via the generated `desktop/src/bridgeContract.ts`
 (`scripts/gen_bridge_contract.py --check` is a desktop-CI drift gate).
 
-The command/event set is a versioned schema: `bridge_abi_version()` returns `4`
+The command/event set is a versioned schema: `bridge_abi_version()` returns `5`
 (v2 added the review commands — `load_recording`, `playback_seek_index`,
 `fetch_frame_by_index`; v3 added the processing commands — `apply_processing`,
 `fetch_processing_stats`; v4 added operation state, `cancel_operation`,
-`queue_overflow_total`, the bounded queue, and the extended error sources —
+`queue_overflow_total`, the bounded queue, and the extended error sources;
+v5 added the experiment lifecycle (BE-4) —
 all additive over the v1 live-capture set); additive
 changes bump it. `tests/contract.rs` is the boundary gate and regression guard:
 `lifecycle_produces_status_and_frame_events` drives

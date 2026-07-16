@@ -97,6 +97,13 @@ mib_add_backend_test_executable(backend_facade_boundary_test backend/backend_fac
 add_test(NAME backend.facade_boundary COMMAND $<TARGET_FILE:backend_facade_boundary_test>)
 set_tests_properties(backend.facade_boundary PROPERTIES LABELS "backend;bridge")
 
+# BE-4 (#274): backend-owned experiment lifecycle state machine — pipeline e2e
+# over the facade command surface plus fault-injection (fatal save error,
+# double start/stop, shutdown during active experiment).
+mib_add_backend_test_executable(experiment_coordinator_test backend/experiment_coordinator_test.cpp)
+add_test(NAME e2e.experiment_coordinator COMMAND $<TARGET_FILE:experiment_coordinator_test>)
+set_tests_properties(e2e.experiment_coordinator PROPERTIES LABELS "backend;bridge;e2e" TIMEOUT 180)
+
 mib_add_backend_test_executable(mindvision_selection_state_test backend/mindvision_selection_state_test.cpp)
 add_test(NAME backend.mindvision_selection_state COMMAND $<TARGET_FILE:mindvision_selection_state_test>)
 set_tests_properties(backend.mindvision_selection_state PROPERTIES LABELS "backend;camera")

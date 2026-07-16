@@ -1,5 +1,6 @@
 #pragma once
 
+#include "backend/app/ExperimentCoordinator.h"
 #include "backend/processing/ProcessingService.h"
 
 #include <atomic>
@@ -33,6 +34,7 @@ namespace backend::bridge
         RecordingLoad,
         PlaybackSeek,
         Operation,
+        Experiment,
     };
 
     enum class CameraCommandAction
@@ -148,12 +150,29 @@ namespace backend::bridge
         std::uint64_t operationId{0};
     };
 
+    // Experiment lifecycle (BE-4, issue #274): thin command surface over the
+    // backend-owned ExperimentCoordinator state machine.
+    enum class ExperimentCommandAction
+    {
+        Start,
+        Stop,
+        Cancel,
+        Status,
+    };
+
+    struct ExperimentCommand
+    {
+        ExperimentCommandAction action{ExperimentCommandAction::Status};
+        std::string outputPath; // Start only
+    };
+
     using BackendCommand = std::variant<CameraCommand,
                                         RecordingCommand,
                                         ProcessingSettingsCommand,
                                         RecordingLoadCommand,
                                         PlaybackSeekCommand,
-                                        OperationCommand>;
+                                        OperationCommand,
+                                        ExperimentCommand>;
 
     struct BackendCommandResult
     {
@@ -287,6 +306,25 @@ namespace backend::bridge
         std::string message;
     };
 
+    // Experiment lifecycle snapshot pushed on every coordinator transition and
+    // periodic-flush tick (BE-4). The full status (incl. output path) is also
+    // pullable via fetchExperimentStatus.
+    struct ExperimentStatusEvent
+    {
+        ExperimentCoordinator::State state{ExperimentCoordinator::State::Idle};
+        std::uint64_t startTimeNs{0};
+        std::uint64_t endTimeNs{0};
+        std::uint64_t validBuffered{0};
+        std::uint64_t invalidBuffered{0};
+        std::uint64_t validSaved{0};
+        std::uint64_t invalidSaved{0};
+        std::uint64_t droppedValid{0};
+        std::uint64_t droppedInvalid{0};
+        bool flushing{false};
+        bool cancelled{false};
+        std::string message;
+    };
+
     // Variant order defines the bridge event-kind values — append-only.
     using BackendEvent = std::variant<FrameReadyEvent,
                                       CameraStatusEvent,
@@ -294,7 +332,8 @@ namespace backend::bridge
                                       ProcessingResultEvent,
                                       PlaybackPositionEvent,
                                       BackendErrorEvent,
-                                      OperationStatusEvent>;
+                                      OperationStatusEvent,
+                                      ExperimentStatusEvent>;
 
     struct BackendFrame
     {
@@ -338,6 +377,7 @@ namespace backend::bridge
         bool fetchLatestFrame(BackendFrame &out) const;
         bool fetchFrameByIndex(std::uint64_t frameIndex, BackendFrame &out) const;
         bool fetchProcessingStats(BackendProcessingStats &out) const;
+        bool fetchExperimentStatus(ExperimentCoordinator::Status &out) const;
 
         // ---- Operation tracking (BE-1, ADR 0004) ----
         // Long-running actions register here so they get a correlatable ID,
@@ -367,6 +407,7 @@ namespace backend::bridge
         BackendCommandResult handleRecordingLoadCommand(const RecordingLoadCommand &command);
         BackendCommandResult handlePlaybackSeekCommand(const PlaybackSeekCommand &command);
         BackendCommandResult handleOperationCommand(const OperationCommand &command);
+        BackendCommandResult handleExperimentCommand(const ExperimentCommand &command);
 
         BackendCommandResult lifecycleError(BackendCommandType command, const std::string &message);
         void emitEvent(const BackendEvent &event) const;
@@ -389,6 +430,12 @@ namespace backend::bridge
         mutable std::mutex operationsMutex_;
         std::unordered_map<std::uint64_t, ActiveOperation> activeOperations_;
         std::atomic<std::uint64_t> nextOperationId_{1};
+
+        // Backend-owned experiment state machine (BE-4). The running
+        // experiment is also a tracked operation so it can be correlated and
+        // cancelled through the generic operation surface.
+        std::unique_ptr<ExperimentCoordinator> experiment_;
+        std::atomic<std::uint64_t> experimentOperationId_{0};
     };
 
 } // namespace backend::bridge
