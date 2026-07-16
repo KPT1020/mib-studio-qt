@@ -26,11 +26,19 @@ struct CmdResult {
     ok: bool,
     command: u32,
     message: String,
+    /// Non-zero when the command started/targeted a tracked operation
+    /// (schema v4) — correlates with OperationStatus events.
+    operation_id: u64,
 }
 
 impl From<ffi::BridgeCommandResult> for CmdResult {
     fn from(r: ffi::BridgeCommandResult) -> Self {
-        CmdResult { ok: r.ok, command: r.command, message: r.message }
+        CmdResult {
+            ok: r.ok,
+            command: r.command,
+            message: r.message,
+            operation_id: r.operation_id,
+        }
     }
 }
 
@@ -84,6 +92,10 @@ fn kind_name(k: BridgeEventKind) -> &'static str {
         BridgeEventKind::ProcessingResult => "ProcessingResult",
         BridgeEventKind::PlaybackPosition => "PlaybackPosition",
         BridgeEventKind::BackendError => "BackendError",
+        BridgeEventKind::OperationStatus => "OperationStatus",
+        BridgeEventKind::QueueOverflow => "QueueOverflow",
+        // Fail-safe for additive kinds this build does not know (ADR 0004):
+        // consumers must ignore "Unknown" rather than crash.
         _ => "Unknown",
     }
 }
@@ -258,6 +270,21 @@ fn apply_processing(
         .into())
 }
 
+/// Request cancellation of a tracked operation (schema v4). Fails safely for
+/// unknown/finished IDs.
+#[tauri::command]
+fn cancel_operation(state: State<AppState>, operation_id: u64) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().cancel_operation(operation_id).into())
+}
+
+/// Total events dropped by the bounded bridge queue (schema v4 observability).
+#[tauri::command]
+fn queue_overflow_total(state: State<AppState>) -> Result<u64, String> {
+    let guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.queue_overflow_total())
+}
+
 #[tauri::command]
 fn fetch_processing_stats(state: State<AppState>) -> Result<ProcessingStats, String> {
     let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
@@ -283,6 +310,11 @@ mod tests {
         assert_eq!(kind_name(BridgeEventKind::FrameReady), "FrameReady");
         assert_eq!(kind_name(BridgeEventKind::CameraStatus), "CameraStatus");
         assert_eq!(kind_name(BridgeEventKind::BackendError), "BackendError");
+        assert_eq!(kind_name(BridgeEventKind::OperationStatus), "OperationStatus");
+        assert_eq!(kind_name(BridgeEventKind::QueueOverflow), "QueueOverflow");
+        // Additive kinds from a newer bridge fail safely as "Unknown" (ADR
+        // 0004) — consumers ignore them instead of crashing.
+        assert_eq!(kind_name(BridgeEventKind { repr: 9999 }), "Unknown");
     }
 
     // Headless proof that the desktop crate links the bridge and the mock-camera
@@ -432,6 +464,8 @@ pub fn run() {
             fetch_frame_by_index,
             apply_processing,
             fetch_processing_stats,
+            cancel_operation,
+            queue_overflow_total,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -21,6 +21,10 @@ pub mod ffi {
         pub ok: bool,
         pub command: u32,
         pub message: String,
+        /// Non-zero when this command started (or targeted) a tracked
+        /// long-running operation; correlates with `OperationStatus` events
+        /// (schema v4, ADR 0004).
+        pub operation_id: u64,
     }
 
     /// Discriminant for [`BridgeEvent::kind`], mirroring the
@@ -34,6 +38,12 @@ pub mod ffi {
         ProcessingResult = 3,
         PlaybackPosition = 4,
         BackendError = 5,
+        /// Operation lifecycle (schema v4): u0 operationId, u1 kind, u2 state,
+        /// u3 progress, u4 total; text message.
+        OperationStatus = 6,
+        /// Synthetic bounded-queue marker (schema v4): u0 events dropped since
+        /// the last poll, u1 dropped total. Emitted first in a poll batch.
+        QueueOverflow = 7,
     }
 
     /// A flattened `BackendEvent`. Rather than mirror every variant field, the
@@ -139,8 +149,18 @@ pub mod ffi {
             pixel_to_micron: f64,
         ) -> BridgeCommandResult;
 
-        /// Drain and return all events queued since the last poll.
+        /// Request cancellation of a tracked operation by ID (schema v4). Fails
+        /// safely (`ok == false`) for unknown or already-finished IDs.
+        fn cancel_operation(self: Pin<&mut BackendBridge>, operation_id: u64)
+            -> BridgeCommandResult;
+
+        /// Drain and return all events queued since the last poll. The queue is
+        /// bounded drop-oldest (`MIB_BRIDGE_MAX_QUEUE`, default 4096); when
+        /// events were dropped, the batch starts with a `QueueOverflow` marker.
         fn poll_events(self: Pin<&mut BackendBridge>) -> Vec<BridgeEvent>;
+
+        /// Total events dropped by the bounded queue since construction.
+        fn queue_overflow_total(&self) -> u64;
 
         /// Pull the latest frame's metadata + pixel bytes (one copy).
         fn fetch_latest_frame(self: Pin<&mut BackendBridge>) -> BridgeFrame;

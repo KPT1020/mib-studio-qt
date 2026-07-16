@@ -7,6 +7,7 @@ import {
   type FrameMeta,
   type ProcessingStats,
 } from "./bridge";
+import { BRIDGE_ABI_VERSION } from "./bridgeContract";
 import "./App.css";
 
 const H5_FILTER = [{ name: "HDF5", extensions: ["h5"] }];
@@ -156,7 +157,15 @@ export default function App() {
   // Initialize the backend on boot (empty data dir resolves to Tauri's
   // app_data_dir on the Rust side) — the Qt app has no manual init step.
   useEffect(() => {
-    bridge.abiVersion().then(setAbi).catch((e) => append(`abi error: ${e}`));
+    bridge
+      .abiVersion()
+      .then((v) => {
+        setAbi(v);
+        if (v < BRIDGE_ABI_VERSION) {
+          append(`bridge ABI ${v} is older than the UI contract (${BRIDGE_ABI_VERSION})`);
+        }
+      })
+      .catch((e) => append(`abi error: ${e}`));
     (async () => {
       try {
         const already = await bridge.isInitialized();
@@ -215,7 +224,14 @@ export default function App() {
           setRange({ earliest: e.u2, latest: e.u3, count: e.u4 });
         } else if (e.kind === "BackendError") {
           append(`backend error: ${e.text}`);
+        } else if (e.kind === "OperationStatus") {
+          // u0 id, u2 state (2 Completed, 3 Failed, 4 Cancelled, 5 TimedOut).
+          if (e.u2 >= 3) append(`operation ${e.u0} ${e.u2 === 3 ? "failed" : e.u2 === 4 ? "cancelled" : "timed out"}: ${e.text}`);
+        } else if (e.kind === "QueueOverflow") {
+          append(`event queue overflow: ${e.u0} coalesced (total ${e.u1})`);
         }
+        // Kinds this build does not know (additive, newer bridge) fall through
+        // and are ignored — never fatal (ADR 0004).
       }
     },
     [append],

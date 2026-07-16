@@ -6,6 +6,9 @@ export interface CmdResult {
   ok: boolean;
   command: number;
   message: string;
+  /** Non-zero when the command started/targeted a tracked long-running
+   *  operation (bridge schema v4); correlates with OperationStatus events. */
+  operation_id: number;
 }
 
 export interface FrameMeta {
@@ -57,6 +60,10 @@ export const bridge = {
   applyProcessing: (realtimeEnabled: boolean, pixelToMicron: number) =>
     invoke<CmdResult>("apply_processing", { realtimeEnabled, pixelToMicron }),
   fetchProcessingStats: () => invoke<ProcessingStats>("fetch_processing_stats"),
+  // Operation state + bounded-queue observability (bridge schema v4, BE-1).
+  cancelOperation: (operationId: number) =>
+    invoke<CmdResult>("cancel_operation", { operationId }),
+  queueOverflowTotal: () => invoke<number>("queue_overflow_total"),
   // Binary IPC response — raw Mono8 bytes, never base64 (ADR 0003).
   frameBytes: async (): Promise<Uint8Array> => {
     const buf = await invoke<ArrayBuffer>("frame_bytes");

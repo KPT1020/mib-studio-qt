@@ -50,9 +50,204 @@ fn drain_until<F: Fn(&ffi::BridgeEvent) -> bool>(
 #[test]
 fn abi_version_is_stable() {
     // The command/event schema is versioned (ADR 0003). v2 added the review
-    // commands; v3 added the processing commands (apply_processing /
-    // fetch_processing_stats).
-    assert_eq!(ffi::bridge_abi_version(), 3);
+    // commands; v3 the processing commands; v4 operation state, the bounded
+    // event queue, and the extended error sources (ADR 0004).
+    assert_eq!(ffi::bridge_abi_version(), 4);
+}
+
+// The Rust enum values must match contract/bridge-contract.json — the single
+// source of truth also pinned by shim.cpp static_asserts (C++) and the
+// generated desktop/src/bridgeContract.ts (TypeScript). Drift fails here.
+#[test]
+fn rust_enums_match_contract_json() {
+    let contract: serde_json::Value =
+        serde_json::from_str(include_str!("../contract/bridge-contract.json")).unwrap();
+
+    assert_eq!(
+        contract["abi_version"].as_u64().unwrap() as u32,
+        ffi::bridge_abi_version(),
+        "abi_version drifted between JSON contract and bridge"
+    );
+
+    let kinds = contract["event_kinds"].as_object().unwrap();
+    let expected: &[(&str, BridgeEventKind)] = &[
+        ("FrameReady", BridgeEventKind::FrameReady),
+        ("CameraStatus", BridgeEventKind::CameraStatus),
+        ("RecordingStatus", BridgeEventKind::RecordingStatus),
+        ("ProcessingResult", BridgeEventKind::ProcessingResult),
+        ("PlaybackPosition", BridgeEventKind::PlaybackPosition),
+        ("BackendError", BridgeEventKind::BackendError),
+        ("OperationStatus", BridgeEventKind::OperationStatus),
+        ("QueueOverflow", BridgeEventKind::QueueOverflow),
+    ];
+    assert_eq!(kinds.len(), expected.len(), "event kind count drifted");
+    for (name, kind) in expected {
+        assert_eq!(
+            kinds[*name].as_u64().unwrap() as u32,
+            kind.repr,
+            "event kind {name} drifted from the JSON contract"
+        );
+    }
+}
+
+// Duplicate/late commands must fail safely without desynchronizing state
+// (BE-1): double start is idempotent, double stop is idempotent, and the
+// pipeline still works afterwards.
+#[test]
+#[serial]
+fn duplicate_start_stop_cannot_desynchronize() {
+    let frame_dir = make_frame_dir();
+    let data_dir = std::env::temp_dir().join(format!("mib_bridge_dup_data_{}", std::process::id()));
+
+    let mut bridge = ffi::new_backend_bridge();
+    assert!(bridge.pin_mut().initialize(&data_dir.to_string_lossy()));
+    assert!(bridge
+        .pin_mut()
+        .configure_mock_camera(&frame_dir.to_string_lossy(), 5, true)
+        .ok);
+
+    assert!(bridge.pin_mut().start_capture().ok);
+    // Duplicate start while running: must not tear down or double-spawn.
+    assert!(bridge.pin_mut().start_capture().ok);
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut got = false;
+    while Instant::now() < deadline {
+        if bridge.pin_mut().fetch_latest_frame().valid {
+            got = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(got, "no frame after duplicate start");
+
+    assert!(bridge.pin_mut().stop_capture().ok);
+    // Duplicate stop: idempotent.
+    assert!(bridge.pin_mut().stop_capture().ok);
+
+    // The pipeline still works after the duplicate commands.
+    assert!(bridge.pin_mut().start_capture().ok);
+    assert!(bridge.pin_mut().stop_capture().ok);
+
+    bridge.pin_mut().shutdown();
+    let _ = std::fs::remove_dir_all(&frame_dir);
+    let _ = std::fs::remove_dir_all(&data_dir);
+}
+
+// Cancelling an unknown or finished operation fails safely (BE-1).
+#[test]
+#[serial]
+fn cancel_unknown_operation_fails_safely() {
+    let data_dir =
+        std::env::temp_dir().join(format!("mib_bridge_cancel_data_{}", std::process::id()));
+    let mut bridge = ffi::new_backend_bridge();
+    assert!(bridge.pin_mut().initialize(&data_dir.to_string_lossy()));
+
+    let res = bridge.pin_mut().cancel_operation(999_999);
+    assert!(!res.ok, "cancelling an unknown operation must not report ok");
+    assert!(
+        res.message.to_lowercase().contains("unknown"),
+        "unexpected message: {}",
+        res.message
+    );
+
+    bridge.pin_mut().shutdown();
+    let _ = std::fs::remove_dir_all(&data_dir);
+}
+
+// A recording load is a tracked operation: the command result carries a
+// non-zero operation_id and Started/Completed OperationStatus events with the
+// same id bracket it (BE-1).
+#[test]
+#[serial]
+fn recording_load_emits_operation_lifecycle() {
+    let frame_dir = make_frame_dir();
+    let data_dir = std::env::temp_dir().join(format!("mib_bridge_op_data_{}", std::process::id()));
+    let rec_path = std::env::temp_dir().join(format!("mib_bridge_op_{}.h5", std::process::id()));
+
+    let mut bridge = ffi::new_backend_bridge();
+    assert!(bridge.pin_mut().initialize(&data_dir.to_string_lossy()));
+    assert!(bridge
+        .pin_mut()
+        .configure_mock_camera(&frame_dir.to_string_lossy(), 5, true)
+        .ok);
+    assert!(bridge.pin_mut().start_capture().ok);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && !bridge.pin_mut().fetch_latest_frame().valid {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(bridge.pin_mut().start_frame_recording(&rec_path.to_string_lossy()).ok);
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(bridge.pin_mut().stop_frame_recording().ok);
+    assert!(bridge.pin_mut().stop_capture().ok);
+    // Discard events so far; focus on the load.
+    let _ = bridge.pin_mut().poll_events();
+
+    let load = bridge.pin_mut().load_recording(&rec_path.to_string_lossy());
+    assert!(load.ok, "load_recording failed: {}", load.message);
+    assert!(load.operation_id != 0, "load did not report an operation id");
+
+    let events = bridge.pin_mut().poll_events();
+    let op_events: Vec<_> = events
+        .iter()
+        .filter(|e| e.kind == BridgeEventKind::OperationStatus && e.u0 == load.operation_id)
+        .collect();
+    // u2 = state: 0 Started .. 2 Completed (contract values).
+    assert!(
+        op_events.iter().any(|e| e.u2 == 0),
+        "no Started operation event for the load"
+    );
+    assert!(
+        op_events.iter().any(|e| e.u2 == 2),
+        "no Completed operation event for the load"
+    );
+    // A finished operation can no longer be cancelled.
+    assert!(!bridge.pin_mut().cancel_operation(load.operation_id).ok);
+
+    bridge.pin_mut().shutdown();
+    let _ = std::fs::remove_dir_all(&frame_dir);
+    let _ = std::fs::remove_dir_all(&data_dir);
+    let _ = std::fs::remove_file(&rec_path);
+}
+
+// The shim event queue is bounded drop-oldest and overflow is observable
+// (BE-1): with a tiny capacity, flooding events yields a bounded poll batch
+// prefixed by a QueueOverflow marker.
+#[test]
+#[serial]
+fn event_queue_overflow_is_bounded_and_observable() {
+    std::env::set_var("MIB_BRIDGE_MAX_QUEUE", "8");
+    let data_dir =
+        std::env::temp_dir().join(format!("mib_bridge_ovf_data_{}", std::process::id()));
+
+    let mut bridge = ffi::new_backend_bridge();
+    assert!(bridge.pin_mut().initialize(&data_dir.to_string_lossy()));
+    let _ = bridge.pin_mut().poll_events();
+
+    // Every seek emits a PlaybackPosition event even with no frames loaded.
+    for _ in 0..40 {
+        let _ = bridge.pin_mut().playback_seek_latest();
+    }
+
+    let events = bridge.pin_mut().poll_events();
+    assert!(
+        events.len() <= 8 + 1,
+        "poll batch exceeded the bounded capacity: {}",
+        events.len()
+    );
+    let overflow = &events[0];
+    assert_eq!(
+        overflow.kind,
+        BridgeEventKind::QueueOverflow,
+        "first event of an overflowed batch must be the QueueOverflow marker"
+    );
+    assert!(overflow.u0 > 0, "overflow marker reports zero dropped events");
+    assert_eq!(overflow.u1, bridge.queue_overflow_total());
+    assert!(bridge.queue_overflow_total() > 0);
+
+    bridge.pin_mut().shutdown();
+    std::env::remove_var("MIB_BRIDGE_MAX_QUEUE");
+    let _ = std::fs::remove_dir_all(&data_dir);
 }
 
 #[test]

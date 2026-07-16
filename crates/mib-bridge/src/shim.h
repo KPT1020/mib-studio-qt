@@ -42,8 +42,10 @@ public:
     BridgeCommandResult load_recording(rust::Str file_path);
     BridgeCommandResult playback_seek_index(std::uint64_t frame_index);
     BridgeCommandResult apply_processing(bool realtime_enabled, double pixel_to_micron);
+    BridgeCommandResult cancel_operation(std::uint64_t operation_id);
 
     rust::Vec<BridgeEvent> poll_events();
+    std::uint64_t queue_overflow_total() const;
     BridgeFrame fetch_latest_frame();
     BridgeFrame fetch_frame_by_index(std::uint64_t frame_index);
     BridgeProcessingStats fetch_processing_stats();

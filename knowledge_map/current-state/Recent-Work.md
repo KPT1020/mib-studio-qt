@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Qt → React/Tauri migration: BE-1 — bridge contract source of truth,
+  operation state, bounded event queue** (2026-07-16, epic #246, issue #271,
+  ADR 0004) — `crates/mib-bridge/contract/bridge-contract.json` is now the
+  machine-checked contract (C++ static_asserts, Rust JSON test, generated
+  `desktop/src/bridgeContract.ts` + CI drift gate). `BackendFacade` tracks
+  long-running actions as operations (IDs, Started/Progress/terminal events,
+  cancel flags, shutdown-cancels-all); the shim event queue is bounded
+  drop-oldest with an observable `QueueOverflow` marker; error sources extended
+  for the remaining workflows. Bridge ABI **v4** (additive). Details:
+  `knowledge_map/task/2026-07-16-bridge-contract-operation-state.md`.
+
 - **Qt → React/Tauri migration: UI-1 — operator shell parity with the Qt UI**
   (2026-07-16, epic #246, issue #266) — Replaced the developer-oriented
   Phase 3/4 form in `desktop/src/App.tsx` with the Qt operator layout: menu

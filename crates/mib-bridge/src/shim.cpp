@@ -8,6 +8,9 @@
 #include "backend/app/AppBackend.h"
 #include "backend/app/BackendFacade.h"
 
+#include <algorithm>
+#include <cstdlib>
+#include <deque>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -18,13 +21,68 @@ namespace mib_bridge {
 
 namespace {
 
+// ---- Contract pinning (BE-1, ADR 0004) ----
+// These asserts tie the C++ backend enums to the numeric values in
+// crates/mib-bridge/contract/bridge-contract.json (mirrored by the cxx enum in
+// lib.rs and the generated desktop/src/bridgeContract.ts). Renumbering any of
+// them breaks the build here instead of drifting silently.
+namespace bb = backend::bridge;
+
+static_assert(std::variant_size_v<bb::BackendEvent> == 7,
+              "BackendEvent variant changed — update the bridge contract");
+static_assert(std::is_same_v<std::variant_alternative_t<0, bb::BackendEvent>, bb::FrameReadyEvent>);
+static_assert(std::is_same_v<std::variant_alternative_t<1, bb::BackendEvent>, bb::CameraStatusEvent>);
+static_assert(std::is_same_v<std::variant_alternative_t<2, bb::BackendEvent>, bb::RecordingStatusEvent>);
+static_assert(std::is_same_v<std::variant_alternative_t<3, bb::BackendEvent>, bb::ProcessingResultEvent>);
+static_assert(std::is_same_v<std::variant_alternative_t<4, bb::BackendEvent>, bb::PlaybackPositionEvent>);
+static_assert(std::is_same_v<std::variant_alternative_t<5, bb::BackendEvent>, bb::BackendErrorEvent>);
+static_assert(std::is_same_v<std::variant_alternative_t<6, bb::BackendEvent>, bb::OperationStatusEvent>);
+
+static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Camera) == 0);
+static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Recording) == 1);
+static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::ProcessingSettings) == 2);
+static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::RecordingLoad) == 3);
+static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::PlaybackSeek) == 4);
+static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Operation) == 5);
+
+static_assert(static_cast<std::uint32_t>(bb::BackendErrorSource::Lifecycle) == 0);
+static_assert(static_cast<std::uint32_t>(bb::BackendErrorSource::Playback) == 4);
+static_assert(static_cast<std::uint32_t>(bb::BackendErrorSource::Experiment) == 5);
+static_assert(static_cast<std::uint32_t>(bb::BackendErrorSource::Monitoring) == 6);
+static_assert(static_cast<std::uint32_t>(bb::BackendErrorSource::Hardware) == 7);
+static_assert(static_cast<std::uint32_t>(bb::BackendErrorSource::ConfigCore) == 8);
+static_assert(static_cast<std::uint32_t>(bb::BackendErrorSource::Review) == 9);
+static_assert(static_cast<std::uint32_t>(bb::BackendErrorSource::Export) == 10);
+static_assert(static_cast<std::uint32_t>(bb::BackendErrorSource::Platform) == 11);
+
+static_assert(static_cast<std::uint32_t>(bb::BackendOperationKind::RecordingLoad) == 0);
+static_assert(static_cast<std::uint32_t>(bb::BackendOperationKind::Reanalysis) == 5);
+static_assert(static_cast<std::uint32_t>(bb::BackendOperationState::Started) == 0);
+static_assert(static_cast<std::uint32_t>(bb::BackendOperationState::TimedOut) == 5);
+
 std::string toStd(rust::Str s) { return std::string(s.data(), s.size()); }
+
+// Event-queue bound (BE-1): the shim queue is drop-oldest bounded so a stalled
+// or slow poller cannot grow memory without limit. Overflow is observable via
+// a synthetic QueueOverflow event (u0 = dropped since last poll, u1 = dropped
+// total) plus queue_overflow_total(). MIB_BRIDGE_MAX_QUEUE overrides the
+// capacity (min 4) — used by the bounded-queue contract test.
+std::size_t queueCapacityFromEnv() {
+    if (const char* raw = std::getenv("MIB_BRIDGE_MAX_QUEUE")) {
+        const long parsed = std::strtol(raw, nullptr, 10);
+        if (parsed > 0) {
+            return std::max<std::size_t>(4, static_cast<std::size_t>(parsed));
+        }
+    }
+    return 4096;
+}
 
 BridgeCommandResult toBridgeResult(const backend::bridge::BackendCommandResult& r) {
     BridgeCommandResult out;
     out.ok = r.ok;
     out.command = static_cast<std::uint32_t>(r.command);
     out.message = rust::String(r.message);
+    out.operation_id = r.operationId;
     return out;
 }
 
@@ -33,6 +91,7 @@ BridgeCommandResult errorResult(const std::string& message) {
     out.ok = false;
     out.command = static_cast<std::uint32_t>(backend::bridge::BackendCommandType::Camera);
     out.message = rust::String(message);
+    out.operation_id = 0;
     return out;
 }
 
@@ -105,6 +164,16 @@ BridgeEvent toBridgeEvent(const backend::bridge::BackendEvent& ev) {
                 out.u0 = static_cast<std::uint64_t>(e.source);
                 out.u1 = static_cast<std::uint64_t>(e.command);
                 out.text = rust::String(e.message);
+            } else if constexpr (std::is_same_v<T, OperationStatusEvent>) {
+                // u0 operationId, u1 kind, u2 state, u3 progress, u4 total;
+                // text message.
+                out.kind = BridgeEventKind::OperationStatus;
+                out.u0 = e.operationId;
+                out.u1 = static_cast<std::uint64_t>(e.kind);
+                out.u2 = static_cast<std::uint64_t>(e.state);
+                out.u3 = e.progress;
+                out.u4 = e.total;
+                out.text = rust::String(e.message);
             }
         },
         ev);
@@ -117,15 +186,25 @@ struct BackendBridge::Impl {
     backend::AppBackend app;
     backend::bridge::BackendFacade facade{app};
     std::mutex queueMutex;
-    std::vector<BridgeEvent> queue;
+    std::deque<BridgeEvent> queue;
+    const std::size_t queueCapacity{queueCapacityFromEnv()};
+    std::uint64_t droppedSinceLastPoll{0};
+    std::uint64_t droppedTotal{0};
 
     void installSink() {
         facade.setEventSink([this](const backend::bridge::BackendEvent& ev) {
             // Runs on backend threads. Do the minimum: convert + enqueue, then
             // return. Rust drains via poll_events (ADR 0003 threading rule).
+            // The queue is bounded drop-oldest (BE-1): high-rate events like
+            // FrameReady coalesce to the newest state under a slow poller.
             BridgeEvent be = toBridgeEvent(ev);
             std::scoped_lock lock(queueMutex);
             queue.push_back(std::move(be));
+            while (queue.size() > queueCapacity) {
+                queue.pop_front();
+                ++droppedSinceLastPoll;
+                ++droppedTotal;
+            }
         });
     }
 };
@@ -278,16 +357,48 @@ BridgeCommandResult BackendBridge::apply_processing(bool realtime_enabled,
 }
 
 rust::Vec<BridgeEvent> BackendBridge::poll_events() {
-    std::vector<BridgeEvent> drained;
+    std::deque<BridgeEvent> drained;
+    std::uint64_t dropped = 0;
+    std::uint64_t droppedTotal = 0;
     {
         std::scoped_lock lock(impl_->queueMutex);
         drained.swap(impl_->queue);
+        dropped = impl_->droppedSinceLastPoll;
+        droppedTotal = impl_->droppedTotal;
+        impl_->droppedSinceLastPoll = 0;
     }
     rust::Vec<BridgeEvent> out;
+    if (dropped > 0) {
+        // Synthetic overflow marker so a consumer knows events were coalesced
+        // away since its last poll (u0 = dropped since last poll, u1 = total).
+        BridgeEvent overflow{};
+        overflow.kind = BridgeEventKind::QueueOverflow;
+        overflow.u0 = dropped;
+        overflow.u1 = droppedTotal;
+        out.push_back(std::move(overflow));
+    }
     for (auto& e : drained) {
         out.push_back(std::move(e));
     }
     return out;
+}
+
+std::uint64_t BackendBridge::queue_overflow_total() const {
+    std::scoped_lock lock(impl_->queueMutex);
+    return impl_->droppedTotal;
+}
+
+BridgeCommandResult BackendBridge::cancel_operation(std::uint64_t operation_id) {
+    try {
+        backend::bridge::OperationCommand cmd;
+        cmd.action = backend::bridge::OperationCommandAction::Cancel;
+        cmd.operationId = operation_id;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("cancel_operation: ") + e.what());
+    } catch (...) {
+        return errorResult("cancel_operation: unknown error");
+    }
 }
 
 namespace {
@@ -347,8 +458,11 @@ std::unique_ptr<BackendBridge> new_backend_bridge() {
 
 // Schema version of the command/event contract. v2 added the review commands
 // (load_recording, playback_seek_index, fetch_frame_by_index); v3 added the
-// processing commands (apply_processing, fetch_processing_stats). All additive
-// over v1 (ADR 0003).
-std::uint32_t bridge_abi_version() { return 3; }
+// processing commands (apply_processing, fetch_processing_stats); v4 added
+// operation state (OperationStatus events, cancel_operation, result
+// operation_id), the bounded event queue with QueueOverflow, and the extended
+// error sources. All additive over v1 (ADR 0003/0004). Must match
+// contract/bridge-contract.json.
+std::uint32_t bridge_abi_version() { return 4; }
 
 } // namespace mib_bridge

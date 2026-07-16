@@ -36,12 +36,24 @@ Rust owns an opaque `BackendBridge` (`UniquePtr`) that composes an `AppBackend`
   `apply_processing` (realtime enable + pixel→micron). Each returns a flattened
   `BridgeCommandResult { ok, command, message }`. No exceptions cross the
   boundary — the shim catches any C++ exception and returns `ok=false`.
-- **Events (poll-drained queue):** `poll_events() -> Vec<BridgeEvent>`. The
-  facade emits `BackendEvent`s from **backend threads** (the background-capture
-  callback runs on the capture/processing thread). The shim's event sink does
-  the minimum on that thread — serialise to a typed-slot `BridgeEvent` and push
-  onto a mutex-guarded queue — then returns; Rust drains it. This is the
-  non-blocking-sink rule from ADR 0003.
+- **Events (poll-drained bounded queue):** `poll_events() -> Vec<BridgeEvent>`.
+  The facade emits `BackendEvent`s from **backend threads** (the
+  background-capture callback runs on the capture/processing thread). The
+  shim's event sink does the minimum on that thread — serialise to a
+  typed-slot `BridgeEvent` and push onto a mutex-guarded queue — then returns;
+  Rust drains it. This is the non-blocking-sink rule from ADR 0003. Since v4
+  the queue is **bounded drop-oldest** (default 4096, `MIB_BRIDGE_MAX_QUEUE`
+  override, floor 4): a stalled poller coalesces to the newest state, and the
+  loss is observable — the next poll batch starts with a synthetic
+  `QueueOverflow` event (u0 dropped-since-last-poll, u1 total) and
+  `queue_overflow_total()` exposes the counter (ADR 0004).
+- **Operation state (v4, ADR 0004):** long-running actions are tracked
+  operations. `BackendFacade::beginOperation/reportOperationProgress/
+  finishOperation` emit `OperationStatus` events (u0 id, u1 kind, u2 state,
+  u3/u4 progress/total); command results carry a non-zero `operation_id`;
+  `cancel_operation(id)` requests cancellation and fails safely for
+  unknown/finished IDs; `shutdown()` cancels all active operations first.
+  RecordingLoad is the first tracked operation; BE-4/BE-6 build on this.
 - **Frame pull:** `fetch_latest_frame() -> BridgeFrame` (metadata + one owned
   byte copy out of the playback store), and `fetch_frame_by_index(index)` for
   review scrubbing. Frames are **pulled on demand, never pushed** through the
@@ -58,16 +70,25 @@ Rust owns an opaque `BackendBridge` (`UniquePtr`) that composes an `AppBackend`
 Rather than mirror every `BackendEvent` variant field, events flatten into a
 small pool of typed slots (`u0..u5`, `f0..f2`, `b0..b1`, `text`) whose meaning
 depends on `kind` (`FrameReady` / `CameraStatus` / `RecordingStatus` /
-`ProcessingResult` / `PlaybackPosition` / `BackendError`). The per-kind mapping
-is documented in `event_to_bridge` in `shim.cpp` and is part of the versioned
-contract — new fields append slots, never repurpose them.
+`ProcessingResult` / `PlaybackPosition` / `BackendError` / `OperationStatus` /
+`QueueOverflow`). The per-kind mapping is documented in `toBridgeEvent` in
+`shim.cpp` and is part of the versioned contract — new fields append slots,
+never repurpose them.
 
 ## Versioned contract + test
 
-The command/event set is a versioned schema: `bridge_abi_version()` returns `3`
+Since v4 the identities live in one machine-checked source of truth:
+`crates/mib-bridge/contract/bridge-contract.json` (ADR 0004). C++ pins to it
+via static_asserts in `shim.cpp`, Rust via `rust_enums_match_contract_json`,
+TypeScript via the generated `desktop/src/bridgeContract.ts`
+(`scripts/gen_bridge_contract.py --check` is a desktop-CI drift gate).
+
+The command/event set is a versioned schema: `bridge_abi_version()` returns `4`
 (v2 added the review commands — `load_recording`, `playback_seek_index`,
 `fetch_frame_by_index`; v3 added the processing commands — `apply_processing`,
-`fetch_processing_stats` — all additive over the v1 live-capture set); additive
+`fetch_processing_stats`; v4 added operation state, `cancel_operation`,
+`queue_overflow_total`, the bounded queue, and the extended error sources —
+all additive over the v1 live-capture set); additive
 changes bump it. `tests/contract.rs` is the boundary gate and regression guard:
 `lifecycle_produces_status_and_frame_events` drives
 init → configure mock camera → start → poll `fetch_latest_frame` (asserts the

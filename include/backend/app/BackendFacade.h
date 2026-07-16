@@ -2,12 +2,15 @@
 
 #include "backend/processing/ProcessingService.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -19,6 +22,9 @@ namespace backend
 namespace backend::bridge
 {
 
+    // Values are part of the bridge contract
+    // (crates/mib-bridge/contract/bridge-contract.json, ADR 0004) and are
+    // append-only: never renumber or repurpose.
     enum class BackendCommandType
     {
         Camera,
@@ -26,6 +32,7 @@ namespace backend::bridge
         ProcessingSettings,
         RecordingLoad,
         PlaybackSeek,
+        Operation,
     };
 
     enum class CameraCommandAction
@@ -95,17 +102,67 @@ namespace backend::bridge
         std::uint64_t frameIndex{0};
     };
 
+    // Long-running actions (recording load today; experiment, export,
+    // reanalysis as they land) are tracked as operations with explicit IDs and
+    // terminal states so the shell can correlate progress events, cancel, and
+    // detect late events safely (BE-1, ADR 0004). Values are contract-pinned
+    // and append-only.
+    enum class BackendOperationKind
+    {
+        RecordingLoad,
+        Experiment,
+        Export,
+        BatchMetrics,
+        MaskRegeneration,
+        Reanalysis,
+    };
+
+    enum class BackendOperationState
+    {
+        Started,
+        Progress,
+        Completed,
+        Failed,
+        Cancelled,
+        TimedOut,
+    };
+
+    struct OperationStatusEvent
+    {
+        std::uint64_t operationId{0};
+        BackendOperationKind kind{BackendOperationKind::RecordingLoad};
+        BackendOperationState state{BackendOperationState::Started};
+        std::uint64_t progress{0};
+        std::uint64_t total{0};
+        std::string message;
+    };
+
+    enum class OperationCommandAction
+    {
+        Cancel,
+    };
+
+    struct OperationCommand
+    {
+        OperationCommandAction action{OperationCommandAction::Cancel};
+        std::uint64_t operationId{0};
+    };
+
     using BackendCommand = std::variant<CameraCommand,
                                         RecordingCommand,
                                         ProcessingSettingsCommand,
                                         RecordingLoadCommand,
-                                        PlaybackSeekCommand>;
+                                        PlaybackSeekCommand,
+                                        OperationCommand>;
 
     struct BackendCommandResult
     {
         bool ok{false};
         BackendCommandType command{BackendCommandType::Camera};
         std::string message;
+        // Non-zero when the command started (or targeted) a tracked operation;
+        // correlates with OperationStatusEvent::operationId.
+        std::uint64_t operationId{0};
     };
 
     enum class FrameReadySource
@@ -205,6 +262,8 @@ namespace backend::bridge
         std::size_t availableCount{0};
     };
 
+    // Contract-pinned and append-only (ADR 0004). The tail entries cover the
+    // workflows being migrated behind the bridge (BE-2…BE-9).
     enum class BackendErrorSource
     {
         Lifecycle,
@@ -212,6 +271,13 @@ namespace backend::bridge
         Recording,
         Processing,
         Playback,
+        Experiment,
+        Monitoring,
+        Hardware,
+        ConfigCore,
+        Review,
+        Export,
+        Platform,
     };
 
     struct BackendErrorEvent
@@ -221,12 +287,14 @@ namespace backend::bridge
         std::string message;
     };
 
+    // Variant order defines the bridge event-kind values — append-only.
     using BackendEvent = std::variant<FrameReadyEvent,
                                       CameraStatusEvent,
                                       RecordingStatusEvent,
                                       ProcessingResultEvent,
                                       PlaybackPositionEvent,
-                                      BackendErrorEvent>;
+                                      BackendErrorEvent,
+                                      OperationStatusEvent>;
 
     struct BackendFrame
     {
@@ -271,21 +339,56 @@ namespace backend::bridge
         bool fetchFrameByIndex(std::uint64_t frameIndex, BackendFrame &out) const;
         bool fetchProcessingStats(BackendProcessingStats &out) const;
 
+        // ---- Operation tracking (BE-1, ADR 0004) ----
+        // Long-running actions register here so they get a correlatable ID,
+        // Started/Progress/terminal events, and a cancel flag the runner must
+        // observe. finishOperation() is idempotent per ID: the first terminal
+        // state wins and later calls are dropped (late-event policy).
+        using CancelFlag = std::shared_ptr<std::atomic<bool>>;
+        std::uint64_t beginOperation(BackendOperationKind kind,
+                                     CancelFlag *cancelFlagOut = nullptr,
+                                     const std::string &message = {});
+        void reportOperationProgress(std::uint64_t operationId,
+                                     std::uint64_t progress,
+                                     std::uint64_t total,
+                                     const std::string &message = {});
+        void finishOperation(std::uint64_t operationId,
+                             BackendOperationState terminalState,
+                             const std::string &message = {});
+        // Request cancellation; returns true if the operation was active. The
+        // runner observes the flag and emits the Cancelled terminal event.
+        bool requestOperationCancel(std::uint64_t operationId);
+        std::size_t activeOperationCount() const;
+
     private:
         BackendCommandResult handleCameraCommand(const CameraCommand &command);
         BackendCommandResult handleRecordingCommand(const RecordingCommand &command);
         BackendCommandResult handleProcessingSettingsCommand(const ProcessingSettingsCommand &command);
         BackendCommandResult handleRecordingLoadCommand(const RecordingLoadCommand &command);
         BackendCommandResult handlePlaybackSeekCommand(const PlaybackSeekCommand &command);
+        BackendCommandResult handleOperationCommand(const OperationCommand &command);
 
         BackendCommandResult lifecycleError(BackendCommandType command, const std::string &message);
         void emitEvent(const BackendEvent &event) const;
         CameraStatusEvent makeCameraStatus(CameraState state, std::string label = {}) const;
+        // Shutdown path: mark every active operation cancelled (flag + event)
+        // so no operation outlives the facade silently.
+        void cancelAllOperations(const std::string &reason);
+
+        struct ActiveOperation
+        {
+            BackendOperationKind kind{BackendOperationKind::RecordingLoad};
+            CancelFlag cancelRequested;
+        };
 
         AppBackend &backend_;
         mutable std::mutex eventSinkMutex_;
         EventSink eventSink_;
         bool initialized_{false};
+
+        mutable std::mutex operationsMutex_;
+        std::unordered_map<std::uint64_t, ActiveOperation> activeOperations_;
+        std::atomic<std::uint64_t> nextOperationId_{1};
     };
 
 } // namespace backend::bridge

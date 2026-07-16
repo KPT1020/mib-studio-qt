@@ -39,9 +39,13 @@ namespace backend::bridge
                 {
                     return BackendCommandType::RecordingLoad;
                 }
-                else
+                else if constexpr (std::is_same_v<Command, PlaybackSeekCommand>)
                 {
                     return BackendCommandType::PlaybackSeek;
+                }
+                else
+                {
+                    return BackendCommandType::Operation;
                 }
             }, command);
         }
@@ -88,6 +92,8 @@ namespace backend::bridge
                 return BackendErrorSource::Processing;
             case BackendCommandType::PlaybackSeek:
                 return BackendErrorSource::Playback;
+            case BackendCommandType::Operation:
+                return BackendErrorSource::Lifecycle;
             }
             return BackendErrorSource::Lifecycle;
         }
@@ -138,6 +144,10 @@ namespace backend::bridge
         {
             return;
         }
+
+        // Drain/cancel tracked operations first so their consumers see a
+        // terminal event before service teardown (BE-1 shutdown policy).
+        cancelAllOperations("Backend shutdown");
 
         backend_.stopFrameRecording();
         backend_.capture().stop();
@@ -225,9 +235,13 @@ namespace backend::bridge
             {
                 return handleRecordingLoadCommand(typedCommand);
             }
-            else
+            else if constexpr (std::is_same_v<Command, PlaybackSeekCommand>)
             {
                 return handlePlaybackSeekCommand(typedCommand);
+            }
+            else
+            {
+                return handleOperationCommand(typedCommand);
             }
         }, command);
     }
@@ -479,6 +493,12 @@ namespace backend::bridge
 
     BackendCommandResult BackendFacade::handleRecordingLoadCommand(const RecordingLoadCommand &command)
     {
+        // Tracked as an operation (BE-1): synchronous today, but the shell
+        // already correlates Started/terminal events by operationId so the
+        // load can move off-thread without a contract change.
+        const std::uint64_t operationId =
+            beginOperation(BackendOperationKind::RecordingLoad, nullptr, command.filePath);
+
         auto &hdf5 = backend_.hdf5();
         if (!hdf5.loadFile(command.filePath))
         {
@@ -494,7 +514,8 @@ namespace backend::bridge
             emitEvent(BackendErrorEvent{BackendErrorSource::Recording,
                                         BackendCommandType::RecordingLoad,
                                         "Recording load failed"});
-            return {false, BackendCommandType::RecordingLoad, "Recording load failed"};
+            finishOperation(operationId, BackendOperationState::Failed, "Recording load failed");
+            return {false, BackendCommandType::RecordingLoad, "Recording load failed", operationId};
         }
 
         RecordingStatusEvent event;
@@ -538,7 +559,27 @@ namespace backend::bridge
         }
 
         emitEvent(event);
-        return {true, BackendCommandType::RecordingLoad, "Recording loaded"};
+        finishOperation(operationId, BackendOperationState::Completed, command.filePath);
+        return {true, BackendCommandType::RecordingLoad, "Recording loaded", operationId};
+    }
+
+    BackendCommandResult BackendFacade::handleOperationCommand(const OperationCommand &command)
+    {
+        switch (command.action)
+        {
+        case OperationCommandAction::Cancel:
+            if (requestOperationCancel(command.operationId))
+            {
+                return {true, BackendCommandType::Operation, "Operation cancel requested",
+                        command.operationId};
+            }
+            // Unknown or already-finished IDs fail safely without touching
+            // state — duplicate cancels cannot desynchronize anything.
+            return {false, BackendCommandType::Operation,
+                    "Unknown or finished operation", command.operationId};
+        }
+
+        return {false, BackendCommandType::Operation, "Unknown operation command"};
     }
 
     BackendCommandResult BackendFacade::handlePlaybackSeekCommand(const PlaybackSeekCommand &command)
@@ -593,6 +634,98 @@ namespace backend::bridge
         if (sink)
         {
             sink(event);
+        }
+    }
+
+    std::uint64_t BackendFacade::beginOperation(BackendOperationKind kind,
+                                                CancelFlag *cancelFlagOut,
+                                                const std::string &message)
+    {
+        const std::uint64_t operationId = nextOperationId_.fetch_add(1, std::memory_order_relaxed);
+        auto flag = std::make_shared<std::atomic<bool>>(false);
+        {
+            std::scoped_lock lock(operationsMutex_);
+            activeOperations_[operationId] = ActiveOperation{kind, flag};
+        }
+        if (cancelFlagOut)
+        {
+            *cancelFlagOut = flag;
+        }
+        emitEvent(OperationStatusEvent{operationId, kind, BackendOperationState::Started, 0, 0, message});
+        return operationId;
+    }
+
+    void BackendFacade::reportOperationProgress(std::uint64_t operationId,
+                                                std::uint64_t progress,
+                                                std::uint64_t total,
+                                                const std::string &message)
+    {
+        BackendOperationKind kind;
+        {
+            std::scoped_lock lock(operationsMutex_);
+            const auto it = activeOperations_.find(operationId);
+            if (it == activeOperations_.end())
+            {
+                // Late progress after a terminal state: dropped by policy.
+                return;
+            }
+            kind = it->second.kind;
+        }
+        emitEvent(OperationStatusEvent{operationId, kind, BackendOperationState::Progress,
+                                       progress, total, message});
+    }
+
+    void BackendFacade::finishOperation(std::uint64_t operationId,
+                                        BackendOperationState terminalState,
+                                        const std::string &message)
+    {
+        BackendOperationKind kind;
+        {
+            std::scoped_lock lock(operationsMutex_);
+            const auto it = activeOperations_.find(operationId);
+            if (it == activeOperations_.end())
+            {
+                // First terminal state wins; later finishes are late events
+                // and are dropped (BE-1 policy).
+                return;
+            }
+            kind = it->second.kind;
+            activeOperations_.erase(it);
+        }
+        emitEvent(OperationStatusEvent{operationId, kind, terminalState, 0, 0, message});
+    }
+
+    bool BackendFacade::requestOperationCancel(std::uint64_t operationId)
+    {
+        std::scoped_lock lock(operationsMutex_);
+        const auto it = activeOperations_.find(operationId);
+        if (it == activeOperations_.end())
+        {
+            return false;
+        }
+        it->second.cancelRequested->store(true, std::memory_order_relaxed);
+        return true;
+    }
+
+    std::size_t BackendFacade::activeOperationCount() const
+    {
+        std::scoped_lock lock(operationsMutex_);
+        return activeOperations_.size();
+    }
+
+    void BackendFacade::cancelAllOperations(const std::string &reason)
+    {
+        std::vector<std::pair<std::uint64_t, ActiveOperation>> drained;
+        {
+            std::scoped_lock lock(operationsMutex_);
+            drained.assign(activeOperations_.begin(), activeOperations_.end());
+            activeOperations_.clear();
+        }
+        for (auto &[operationId, op] : drained)
+        {
+            op.cancelRequested->store(true, std::memory_order_relaxed);
+            emitEvent(OperationStatusEvent{operationId, op.kind,
+                                           BackendOperationState::Cancelled, 0, 0, reason});
         }
     }
 
