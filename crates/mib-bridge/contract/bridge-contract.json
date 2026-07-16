@@ -1,6 +1,6 @@
 {
   "$comment": "Single source of truth for the bridge command/event contract (BE-1, issue #271, epic #246, ADR 0004). C++ ties to these values via static_asserts in crates/mib-bridge/src/shim.cpp; Rust via crates/mib-bridge/tests/contract.rs; TypeScript via the generated desktop/src/bridgeContract.ts (scripts/gen_bridge_contract.py --check fails CI on drift). All changes must be additive: append values, never renumber or repurpose.",
-  "abi_version": 9,
+  "abi_version": 10,
   "event_kinds": {
     "FrameReady": 0,
     "CameraStatus": 1,
@@ -22,7 +22,8 @@
     "Experiment": 6,
     "Monitoring": 7,
     "Trigger": 8,
-    "Review": 9
+    "Review": 9,
+    "Pump": 10
   },
   "review_image_datasets": {
     "ValidImage": 0,
@@ -69,7 +70,22 @@
     "Export": 2,
     "BatchMetrics": 3,
     "MaskRegeneration": 4,
-    "Reanalysis": 5
+    "Reanalysis": 5,
+    "PumpScan": 6
+  },
+  "pump_ids": {
+    "Sample": 0,
+    "Sheath": 1
+  },
+  "pump_run_states": {
+    "Stop": 0,
+    "Forward": 1,
+    "Backward": 2,
+    "Pause": 3
+  },
+  "pump_directions": {
+    "Infuse": 0,
+    "Withdraw": 1
   },
   "operation_states": {
     "Started": 0,

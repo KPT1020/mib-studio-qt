@@ -5,6 +5,16 @@
 
 ## Features shipped
 
+- **Qt → React/Tauri migration: BE-7 — syringe-pump commands/status bridge**
+  (2026-07-16, epic #246, issue #277) — Bridge ABI **v10**: facade
+  `PumpCommand` surface + authoritative per-pump snapshots for the Sample and
+  Sheath dLSP pumps over the Qt-free `ISerialPort` seam, with structured
+  parameter validation, serial-port conflict rules (other pump / autofocus
+  controller), safe stop-on-disconnect, and the Modbus address scan running
+  as a BE-1 tracked operation. Fake-Modbus facade e2e in CTest
+  (`backend.pump_bridge_facade`); real dLSP hardware acceptance stays open on
+  #277. Details: `knowledge_map/task/2026-07-16-syringe-pump-bridge.md`.
+
 - **Qt → React/Tauri migration: BE-6 — paged HDF5 review + export jobs**
   (2026-07-16, epic #246, issue #276) — Bridge ABI **v9**: review metadata
   (mode/counts/ROI/provenance/dataset capabilities), bounded metrics pages

@@ -55,8 +55,62 @@ fn abi_version_is_stable() {
     // experiment lifecycle (BE-4); v6 monitoring snapshots + trigger (BE-5);
     // v7 camera discovery/selection (BE-2); v8 config round-trip, ROI/
     // background, and core status (BE-3); v9 paged HDF5 review + export jobs
-    // (BE-6).
-    assert_eq!(ffi::bridge_abi_version(), 9);
+    // (BE-6); v10 syringe-pump commands/status (BE-7).
+    assert_eq!(ffi::bridge_abi_version(), 10);
+}
+
+// BE-7: the pump command surface fails safely without hardware — structured
+// errors for invalid ids/ports/params, valid-but-disconnected snapshots, and
+// the address scan completing as a tracked operation. (The full fake-Modbus
+// end-to-end for both pump identities is backend.pump_bridge_facade in CTest.)
+#[test]
+#[serial]
+fn pump_commands_fail_safely_without_hardware() {
+    let data_dir = std::env::temp_dir().join(format!("mib_bridge_pump_data_{}", std::process::id()));
+    let mut bridge = ffi::new_backend_bridge();
+    assert!(bridge.pin_mut().initialize(&data_dir.to_string_lossy()));
+
+    // Snapshots: valid for both identities, invalid pump id fails.
+    let sample = bridge.pin_mut().fetch_pump_status(0);
+    assert!(sample.valid && !sample.connected);
+    assert!(bridge.pin_mut().fetch_pump_status(1).valid);
+    assert!(!bridge.pin_mut().fetch_pump_status(9).valid);
+
+    // Structured parameter errors.
+    assert!(!bridge.pin_mut().pump_connect(9, 3, 115200, 1).ok);
+    assert!(!bridge.pin_mut().pump_connect(0, -1, 115200, 1).ok);
+    assert!(!bridge.pin_mut().pump_connect(0, 3, 115200, 300).ok);
+    assert!(!bridge.pin_mut().pump_set_flow_rate(0, -5.0, 100).ok);
+    assert!(!bridge.pin_mut().pump_set_syringe_volume(0, 0, 1).ok);
+
+    // No hardware on this platform: a real connect fails without hanging, and
+    // control commands on a disconnected pump fail cleanly.
+    assert!(!bridge.pin_mut().pump_connect(0, 200, 115200, 1).ok);
+    assert!(!bridge.pin_mut().pump_start(0).ok);
+    assert!(!bridge.pin_mut().pump_stop(0).ok);
+    assert!(!bridge.pin_mut().pump_purge(0, 0).ok);
+
+    // The address scan runs as a tracked operation and completes (empty
+    // result without hardware) rather than blocking the bridge.
+    let _ = bridge.pin_mut().poll_events();
+    let scan = bridge.pin_mut().pump_scan_addresses(200, 115200, 1, 2, 20);
+    assert!(scan.ok && scan.operation_id != 0, "scan failed to start: {}", scan.message);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut completed = false;
+    while Instant::now() < deadline && !completed {
+        for e in bridge.pin_mut().poll_events() {
+            if e.kind == BridgeEventKind::OperationStatus && e.u0 == scan.operation_id && e.u2 == 2
+            {
+                assert!(e.text.is_empty(), "unexpected scan result: {}", e.text);
+                completed = true;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(completed, "pump scan did not complete");
+
+    bridge.pin_mut().shutdown();
+    let _ = std::fs::remove_dir_all(&data_dir);
 }
 
 // BE-6: review metadata, paged metrics, bounded image pulls, and the

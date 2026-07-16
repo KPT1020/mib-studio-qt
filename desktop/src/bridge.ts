@@ -49,6 +49,25 @@ export interface ExperimentStatus {
   message: string;
 }
 
+/** Authoritative per-pump snapshot (schema v10, BE-7). `run_status` /
+ *  `direction` are contract PUMP_RUN_STATES / PUMP_DIRECTIONS values. */
+export interface PumpStatus {
+  valid: boolean;
+  connected: boolean;
+  run_status: number;
+  current_flow_rate: number;
+  accumulated_volume: number;
+  min_flow_rate: number;
+  max_flow_rate: number;
+  stalled: boolean;
+  com_port: number;
+  baud_rate: number;
+  modbus_address: number;
+  configured_flow_rate: number;
+  flow_rate_unit: number;
+  direction: number;
+}
+
 /** Per-dataset capabilities of the loaded review file (schema v9, BE-6). */
 export interface ReviewDatasetInfo {
   present: boolean;
@@ -242,6 +261,31 @@ export const bridge = {
   experimentStop: () => invoke<CmdResult>("experiment_stop"),
   experimentCancel: () => invoke<CmdResult>("experiment_cancel"),
   fetchExperimentStatus: () => invoke<ExperimentStatus>("fetch_experiment_status"),
+  // Syringe pumps (schema v10, BE-7): pump 0 = Sample, 1 = Sheath.
+  pumpConnect: (pump: number, comPort: number, baudRate: number, modbusAddress: number) =>
+    invoke<CmdResult>("pump_connect", { pump, comPort, baudRate, modbusAddress }),
+  pumpDisconnect: (pump: number) => invoke<CmdResult>("pump_disconnect", { pump }),
+  pumpSetFlowRate: (pump: number, rate: number, unit: number) =>
+    invoke<CmdResult>("pump_set_flow_rate", { pump, rate, unit }),
+  pumpSetDirection: (pump: number, direction: number) =>
+    invoke<CmdResult>("pump_set_direction", { pump, direction }),
+  pumpStart: (pump: number) => invoke<CmdResult>("pump_start", { pump }),
+  pumpStop: (pump: number) => invoke<CmdResult>("pump_stop", { pump }),
+  pumpPurge: (pump: number, direction: number) =>
+    invoke<CmdResult>("pump_purge", { pump, direction }),
+  pumpStopPurge: (pump: number) => invoke<CmdResult>("pump_stop_purge", { pump }),
+  pumpSetSyringeVolume: (pump: number, volume: number, unit: number) =>
+    invoke<CmdResult>("pump_set_syringe_volume", { pump, volume, unit }),
+  pumpPollStatus: (pump: number) => invoke<CmdResult>("pump_poll_status", { pump }),
+  fetchPumpStatus: (pump: number) => invoke<PumpStatus>("fetch_pump_status", { pump }),
+  pumpScanAddresses: (
+    comPort: number,
+    baudRate: number,
+    startAddress: number,
+    endAddress: number,
+    timeoutMs: number,
+  ) =>
+    invoke<CmdResult>("pump_scan_addresses", { comPort, baudRate, startAddress, endAddress, timeoutMs }),
   // Paged HDF5 review + export jobs (schema v9, BE-6).
   fetchReviewMetadata: () => invoke<ReviewMetadata>("fetch_review_metadata"),
   fetchReviewMetricsPage: (valid: boolean, offset: number, count: number) =>

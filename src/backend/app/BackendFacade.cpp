@@ -13,8 +13,10 @@
 #include "backend/playback/FrameStore.h"
 #include "backend/playback/PlaybackService.h"
 #include "backend/recording/Hdf5Service.h"
+#include "backend/services/AutofocusService.h"
 #include "backend/services/CameraControlService.h"
 #include "backend/services/CaptureService.h"
+#include "backend/services/SyringePumpService.h"
 #include "backend/services/TriggerService.h"
 
 #include <algorithm>
@@ -68,9 +70,13 @@ namespace backend::bridge
                 {
                     return BackendCommandType::Trigger;
                 }
-                else
+                else if constexpr (std::is_same_v<Command, ReviewCommand>)
                 {
                     return BackendCommandType::Review;
+                }
+                else
+                {
+                    return BackendCommandType::Pump;
                 }
             }, command);
         }
@@ -127,6 +133,8 @@ namespace backend::bridge
                 return BackendErrorSource::Hardware;
             case BackendCommandType::Review:
                 return BackendErrorSource::Review;
+            case BackendCommandType::Pump:
+                return BackendErrorSource::Hardware;
             }
             return BackendErrorSource::Lifecycle;
         }
@@ -360,9 +368,13 @@ namespace backend::bridge
             {
                 return handleTriggerCommand(typedCommand);
             }
-            else
+            else if constexpr (std::is_same_v<Command, ReviewCommand>)
             {
                 return handleReviewCommand(typedCommand);
+            }
+            else
+            {
+                return handlePumpCommand(typedCommand);
             }
         }, command);
     }
@@ -1411,6 +1423,186 @@ namespace backend::bridge
         }
         }
         return {false, BackendCommandType::Review, "Unknown review command"};
+    }
+
+    BackendCommandResult BackendFacade::handlePumpCommand(const PumpCommand &command)
+    {
+        using Pump = services::SyringePumpService;
+        if (command.pumpId < 0 || command.pumpId >= Pump::PUMP_COUNT)
+        {
+            return {false, BackendCommandType::Pump, "Invalid pump id"};
+        }
+        auto &pumps = backend_.syringePump();
+        const auto pumpId = static_cast<Pump::PumpId>(command.pumpId);
+        auto fail = [this](const std::string &message) -> BackendCommandResult {
+            emitEvent(BackendErrorEvent{BackendErrorSource::Hardware,
+                                        BackendCommandType::Pump, message});
+            return {false, BackendCommandType::Pump, message};
+        };
+
+        switch (command.action)
+        {
+        case PumpCommandAction::Connect:
+        {
+            if (command.comPort < 0)
+            {
+                return fail("Invalid COM port");
+            }
+            if (command.modbusAddress < 1 || command.modbusAddress > 247)
+            {
+                return fail("Invalid Modbus address (1-247)");
+            }
+            // Serial-port conflict rules (BE-7): the other pump and the
+            // autofocus controller must not share the port.
+            const auto otherId = pumpId == Pump::PumpId::Sample ? Pump::PumpId::Sheath
+                                                                : Pump::PumpId::Sample;
+            if (pumps.isConnected(otherId) && pumps.getComPort(otherId) == command.comPort)
+            {
+                return fail("COM port already in use by the other pump");
+            }
+            if (backend_.autofocus().isConnected() &&
+                backend_.autofocus().getComPort() == command.comPort)
+            {
+                return fail("COM port already in use by the autofocus controller");
+            }
+            if (!pumps.connect(pumpId, command.comPort, command.baudRate,
+                               static_cast<std::uint8_t>(command.modbusAddress)))
+            {
+                return fail("Pump connect failed (no Modbus response)");
+            }
+            return {true, BackendCommandType::Pump, "Pump connected"};
+        }
+        case PumpCommandAction::Disconnect:
+            // Disconnect safely stops an active run/purge first.
+            pumps.stop(pumpId);
+            pumps.disconnect(pumpId);
+            return {true, BackendCommandType::Pump, "Pump disconnected"};
+        case PumpCommandAction::SetFlowRate:
+            if (command.flowRate < 0.0)
+            {
+                return fail("Invalid flow rate");
+            }
+            if (!pumps.setFlowRate(pumpId, command.flowRate,
+                                   static_cast<std::uint16_t>(command.flowRateUnit)))
+            {
+                return fail("Set flow rate failed");
+            }
+            return {true, BackendCommandType::Pump, "Flow rate set"};
+        case PumpCommandAction::SetDirection:
+            if (!pumps.setDirection(pumpId, command.direction == 1
+                                                ? Pump::Direction::Withdraw
+                                                : Pump::Direction::Infuse))
+            {
+                return fail("Set direction failed");
+            }
+            return {true, BackendCommandType::Pump, "Direction set"};
+        case PumpCommandAction::Start:
+            if (!pumps.start(pumpId))
+            {
+                return fail("Pump start failed");
+            }
+            return {true, BackendCommandType::Pump, "Pump started"};
+        case PumpCommandAction::Stop:
+            if (!pumps.stop(pumpId))
+            {
+                return fail("Pump stop failed");
+            }
+            return {true, BackendCommandType::Pump, "Pump stopped"};
+        case PumpCommandAction::Purge:
+            if (!pumps.purge(pumpId, command.direction == 1 ? Pump::Direction::Withdraw
+                                                            : Pump::Direction::Infuse))
+            {
+                return fail("Pump purge failed");
+            }
+            return {true, BackendCommandType::Pump, "Pump purge started"};
+        case PumpCommandAction::StopPurge:
+            if (!pumps.stopPurge(pumpId))
+            {
+                return fail("Pump purge stop failed");
+            }
+            return {true, BackendCommandType::Pump, "Pump purge stopped"};
+        case PumpCommandAction::SetSyringeVolume:
+            if (command.syringeVolume <= 0)
+            {
+                return fail("Invalid syringe volume");
+            }
+            if (!pumps.setSyringeVolume(pumpId,
+                                        static_cast<std::uint16_t>(command.syringeVolume),
+                                        static_cast<std::uint16_t>(command.syringeVolumeUnit)))
+            {
+                return fail("Set syringe volume failed");
+            }
+            return {true, BackendCommandType::Pump, "Syringe volume set"};
+        case PumpCommandAction::PollStatus:
+            pumps.pollStatus(pumpId);
+            return {true, BackendCommandType::Pump, "Pump status polled"};
+        case PumpCommandAction::ScanAddresses:
+        {
+            if (command.comPort < 0)
+            {
+                return fail("Invalid COM port");
+            }
+            // The scan blocks up to (end-start+1) * timeout — run it as a
+            // tracked operation so the bridge stays responsive (BE-1).
+            const std::uint64_t operationId = beginOperation(
+                BackendOperationKind::PumpScan, nullptr,
+                "pump address scan on COM" + std::to_string(command.comPort));
+            const int comPort = command.comPort;
+            const int baudRate = command.baudRate;
+            const int startAddr = std::clamp(command.scanStartAddress, 1, 247);
+            const int endAddr = std::clamp(command.scanEndAddress, startAddr, 247);
+            const int timeoutMs = std::max(10, command.scanTimeoutMs);
+            std::thread worker([this, operationId, comPort, baudRate, startAddr, endAddr,
+                                timeoutMs]() {
+                const auto addresses = backend_.syringePump().scanModbusAddresses(
+                    comPort, baudRate, static_cast<std::uint8_t>(startAddr),
+                    static_cast<std::uint8_t>(endAddr), timeoutMs);
+                std::string found;
+                for (const auto addr : addresses)
+                {
+                    if (!found.empty())
+                    {
+                        found += ",";
+                    }
+                    found += std::to_string(static_cast<int>(addr));
+                }
+                finishOperation(operationId, BackendOperationState::Completed, found);
+            });
+            {
+                std::scoped_lock lock(reviewJobsMutex_);
+                reviewJobThreads_.push_back(std::move(worker));
+            }
+            return {true, BackendCommandType::Pump, "Pump address scan started", operationId};
+        }
+        }
+        return {false, BackendCommandType::Pump, "Unknown pump command"};
+    }
+
+    bool BackendFacade::fetchPumpStatus(int pumpId, BackendPumpStatus &out) const
+    {
+        using Pump = services::SyringePumpService;
+        if (!initialized_ || pumpId < 0 || pumpId >= Pump::PUMP_COUNT)
+        {
+            return false;
+        }
+        auto &pumps = backend_.syringePump();
+        const auto id = static_cast<Pump::PumpId>(pumpId);
+        const auto status = pumps.getStatus(id);
+        const auto config = pumps.getConfig(id);
+        out.connected = status.connected;
+        out.runStatus = static_cast<int>(status.runStatus);
+        out.currentFlowRate = status.currentFlowRate;
+        out.accumulatedVolume = status.accumulatedVolume;
+        out.minFlowRate = status.minFlowRate;
+        out.maxFlowRate = status.maxFlowRate;
+        out.stalled = status.stalled;
+        out.comPort = config.comPort;
+        out.baudRate = config.baudRate;
+        out.modbusAddress = config.modbusAddress;
+        out.configuredFlowRate = config.flowRate;
+        out.flowRateUnit = config.flowRateUnit;
+        out.direction = static_cast<int>(config.direction);
+        return true;
     }
 
     bool BackendFacade::fetchBackgroundImage(BackendFrame &out) const

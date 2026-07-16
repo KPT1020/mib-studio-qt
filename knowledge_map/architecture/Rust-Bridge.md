@@ -54,6 +54,11 @@ Rust owns an opaque `BackendBridge` (`UniquePtr`) that composes an `AppBackend`
   `cancel_operation(id)` requests cancellation and fails safely for
   unknown/finished IDs; `shutdown()` cancels all active operations first.
   RecordingLoad is the first tracked operation; BE-4/BE-6 build on this.
+- **Syringe pumps (v10, BE-7):** flat `pump_*` commands (connect/disconnect/
+  flow rate/direction/start/stop/purge/syringe volume/poll) with structured
+  validation + COM-port conflict rules, `fetch_pump_status(pump)` snapshots
+  for both identities, and `pump_scan_addresses` as a tracked `PumpScan`
+  operation (addresses in the Completed event's text).
 - **Paged HDF5 review + export jobs (v9, BE-6):** `fetch_review_metadata`,
   `fetch_review_metrics_page` (bounded, metadata-only cache),
   `fetch_review_image(dataset, index)` (contract `review_image_datasets`,
@@ -116,7 +121,7 @@ via static_asserts in `shim.cpp`, Rust via `rust_enums_match_contract_json`,
 TypeScript via the generated `desktop/src/bridgeContract.ts`
 (`scripts/gen_bridge_contract.py --check` is a desktop-CI drift gate).
 
-The command/event set is a versioned schema: `bridge_abi_version()` returns `9`
+The command/event set is a versioned schema: `bridge_abi_version()` returns `10`
 (v2 added the review commands — `load_recording`, `playback_seek_index`,
 `fetch_frame_by_index`; v3 added the processing commands — `apply_processing`,
 `fetch_processing_stats`; v4 added operation state, `cancel_operation`,
@@ -124,7 +129,8 @@ The command/event set is a versioned schema: `bridge_abi_version()` returns `9`
 v5 added the experiment lifecycle (BE-4); v6 added monitoring snapshots and
 the sorter trigger (BE-5); v7 added camera discovery/selection (BE-2); v8
 added the processing-config round-trip, ROI/background, and core status
-(BE-3); v9 added paged HDF5 review and export jobs (BE-6) —
+(BE-3); v9 added paged HDF5 review and export jobs (BE-6); v10 added the
+syringe-pump surface (BE-7) —
 all additive over the v1 live-capture set); additive
 changes bump it. `tests/contract.rs` is the boundary gate and regression guard:
 `lifecycle_produces_status_and_frame_events` drives

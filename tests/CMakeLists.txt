@@ -46,6 +46,12 @@ mib_add_backend_test_executable(syringe_pump_fake_serial_test backend/syringe_pu
 add_test(NAME backend.syringe_pump_fake_serial COMMAND $<TARGET_FILE:syringe_pump_fake_serial_test>)
 set_tests_properties(backend.syringe_pump_fake_serial PROPERTIES LABELS "backend" TIMEOUT 30)
 
+# BE-7 (#277): facade PumpCommand surface over the fake Modbus serial — both
+# pump identities, structured errors, COM-port conflict rules, safe disconnect.
+mib_add_backend_test_executable(pump_bridge_facade_test backend/pump_bridge_facade_test.cpp)
+add_test(NAME backend.pump_bridge_facade COMMAND $<TARGET_FILE:pump_bridge_facade_test>)
+set_tests_properties(backend.pump_bridge_facade PROPERTIES LABELS "backend;bridge" TIMEOUT 60)
+
 mib_add_backend_test_executable(serial_port_posix_loopback_test backend/serial_port_posix_loopback_test.cpp)
 add_test(NAME backend.serial_port_posix_loopback COMMAND $<TARGET_FILE:serial_port_posix_loopback_test>)
 set_tests_properties(backend.serial_port_posix_loopback PROPERTIES LABELS "backend" TIMEOUT 30)

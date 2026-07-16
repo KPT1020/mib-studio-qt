@@ -167,6 +167,26 @@ pub mod ffi {
         pub running: bool,
     }
 
+    /// Authoritative per-pump snapshot (schema v10, BE-7). `run_status` /
+    /// `direction` are contract `pump_run_states` / `pump_directions` values.
+    #[derive(Debug, Clone, Default)]
+    pub struct BridgePumpStatus {
+        pub valid: bool,
+        pub connected: bool,
+        pub run_status: u32,
+        pub current_flow_rate: f64,
+        pub accumulated_volume: f64,
+        pub min_flow_rate: f64,
+        pub max_flow_rate: f64,
+        pub stalled: bool,
+        pub com_port: i32,
+        pub baud_rate: i32,
+        pub modbus_address: i32,
+        pub configured_flow_rate: f64,
+        pub flow_rate_unit: i32,
+        pub direction: u32,
+    }
+
     /// Per-dataset capabilities of the loaded review file (schema v9, BE-6).
     #[derive(Debug, Clone, Default)]
     pub struct BridgeReviewDatasetInfo {
@@ -381,6 +401,54 @@ pub mod ffi {
 
         /// Pull the current experiment lifecycle snapshot (schema v5).
         fn fetch_experiment_status(self: Pin<&mut BackendBridge>) -> BridgeExperimentStatus;
+
+        /// Syringe pump commands (schema v10, BE-7). `pump` is a contract
+        /// `pump_ids` value (0 Sample, 1 Sheath). Serial-port conflicts with
+        /// the other pump or the autofocus controller are structured errors.
+        fn pump_connect(
+            self: Pin<&mut BackendBridge>,
+            pump: u32,
+            com_port: i32,
+            baud_rate: i32,
+            modbus_address: i32,
+        ) -> BridgeCommandResult;
+        /// Disconnect stops an active run/purge first.
+        fn pump_disconnect(self: Pin<&mut BackendBridge>, pump: u32) -> BridgeCommandResult;
+        fn pump_set_flow_rate(
+            self: Pin<&mut BackendBridge>,
+            pump: u32,
+            rate: f64,
+            unit: i32,
+        ) -> BridgeCommandResult;
+        fn pump_set_direction(self: Pin<&mut BackendBridge>, pump: u32, direction: u32)
+            -> BridgeCommandResult;
+        fn pump_start(self: Pin<&mut BackendBridge>, pump: u32) -> BridgeCommandResult;
+        fn pump_stop(self: Pin<&mut BackendBridge>, pump: u32) -> BridgeCommandResult;
+        fn pump_purge(self: Pin<&mut BackendBridge>, pump: u32, direction: u32)
+            -> BridgeCommandResult;
+        fn pump_stop_purge(self: Pin<&mut BackendBridge>, pump: u32) -> BridgeCommandResult;
+        fn pump_set_syringe_volume(
+            self: Pin<&mut BackendBridge>,
+            pump: u32,
+            volume: i32,
+            unit: i32,
+        ) -> BridgeCommandResult;
+        /// Poll the pump hardware, then read the snapshot via
+        /// `fetch_pump_status`. Polling runs on the command thread and never
+        /// blocks the event queue.
+        fn pump_poll_status(self: Pin<&mut BackendBridge>, pump: u32) -> BridgeCommandResult;
+        fn fetch_pump_status(self: Pin<&mut BackendBridge>, pump: u32) -> BridgePumpStatus;
+        /// Probe a COM port for responsive Modbus addresses as a tracked
+        /// operation (the terminal Completed event's text carries the
+        /// comma-separated addresses).
+        fn pump_scan_addresses(
+            self: Pin<&mut BackendBridge>,
+            com_port: i32,
+            baud_rate: i32,
+            start_address: i32,
+            end_address: i32,
+            timeout_ms: i32,
+        ) -> BridgeCommandResult;
 
         /// Pull the review metadata of the loaded HDF5 file (schema v9, BE-6).
         fn fetch_review_metadata(self: Pin<&mut BackendBridge>) -> BridgeReviewMetadata;

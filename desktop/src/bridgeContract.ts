@@ -3,7 +3,7 @@
 // Regenerate with: python3 scripts/gen_bridge_contract.py
 // CI verifies this file with: python3 scripts/gen_bridge_contract.py --check
 
-export const BRIDGE_ABI_VERSION = 9;
+export const BRIDGE_ABI_VERSION = 10;
 
 export const EVENT_KINDS = {
   FrameReady: 0,
@@ -28,6 +28,7 @@ export const COMMAND_TYPES = {
   Monitoring: 7,
   Trigger: 8,
   Review: 9,
+  Pump: 10,
 } as const;
 
 export const CAMERA_TYPES = {
@@ -49,6 +50,23 @@ export const REVIEW_IMAGE_DATASETS = {
   RecordedImage: 2,
   ValidMask: 3,
   InvalidMask: 4,
+} as const;
+
+export const PUMP_IDS = {
+  Sample: 0,
+  Sheath: 1,
+} as const;
+
+export const PUMP_RUN_STATES = {
+  Stop: 0,
+  Forward: 1,
+  Backward: 2,
+  Pause: 3,
+} as const;
+
+export const PUMP_DIRECTIONS = {
+  Infuse: 0,
+  Withdraw: 1,
 } as const;
 
 export const EXPERIMENT_STATES = {
@@ -81,6 +99,7 @@ export const OPERATION_KINDS = {
   BatchMetrics: 3,
   MaskRegeneration: 4,
   Reanalysis: 5,
+  PumpScan: 6,
 } as const;
 
 export const OPERATION_STATES = {

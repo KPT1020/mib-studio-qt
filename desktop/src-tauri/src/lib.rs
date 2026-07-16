@@ -339,6 +339,139 @@ fn fetch_experiment_status(state: State<AppState>) -> Result<ExperimentStatus, S
     })
 }
 
+/// Authoritative per-pump snapshot for the webview (schema v10, BE-7).
+#[derive(Serialize, Clone, Default)]
+struct PumpStatus {
+    valid: bool,
+    connected: bool,
+    run_status: u32,
+    current_flow_rate: f64,
+    accumulated_volume: f64,
+    min_flow_rate: f64,
+    max_flow_rate: f64,
+    stalled: bool,
+    com_port: i32,
+    baud_rate: i32,
+    modbus_address: i32,
+    configured_flow_rate: f64,
+    flow_rate_unit: i32,
+    direction: u32,
+}
+
+#[tauri::command]
+fn pump_connect(
+    state: State<AppState>,
+    pump: u32,
+    com_port: i32,
+    baud_rate: i32,
+    modbus_address: i32,
+) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().pump_connect(pump, com_port, baud_rate, modbus_address).into())
+}
+
+#[tauri::command]
+fn pump_disconnect(state: State<AppState>, pump: u32) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().pump_disconnect(pump).into())
+}
+
+#[tauri::command]
+fn pump_set_flow_rate(
+    state: State<AppState>,
+    pump: u32,
+    rate: f64,
+    unit: i32,
+) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().pump_set_flow_rate(pump, rate, unit).into())
+}
+
+#[tauri::command]
+fn pump_set_direction(state: State<AppState>, pump: u32, direction: u32) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().pump_set_direction(pump, direction).into())
+}
+
+#[tauri::command]
+fn pump_start(state: State<AppState>, pump: u32) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().pump_start(pump).into())
+}
+
+#[tauri::command]
+fn pump_stop(state: State<AppState>, pump: u32) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().pump_stop(pump).into())
+}
+
+#[tauri::command]
+fn pump_purge(state: State<AppState>, pump: u32, direction: u32) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().pump_purge(pump, direction).into())
+}
+
+#[tauri::command]
+fn pump_stop_purge(state: State<AppState>, pump: u32) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().pump_stop_purge(pump).into())
+}
+
+#[tauri::command]
+fn pump_set_syringe_volume(
+    state: State<AppState>,
+    pump: u32,
+    volume: i32,
+    unit: i32,
+) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().pump_set_syringe_volume(pump, volume, unit).into())
+}
+
+#[tauri::command]
+fn pump_poll_status(state: State<AppState>, pump: u32) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().pump_poll_status(pump).into())
+}
+
+#[tauri::command]
+fn fetch_pump_status(state: State<AppState>, pump: u32) -> Result<PumpStatus, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    let s = guard.pin_mut().fetch_pump_status(pump);
+    Ok(PumpStatus {
+        valid: s.valid,
+        connected: s.connected,
+        run_status: s.run_status,
+        current_flow_rate: s.current_flow_rate,
+        accumulated_volume: s.accumulated_volume,
+        min_flow_rate: s.min_flow_rate,
+        max_flow_rate: s.max_flow_rate,
+        stalled: s.stalled,
+        com_port: s.com_port,
+        baud_rate: s.baud_rate,
+        modbus_address: s.modbus_address,
+        configured_flow_rate: s.configured_flow_rate,
+        flow_rate_unit: s.flow_rate_unit,
+        direction: s.direction,
+    })
+}
+
+#[tauri::command]
+fn pump_scan_addresses(
+    state: State<AppState>,
+    com_port: i32,
+    baud_rate: i32,
+    start_address: i32,
+    end_address: i32,
+    timeout_ms: i32,
+) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard
+        .pin_mut()
+        .pump_scan_addresses(com_port, baud_rate, start_address, end_address, timeout_ms)
+        .into())
+}
+
 /// Per-dataset capabilities of the loaded review file (schema v9, BE-6).
 #[derive(Serialize, Clone, Default)]
 struct ReviewDatasetInfo {
@@ -1123,6 +1256,18 @@ pub fn run() {
             experiment_stop,
             experiment_cancel,
             fetch_experiment_status,
+            pump_connect,
+            pump_disconnect,
+            pump_set_flow_rate,
+            pump_set_direction,
+            pump_start,
+            pump_stop,
+            pump_purge,
+            pump_stop_purge,
+            pump_set_syringe_volume,
+            pump_poll_status,
+            fetch_pump_status,
+            pump_scan_addresses,
             fetch_review_metadata,
             fetch_review_metrics_page,
             fetch_review_image,

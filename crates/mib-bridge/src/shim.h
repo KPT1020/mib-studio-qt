@@ -19,6 +19,7 @@ struct BridgeCameraSelection;
 struct BridgeCommandResult;
 struct BridgeConfigDocument;
 struct BridgeProcessingCoreStatus;
+struct BridgePumpStatus;
 struct BridgeReviewMetadata;
 struct BridgeReviewMetricsPage;
 struct BridgeEvent;
@@ -56,6 +57,22 @@ public:
     BridgeCommandResult experiment_stop();
     BridgeCommandResult experiment_cancel();
     BridgeExperimentStatus fetch_experiment_status();
+    BridgeCommandResult pump_connect(std::uint32_t pump, std::int32_t com_port,
+                                     std::int32_t baud_rate, std::int32_t modbus_address);
+    BridgeCommandResult pump_disconnect(std::uint32_t pump);
+    BridgeCommandResult pump_set_flow_rate(std::uint32_t pump, double rate, std::int32_t unit);
+    BridgeCommandResult pump_set_direction(std::uint32_t pump, std::uint32_t direction);
+    BridgeCommandResult pump_start(std::uint32_t pump);
+    BridgeCommandResult pump_stop(std::uint32_t pump);
+    BridgeCommandResult pump_purge(std::uint32_t pump, std::uint32_t direction);
+    BridgeCommandResult pump_stop_purge(std::uint32_t pump);
+    BridgeCommandResult pump_set_syringe_volume(std::uint32_t pump, std::int32_t volume,
+                                                std::int32_t unit);
+    BridgeCommandResult pump_poll_status(std::uint32_t pump);
+    BridgePumpStatus fetch_pump_status(std::uint32_t pump);
+    BridgeCommandResult pump_scan_addresses(std::int32_t com_port, std::int32_t baud_rate,
+                                            std::int32_t start_address, std::int32_t end_address,
+                                            std::int32_t timeout_ms);
     BridgeReviewMetadata fetch_review_metadata();
     BridgeReviewMetricsPage fetch_review_metrics_page(bool valid, std::uint64_t offset,
                                                       std::uint64_t count);

@@ -8,6 +8,7 @@
 #include "backend/app/AppBackend.h"
 #include "backend/app/BackendFacade.h"
 #include "backend/services/CameraControlService.h"
+#include "backend/services/SyringePumpService.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -50,6 +51,15 @@ static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Experiment) == 
 static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Monitoring) == 7);
 static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Trigger) == 8);
 static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Review) == 9);
+static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Pump) == 10);
+
+static_assert(static_cast<std::uint32_t>(bb::BackendOperationKind::PumpScan) == 6);
+static_assert(static_cast<std::uint32_t>(backend::services::SyringePumpService::PumpId::Sample) == 0);
+static_assert(static_cast<std::uint32_t>(backend::services::SyringePumpService::PumpId::Sheath) == 1);
+static_assert(static_cast<std::uint32_t>(backend::services::SyringePumpService::RunStatus::Stop) == 0);
+static_assert(static_cast<std::uint32_t>(backend::services::SyringePumpService::RunStatus::Pause) == 3);
+static_assert(static_cast<std::uint32_t>(backend::services::SyringePumpService::Direction::Infuse) == 0);
+static_assert(static_cast<std::uint32_t>(backend::services::SyringePumpService::Direction::Withdraw) == 1);
 
 static_assert(static_cast<std::uint32_t>(bb::ReviewImageDataset::ValidImage) == 0);
 static_assert(static_cast<std::uint32_t>(bb::ReviewImageDataset::InvalidImage) == 1);
@@ -529,6 +539,188 @@ BridgeMonitoringRow toMonitoringRow(const backend::bridge::MonitoringObjectRow& 
 }
 
 } // namespace
+
+namespace {
+
+backend::bridge::PumpCommand makePumpCommand(backend::bridge::PumpCommandAction action,
+                                             std::uint32_t pump) {
+    backend::bridge::PumpCommand cmd;
+    cmd.action = action;
+    cmd.pumpId = static_cast<int>(pump);
+    return cmd;
+}
+
+} // namespace
+
+BridgeCommandResult BackendBridge::pump_connect(std::uint32_t pump, std::int32_t com_port,
+                                                std::int32_t baud_rate,
+                                                std::int32_t modbus_address) {
+    try {
+        auto cmd = makePumpCommand(backend::bridge::PumpCommandAction::Connect, pump);
+        cmd.comPort = com_port;
+        cmd.baudRate = baud_rate;
+        cmd.modbusAddress = modbus_address;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("pump_connect: ") + e.what());
+    } catch (...) {
+        return errorResult("pump_connect: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::pump_disconnect(std::uint32_t pump) {
+    try {
+        return toBridgeResult(impl_->facade.dispatch(
+            makePumpCommand(backend::bridge::PumpCommandAction::Disconnect, pump)));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("pump_disconnect: ") + e.what());
+    } catch (...) {
+        return errorResult("pump_disconnect: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::pump_set_flow_rate(std::uint32_t pump, double rate,
+                                                      std::int32_t unit) {
+    try {
+        auto cmd = makePumpCommand(backend::bridge::PumpCommandAction::SetFlowRate, pump);
+        cmd.flowRate = rate;
+        cmd.flowRateUnit = unit;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("pump_set_flow_rate: ") + e.what());
+    } catch (...) {
+        return errorResult("pump_set_flow_rate: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::pump_set_direction(std::uint32_t pump,
+                                                      std::uint32_t direction) {
+    try {
+        auto cmd = makePumpCommand(backend::bridge::PumpCommandAction::SetDirection, pump);
+        cmd.direction = static_cast<int>(direction);
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("pump_set_direction: ") + e.what());
+    } catch (...) {
+        return errorResult("pump_set_direction: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::pump_start(std::uint32_t pump) {
+    try {
+        return toBridgeResult(impl_->facade.dispatch(
+            makePumpCommand(backend::bridge::PumpCommandAction::Start, pump)));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("pump_start: ") + e.what());
+    } catch (...) {
+        return errorResult("pump_start: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::pump_stop(std::uint32_t pump) {
+    try {
+        return toBridgeResult(impl_->facade.dispatch(
+            makePumpCommand(backend::bridge::PumpCommandAction::Stop, pump)));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("pump_stop: ") + e.what());
+    } catch (...) {
+        return errorResult("pump_stop: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::pump_purge(std::uint32_t pump, std::uint32_t direction) {
+    try {
+        auto cmd = makePumpCommand(backend::bridge::PumpCommandAction::Purge, pump);
+        cmd.direction = static_cast<int>(direction);
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("pump_purge: ") + e.what());
+    } catch (...) {
+        return errorResult("pump_purge: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::pump_stop_purge(std::uint32_t pump) {
+    try {
+        return toBridgeResult(impl_->facade.dispatch(
+            makePumpCommand(backend::bridge::PumpCommandAction::StopPurge, pump)));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("pump_stop_purge: ") + e.what());
+    } catch (...) {
+        return errorResult("pump_stop_purge: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::pump_set_syringe_volume(std::uint32_t pump,
+                                                           std::int32_t volume,
+                                                           std::int32_t unit) {
+    try {
+        auto cmd = makePumpCommand(backend::bridge::PumpCommandAction::SetSyringeVolume, pump);
+        cmd.syringeVolume = volume;
+        cmd.syringeVolumeUnit = unit;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("pump_set_syringe_volume: ") + e.what());
+    } catch (...) {
+        return errorResult("pump_set_syringe_volume: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::pump_poll_status(std::uint32_t pump) {
+    try {
+        return toBridgeResult(impl_->facade.dispatch(
+            makePumpCommand(backend::bridge::PumpCommandAction::PollStatus, pump)));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("pump_poll_status: ") + e.what());
+    } catch (...) {
+        return errorResult("pump_poll_status: unknown error");
+    }
+}
+
+BridgePumpStatus BackendBridge::fetch_pump_status(std::uint32_t pump) {
+    BridgePumpStatus out{};
+    backend::bridge::BackendPumpStatus status;
+    if (!impl_->facade.fetchPumpStatus(static_cast<int>(pump), status)) {
+        out.valid = false;
+        return out;
+    }
+    out.valid = true;
+    out.connected = status.connected;
+    out.run_status = static_cast<std::uint32_t>(status.runStatus);
+    out.current_flow_rate = status.currentFlowRate;
+    out.accumulated_volume = status.accumulatedVolume;
+    out.min_flow_rate = status.minFlowRate;
+    out.max_flow_rate = status.maxFlowRate;
+    out.stalled = status.stalled;
+    out.com_port = status.comPort;
+    out.baud_rate = status.baudRate;
+    out.modbus_address = status.modbusAddress;
+    out.configured_flow_rate = status.configuredFlowRate;
+    out.flow_rate_unit = status.flowRateUnit;
+    out.direction = static_cast<std::uint32_t>(status.direction);
+    return out;
+}
+
+BridgeCommandResult BackendBridge::pump_scan_addresses(std::int32_t com_port,
+                                                       std::int32_t baud_rate,
+                                                       std::int32_t start_address,
+                                                       std::int32_t end_address,
+                                                       std::int32_t timeout_ms) {
+    try {
+        backend::bridge::PumpCommand cmd;
+        cmd.action = backend::bridge::PumpCommandAction::ScanAddresses;
+        cmd.comPort = com_port;
+        cmd.baudRate = baud_rate;
+        cmd.scanStartAddress = start_address;
+        cmd.scanEndAddress = end_address;
+        cmd.scanTimeoutMs = timeout_ms;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("pump_scan_addresses: ") + e.what());
+    } catch (...) {
+        return errorResult("pump_scan_addresses: unknown error");
+    }
+}
 
 BridgeReviewMetadata BackendBridge::fetch_review_metadata() {
     BridgeReviewMetadata out{};
@@ -1019,8 +1211,9 @@ std::unique_ptr<BackendBridge> new_backend_bridge() {
 // reset_hardware_camera — BE-2); v8 added the processing config document
 // round-trip, ROI/background binary transfer, and processing-core status
 // (BE-3); v9 added paged HDF5 review (metadata, metrics pages, image/mask
-// pulls, cancellable CSV export jobs — BE-6). All additive over v1
+// pulls, cancellable CSV export jobs — BE-6); v10 added syringe-pump
+// commands/status for the sample/sheath pumps (BE-7). All additive over v1
 // (ADR 0003/0004). Must match contract/bridge-contract.json.
-std::uint32_t bridge_abi_version() { return 9; }
+std::uint32_t bridge_abi_version() { return 10; }
 
 } // namespace mib_bridge

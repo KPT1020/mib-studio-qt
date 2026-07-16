@@ -39,6 +39,7 @@ namespace backend::bridge
         Monitoring,
         Trigger,
         Review,
+        Pump,
     };
 
     enum class CameraCommandAction
@@ -126,6 +127,7 @@ namespace backend::bridge
         BatchMetrics,
         MaskRegeneration,
         Reanalysis,
+        PumpScan,
     };
 
     enum class BackendOperationState
@@ -219,6 +221,42 @@ namespace backend::bridge
         std::string outputPath;
     };
 
+    // Syringe-pump commands (BE-7, #277) over the Qt-free SyringePumpService.
+    // Sample and Sheath are independent identities; serial-port conflicts
+    // (other pump or the autofocus controller on the same COM port) are
+    // rejected with structured errors before touching the port.
+    enum class PumpCommandAction
+    {
+        Connect,
+        Disconnect,
+        SetFlowRate,
+        SetDirection,
+        Start,
+        Stop,
+        Purge,
+        StopPurge,
+        SetSyringeVolume,
+        PollStatus,
+        ScanAddresses,
+    };
+
+    struct PumpCommand
+    {
+        PumpCommandAction action{PumpCommandAction::PollStatus};
+        int pumpId{0}; // 0 Sample, 1 Sheath (contract pump_ids)
+        int comPort{-1};
+        int baudRate{115200};
+        int modbusAddress{1};
+        double flowRate{0.0};
+        int flowRateUnit{100};
+        int direction{0}; // 0 Infuse, 1 Withdraw (contract pump_directions)
+        int syringeVolume{0};
+        int syringeVolumeUnit{0};
+        int scanStartAddress{1};
+        int scanEndAddress{8};
+        int scanTimeoutMs{300};
+    };
+
     using BackendCommand = std::variant<CameraCommand,
                                         RecordingCommand,
                                         ProcessingSettingsCommand,
@@ -228,7 +266,8 @@ namespace backend::bridge
                                         ExperimentCommand,
                                         MonitoringCommand,
                                         TriggerCommand,
-                                        ReviewCommand>;
+                                        ReviewCommand,
+                                        PumpCommand>;
 
     struct BackendCommandResult
     {
@@ -561,6 +600,25 @@ namespace backend::bridge
         bool pinSatisfied{true};
     };
 
+    // Authoritative per-pump snapshot (BE-7): connection, run state, rates,
+    // and the applied configuration.
+    struct BackendPumpStatus
+    {
+        bool connected{false};
+        int runStatus{0}; // contract pump_run_states
+        double currentFlowRate{0.0};
+        double accumulatedVolume{0.0};
+        double minFlowRate{0.0};
+        double maxFlowRate{0.0};
+        bool stalled{false};
+        int comPort{-1};
+        int baudRate{115200};
+        int modbusAddress{1};
+        double configuredFlowRate{0.0};
+        int flowRateUnit{100};
+        int direction{0};
+    };
+
     // Sorter trigger status snapshot (BE-5).
     struct BackendTriggerStatus
     {
@@ -605,6 +663,7 @@ namespace backend::bridge
         // synthetic mock entry; the selection snapshot is authoritative.
         bool fetchCameraDiscovery(BackendCameraDiscovery &out) const;
         bool fetchCameraSelection(BackendCameraSelection &out) const;
+        bool fetchPumpStatus(int pumpId, BackendPumpStatus &out) const;
         // Processing configuration (BE-3): the full lossless config document
         // as JSON — image_processing (config.json schema), realtime settings,
         // flush interval, pixel→micron, ROI, background flag, and the
@@ -665,6 +724,7 @@ namespace backend::bridge
         BackendCommandResult handleMonitoringCommand(const MonitoringCommand &command);
         BackendCommandResult handleTriggerCommand(const TriggerCommand &command);
         BackendCommandResult handleReviewCommand(const ReviewCommand &command);
+        BackendCommandResult handlePumpCommand(const PumpCommand &command);
 
         BackendCommandResult lifecycleError(BackendCommandType command, const std::string &message);
         void emitEvent(const BackendEvent &event) const;
