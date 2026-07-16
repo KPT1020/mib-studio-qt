@@ -49,6 +49,20 @@ export interface ExperimentStatus {
   message: string;
 }
 
+/** Processing-core identity/pin status (bridge schema v8, BE-3). */
+export interface ProcessingCoreStatus {
+  valid: boolean;
+  active_version: string;
+  contract_version: number;
+  engine_abi_version: number;
+  source: string;
+  release_tag: string;
+  build_id: string;
+  artifact_sha256: string;
+  required_version: string;
+  pin_satisfied: boolean;
+}
+
 /** One discovered camera (bridge schema v7, BE-2). `camera_type` is a
  *  contract CAMERA_TYPES value (0 EGrabber, 1 MindVision, 2 Mock). */
 export interface DiscoveredCamera {
@@ -185,6 +199,23 @@ export const bridge = {
   experimentStop: () => invoke<CmdResult>("experiment_stop"),
   experimentCancel: () => invoke<CmdResult>("experiment_cancel"),
   fetchExperimentStatus: () => invoke<ExperimentStatus>("fetch_experiment_status"),
+  // Processing config / ROI / background / core identity (schema v8, BE-3).
+  fetchProcessingConfigJson: () =>
+    invoke<{ valid: boolean; json: string }>("fetch_processing_config_json"),
+  applyProcessingConfigJson: (json: string) =>
+    invoke<CmdResult>("apply_processing_config_json", { json }),
+  setProcessingRoi: (x: number, y: number, w: number, h: number) =>
+    invoke<CmdResult>("set_processing_roi", { x, y, w, h }),
+  fetchBackground: () => invoke<FrameMeta>("fetch_background"),
+  backgroundBytes: async (): Promise<Uint8Array> => {
+    const buf = await invoke<ArrayBuffer>("background_bytes");
+    return new Uint8Array(buf);
+  },
+  setBackgroundFromCurrentFrame: () =>
+    invoke<CmdResult>("set_background_from_current_frame"),
+  clearBackgroundImage: () => invoke<CmdResult>("clear_background_image"),
+  fetchProcessingCoreStatus: () =>
+    invoke<ProcessingCoreStatus>("fetch_processing_core_status"),
   // Camera discovery/selection (bridge schema v7, BE-2).
   fetchCameraDiscovery: () => invoke<CameraDiscovery>("fetch_camera_discovery"),
   fetchCameraSelection: () => invoke<CameraSelection>("fetch_camera_selection"),

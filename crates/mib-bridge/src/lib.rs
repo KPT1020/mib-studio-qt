@@ -167,6 +167,33 @@ pub mod ffi {
         pub running: bool,
     }
 
+    /// Full processing configuration document (schema v8, BE-3): a lossless
+    /// JSON string — `image_processing` (exact config.json schema),
+    /// `realtime_processing`, `flush_interval`, `pixel_to_micron`, `roi`,
+    /// `background_set`, and the monotonic `config_version` for
+    /// external-change detection. `valid` is false when uninitialized.
+    #[derive(Debug, Clone, Default)]
+    pub struct BridgeConfigDocument {
+        pub valid: bool,
+        pub json: String,
+    }
+
+    /// Processing-core identity/trust status (schema v8, BE-3). Trust
+    /// verification stays backend-owned; this is observability only.
+    #[derive(Debug, Clone, Default)]
+    pub struct BridgeProcessingCoreStatus {
+        pub valid: bool,
+        pub active_version: String,
+        pub contract_version: u32,
+        pub engine_abi_version: u32,
+        pub source: String,
+        pub release_tag: String,
+        pub build_id: String,
+        pub artifact_sha256: String,
+        pub required_version: String,
+        pub pin_satisfied: bool,
+    }
+
     /// One monitoring metric row (schema v6, BE-5): the per-object
     /// measurements that feed the Monitoring charts. `(frame_index,
     /// object_id)` is a stable identity for frontend reconciliation. Never
@@ -307,6 +334,44 @@ pub mod ffi {
 
         /// Pull the current experiment lifecycle snapshot (schema v5).
         fn fetch_experiment_status(self: Pin<&mut BackendBridge>) -> BridgeExperimentStatus;
+
+        /// Pull the full processing configuration document (schema v8, BE-3).
+        fn fetch_processing_config_json(self: Pin<&mut BackendBridge>) -> BridgeConfigDocument;
+
+        /// Merge-apply a processing configuration document (schema v8, BE-3):
+        /// only keys present in the JSON change; malformed values fail the
+        /// whole command without touching state.
+        fn apply_processing_config_json(self: Pin<&mut BackendBridge>, json: &str)
+            -> BridgeCommandResult;
+
+        /// Set the realtime processing ROI (schema v8, BE-3). w==0 || h==0
+        /// clears the ROI.
+        fn set_processing_roi(
+            self: Pin<&mut BackendBridge>,
+            x: i32,
+            y: i32,
+            w: i32,
+            h: i32,
+        ) -> BridgeCommandResult;
+
+        /// Pull the current background image (Mono8, binary — schema v8).
+        /// `valid` is false when no background is set.
+        fn fetch_background_image(self: Pin<&mut BackendBridge>) -> BridgeFrame;
+
+        /// Set the background image from raw Mono8 bytes (len == w*h).
+        fn set_background_image(
+            self: Pin<&mut BackendBridge>,
+            width: u64,
+            height: u64,
+            data: &[u8],
+        ) -> BridgeCommandResult;
+
+        /// Clear the background image.
+        fn clear_background_image(self: Pin<&mut BackendBridge>) -> BridgeCommandResult;
+
+        /// Pull the processing-core identity/pin status (schema v8, BE-3).
+        fn fetch_processing_core_status(self: Pin<&mut BackendBridge>)
+            -> BridgeProcessingCoreStatus;
 
         /// Enumerate cameras/framegrabbers (schema v7, BE-2): EGrabber +
         /// MindVision hardware (empty without the SDKs) plus the synthetic

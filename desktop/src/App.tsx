@@ -9,6 +9,7 @@ import {
   type ExperimentStatus,
   type FrameMeta,
   type MonitoringSnapshot,
+  type ProcessingCoreStatus,
   type ProcessingStats,
   type TriggerStatus,
 } from "./bridge";
@@ -26,6 +27,7 @@ const PENDING = {
   roi: "ROI editing is not bridged yet — backend issue BE-3 (#273)",
   script: "Camera script/config apply is not bridged yet — BE-2 (#272) / BE-3 (#273)",
   config: "App config / profiles are not bridged yet — backend issue BE-3 (#273)",
+  profiles: "Profile management is not bridged yet — BE-3 (#273) follow-up",
   saveBuffer: "Preview buffer save is not bridged yet — UI-3 (#268)",
   monitoring: "Monitoring data is not bridged yet — backend issue BE-5 (#275)",
   review: "HDF5 metadata/metrics/export are not bridged yet — backend issue BE-6 (#276)",
@@ -160,6 +162,13 @@ export default function App() {
   const [trigStatus, setTrigStatus] = useState<TriggerStatus | null>(null);
   const [pulseUs, setPulseUs] = useState("1");
   const [periodicMs, setPeriodicMs] = useState("1000");
+
+  // Processing config / ROI / background / core identity (schema v8, BE-3).
+  const [configText, setConfigText] = useState("");
+  const [configDirty, setConfigDirty] = useState(false);
+  const [coreStatus, setCoreStatus] = useState<ProcessingCoreStatus | null>(null);
+  const [backgroundSet, setBackgroundSet] = useState(false);
+  const [roiFields, setRoiFields] = useState({ x: "0", y: "0", w: "0", h: "0" });
 
   // Review.
   const [reviewPath, setReviewPath] = useState("");
@@ -330,6 +339,60 @@ export default function App() {
   }, []);
 
   // ---- Camera discovery/selection (BE-2) + camera actions ----
+
+  const refreshConfig = useCallback(async () => {
+    try {
+      const doc = await bridge.fetchProcessingConfigJson();
+      if (doc.valid) {
+        const parsed = JSON.parse(doc.json);
+        setConfigText(JSON.stringify(parsed, null, 2));
+        setConfigDirty(false);
+        setBackgroundSet(Boolean(parsed.background_set));
+        if (parsed.roi) {
+          setRoiFields({
+            x: String(parsed.roi.x ?? 0),
+            y: String(parsed.roi.y ?? 0),
+            w: String(parsed.roi.w ?? 0),
+            h: String(parsed.roi.h ?? 0),
+          });
+        }
+      }
+      setCoreStatus(await bridge.fetchProcessingCoreStatus());
+    } catch (e) {
+      append(`config fetch error: ${e}`);
+    }
+  }, [append]);
+
+  useEffect(() => {
+    if (ready) void refreshConfig();
+  }, [ready, refreshConfig]);
+
+  const onApplyConfigJson = useCallback(async () => {
+    try {
+      const res = await bridge.applyProcessingConfigJson(configText);
+      if (!res.ok) return append(`config apply failed: ${res.message}`);
+      append("processing config applied");
+      await refreshConfig();
+    } catch (e) {
+      append(`config apply error: ${e}`);
+    }
+  }, [configText, append, refreshConfig]);
+
+  const onApplyRoi = useCallback(async () => {
+    try {
+      const res = await bridge.setProcessingRoi(
+        Number(roiFields.x) || 0,
+        Number(roiFields.y) || 0,
+        Number(roiFields.w) || 0,
+        Number(roiFields.h) || 0,
+      );
+      if (!res.ok) return append(`ROI apply failed: ${res.message}`);
+      append(`ROI set to ${roiFields.w}×${roiFields.h} @ (${roiFields.x}, ${roiFields.y})`);
+      await refreshConfig();
+    } catch (e) {
+      append(`ROI error: ${e}`);
+    }
+  }, [roiFields, append, refreshConfig]);
 
   const refreshCameraState = useCallback(async () => {
     try {
@@ -574,8 +637,8 @@ export default function App() {
         {/* ---- Telemetry sidebar ---- */}
         <aside className={`sidebar ${sidebarCollapsed ? "collapsed" : ""}`} aria-label="Telemetry sidebar">
           <div className="side-section">
-            <div className="bg-preview" title={PENDING.background}>
-              No background set
+            <div className="bg-preview" title="Processing background state (set/clear in Experiment ▸ Preview)">
+              {backgroundSet ? "Background set" : "No background set"}
             </div>
           </div>
           <div className="side-section">
@@ -754,13 +817,22 @@ export default function App() {
               <>
                 <div className="toolbar">
                   <button onClick={() => setFitWindow((f) => !f)}>{fitWindow ? "Fit: Window" : "Fit: 1:1"}</button>
-                  <button disabled title={PENDING.roi}>ROI Overlay: Off</button>
+                  <button disabled title="ROI overlay rendering lands with UI-2 (#267)">ROI Overlay: Off</button>
                   <label>
-                    W: <input type="number" disabled title={PENDING.roi} placeholder="—" /> px
+                    X: <input type="number" value={roiFields.x} onChange={(e) => setRoiFields((r) => ({ ...r, x: e.target.value }))} />
                   </label>
                   <label>
-                    H: <input type="number" disabled title={PENDING.roi} placeholder="—" /> px
+                    Y: <input type="number" value={roiFields.y} onChange={(e) => setRoiFields((r) => ({ ...r, y: e.target.value }))} />
                   </label>
+                  <label>
+                    W: <input type="number" value={roiFields.w} onChange={(e) => setRoiFields((r) => ({ ...r, w: e.target.value }))} /> px
+                  </label>
+                  <label>
+                    H: <input type="number" value={roiFields.h} onChange={(e) => setRoiFields((r) => ({ ...r, h: e.target.value }))} /> px
+                  </label>
+                  <button className="btn" onClick={onApplyRoi} disabled={!ready}>
+                    Apply ROI
+                  </button>
                 </div>
                 <div className="canvas-wrap">
                   {!lastMeta && <span className="canvas-hint">No frame yet — configure a camera and press Start Camera</span>}
@@ -802,7 +874,9 @@ export default function App() {
                     </button>
                   </div>
                   <div className="right">
-                    <span className="mono" title={PENDING.roi}>ROI: — (not bridged)</span>
+                    <span className="mono">
+                      ROI: {Number(roiFields.w) > 0 ? `${roiFields.w} × ${roiFields.h} @ (${roiFields.x}, ${roiFields.y})` : "full frame"}
+                    </span>
                     <button onClick={onStartExperiment} disabled={!!startExperimentReason} title={startExperimentReason}>
                       Start Experiment
                     </button>
@@ -829,11 +903,41 @@ export default function App() {
                         <span className="chip"><span className="swatch" style={{ background: "#1a7f37" }} /> Valid</span>
                         <span className="chip"><span className="swatch" style={{ background: "#b42318" }} /> Invalid</span>
                       </span>
-                      <button disabled title={PENDING.background}>Set Background</button>
-                      <label title={PENDING.background}>
-                        <input type="checkbox" disabled /> Auto
+                      <button
+                        onClick={async () => {
+                          const res = await bridge.setBackgroundFromCurrentFrame();
+                          append(res.ok ? "background captured from current frame" : `set background failed: ${res.message}`);
+                          await refreshConfig();
+                        }}
+                        disabled={!running}
+                        title={running ? "Capture the current frame as the processing background" : "Camera is not running"}
+                      >
+                        Set Background
+                      </button>
+                      <button
+                        onClick={async () => {
+                          await bridge.clearBackgroundImage();
+                          append("background cleared");
+                          await refreshConfig();
+                        }}
+                        disabled={!backgroundSet}
+                        title={backgroundSet ? undefined : "No background is set"}
+                      >
+                        Clear Background
+                      </button>
+                      <label title="Auto background is configured via auto_background_* in the App config">
+                        <input type="checkbox" disabled checked={false} /> Auto
                       </label>
-                      <button disabled title={PENDING.roi}>Clear ROI</button>
+                      <button
+                        onClick={async () => {
+                          setRoiFields({ x: "0", y: "0", w: "0", h: "0" });
+                          await bridge.setProcessingRoi(0, 0, 0, 0);
+                          await refreshConfig();
+                        }}
+                        disabled={!ready}
+                      >
+                        Clear ROI
+                      </button>
                       <button disabled title={PENDING.saveBuffer}>Save Buffer</button>
                       <button onClick={onToggleRecord} disabled={!running} title={running ? "Record raw frames to an HDF5 file" : "Camera is not running"}>
                         {recording ? "Stop Recording" : "Record"}
@@ -854,21 +958,43 @@ export default function App() {
                       {configTab === "app" && (
                         <>
                           <div className="toolbar">
-                            <button disabled title={PENDING.config}>Reset</button>
-                            <button disabled title={PENDING.config}>Save</button>
-                            <button disabled title={PENDING.config}>Browse…</button>
+                            <button onClick={refreshConfig} disabled={!ready} title="Reload the live config from the backend">
+                              Reload
+                            </button>
+                            <button className="btn" onClick={onApplyConfigJson} disabled={!ready || !configDirty} title={configDirty ? "Merge-apply the edited document" : "No edits to apply"}>
+                              Apply
+                            </button>
                             <label>
                               Profile:{" "}
-                              <select disabled title={PENDING.config}>
+                              <select disabled title={PENDING.profiles}>
                                 <option>&lt;no prof&gt;</option>
                               </select>
                             </label>
-                            <button disabled title={PENDING.config}>Save Profile</button>
-                            <button disabled title={PENDING.config}>Show Diff</button>
+                            <button disabled title={PENDING.profiles}>Save Profile</button>
+                            <button disabled title={PENDING.profiles}>Show Diff</button>
+                            <span className="mono right" title="Active processing core identity (backend-owned trust)">
+                              core {coreStatus?.valid ? `v${coreStatus.active_version} (${coreStatus.source})` : "—"}
+                              {coreStatus?.valid && !coreStatus.pin_satisfied
+                                ? ` · PIN NOT SATISFIED (requires ${coreStatus.required_version})`
+                                : ""}
+                            </span>
                           </div>
                           <div className="config-grid">
+                            <div className="config-group" style={{ flex: 2 }}>
+                              <h5>Live config document (merge-applied on Apply)</h5>
+                              <textarea
+                                className="script-editor"
+                                style={{ minHeight: 160 }}
+                                value={configText}
+                                onChange={(e) => {
+                                  setConfigText(e.target.value);
+                                  setConfigDirty(true);
+                                }}
+                                aria-label="Processing configuration JSON"
+                              />
+                            </div>
                             <div className="config-group">
-                              <h5>realtime_processing (bridged — schema v3)</h5>
+                              <h5>realtime_processing</h5>
                               <div className="row">
                                 <label>
                                   <input
@@ -899,13 +1025,7 @@ export default function App() {
                                   {stats.invalid_fps1s.toFixed(1)} fps · px→µm {stats.pixel_to_micron}
                                 </p>
                               )}
-                            </div>
-                            <div className="config-group" title={PENDING.config}>
-                              <h5>General / image_processing</h5>
-                              <p className="pending-note">
-                                Full config round-trip (thresholds, background, batching, flush interval, profiles) is not bridged yet —
-                                BE-3 (#273).
-                              </p>
+                              <p className="mono">background: {backgroundSet ? "set" : "not set"}</p>
                             </div>
                           </div>
                         </>

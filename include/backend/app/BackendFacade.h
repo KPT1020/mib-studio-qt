@@ -86,6 +86,11 @@ namespace backend::bridge
         std::optional<services::ProcessingService::RealtimeProcessingMode> realtimeProcessingMode;
         std::optional<services::ProcessingService::RealtimeBatchSettings> realtimeBatchSettings;
         std::optional<double> pixelToMicronFactor;
+        // BE-3 (#273): merge-apply a config document (the schema of
+        // fetchProcessingConfigJson) — only keys present in the JSON change;
+        // malformed values fail the whole command without touching state.
+        std::optional<std::string> configJson;
+        std::optional<std::size_t> flushInterval;
     };
 
     struct RecordingLoadCommand
@@ -479,6 +484,21 @@ namespace backend::bridge
         bool running{false};
     };
 
+    // Processing-core identity/trust status (BE-3, #273). Trust verification
+    // and activation stay backend-owned; this is observability only.
+    struct BackendProcessingCoreStatus
+    {
+        std::string activeVersion;
+        std::uint32_t contractVersion{0};
+        std::uint32_t engineAbiVersion{0};
+        std::string source;
+        std::string releaseTag;
+        std::string buildId;
+        std::string artifactSha256;
+        std::string requiredVersion; // administrator pin ("" = unpinned)
+        bool pinSatisfied{true};
+    };
+
     // Sorter trigger status snapshot (BE-5).
     struct BackendTriggerStatus
     {
@@ -523,6 +543,19 @@ namespace backend::bridge
         // synthetic mock entry; the selection snapshot is authoritative.
         bool fetchCameraDiscovery(BackendCameraDiscovery &out) const;
         bool fetchCameraSelection(BackendCameraSelection &out) const;
+        // Processing configuration (BE-3): the full lossless config document
+        // as JSON — image_processing (config.json schema), realtime settings,
+        // flush interval, pixel→micron, ROI, background flag, and the
+        // monotonic config_version for external-change detection.
+        bool fetchProcessingConfigJson(std::string &out) const;
+        bool fetchProcessingCoreStatus(BackendProcessingCoreStatus &out) const;
+        // Background image (BE-3): binary get/set/clear (grayscale Mono8).
+        bool fetchBackgroundImage(BackendFrame &out) const;
+        BackendCommandResult setBackgroundImage(std::uint64_t width,
+                                                std::uint64_t height,
+                                                const std::uint8_t *data,
+                                                std::size_t byteLen);
+        BackendCommandResult clearBackgroundImage();
 
         // ---- Operation tracking (BE-1, ADR 0004) ----
         // Long-running actions register here so they get a correlatable ID,

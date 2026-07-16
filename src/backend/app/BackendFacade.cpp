@@ -3,6 +3,11 @@
 #include "backend/app/AppBackend.h"
 #include "backend/app/BackgroundFrame.h"
 #include "backend/camera/mock/MockCamera.h"
+#include "backend/processing/ProcessingConfigJson.h"
+
+#include <nlohmann/json.hpp>
+
+#include <cstring>
 #include "backend/playback/FrameStore.h"
 #include "backend/playback/PlaybackService.h"
 #include "backend/recording/Hdf5Service.h"
@@ -563,6 +568,71 @@ namespace backend::bridge
     BackendCommandResult BackendFacade::handleProcessingSettingsCommand(const ProcessingSettingsCommand &command)
     {
         auto &processing = backend_.processing();
+        if (command.configJson)
+        {
+            // Merge-apply (BE-3): parse against the current config so absent
+            // keys keep their values; a malformed document fails the whole
+            // command without touching state.
+            nlohmann::json doc;
+            try
+            {
+                doc = nlohmann::json::parse(*command.configJson);
+            }
+            catch (const nlohmann::json::exception &e)
+            {
+                const std::string message = std::string("Invalid config JSON: ") + e.what();
+                emitEvent(BackendErrorEvent{BackendErrorSource::ConfigCore,
+                                            BackendCommandType::ProcessingSettings, message});
+                return {false, BackendCommandType::ProcessingSettings, message};
+            }
+
+            services::ProcessingConfig merged = processing.getProcessingConfig();
+            std::string error;
+            const auto image = doc.contains("image_processing") ? doc["image_processing"] : doc;
+            if (!processing::config_json::fromJson(image, merged, &error))
+            {
+                emitEvent(BackendErrorEvent{BackendErrorSource::ConfigCore,
+                                            BackendCommandType::ProcessingSettings, error});
+                return {false, BackendCommandType::ProcessingSettings, error};
+            }
+            processing.setProcessingConfig(merged);
+
+            if (const auto rt = doc.find("realtime_processing"); rt != doc.end())
+            {
+                if (const auto mode = rt->find("mode"); mode != rt->end() && mode->is_string())
+                {
+                    processing.setRealtimeProcessingMode(
+                        mode->get<std::string>() == "async_batch"
+                            ? services::ProcessingService::RealtimeProcessingMode::AsyncBatch
+                            : services::ProcessingService::RealtimeProcessingMode::Inline);
+                }
+                auto batch = processing.getRealtimeBatchSettings();
+                if (const auto v = rt->find("batch_size"); v != rt->end())
+                    batch.batchSize = v->get<std::size_t>();
+                if (const auto v = rt->find("max_queued_frames"); v != rt->end())
+                    batch.maxQueuedFrames = v->get<std::size_t>();
+                if (const auto v = rt->find("worker_count"); v != rt->end())
+                    batch.workerCount = v->get<std::size_t>();
+                if (const auto v = rt->find("max_batch_delay_ms"); v != rt->end())
+                    batch.maxBatchDelayMs = v->get<int>();
+                processing.setRealtimeBatchSettings(batch);
+                if (const auto v = rt->find("drop_frames"); v != rt->end())
+                    processing.setRealtimeDropFrames(v->get<bool>());
+            }
+            if (const auto v = doc.find("flush_interval"); v != doc.end())
+                processing.setFlushInterval(v->get<std::size_t>());
+            if (const auto v = doc.find("pixel_to_micron"); v != doc.end())
+                processing.setPixelToMicronFactor(v->get<double>());
+            if (const auto roi = doc.find("roi"); roi != doc.end() && roi->is_object())
+            {
+                services::ProcessingService::Roi r{};
+                r.x = roi->value("x", 0);
+                r.y = roi->value("y", 0);
+                r.w = roi->value("w", 0);
+                r.h = roi->value("h", 0);
+                processing.setRealtimeRoi(r);
+            }
+        }
         if (command.config)
         {
             processing.setProcessingConfig(*command.config);
@@ -590,6 +660,10 @@ namespace backend::bridge
         if (command.pixelToMicronFactor)
         {
             processing.setPixelToMicronFactor(*command.pixelToMicronFactor);
+        }
+        if (command.flushInterval)
+        {
+            processing.setFlushInterval(*command.flushInterval);
         }
 
         emitEvent(ProcessingResultEvent{
@@ -942,6 +1016,126 @@ namespace backend::bridge
         out.periodicActive = trigger.isPeriodicTestActive();
         out.periodicIntervalMs = trigger.getPeriodicTestIntervalMs();
         return true;
+    }
+
+    bool BackendFacade::fetchProcessingConfigJson(std::string &out) const
+    {
+        if (!initialized_)
+        {
+            return false;
+        }
+        auto &processing = backend_.processing();
+        const auto batch = processing.getRealtimeBatchSettings();
+        const auto roi = processing.getRealtimeRoi();
+        nlohmann::json doc{
+            {"config_version", processing.getConfigVersion()},
+            {"image_processing", processing::config_json::toJson(processing.getProcessingConfig())},
+            {"realtime_processing",
+             {
+                 {"enabled", processing.isRealtimeEnabled()},
+                 {"mode", processing.getRealtimeProcessingMode() ==
+                                  services::ProcessingService::RealtimeProcessingMode::AsyncBatch
+                              ? "async_batch"
+                              : "inline"},
+                 {"batch_size", batch.batchSize},
+                 {"max_queued_frames", batch.maxQueuedFrames},
+                 {"worker_count", batch.workerCount},
+                 {"max_batch_delay_ms", batch.maxBatchDelayMs},
+                 {"drop_frames", processing.getRealtimeDropFrames()},
+             }},
+            {"flush_interval", processing.getFlushInterval()},
+            {"pixel_to_micron", processing.getPixelToMicronFactor()},
+            {"roi", {{"x", roi.x}, {"y", roi.y}, {"w", roi.w}, {"h", roi.h}}},
+            {"background_set", !processing.getRealtimeBackgroundGray().empty()},
+        };
+        out = doc.dump();
+        return true;
+    }
+
+    bool BackendFacade::fetchProcessingCoreStatus(BackendProcessingCoreStatus &out) const
+    {
+        if (!initialized_)
+        {
+            return false;
+        }
+        auto &processing = backend_.processing();
+        const auto identity = processing.activeProcessingCoreIdentity();
+        out.activeVersion = identity.version;
+        out.contractVersion = identity.contractVersion;
+        out.engineAbiVersion = identity.engineAbiVersion;
+        out.source = identity.source;
+        out.releaseTag = identity.releaseTag;
+        out.buildId = identity.buildId;
+        out.artifactSha256 = identity.artifactSha256;
+        out.requiredVersion = processing.requiredProcessingCoreVersion();
+        out.pinSatisfied = processing.isProcessingCorePinSatisfied();
+        return true;
+    }
+
+    bool BackendFacade::fetchBackgroundImage(BackendFrame &out) const
+    {
+        if (!initialized_)
+        {
+            return false;
+        }
+        const cv::Mat bg = backend_.processing().getRealtimeBackgroundGray();
+        if (bg.empty())
+        {
+            return false;
+        }
+        out = BackendFrame{};
+        out.width = static_cast<std::uint64_t>(bg.cols);
+        out.height = static_cast<std::uint64_t>(bg.rows);
+        out.pixelFormat = 0; // Mono8
+        out.strideBytes = static_cast<std::size_t>(bg.cols);
+        out.data.resize(static_cast<std::size_t>(bg.cols) * static_cast<std::size_t>(bg.rows));
+        if (bg.isContinuous())
+        {
+            std::memcpy(out.data.data(), bg.data, out.data.size());
+        }
+        else
+        {
+            for (int row = 0; row < bg.rows; ++row)
+            {
+                std::memcpy(out.data.data() + static_cast<std::size_t>(row) * bg.cols,
+                            bg.ptr(row), static_cast<std::size_t>(bg.cols));
+            }
+        }
+        return true;
+    }
+
+    BackendCommandResult BackendFacade::setBackgroundImage(std::uint64_t width,
+                                                           std::uint64_t height,
+                                                           const std::uint8_t *data,
+                                                           std::size_t byteLen)
+    {
+        if (!initialized_)
+        {
+            return lifecycleError(BackendCommandType::ProcessingSettings,
+                                  "Backend facade is not initialized");
+        }
+        if (width == 0 || height == 0 || data == nullptr || byteLen != width * height)
+        {
+            const std::string message = "Background image must be Mono8 with byteLen == width*height";
+            emitEvent(BackendErrorEvent{BackendErrorSource::ConfigCore,
+                                        BackendCommandType::ProcessingSettings, message});
+            return {false, BackendCommandType::ProcessingSettings, message};
+        }
+        cv::Mat bg(static_cast<int>(height), static_cast<int>(width), CV_8UC1);
+        std::memcpy(bg.data, data, byteLen);
+        backend_.processing().setRealtimeBackgroundGray(bg);
+        return {true, BackendCommandType::ProcessingSettings, "Background image set"};
+    }
+
+    BackendCommandResult BackendFacade::clearBackgroundImage()
+    {
+        if (!initialized_)
+        {
+            return lifecycleError(BackendCommandType::ProcessingSettings,
+                                  "Backend facade is not initialized");
+        }
+        backend_.processing().setRealtimeBackgroundGray(cv::Mat());
+        return {true, BackendCommandType::ProcessingSettings, "Background image cleared"};
     }
 
     bool BackendFacade::fetchCameraDiscovery(BackendCameraDiscovery &out) const

@@ -18,6 +18,9 @@ struct AppState {
     /// Pixel bytes of the last `fetch_frame` pull, so `frame_bytes` returns the
     /// exact frame `fetch_frame` described.
     last_frame: Mutex<Vec<u8>>,
+    /// Pixel bytes of the last `fetch_background` pull (separate cache so
+    /// background pulls never clobber the live-frame channel).
+    last_background: Mutex<Vec<u8>>,
 }
 
 /// Flattened command result handed to JS.
@@ -331,6 +334,129 @@ fn fetch_experiment_status(state: State<AppState>) -> Result<ExperimentStatus, S
         cancelled: s.cancelled,
         output_path: s.output_path,
         message: s.message,
+    })
+}
+
+/// Full processing configuration document (schema v8, BE-3).
+#[derive(Serialize, Clone, Default)]
+struct ConfigDocument {
+    valid: bool,
+    json: String,
+}
+
+/// Processing-core identity/pin status (schema v8, BE-3).
+#[derive(Serialize, Clone, Default)]
+struct ProcessingCoreStatus {
+    valid: bool,
+    active_version: String,
+    contract_version: u32,
+    engine_abi_version: u32,
+    source: String,
+    release_tag: String,
+    build_id: String,
+    artifact_sha256: String,
+    required_version: String,
+    pin_satisfied: bool,
+}
+
+/// Pull the full processing configuration document (lossless JSON).
+#[tauri::command]
+fn fetch_processing_config_json(state: State<AppState>) -> Result<ConfigDocument, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    let d = guard.pin_mut().fetch_processing_config_json();
+    Ok(ConfigDocument { valid: d.valid, json: d.json })
+}
+
+/// Merge-apply a processing configuration document.
+#[tauri::command]
+fn apply_processing_config_json(state: State<AppState>, json: String) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().apply_processing_config_json(&json).into())
+}
+
+/// Set (or clear, with w/h == 0) the realtime processing ROI.
+#[tauri::command]
+fn set_processing_roi(
+    state: State<AppState>,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().set_processing_roi(x, y, w, h).into())
+}
+
+/// Pull the background image metadata (bytes via `background_bytes`).
+#[tauri::command]
+fn fetch_background(state: State<AppState>) -> Result<FrameMeta, String> {
+    let mut bridge = state.bridge.lock().map_err(|e| e.to_string())?;
+    let frame = bridge.pin_mut().fetch_background_image();
+    let meta = frame_to_meta(&frame);
+    let mut last = state.last_background.lock().map_err(|e| e.to_string())?;
+    *last = frame.data;
+    Ok(meta)
+}
+
+/// Raw Mono8 bytes of the last `fetch_background` pull (binary IPC response).
+#[tauri::command]
+fn background_bytes(state: State<AppState>) -> Result<Response, String> {
+    let last = state.last_background.lock().map_err(|e| e.to_string())?;
+    Ok(Response::new(last.clone()))
+}
+
+/// Set the processing background from the latest live frame — the operator's
+/// "Set Background" action. Pixels stay on the Rust side (no webview copy).
+#[tauri::command]
+fn set_background_from_current_frame(state: State<AppState>) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    let frame = guard.pin_mut().fetch_latest_frame();
+    if !frame.valid {
+        return Ok(CmdResult {
+            ok: false,
+            command: 2, // ProcessingSettings
+            message: "No live frame available to capture as background".into(),
+            operation_id: 0,
+        });
+    }
+    // The bridge background path expects tightly-packed Mono8 (len == w*h).
+    let width = frame.width as usize;
+    let height = frame.height as usize;
+    let stride = if frame.stride_bytes > 0 { frame.stride_bytes as usize } else { width };
+    let mut packed = Vec::with_capacity(width * height);
+    for row in 0..height {
+        let start = row * stride;
+        packed.extend_from_slice(&frame.data[start..start + width]);
+    }
+    Ok(guard
+        .pin_mut()
+        .set_background_image(frame.width, frame.height, &packed)
+        .into())
+}
+
+/// Clear the processing background image.
+#[tauri::command]
+fn clear_background_image(state: State<AppState>) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().clear_background_image().into())
+}
+
+/// Pull the processing-core identity/pin status.
+#[tauri::command]
+fn fetch_processing_core_status(state: State<AppState>) -> Result<ProcessingCoreStatus, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    let s = guard.pin_mut().fetch_processing_core_status();
+    Ok(ProcessingCoreStatus {
+        valid: s.valid,
+        active_version: s.active_version,
+        contract_version: s.contract_version,
+        engine_abi_version: s.engine_abi_version,
+        source: s.source,
+        release_tag: s.release_tag,
+        build_id: s.build_id,
+        artifact_sha256: s.artifact_sha256,
+        required_version: s.required_version,
+        pin_satisfied: s.pin_satisfied,
     })
 }
 
@@ -814,6 +940,7 @@ pub fn run() {
         .manage(AppState {
             bridge: Mutex::new(ffi::new_backend_bridge()),
             last_frame: Mutex::new(Vec::new()),
+            last_background: Mutex::new(Vec::new()),
         })
         .invoke_handler(tauri::generate_handler![
             abi_version,
@@ -839,6 +966,14 @@ pub fn run() {
             experiment_stop,
             experiment_cancel,
             fetch_experiment_status,
+            fetch_processing_config_json,
+            apply_processing_config_json,
+            set_processing_roi,
+            fetch_background,
+            background_bytes,
+            set_background_from_current_frame,
+            clear_background_image,
+            fetch_processing_core_status,
             fetch_camera_discovery,
             fetch_camera_selection,
             select_hardware_camera,

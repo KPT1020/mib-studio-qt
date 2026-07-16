@@ -53,8 +53,102 @@ fn abi_version_is_stable() {
     // commands; v3 the processing commands; v4 operation state, the bounded
     // event queue, and the extended error sources (ADR 0004); v5 the
     // experiment lifecycle (BE-4); v6 monitoring snapshots + trigger (BE-5);
-    // v7 camera discovery/selection (BE-2).
-    assert_eq!(ffi::bridge_abi_version(), 7);
+    // v7 camera discovery/selection (BE-2); v8 config round-trip, ROI/
+    // background, and core status (BE-3).
+    assert_eq!(ffi::bridge_abi_version(), 8);
+}
+
+// BE-3: lossless processing-config round-trip, ROI/background binary
+// transfer, external-change observability, and core identity/pin status.
+#[test]
+#[serial]
+fn processing_config_roundtrip_and_core_status() {
+    let data_dir = std::env::temp_dir().join(format!("mib_bridge_cfg_data_{}", std::process::id()));
+
+    let mut bridge = ffi::new_backend_bridge();
+    assert!(bridge.pin_mut().initialize(&data_dir.to_string_lossy()));
+
+    // Full config document round-trips without loss.
+    let doc = bridge.pin_mut().fetch_processing_config_json();
+    assert!(doc.valid, "config document unavailable");
+    let parsed: serde_json::Value = serde_json::from_str(&doc.json).unwrap();
+    assert!(parsed["image_processing"]["filters"].is_object());
+    let version_before = parsed["config_version"].as_u64().unwrap();
+
+    // Merge-apply changes only the present keys; everything else survives.
+    let baseline_blur = parsed["image_processing"]["gaussian_blur_size"].as_i64().unwrap();
+    let apply = bridge.pin_mut().apply_processing_config_json(
+        r#"{
+            "image_processing": {"area_threshold_min": 42,
+                                 "target_group": {"enabled": true, "area_min": 50}},
+            "realtime_processing": {"mode": "async_batch", "batch_size": 8},
+            "flush_interval": 512,
+            "pixel_to_micron": 4.5
+        }"#,
+    );
+    assert!(apply.ok, "apply failed: {}", apply.message);
+
+    let doc2 = bridge.pin_mut().fetch_processing_config_json();
+    let parsed2: serde_json::Value = serde_json::from_str(&doc2.json).unwrap();
+    assert_eq!(parsed2["image_processing"]["area_threshold_min"], 42);
+    assert_eq!(parsed2["image_processing"]["target_group"]["enabled"], true);
+    assert_eq!(parsed2["image_processing"]["target_group"]["area_min"], 50);
+    assert_eq!(
+        parsed2["image_processing"]["gaussian_blur_size"].as_i64().unwrap(),
+        baseline_blur,
+        "absent key must keep its value (no silent default substitution)"
+    );
+    assert_eq!(parsed2["realtime_processing"]["mode"], "async_batch");
+    assert_eq!(parsed2["realtime_processing"]["batch_size"], 8);
+    assert_eq!(parsed2["flush_interval"], 512);
+    assert!((parsed2["pixel_to_micron"].as_f64().unwrap() - 4.5).abs() < 1e-9);
+    // External-change observability: the monotonic version advanced.
+    assert!(parsed2["config_version"].as_u64().unwrap() > version_before);
+
+    // Malformed documents fail without touching state.
+    assert!(!bridge.pin_mut().apply_processing_config_json("{not json").ok);
+    let bad_type = bridge
+        .pin_mut()
+        .apply_processing_config_json(r#"{"image_processing": {"gaussian_blur_size": "big"}}"#);
+    assert!(!bad_type.ok, "type mismatch must fail");
+    let parsed3: serde_json::Value =
+        serde_json::from_str(&bridge.pin_mut().fetch_processing_config_json().json).unwrap();
+    assert_eq!(
+        parsed3["image_processing"]["gaussian_blur_size"].as_i64().unwrap(),
+        baseline_blur
+    );
+
+    // ROI set/get round-trip.
+    assert!(bridge.pin_mut().set_processing_roi(4, 8, 100, 50).ok);
+    let parsed4: serde_json::Value =
+        serde_json::from_str(&bridge.pin_mut().fetch_processing_config_json().json).unwrap();
+    assert_eq!(parsed4["roi"]["x"], 4);
+    assert_eq!(parsed4["roi"]["w"], 100);
+
+    // Background image: binary set/get/clear.
+    assert!(!bridge.pin_mut().fetch_background_image().valid, "no background expected yet");
+    let bg: Vec<u8> = (0..(64 * 32)).map(|i| (i % 251) as u8).collect();
+    assert!(!bridge.pin_mut().set_background_image(64, 32, &bg[..10]).ok, "bad length must fail");
+    assert!(bridge.pin_mut().set_background_image(64, 32, &bg).ok);
+    let fetched = bridge.pin_mut().fetch_background_image();
+    assert!(fetched.valid && fetched.width == 64 && fetched.height == 32);
+    assert_eq!(fetched.data.as_slice(), bg.as_slice(), "background bytes must round-trip");
+    let parsed5: serde_json::Value =
+        serde_json::from_str(&bridge.pin_mut().fetch_processing_config_json().json).unwrap();
+    assert_eq!(parsed5["background_set"], true);
+    assert!(bridge.pin_mut().clear_background_image().ok);
+    assert!(!bridge.pin_mut().fetch_background_image().valid);
+
+    // Core identity/pin status is observable and consistent.
+    let core = bridge.pin_mut().fetch_processing_core_status();
+    assert!(core.valid);
+    assert!(!core.active_version.is_empty());
+    assert!(core.contract_version >= 1);
+    // No administrator pin in the test environment -> satisfied.
+    assert!(core.pin_satisfied);
+
+    bridge.pin_mut().shutdown();
+    let _ = std::fs::remove_dir_all(&data_dir);
 }
 
 // BE-2: camera discovery/selection contract — mock enumeration/selection is

@@ -17,6 +17,8 @@ namespace mib_bridge {
 struct BridgeCameraDiscovery;
 struct BridgeCameraSelection;
 struct BridgeCommandResult;
+struct BridgeConfigDocument;
+struct BridgeProcessingCoreStatus;
 struct BridgeEvent;
 struct BridgeExperimentStatus;
 struct BridgeFrame;
@@ -52,6 +54,15 @@ public:
     BridgeCommandResult experiment_stop();
     BridgeCommandResult experiment_cancel();
     BridgeExperimentStatus fetch_experiment_status();
+    BridgeConfigDocument fetch_processing_config_json();
+    BridgeCommandResult apply_processing_config_json(rust::Str json);
+    BridgeCommandResult set_processing_roi(std::int32_t x, std::int32_t y,
+                                           std::int32_t w, std::int32_t h);
+    BridgeFrame fetch_background_image();
+    BridgeCommandResult set_background_image(std::uint64_t width, std::uint64_t height,
+                                             rust::Slice<const std::uint8_t> data);
+    BridgeCommandResult clear_background_image();
+    BridgeProcessingCoreStatus fetch_processing_core_status();
     BridgeCameraDiscovery fetch_camera_discovery();
     BridgeCameraSelection fetch_camera_selection();
     BridgeCommandResult select_hardware_camera(std::int32_t interface_index,

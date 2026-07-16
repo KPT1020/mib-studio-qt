@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Qt → React/Tauri migration: BE-3 — processing config round-trip,
+  ROI/background, core identity** (2026-07-16, epic #246, issue #273) —
+  Bridge ABI **v8**: lossless config document pull/merge-apply (new Qt-free
+  `backend::processing::config_json` serializer matching the config.json
+  `image_processing` schema; monotonic `config_version` for change
+  detection), ROI set/get, binary background image get/set/clear (+ Tauri
+  "set from current frame"), and processing-core identity/pin status.
+  Profiles + config.json file load/save/watch remain open on #273 (need
+  BE-9 path services). Details:
+  `knowledge_map/task/2026-07-16-processing-config-bridge.md`.
+
 - **Qt → React/Tauri migration: BE-2 — camera discovery/selection/status
   bridge** (2026-07-16, epic #246, issue #272) — Bridge ABI **v7**: typed
   discovery (`fetch_camera_discovery` over `CameraControlService`, plus a

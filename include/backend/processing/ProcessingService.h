@@ -147,6 +147,7 @@ public:
     void startRealtime(std::shared_ptr<backend::playback::FrameStore> store);
     void stopRealtime();
     bool isRealtimeRunning() const { return rtRunning_.load(std::memory_order_relaxed); }
+    bool isRealtimeEnabled() const { return rtEnabled_.load(std::memory_order_relaxed); }
     void setRealtimeEnabled(bool on);
     // When enabled, realtime processing will skip intermediate frames and process only the most recent frame.
     // Note: experiments still process every frame (this mode is ignored while experimentActive_ is true).

@@ -80,6 +80,22 @@ static_assert(static_cast<std::uint32_t>(bb::BackendOperationState::TimedOut) ==
 
 std::string toStd(rust::Str s) { return std::string(s.data(), s.size()); }
 
+BridgeFrame toBridgeFrame(const backend::bridge::BackendFrame& frame) {
+    BridgeFrame out{};
+    out.valid = true;
+    out.frame_index = frame.frameIndex;
+    out.timestamp_ns = frame.timestampNs;
+    out.width = frame.width;
+    out.height = frame.height;
+    out.pixel_format = frame.pixelFormat;
+    out.stride_bytes = static_cast<std::uint64_t>(frame.strideBytes);
+    out.data.reserve(frame.data.size());
+    for (std::uint8_t byte : frame.data) {
+        out.data.push_back(byte);
+    }
+    return out;
+}
+
 // Event-queue bound (BE-1): the shim queue is drop-oldest bounded so a stalled
 // or slow poller cannot grow memory without limit. Overflow is observable via
 // a synthetic QueueOverflow event (u0 = dropped since last poll, u1 = dropped
@@ -474,6 +490,99 @@ BridgeCommandResult BackendBridge::experiment_cancel() {
     }
 }
 
+BridgeConfigDocument BackendBridge::fetch_processing_config_json() {
+    BridgeConfigDocument out{};
+    std::string json;
+    if (!impl_->facade.fetchProcessingConfigJson(json)) {
+        out.valid = false;
+        return out;
+    }
+    out.valid = true;
+    out.json = rust::String(json);
+    return out;
+}
+
+BridgeCommandResult BackendBridge::apply_processing_config_json(rust::Str json) {
+    try {
+        backend::bridge::ProcessingSettingsCommand cmd;
+        cmd.configJson = toStd(json);
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("apply_processing_config_json: ") + e.what());
+    } catch (...) {
+        return errorResult("apply_processing_config_json: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::set_processing_roi(std::int32_t x, std::int32_t y,
+                                                      std::int32_t w, std::int32_t h) {
+    try {
+        backend::bridge::ProcessingSettingsCommand cmd;
+        backend::services::ProcessingService::Roi roi;
+        roi.x = x;
+        roi.y = y;
+        roi.w = w;
+        roi.h = h;
+        cmd.roi = roi;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("set_processing_roi: ") + e.what());
+    } catch (...) {
+        return errorResult("set_processing_roi: unknown error");
+    }
+}
+
+BridgeFrame BackendBridge::fetch_background_image() {
+    backend::bridge::BackendFrame frame;
+    if (!impl_->facade.fetchBackgroundImage(frame)) {
+        return BridgeFrame{};
+    }
+    return toBridgeFrame(frame);
+}
+
+BridgeCommandResult BackendBridge::set_background_image(std::uint64_t width,
+                                                        std::uint64_t height,
+                                                        rust::Slice<const std::uint8_t> data) {
+    try {
+        return toBridgeResult(
+            impl_->facade.setBackgroundImage(width, height, data.data(), data.size()));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("set_background_image: ") + e.what());
+    } catch (...) {
+        return errorResult("set_background_image: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::clear_background_image() {
+    try {
+        return toBridgeResult(impl_->facade.clearBackgroundImage());
+    } catch (const std::exception& e) {
+        return errorResult(std::string("clear_background_image: ") + e.what());
+    } catch (...) {
+        return errorResult("clear_background_image: unknown error");
+    }
+}
+
+BridgeProcessingCoreStatus BackendBridge::fetch_processing_core_status() {
+    BridgeProcessingCoreStatus out{};
+    backend::bridge::BackendProcessingCoreStatus status;
+    if (!impl_->facade.fetchProcessingCoreStatus(status)) {
+        out.valid = false;
+        return out;
+    }
+    out.valid = true;
+    out.active_version = rust::String(status.activeVersion);
+    out.contract_version = status.contractVersion;
+    out.engine_abi_version = status.engineAbiVersion;
+    out.source = rust::String(status.source);
+    out.release_tag = rust::String(status.releaseTag);
+    out.build_id = rust::String(status.buildId);
+    out.artifact_sha256 = rust::String(status.artifactSha256);
+    out.required_version = rust::String(status.requiredVersion);
+    out.pin_satisfied = status.pinSatisfied;
+    return out;
+}
+
 BridgeCameraDiscovery BackendBridge::fetch_camera_discovery() {
     BridgeCameraDiscovery out{};
     backend::bridge::BackendCameraDiscovery discovery;
@@ -746,26 +855,6 @@ BridgeExperimentStatus BackendBridge::fetch_experiment_status() {
     return out;
 }
 
-namespace {
-
-BridgeFrame toBridgeFrame(const backend::bridge::BackendFrame& frame) {
-    BridgeFrame out{};
-    out.valid = true;
-    out.frame_index = frame.frameIndex;
-    out.timestamp_ns = frame.timestampNs;
-    out.width = frame.width;
-    out.height = frame.height;
-    out.pixel_format = frame.pixelFormat;
-    out.stride_bytes = static_cast<std::uint64_t>(frame.strideBytes);
-    out.data.reserve(frame.data.size());
-    for (std::uint8_t byte : frame.data) {
-        out.data.push_back(byte);
-    }
-    return out;
-}
-
-} // namespace
-
 BridgeFrame BackendBridge::fetch_latest_frame() {
     backend::bridge::BackendFrame frame;
     if (!impl_->facade.fetchLatestFrame(frame)) {
@@ -811,8 +900,10 @@ std::unique_ptr<BackendBridge> new_backend_bridge() {
 // bounded monitoring snapshot and sorter trigger commands/status (BE-5); v7
 // added camera discovery/selection (fetch_camera_discovery/selection,
 // select_hardware/mindvision_camera, apply_camera_script,
-// reset_hardware_camera — BE-2). All additive over v1 (ADR 0003/0004). Must
-// match contract/bridge-contract.json.
-std::uint32_t bridge_abi_version() { return 7; }
+// reset_hardware_camera — BE-2); v8 added the processing config document
+// round-trip, ROI/background binary transfer, and processing-core status
+// (BE-3). All additive over v1 (ADR 0003/0004). Must match
+// contract/bridge-contract.json.
+std::uint32_t bridge_abi_version() { return 8; }
 
 } // namespace mib_bridge
