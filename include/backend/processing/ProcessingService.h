@@ -180,6 +180,12 @@ public:
     std::vector<ProcessedFrame> getMonitoringValidFrames() const;
     std::vector<ProcessedFrame> getMonitoringInvalidFrames() const;
     void clearMonitoringFrames();
+    // Monitoring observability (BE-5): totals appended since start/clear so a
+    // consumer can compute ring-buffer evictions (appended - currently held).
+    bool isMonitoringActive() const { return monitoringActive_.load(std::memory_order_relaxed); }
+    uint64_t getMonitoringValidAppended() const { return monitoringValidAppended_.load(std::memory_order_relaxed); }
+    uint64_t getMonitoringInvalidAppended() const { return monitoringInvalidAppended_.load(std::memory_order_relaxed); }
+    static constexpr size_t getMonitoringCapacity() { return MAX_MONITORING_FRAMES; }
     // Enable/disable monitoring accumulation. When false, appendRealtimeMonitoringFrame
     // returns immediately with no clones. Wire to tab show/hide in the UI.
     void setMonitoringActive(bool active);
@@ -519,6 +525,9 @@ private:
     FrameRingBuffer monitoringInvalidFrames_{1000};
     static constexpr size_t MAX_MONITORING_FRAMES = 1000; // Keep last 1000 frames for monitoring
     std::atomic<bool> monitoringActive_{false}; // gating: no clones when no consumer is active
+    // Totals appended to the monitoring ring buffers since start/clear (BE-5)
+    std::atomic<uint64_t> monitoringValidAppended_{0};
+    std::atomic<uint64_t> monitoringInvalidAppended_{0};
     mutable ProcessingConfig processingConfig_;
     mutable std::mutex configMutex_;
     std::atomic<uint64_t> configVersion_{0}; // bumped by setProcessingConfig / setRealtimeRoi

@@ -52,8 +52,97 @@ fn abi_version_is_stable() {
     // The command/event schema is versioned (ADR 0003). v2 added the review
     // commands; v3 the processing commands; v4 operation state, the bounded
     // event queue, and the extended error sources (ADR 0004); v5 the
-    // experiment lifecycle (BE-4).
-    assert_eq!(ffi::bridge_abi_version(), 5);
+    // experiment lifecycle (BE-4); v6 monitoring snapshots + trigger (BE-5).
+    assert_eq!(ffi::bridge_abi_version(), 6);
+}
+
+// BE-5: bounded monitoring snapshot semantics and the sorter trigger contract
+// (manual, periodic, stop, and failure behavior with the mock camera's
+// trigger-output emulation).
+#[test]
+#[serial]
+fn monitoring_and_trigger_contract() {
+    let frame_dir = make_frame_dir();
+    let data_dir = std::env::temp_dir().join(format!("mib_bridge_mon_data_{}", std::process::id()));
+
+    let mut bridge = ffi::new_backend_bridge();
+    assert!(bridge.pin_mut().initialize(&data_dir.to_string_lossy()));
+    assert!(bridge
+        .pin_mut()
+        .configure_mock_camera(&frame_dir.to_string_lossy(), 5, true)
+        .ok);
+
+    // Failure behavior: no camera attached yet -> manual pulse and periodic
+    // start fail with a structured message.
+    let res = bridge.pin_mut().trigger_manual_pulse();
+    assert!(!res.ok && res.message.contains("No camera"), "{}", res.message);
+    assert!(!bridge.pin_mut().trigger_periodic_start(10).ok);
+    // Invalid parameters are structured errors.
+    assert!(!bridge.pin_mut().trigger_set_pulse_duration(0).ok);
+    assert!(!bridge.pin_mut().trigger_periodic_start(0).ok);
+
+    // Monitoring enable/disable/clear round-trip.
+    assert!(bridge.pin_mut().monitoring_set_active(true).ok);
+    let snap = bridge.pin_mut().fetch_monitoring_snapshot(50);
+    assert!(snap.valid && snap.monitoring_active);
+    assert_eq!(snap.capacity, 1000);
+    assert!(snap.rows.len() <= 50, "snapshot not bounded: {}", snap.rows.len());
+    assert!(bridge.pin_mut().monitoring_clear().ok);
+    let cleared = bridge.pin_mut().fetch_monitoring_snapshot(50);
+    assert_eq!(cleared.valid_appended, 0);
+    assert_eq!(cleared.invalid_appended, 0);
+    assert!(bridge.pin_mut().monitoring_set_active(false).ok);
+    assert!(!bridge.pin_mut().fetch_monitoring_snapshot(50).monitoring_active);
+
+    // Attach the camera by starting capture; the trigger service receives it
+    // through the camera-ready callback.
+    assert!(bridge.pin_mut().start_capture().ok);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && !bridge.pin_mut().fetch_trigger_status().camera_attached {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let status = bridge.pin_mut().fetch_trigger_status();
+    assert!(status.valid && status.camera_attached, "trigger camera never attached");
+
+    // Pulse duration round-trips.
+    assert!(bridge.pin_mut().trigger_set_pulse_duration(5).ok);
+    assert_eq!(bridge.pin_mut().fetch_trigger_status().pulse_duration_us, 5);
+
+    // Manual pulse increments the trigger count.
+    let before = bridge.pin_mut().fetch_trigger_status().trigger_count;
+    assert!(bridge.pin_mut().trigger_manual_pulse().ok);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline
+        && bridge.pin_mut().fetch_trigger_status().trigger_count <= before
+    {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        bridge.pin_mut().fetch_trigger_status().trigger_count > before,
+        "manual pulse did not fire"
+    );
+
+    // Periodic test: counts grow while running, stop halts the generator.
+    let before = bridge.pin_mut().fetch_trigger_status().trigger_count;
+    assert!(bridge.pin_mut().trigger_periodic_start(5).ok);
+    assert!(bridge.pin_mut().fetch_trigger_status().periodic_active);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline
+        && bridge.pin_mut().fetch_trigger_status().trigger_count < before + 3
+    {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        bridge.pin_mut().fetch_trigger_status().trigger_count >= before + 3,
+        "periodic test did not generate pulses"
+    );
+    assert!(bridge.pin_mut().trigger_periodic_stop().ok);
+    assert!(!bridge.pin_mut().fetch_trigger_status().periodic_active);
+
+    assert!(bridge.pin_mut().stop_capture().ok);
+    bridge.pin_mut().shutdown();
+    let _ = std::fs::remove_dir_all(&frame_dir);
+    let _ = std::fs::remove_dir_all(&data_dir);
 }
 
 // The Rust enum values must match contract/bridge-contract.json — the single

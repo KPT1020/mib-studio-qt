@@ -533,9 +533,13 @@ std::vector<ProcessedFrame> ProcessingService::getMonitoringInvalidFrames() cons
 }
 
 void ProcessingService::clearMonitoringFrames() {
+    // Clear is atomic from the consumer's perspective: buffers and appended
+    // totals reset under the same lock the reader snapshot takes (BE-5).
     std::scoped_lock lk(monitoringFramesMutex_);
     monitoringValidFrames_.clear();
     monitoringInvalidFrames_.clear();
+    monitoringValidAppended_.store(0, std::memory_order_relaxed);
+    monitoringInvalidAppended_.store(0, std::memory_order_relaxed);
 }
 
 void ProcessingService::setMonitoringActive(bool active) {
@@ -1610,8 +1614,10 @@ void ProcessingService::appendRealtimeMonitoringFrame(uint64_t index, uint64_t t
 
     std::scoped_lock monitoringLk(monitoringFramesMutex_);
     if (validation.isValid) {
+        monitoringValidAppended_.fetch_add(1, std::memory_order_relaxed);
         monitoringValidFrames_.push_back(std::move(monitoringFrame));
     } else {
+        monitoringInvalidAppended_.fetch_add(1, std::memory_order_relaxed);
         monitoringInvalidFrames_.push_back(std::move(monitoringFrame));
     }
 }

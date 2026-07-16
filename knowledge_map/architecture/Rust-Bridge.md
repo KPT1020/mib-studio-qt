@@ -54,6 +54,13 @@ Rust owns an opaque `BackendBridge` (`UniquePtr`) that composes an `AppBackend`
   `cancel_operation(id)` requests cancellation and fails safely for
   unknown/finished IDs; `shutdown()` cancels all active operations first.
   RecordingLoad is the first tracked operation; BE-4/BE-6 build on this.
+- **Monitoring + trigger (v6, BE-5):** `monitoring_set_active` /
+  `monitoring_clear` / `fetch_monitoring_snapshot(max_rows)` (bounded,
+  metrics-only rows with stable `(frame_index, object_id)` identity; evictions
+  observable as appended − held) and `trigger_set_pulse_duration` /
+  `trigger_manual_pulse` / `trigger_periodic_start/stop` /
+  `fetch_trigger_status` over `TriggerService` (mock camera emulates the
+  trigger output line for headless tests).
 - **Experiment lifecycle (v5, BE-4):** `experiment_start(path)` /
   `experiment_stop` / `experiment_cancel` / `fetch_experiment_status` over the
   backend-owned `backend::ExperimentCoordinator` state machine (see
@@ -91,12 +98,13 @@ via static_asserts in `shim.cpp`, Rust via `rust_enums_match_contract_json`,
 TypeScript via the generated `desktop/src/bridgeContract.ts`
 (`scripts/gen_bridge_contract.py --check` is a desktop-CI drift gate).
 
-The command/event set is a versioned schema: `bridge_abi_version()` returns `5`
+The command/event set is a versioned schema: `bridge_abi_version()` returns `6`
 (v2 added the review commands — `load_recording`, `playback_seek_index`,
 `fetch_frame_by_index`; v3 added the processing commands — `apply_processing`,
 `fetch_processing_stats`; v4 added operation state, `cancel_operation`,
 `queue_overflow_total`, the bounded queue, and the extended error sources;
-v5 added the experiment lifecycle (BE-4) —
+v5 added the experiment lifecycle (BE-4); v6 added monitoring snapshots and
+the sorter trigger (BE-5) —
 all additive over the v1 live-capture set); additive
 changes bump it. `tests/contract.rs` is the boundary gate and regression guard:
 `lifecycle_produces_status_and_frame_events` drives

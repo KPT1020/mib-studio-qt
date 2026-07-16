@@ -334,6 +334,153 @@ fn fetch_experiment_status(state: State<AppState>) -> Result<ExperimentStatus, S
     })
 }
 
+/// One monitoring metric row for the webview (schema v6, BE-5).
+#[derive(Serialize, Clone, Default)]
+struct MonitoringRow {
+    frame_index: u64,
+    timestamp_ns: u64,
+    valid: bool,
+    target_group: bool,
+    object_id: i32,
+    object_count: i32,
+    track_id: i32,
+    centroid_x: f64,
+    centroid_y: f64,
+    area: f64,
+    deformability: f64,
+    area_ratio: f64,
+    ring_ratio: f64,
+    youngs_modulus: f64,
+}
+
+/// Bounded monitoring snapshot for the webview (schema v6, BE-5).
+#[derive(Serialize, Clone, Default)]
+struct MonitoringSnapshot {
+    valid: bool,
+    monitoring_active: bool,
+    valid_held: u64,
+    invalid_held: u64,
+    valid_appended: u64,
+    invalid_appended: u64,
+    capacity: u64,
+    latest_timestamp_ns: u64,
+    rows: Vec<MonitoringRow>,
+}
+
+/// Sorter trigger status for the webview (schema v6, BE-5).
+#[derive(Serialize, Clone, Default)]
+struct TriggerStatus {
+    valid: bool,
+    camera_attached: bool,
+    pulse_duration_us: i32,
+    trigger_count: u64,
+    last_onset_us: f64,
+    last_object_id: i32,
+    last_track_id: i32,
+    periodic_active: bool,
+    periodic_interval_ms: i32,
+}
+
+/// Enable/disable monitoring accumulation (visibility-gated by the UI).
+#[tauri::command]
+fn monitoring_set_active(state: State<AppState>, active: bool) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().monitoring_set_active(active).into())
+}
+
+/// Atomically clear the monitoring buffers.
+#[tauri::command]
+fn monitoring_clear(state: State<AppState>) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().monitoring_clear().into())
+}
+
+/// Pull a bounded monitoring snapshot (metrics only — never image payloads).
+#[tauri::command]
+fn fetch_monitoring_snapshot(
+    state: State<AppState>,
+    max_rows: u64,
+) -> Result<MonitoringSnapshot, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    let s = guard.pin_mut().fetch_monitoring_snapshot(max_rows);
+    Ok(MonitoringSnapshot {
+        valid: s.valid,
+        monitoring_active: s.monitoring_active,
+        valid_held: s.valid_held,
+        invalid_held: s.invalid_held,
+        valid_appended: s.valid_appended,
+        invalid_appended: s.invalid_appended,
+        capacity: s.capacity,
+        latest_timestamp_ns: s.latest_timestamp_ns,
+        rows: s
+            .rows
+            .into_iter()
+            .map(|r| MonitoringRow {
+                frame_index: r.frame_index,
+                timestamp_ns: r.timestamp_ns,
+                valid: r.valid,
+                target_group: r.target_group,
+                object_id: r.object_id,
+                object_count: r.object_count,
+                track_id: r.track_id,
+                centroid_x: r.centroid_x,
+                centroid_y: r.centroid_y,
+                area: r.area,
+                deformability: r.deformability,
+                area_ratio: r.area_ratio,
+                ring_ratio: r.ring_ratio,
+                youngs_modulus: r.youngs_modulus,
+            })
+            .collect(),
+    })
+}
+
+/// Set the sorter trigger pulse duration (µs).
+#[tauri::command]
+fn trigger_set_pulse_duration(state: State<AppState>, pulse_us: i32) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().trigger_set_pulse_duration(pulse_us).into())
+}
+
+/// Fire one manual sorter pulse.
+#[tauri::command]
+fn trigger_manual_pulse(state: State<AppState>) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().trigger_manual_pulse().into())
+}
+
+/// Start the periodic trigger test generator.
+#[tauri::command]
+fn trigger_periodic_start(state: State<AppState>, interval_ms: i32) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().trigger_periodic_start(interval_ms).into())
+}
+
+/// Stop the periodic trigger test generator.
+#[tauri::command]
+fn trigger_periodic_stop(state: State<AppState>) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().trigger_periodic_stop().into())
+}
+
+/// Pull the sorter trigger status snapshot.
+#[tauri::command]
+fn fetch_trigger_status(state: State<AppState>) -> Result<TriggerStatus, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    let s = guard.pin_mut().fetch_trigger_status();
+    Ok(TriggerStatus {
+        valid: s.valid,
+        camera_attached: s.camera_attached,
+        pulse_duration_us: s.pulse_duration_us,
+        trigger_count: s.trigger_count,
+        last_onset_us: s.last_onset_us,
+        last_object_id: s.last_object_id,
+        last_track_id: s.last_track_id,
+        periodic_active: s.periodic_active,
+        periodic_interval_ms: s.periodic_interval_ms,
+    })
+}
+
 /// Request cancellation of a tracked operation (schema v4). Fails safely for
 /// unknown/finished IDs.
 #[tauri::command]
@@ -534,6 +681,14 @@ pub fn run() {
             experiment_stop,
             experiment_cancel,
             fetch_experiment_status,
+            monitoring_set_active,
+            monitoring_clear,
+            fetch_monitoring_snapshot,
+            trigger_set_pulse_duration,
+            trigger_manual_pulse,
+            trigger_periodic_start,
+            trigger_periodic_stop,
+            fetch_trigger_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

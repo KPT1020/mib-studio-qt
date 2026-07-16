@@ -46,6 +46,8 @@ static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::RecordingLoad) 
 static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::PlaybackSeek) == 4);
 static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Operation) == 5);
 static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Experiment) == 6);
+static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Monitoring) == 7);
+static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Trigger) == 8);
 
 static_assert(static_cast<std::uint32_t>(backend::ExperimentCoordinator::State::Idle) == 0);
 static_assert(static_cast<std::uint32_t>(backend::ExperimentCoordinator::State::Starting) == 1);
@@ -464,6 +466,136 @@ BridgeCommandResult BackendBridge::experiment_cancel() {
     }
 }
 
+BridgeCommandResult BackendBridge::monitoring_set_active(bool active) {
+    try {
+        backend::bridge::MonitoringCommand cmd;
+        cmd.action = active ? backend::bridge::MonitoringCommandAction::Enable
+                            : backend::bridge::MonitoringCommandAction::Disable;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("monitoring_set_active: ") + e.what());
+    } catch (...) {
+        return errorResult("monitoring_set_active: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::monitoring_clear() {
+    try {
+        backend::bridge::MonitoringCommand cmd;
+        cmd.action = backend::bridge::MonitoringCommandAction::Clear;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("monitoring_clear: ") + e.what());
+    } catch (...) {
+        return errorResult("monitoring_clear: unknown error");
+    }
+}
+
+BridgeMonitoringSnapshot BackendBridge::fetch_monitoring_snapshot(std::uint64_t max_rows) {
+    BridgeMonitoringSnapshot out{};
+    backend::bridge::BackendMonitoringSnapshot snapshot;
+    if (!impl_->facade.fetchMonitoringSnapshot(snapshot, static_cast<std::size_t>(max_rows))) {
+        out.valid = false;
+        return out;
+    }
+    out.valid = true;
+    out.monitoring_active = snapshot.monitoringActive;
+    out.valid_held = snapshot.validHeld;
+    out.invalid_held = snapshot.invalidHeld;
+    out.valid_appended = snapshot.validAppended;
+    out.invalid_appended = snapshot.invalidAppended;
+    out.capacity = snapshot.capacity;
+    out.latest_timestamp_ns = snapshot.latestTimestampNs;
+    for (const auto& row : snapshot.rows) {
+        BridgeMonitoringRow r{};
+        r.frame_index = row.frameIndex;
+        r.timestamp_ns = row.timestampNs;
+        r.valid = row.valid;
+        r.target_group = row.targetGroup;
+        r.object_id = row.objectId;
+        r.object_count = row.objectCount;
+        r.track_id = row.trackId;
+        r.centroid_x = row.centroidX;
+        r.centroid_y = row.centroidY;
+        r.area = row.area;
+        r.deformability = row.deformability;
+        r.area_ratio = row.areaRatio;
+        r.ring_ratio = row.ringRatio;
+        r.youngs_modulus = row.youngsModulus;
+        out.rows.push_back(std::move(r));
+    }
+    return out;
+}
+
+BridgeCommandResult BackendBridge::trigger_set_pulse_duration(std::int32_t pulse_us) {
+    try {
+        backend::bridge::TriggerCommand cmd;
+        cmd.action = backend::bridge::TriggerCommandAction::SetPulseDuration;
+        cmd.pulseDurationUs = pulse_us;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("trigger_set_pulse_duration: ") + e.what());
+    } catch (...) {
+        return errorResult("trigger_set_pulse_duration: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::trigger_manual_pulse() {
+    try {
+        backend::bridge::TriggerCommand cmd;
+        cmd.action = backend::bridge::TriggerCommandAction::ManualPulse;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("trigger_manual_pulse: ") + e.what());
+    } catch (...) {
+        return errorResult("trigger_manual_pulse: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::trigger_periodic_start(std::int32_t interval_ms) {
+    try {
+        backend::bridge::TriggerCommand cmd;
+        cmd.action = backend::bridge::TriggerCommandAction::StartPeriodicTest;
+        cmd.periodicIntervalMs = interval_ms;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("trigger_periodic_start: ") + e.what());
+    } catch (...) {
+        return errorResult("trigger_periodic_start: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::trigger_periodic_stop() {
+    try {
+        backend::bridge::TriggerCommand cmd;
+        cmd.action = backend::bridge::TriggerCommandAction::StopPeriodicTest;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("trigger_periodic_stop: ") + e.what());
+    } catch (...) {
+        return errorResult("trigger_periodic_stop: unknown error");
+    }
+}
+
+BridgeTriggerStatus BackendBridge::fetch_trigger_status() {
+    BridgeTriggerStatus out{};
+    backend::bridge::BackendTriggerStatus status;
+    if (!impl_->facade.fetchTriggerStatus(status)) {
+        out.valid = false;
+        return out;
+    }
+    out.valid = true;
+    out.camera_attached = status.cameraAttached;
+    out.pulse_duration_us = status.pulseDurationUs;
+    out.trigger_count = status.triggerCount;
+    out.last_onset_us = status.lastOnsetUs;
+    out.last_object_id = status.lastObjectId;
+    out.last_track_id = status.lastTrackId;
+    out.periodic_active = status.periodicActive;
+    out.periodic_interval_ms = status.periodicIntervalMs;
+    return out;
+}
+
 BridgeExperimentStatus BackendBridge::fetch_experiment_status() {
     BridgeExperimentStatus out{};
     backend::ExperimentCoordinator::Status status;
@@ -549,8 +681,9 @@ std::unique_ptr<BackendBridge> new_backend_bridge() {
 // operation state (OperationStatus events, cancel_operation, result
 // operation_id), the bounded event queue with QueueOverflow, and the extended
 // error sources; v5 added the experiment lifecycle (experiment_start/stop/
-// cancel, fetch_experiment_status, ExperimentStatus events). All additive over
-// v1 (ADR 0003/0004). Must match contract/bridge-contract.json.
-std::uint32_t bridge_abi_version() { return 5; }
+// cancel, fetch_experiment_status, ExperimentStatus events); v6 added the
+// bounded monitoring snapshot and sorter trigger commands/status (BE-5). All
+// additive over v1 (ADR 0003/0004). Must match contract/bridge-contract.json.
+std::uint32_t bridge_abi_version() { return 6; }
 
 } // namespace mib_bridge

@@ -6,7 +6,9 @@ import {
   type BridgeEvent,
   type ExperimentStatus,
   type FrameMeta,
+  type MonitoringSnapshot,
   type ProcessingStats,
+  type TriggerStatus,
 } from "./bridge";
 import { BRIDGE_ABI_VERSION, EXPERIMENT_STATES } from "./bridgeContract";
 import "./App.css";
@@ -145,6 +147,12 @@ export default function App() {
 
   // Experiment (bridge schema v5, BE-4 — backend-owned lifecycle).
   const [expStatus, setExpStatus] = useState<ExperimentStatus | null>(null);
+
+  // Monitoring + trigger (bridge schema v6, BE-5).
+  const [monSnapshot, setMonSnapshot] = useState<MonitoringSnapshot | null>(null);
+  const [trigStatus, setTrigStatus] = useState<TriggerStatus | null>(null);
+  const [pulseUs, setPulseUs] = useState("1");
+  const [periodicMs, setPeriodicMs] = useState("1000");
 
   // Review.
   const [reviewPath, setReviewPath] = useState("");
@@ -288,6 +296,24 @@ export default function App() {
   }, []);
 
   useEffect(() => () => stopLoop(), [stopLoop]);
+
+  // Monitoring is visibility-gated (BE-5): accumulation and its per-frame
+  // image clones run only while the Monitoring view is actually shown.
+  const monitoringVisible = tab === "experiment" && expTab === "monitoring";
+  useEffect(() => {
+    if (!ready) return;
+    bridge.monitoringSetActive(monitoringVisible).catch(() => {});
+    if (!monitoringVisible) return;
+    const id = window.setInterval(async () => {
+      try {
+        setMonSnapshot(await bridge.fetchMonitoringSnapshot(200));
+        setTrigStatus(await bridge.fetchTriggerStatus());
+      } catch {
+        /* backend gone — next tick will surface it */
+      }
+    }, 500);
+    return () => window.clearInterval(id);
+  }, [monitoringVisible, ready]);
 
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsed((c) => {
@@ -822,25 +848,144 @@ export default function App() {
                 {expTab === "monitoring" && (
                   <>
                     <div className="toolbar">
-                      <button disabled title={PENDING.monitoring}>Clear Buffer</button>
-                      <button disabled title={PENDING.monitoring}>Sort Trigger</button>
-                      <button disabled title={PENDING.monitoring}>Periodic Test</button>
+                      <button
+                        onClick={async () => {
+                          const res = await bridge.monitoringClear();
+                          append(res.ok ? "monitoring buffers cleared" : `clear failed: ${res.message}`);
+                        }}
+                        disabled={!ready}
+                      >
+                        Clear Buffer
+                      </button>
+                      <button
+                        onClick={async () => {
+                          const res = await bridge.triggerManualPulse();
+                          if (!res.ok) append(`sort trigger failed: ${res.message}`);
+                        }}
+                        disabled={!trigStatus?.camera_attached}
+                        title={trigStatus?.camera_attached ? "Fire one manual sorter pulse" : "No camera attached for trigger output"}
+                      >
+                        Sort Trigger
+                      </button>
+                      <label>
+                        <input
+                          type="number"
+                          style={{ width: 64 }}
+                          value={pulseUs}
+                          onChange={(e) => setPulseUs(e.target.value)}
+                          aria-label="Pulse duration (µs)"
+                        />{" "}
+                        µs
+                      </label>
+                      <button
+                        className="btn"
+                        onClick={async () => {
+                          const res = await bridge.triggerSetPulseDuration(Number(pulseUs) || 1);
+                          append(res.ok ? `pulse duration ${pulseUs} µs` : `pulse duration failed: ${res.message}`);
+                        }}
+                        disabled={!ready}
+                      >
+                        Set Pulse
+                      </button>
+                      <button
+                        onClick={async () => {
+                          const res = trigStatus?.periodic_active
+                            ? await bridge.triggerPeriodicStop()
+                            : await bridge.triggerPeriodicStart(Number(periodicMs) || 1000);
+                          if (!res.ok) append(`periodic test failed: ${res.message}`);
+                          setTrigStatus(await bridge.fetchTriggerStatus());
+                        }}
+                        disabled={!trigStatus?.camera_attached && !trigStatus?.periodic_active}
+                        title={
+                          trigStatus?.camera_attached || trigStatus?.periodic_active
+                            ? undefined
+                            : "No camera attached for trigger output"
+                        }
+                      >
+                        {trigStatus?.periodic_active ? "Stop Periodic Test" : "Periodic Test"}
+                      </button>
+                      <label>
+                        <input
+                          type="number"
+                          style={{ width: 72 }}
+                          value={periodicMs}
+                          onChange={(e) => setPeriodicMs(e.target.value)}
+                          disabled={trigStatus?.periodic_active}
+                          aria-label="Periodic interval (ms)"
+                        />{" "}
+                        ms
+                      </label>
+                      <span className="mono right">
+                        triggers {trigStatus?.trigger_count ?? 0} · buffered v{monSnapshot?.valid_held ?? 0}/i
+                        {monSnapshot?.invalid_held ?? 0} · evicted{" "}
+                        {Math.max(
+                          0,
+                          (monSnapshot?.valid_appended ?? 0) +
+                            (monSnapshot?.invalid_appended ?? 0) -
+                            (monSnapshot?.valid_held ?? 0) -
+                            (monSnapshot?.invalid_held ?? 0),
+                        )}
+                      </span>
                     </div>
                     <div className="config-grid" style={{ flex: 1 }}>
                       <div className="config-group" title={PENDING.monitoring}>
                         <h5>Deformability vs Area (µm²)</h5>
-                        <p className="pending-note">Monitoring scatter/isoelastic charts are not bridged yet — BE-5 (#275).</p>
+                        <p className="pending-note">
+                          Chart rendering lands with UI-3 (#268); the bounded metric rows below are the live chart inputs.
+                        </p>
                       </div>
                       <div className="config-group" title={PENDING.monitoring}>
                         <h5>Ring Width Distribution</h5>
-                        <p className="pending-note">Histogram data is not bridged yet — BE-5 (#275).</p>
-                      </div>
-                      <div className="config-group" title={PENDING.monitoring}>
-                        <h5>Tune Params</h5>
                         <p className="pending-note">
-                          Filter thresholds, target group, and multi-image settings are not bridged yet — BE-5 (#275).
+                          Chart rendering lands with UI-3 (#268); ring-ratio inputs are in the metric rows below.
                         </p>
                       </div>
+                      <div className="config-group" title={PENDING.config}>
+                        <h5>Tune Params</h5>
+                        <p className="pending-note">
+                          Filter thresholds / target group / multi-image editing lands with the config round-trip — BE-3 (#273).
+                        </p>
+                      </div>
+                    </div>
+                    <div className="table-panel" style={{ maxHeight: 180, overflow: "auto" }}>
+                      <table className="metrics-table">
+                        <thead>
+                          <tr>
+                            <th>Frame</th>
+                            <th>Object</th>
+                            <th>Track</th>
+                            <th>Valid</th>
+                            <th>Target</th>
+                            <th>Area (µm²)</th>
+                            <th>Deformability</th>
+                            <th>Ring ratio</th>
+                            <th>E (kPa)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(monSnapshot?.rows ?? []).slice(-15).map((r) => (
+                            <tr key={`${r.frame_index}:${r.object_id}`}>
+                              <td>{r.frame_index}</td>
+                              <td>{r.object_id}</td>
+                              <td>{r.track_id}</td>
+                              <td>{r.valid ? "yes" : "no"}</td>
+                              <td>{r.target_group ? "yes" : "no"}</td>
+                              <td>{r.area.toFixed(1)}</td>
+                              <td>{r.deformability.toFixed(3)}</td>
+                              <td>{r.ring_ratio.toFixed(3)}</td>
+                              <td>{r.youngs_modulus.toFixed(2)}</td>
+                            </tr>
+                          ))}
+                          {(monSnapshot?.rows?.length ?? 0) === 0 && (
+                            <tr>
+                              <td colSpan={9} style={{ color: "#777" }}>
+                                No monitoring rows yet — rows appear while capture + realtime processing run with Monitoring
+                                visible.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
                     </div>
                   </>
                 )}

@@ -35,6 +35,8 @@ namespace backend::bridge
         PlaybackSeek,
         Operation,
         Experiment,
+        Monitoring,
+        Trigger,
     };
 
     enum class CameraCommandAction
@@ -166,13 +168,45 @@ namespace backend::bridge
         std::string outputPath; // Start only
     };
 
+    // Monitoring accumulation control (BE-5): visibility-gated enable/disable
+    // plus an atomic clear. Data flows through fetchMonitoringSnapshot.
+    enum class MonitoringCommandAction
+    {
+        Enable,
+        Disable,
+        Clear,
+    };
+
+    struct MonitoringCommand
+    {
+        MonitoringCommandAction action{MonitoringCommandAction::Enable};
+    };
+
+    // Sorter trigger control (BE-5) over TriggerService.
+    enum class TriggerCommandAction
+    {
+        SetPulseDuration,
+        ManualPulse,
+        StartPeriodicTest,
+        StopPeriodicTest,
+    };
+
+    struct TriggerCommand
+    {
+        TriggerCommandAction action{TriggerCommandAction::ManualPulse};
+        int pulseDurationUs{0};   // SetPulseDuration
+        int periodicIntervalMs{0}; // StartPeriodicTest
+    };
+
     using BackendCommand = std::variant<CameraCommand,
                                         RecordingCommand,
                                         ProcessingSettingsCommand,
                                         RecordingLoadCommand,
                                         PlaybackSeekCommand,
                                         OperationCommand,
-                                        ExperimentCommand>;
+                                        ExperimentCommand,
+                                        MonitoringCommand,
+                                        TriggerCommand>;
 
     struct BackendCommandResult
     {
@@ -356,6 +390,56 @@ namespace backend::bridge
         double pixelToMicronFactor{0.0};
     };
 
+    // One monitoring metric row (BE-5): the per-object measurements that feed
+    // the Monitoring charts. (frameIndex, objectId) is a stable identity for
+    // frontend reconciliation. Deliberately carries NO image/mask payloads —
+    // those move through dedicated binary pulls only when explicitly requested.
+    struct MonitoringObjectRow
+    {
+        std::uint64_t frameIndex{0};
+        std::uint64_t timestampNs{0};
+        bool valid{false};
+        bool targetGroup{false};
+        int objectId{-1};
+        int objectCount{0};
+        int trackId{-1};
+        double centroidX{0.0};
+        double centroidY{0.0};
+        double area{0.0};
+        double deformability{0.0};
+        double areaRatio{0.0};
+        double ringRatio{0.0};
+        double youngsModulus{0.0};
+    };
+
+    // Bounded monitoring snapshot (BE-5). Totals/appended counts make ring
+    // evictions observable (evicted = appended - held); latestTimestampNs is
+    // the freshness signal.
+    struct BackendMonitoringSnapshot
+    {
+        bool monitoringActive{false};
+        std::uint64_t validHeld{0};
+        std::uint64_t invalidHeld{0};
+        std::uint64_t validAppended{0};
+        std::uint64_t invalidAppended{0};
+        std::uint64_t capacity{0};
+        std::uint64_t latestTimestampNs{0};
+        std::vector<MonitoringObjectRow> rows;
+    };
+
+    // Sorter trigger status snapshot (BE-5).
+    struct BackendTriggerStatus
+    {
+        bool cameraAttached{false};
+        int pulseDurationUs{0};
+        std::uint64_t triggerCount{0};
+        double lastOnsetUs{0.0};
+        int lastObjectId{-1};
+        int lastTrackId{-1};
+        bool periodicActive{false};
+        int periodicIntervalMs{0};
+    };
+
     class BackendFacade
     {
     public:
@@ -378,6 +462,10 @@ namespace backend::bridge
         bool fetchFrameByIndex(std::uint64_t frameIndex, BackendFrame &out) const;
         bool fetchProcessingStats(BackendProcessingStats &out) const;
         bool fetchExperimentStatus(ExperimentCoordinator::Status &out) const;
+        // Bounded monitoring pull (BE-5): at most maxRows most-recent metric
+        // rows across the valid+invalid ring buffers (metrics only, no images).
+        bool fetchMonitoringSnapshot(BackendMonitoringSnapshot &out, std::size_t maxRows) const;
+        bool fetchTriggerStatus(BackendTriggerStatus &out) const;
 
         // ---- Operation tracking (BE-1, ADR 0004) ----
         // Long-running actions register here so they get a correlatable ID,
@@ -408,6 +496,8 @@ namespace backend::bridge
         BackendCommandResult handlePlaybackSeekCommand(const PlaybackSeekCommand &command);
         BackendCommandResult handleOperationCommand(const OperationCommand &command);
         BackendCommandResult handleExperimentCommand(const ExperimentCommand &command);
+        BackendCommandResult handleMonitoringCommand(const MonitoringCommand &command);
+        BackendCommandResult handleTriggerCommand(const TriggerCommand &command);
 
         BackendCommandResult lifecycleError(BackendCommandType command, const std::string &message);
         void emitEvent(const BackendEvent &event) const;

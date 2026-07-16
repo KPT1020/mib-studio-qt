@@ -110,6 +110,57 @@ pub mod ffi {
         pub message: String,
     }
 
+    /// One monitoring metric row (schema v6, BE-5): the per-object
+    /// measurements that feed the Monitoring charts. `(frame_index,
+    /// object_id)` is a stable identity for frontend reconciliation. Never
+    /// carries image/mask payloads.
+    #[derive(Debug, Clone, Default)]
+    pub struct BridgeMonitoringRow {
+        pub frame_index: u64,
+        pub timestamp_ns: u64,
+        pub valid: bool,
+        pub target_group: bool,
+        pub object_id: i32,
+        pub object_count: i32,
+        pub track_id: i32,
+        pub centroid_x: f64,
+        pub centroid_y: f64,
+        pub area: f64,
+        pub deformability: f64,
+        pub area_ratio: f64,
+        pub ring_ratio: f64,
+        pub youngs_modulus: f64,
+    }
+
+    /// Bounded monitoring snapshot (schema v6, BE-5). Evictions are
+    /// observable: `*_appended - *_held`; freshness via `latest_timestamp_ns`.
+    #[derive(Debug, Clone, Default)]
+    pub struct BridgeMonitoringSnapshot {
+        pub valid: bool,
+        pub monitoring_active: bool,
+        pub valid_held: u64,
+        pub invalid_held: u64,
+        pub valid_appended: u64,
+        pub invalid_appended: u64,
+        pub capacity: u64,
+        pub latest_timestamp_ns: u64,
+        pub rows: Vec<BridgeMonitoringRow>,
+    }
+
+    /// Sorter trigger status snapshot (schema v6, BE-5).
+    #[derive(Debug, Clone, Default)]
+    pub struct BridgeTriggerStatus {
+        pub valid: bool,
+        pub camera_attached: bool,
+        pub pulse_duration_us: i32,
+        pub trigger_count: u64,
+        pub last_onset_us: f64,
+        pub last_object_id: i32,
+        pub last_track_id: i32,
+        pub periodic_active: bool,
+        pub periodic_interval_ms: i32,
+    }
+
     /// A frame pulled on demand: metadata plus a single owned copy of the pixel
     /// bytes. `valid` is false when no frame is available.
     #[derive(Debug, Clone, Default)]
@@ -199,6 +250,34 @@ pub mod ffi {
 
         /// Pull the current experiment lifecycle snapshot (schema v5).
         fn fetch_experiment_status(self: Pin<&mut BackendBridge>) -> BridgeExperimentStatus;
+
+        /// Enable/disable monitoring accumulation (schema v6, BE-5). Disabled
+        /// monitoring skips the per-frame image clones entirely.
+        fn monitoring_set_active(self: Pin<&mut BackendBridge>, active: bool)
+            -> BridgeCommandResult;
+
+        /// Atomically clear the monitoring buffers and appended totals.
+        fn monitoring_clear(self: Pin<&mut BackendBridge>) -> BridgeCommandResult;
+
+        /// Pull a bounded monitoring snapshot: at most `max_rows` most-recent
+        /// metric rows (metrics only — never image payloads).
+        fn fetch_monitoring_snapshot(self: Pin<&mut BackendBridge>, max_rows: u64)
+            -> BridgeMonitoringSnapshot;
+
+        /// Set the sorter trigger pulse duration in microseconds.
+        fn trigger_set_pulse_duration(self: Pin<&mut BackendBridge>, pulse_us: i32)
+            -> BridgeCommandResult;
+
+        /// Fire one manual sorter pulse (fails without an attached camera).
+        fn trigger_manual_pulse(self: Pin<&mut BackendBridge>) -> BridgeCommandResult;
+
+        /// Start/stop the periodic trigger test generator.
+        fn trigger_periodic_start(self: Pin<&mut BackendBridge>, interval_ms: i32)
+            -> BridgeCommandResult;
+        fn trigger_periodic_stop(self: Pin<&mut BackendBridge>) -> BridgeCommandResult;
+
+        /// Pull the sorter trigger status snapshot.
+        fn fetch_trigger_status(self: Pin<&mut BackendBridge>) -> BridgeTriggerStatus;
 
         /// Drain and return all events queued since the last poll. The queue is
         /// bounded drop-oldest (`MIB_BRIDGE_MAX_QUEUE`, default 4096); when

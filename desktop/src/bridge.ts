@@ -49,6 +49,52 @@ export interface ExperimentStatus {
   message: string;
 }
 
+/** One monitoring metric row (bridge schema v6, BE-5). `(frame_index,
+ *  object_id)` is a stable identity for reconciliation. */
+export interface MonitoringRow {
+  frame_index: number;
+  timestamp_ns: number;
+  valid: boolean;
+  target_group: boolean;
+  object_id: number;
+  object_count: number;
+  track_id: number;
+  centroid_x: number;
+  centroid_y: number;
+  area: number;
+  deformability: number;
+  area_ratio: number;
+  ring_ratio: number;
+  youngs_modulus: number;
+}
+
+/** Bounded monitoring snapshot (bridge schema v6, BE-5). Evicted rows are
+ *  observable as `*_appended - *_held`. */
+export interface MonitoringSnapshot {
+  valid: boolean;
+  monitoring_active: boolean;
+  valid_held: number;
+  invalid_held: number;
+  valid_appended: number;
+  invalid_appended: number;
+  capacity: number;
+  latest_timestamp_ns: number;
+  rows: MonitoringRow[];
+}
+
+/** Sorter trigger status snapshot (bridge schema v6, BE-5). */
+export interface TriggerStatus {
+  valid: boolean;
+  camera_attached: boolean;
+  pulse_duration_us: number;
+  trigger_count: number;
+  last_onset_us: number;
+  last_object_id: number;
+  last_track_id: number;
+  periodic_active: boolean;
+  periodic_interval_ms: number;
+}
+
 export interface BridgeEvent {
   kind: string;
   u0: number; u1: number; u2: number; u3: number; u4: number; u5: number;
@@ -90,6 +136,20 @@ export const bridge = {
   experimentStop: () => invoke<CmdResult>("experiment_stop"),
   experimentCancel: () => invoke<CmdResult>("experiment_cancel"),
   fetchExperimentStatus: () => invoke<ExperimentStatus>("fetch_experiment_status"),
+  // Monitoring + sorter trigger (bridge schema v6, BE-5). Monitoring is
+  // visibility-gated: enable only while the Monitoring view is shown.
+  monitoringSetActive: (active: boolean) =>
+    invoke<CmdResult>("monitoring_set_active", { active }),
+  monitoringClear: () => invoke<CmdResult>("monitoring_clear"),
+  fetchMonitoringSnapshot: (maxRows: number) =>
+    invoke<MonitoringSnapshot>("fetch_monitoring_snapshot", { maxRows }),
+  triggerSetPulseDuration: (pulseUs: number) =>
+    invoke<CmdResult>("trigger_set_pulse_duration", { pulseUs }),
+  triggerManualPulse: () => invoke<CmdResult>("trigger_manual_pulse"),
+  triggerPeriodicStart: (intervalMs: number) =>
+    invoke<CmdResult>("trigger_periodic_start", { intervalMs }),
+  triggerPeriodicStop: () => invoke<CmdResult>("trigger_periodic_stop"),
+  fetchTriggerStatus: () => invoke<TriggerStatus>("fetch_trigger_status"),
   // Binary IPC response — raw Mono8 bytes, never base64 (ADR 0003).
   frameBytes: async (): Promise<Uint8Array> => {
     const buf = await invoke<ArrayBuffer>("frame_bytes");

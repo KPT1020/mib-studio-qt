@@ -5,6 +5,16 @@
 
 ## Features shipped
 
+- **Qt → React/Tauri migration: BE-5 — bounded monitoring snapshots + sorter
+  trigger contracts** (2026-07-16, epic #246, issue #275) — Bridge ABI **v6**:
+  monitoring enable/disable/clear commands (visibility-gated accumulation),
+  a bounded metrics-only snapshot pull with stable `(frame, object)` IDs and
+  observable ring evictions, and trigger commands/status (pulse duration,
+  manual pulse, periodic test via a new `TriggerService` generator thread).
+  `MockCamera` gained trigger-output emulation so the chain is
+  headless-testable. Details:
+  `knowledge_map/task/2026-07-16-monitoring-trigger-bridge.md`.
+
 - **Qt → React/Tauri migration: BE-4 — backend-owned experiment coordinator**
   (2026-07-16, epic #246, issue #274) — New `backend::ExperimentCoordinator`
   state machine owns experiment preconditions, HDF5 setup, the multi-image

@@ -7,6 +7,7 @@
 #include "backend/playback/PlaybackService.h"
 #include "backend/recording/Hdf5Service.h"
 #include "backend/services/CaptureService.h"
+#include "backend/services/TriggerService.h"
 
 #include <algorithm>
 #include <atomic>
@@ -47,9 +48,17 @@ namespace backend::bridge
                 {
                     return BackendCommandType::Operation;
                 }
-                else
+                else if constexpr (std::is_same_v<Command, ExperimentCommand>)
                 {
                     return BackendCommandType::Experiment;
+                }
+                else if constexpr (std::is_same_v<Command, MonitoringCommand>)
+                {
+                    return BackendCommandType::Monitoring;
+                }
+                else
+                {
+                    return BackendCommandType::Trigger;
                 }
             }, command);
         }
@@ -100,6 +109,10 @@ namespace backend::bridge
                 return BackendErrorSource::Lifecycle;
             case BackendCommandType::Experiment:
                 return BackendErrorSource::Experiment;
+            case BackendCommandType::Monitoring:
+                return BackendErrorSource::Monitoring;
+            case BackendCommandType::Trigger:
+                return BackendErrorSource::Hardware;
             }
             return BackendErrorSource::Lifecycle;
         }
@@ -305,9 +318,17 @@ namespace backend::bridge
             {
                 return handleOperationCommand(typedCommand);
             }
-            else
+            else if constexpr (std::is_same_v<Command, ExperimentCommand>)
             {
                 return handleExperimentCommand(typedCommand);
+            }
+            else if constexpr (std::is_same_v<Command, MonitoringCommand>)
+            {
+                return handleMonitoringCommand(typedCommand);
+            }
+            else
+            {
+                return handleTriggerCommand(typedCommand);
             }
         }, command);
     }
@@ -772,6 +793,140 @@ namespace backend::bridge
         {
             sink(event);
         }
+    }
+
+    BackendCommandResult BackendFacade::handleMonitoringCommand(const MonitoringCommand &command)
+    {
+        auto &processing = backend_.processing();
+        switch (command.action)
+        {
+        case MonitoringCommandAction::Enable:
+            processing.setMonitoringActive(true);
+            return {true, BackendCommandType::Monitoring, "Monitoring enabled"};
+        case MonitoringCommandAction::Disable:
+            // Hiding Monitoring must stop accumulation and the per-frame image
+            // clones (the append path is gated on the active flag).
+            processing.setMonitoringActive(false);
+            return {true, BackendCommandType::Monitoring, "Monitoring disabled"};
+        case MonitoringCommandAction::Clear:
+            processing.clearMonitoringFrames();
+            return {true, BackendCommandType::Monitoring, "Monitoring buffers cleared"};
+        }
+        return {false, BackendCommandType::Monitoring, "Unknown monitoring command"};
+    }
+
+    BackendCommandResult BackendFacade::handleTriggerCommand(const TriggerCommand &command)
+    {
+        auto &trigger = backend_.trigger();
+        switch (command.action)
+        {
+        case TriggerCommandAction::SetPulseDuration:
+            if (command.pulseDurationUs < 1)
+            {
+                return {false, BackendCommandType::Trigger, "Pulse duration must be >= 1 us"};
+            }
+            trigger.setPulseDurationUs(command.pulseDurationUs);
+            return {true, BackendCommandType::Trigger, "Pulse duration set"};
+        case TriggerCommandAction::ManualPulse:
+            if (!trigger.hasCamera())
+            {
+                return {false, BackendCommandType::Trigger,
+                        "No camera attached for trigger output"};
+            }
+            trigger.manualPulse();
+            return {true, BackendCommandType::Trigger, "Manual pulse requested"};
+        case TriggerCommandAction::StartPeriodicTest:
+            if (command.periodicIntervalMs < 1)
+            {
+                return {false, BackendCommandType::Trigger,
+                        "Periodic interval must be >= 1 ms"};
+            }
+            if (!trigger.hasCamera())
+            {
+                return {false, BackendCommandType::Trigger,
+                        "No camera attached for trigger output"};
+            }
+            trigger.startPeriodicTest(command.periodicIntervalMs);
+            return {true, BackendCommandType::Trigger, "Periodic test started"};
+        case TriggerCommandAction::StopPeriodicTest:
+            trigger.stopPeriodicTest();
+            return {true, BackendCommandType::Trigger, "Periodic test stopped"};
+        }
+        return {false, BackendCommandType::Trigger, "Unknown trigger command"};
+    }
+
+    bool BackendFacade::fetchMonitoringSnapshot(BackendMonitoringSnapshot &out,
+                                                std::size_t maxRows) const
+    {
+        if (!initialized_)
+        {
+            return false;
+        }
+        auto &processing = backend_.processing();
+        const auto validFrames = processing.getMonitoringValidFrames();
+        const auto invalidFrames = processing.getMonitoringInvalidFrames();
+
+        out = BackendMonitoringSnapshot{};
+        out.monitoringActive = processing.isMonitoringActive();
+        out.validHeld = validFrames.size();
+        out.invalidHeld = invalidFrames.size();
+        out.validAppended = processing.getMonitoringValidAppended();
+        out.invalidAppended = processing.getMonitoringInvalidAppended();
+        out.capacity = services::ProcessingService::getMonitoringCapacity();
+
+        auto appendRow = [&out](const services::ProcessedFrame &frame) {
+            const auto &v = frame.validation;
+            MonitoringObjectRow row;
+            row.frameIndex = frame.index;
+            row.timestampNs = frame.timestampNs;
+            row.valid = v.isValid;
+            row.targetGroup = v.isTargetGroup;
+            row.objectId = v.objectId;
+            row.objectCount = v.objectCount;
+            row.trackId = v.trackId;
+            row.centroidX = v.centroidX;
+            row.centroidY = v.centroidY;
+            row.area = v.area;
+            row.deformability = v.deformability;
+            row.areaRatio = v.areaRatio;
+            row.ringRatio = v.ringRatio;
+            row.youngsModulus = v.youngsModulus;
+            out.rows.push_back(row);
+            out.latestTimestampNs = std::max(out.latestTimestampNs, frame.timestampNs);
+        };
+
+        // Most-recent rows first: take tails of both buffers, bounded by
+        // maxRows overall (valid rows favored to match the chart emphasis).
+        const std::size_t takeValid = std::min(validFrames.size(), maxRows);
+        for (std::size_t i = validFrames.size() - takeValid; i < validFrames.size(); ++i)
+        {
+            appendRow(validFrames[i]);
+        }
+        const std::size_t remaining = maxRows > takeValid ? maxRows - takeValid : 0;
+        const std::size_t takeInvalid = std::min(invalidFrames.size(), remaining);
+        for (std::size_t i = invalidFrames.size() - takeInvalid; i < invalidFrames.size(); ++i)
+        {
+            appendRow(invalidFrames[i]);
+        }
+        return true;
+    }
+
+    bool BackendFacade::fetchTriggerStatus(BackendTriggerStatus &out) const
+    {
+        if (!initialized_)
+        {
+            return false;
+        }
+        auto &trigger = backend_.trigger();
+        out.cameraAttached = trigger.hasCamera();
+        out.pulseDurationUs = trigger.getPulseDurationUs();
+        out.triggerCount = trigger.getTriggerCount();
+        out.lastOnsetUs = trigger.getLastOnsetUs();
+        out.lastObjectId = trigger.getLastTriggerObjectId();
+        out.lastTrackId = trigger.getLastTriggerTrackId();
+        out.periodicActive = trigger.isPeriodicTestActive();
+        out.periodicIntervalMs = trigger.getPeriodicTestIntervalMs();
+        return true;
     }
 
     bool BackendFacade::fetchExperimentStatus(ExperimentCoordinator::Status &out) const

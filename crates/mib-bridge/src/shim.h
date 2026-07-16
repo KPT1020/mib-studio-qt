@@ -18,7 +18,9 @@ struct BridgeCommandResult;
 struct BridgeEvent;
 struct BridgeExperimentStatus;
 struct BridgeFrame;
+struct BridgeMonitoringSnapshot;
 struct BridgeProcessingStats;
+struct BridgeTriggerStatus;
 
 class BackendBridge {
 public:
@@ -48,6 +50,14 @@ public:
     BridgeCommandResult experiment_stop();
     BridgeCommandResult experiment_cancel();
     BridgeExperimentStatus fetch_experiment_status();
+    BridgeCommandResult monitoring_set_active(bool active);
+    BridgeCommandResult monitoring_clear();
+    BridgeMonitoringSnapshot fetch_monitoring_snapshot(std::uint64_t max_rows);
+    BridgeCommandResult trigger_set_pulse_duration(std::int32_t pulse_us);
+    BridgeCommandResult trigger_manual_pulse();
+    BridgeCommandResult trigger_periodic_start(std::int32_t interval_ms);
+    BridgeCommandResult trigger_periodic_stop();
+    BridgeTriggerStatus fetch_trigger_status();
 
     rust::Vec<BridgeEvent> poll_events();
     std::uint64_t queue_overflow_total() const;
