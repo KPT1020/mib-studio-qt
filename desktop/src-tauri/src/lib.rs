@@ -13,6 +13,9 @@ use serde::Serialize;
 use tauri::ipc::Response;
 use tauri::{Manager, State};
 
+mod platform;
+pub mod updater;
+
 struct AppState {
     bridge: Mutex<cxx::UniquePtr<ffi::BackendBridge>>,
     /// Pixel bytes of the last `fetch_frame` pull, so `frame_bytes` returns the
@@ -1350,6 +1353,7 @@ mod tests {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(AppState {
             bridge: Mutex::new(ffi::new_backend_bridge()),
             last_frame: Mutex::new(Vec::new()),
@@ -1376,6 +1380,10 @@ pub fn run() {
             fetch_processing_stats,
             cancel_operation,
             queue_overflow_total,
+            platform::app_paths,
+            platform::get_preferences,
+            platform::set_preferences,
+            platform::shell_log,
             experiment_start,
             experiment_stop,
             experiment_cancel,

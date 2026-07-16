@@ -293,6 +293,18 @@ export const bridge = {
   experimentStop: () => invoke<CmdResult>("experiment_stop"),
   experimentCancel: () => invoke<CmdResult>("experiment_cancel"),
   fetchExperimentStatus: () => invoke<ExperimentStatus>("fetch_experiment_status"),
+  // Platform/shell services (BE-9): stable app paths, persisted shell
+  // preferences (survive webview-storage clearing), and shell logging into
+  // the app log directory.
+  appPaths: () =>
+    invoke<{ app_data: string; app_config: string; app_log: string; app_cache: string; documents: string }>(
+      "app_paths",
+    ),
+  getPreferences: () => invoke<Record<string, unknown>>("get_preferences"),
+  setPreferences: (preferences: Record<string, unknown>) =>
+    invoke<void>("set_preferences", { preferences }),
+  shellLog: (level: string, message: string) =>
+    invoke<void>("shell_log", { level, message }),
   // Autofocus / nanopositioner (schema v11, BE-8).
   autofocusConnect: (comPort: number, baudRate: number, deviceAddress: number) =>
     invoke<CmdResult>("autofocus_connect", { comPort, baudRate, deviceAddress }),

@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Qt → React/Tauri migration: BE-9 — Tauri platform services (Linux
+  subset)** (2026-07-16, epic #246, issue #279) — New
+  `desktop/src-tauri/src/platform.rs` (stable app paths, atomic persisted
+  shell preferences, webview log sink into the app log dir) and
+  `updater.rs` (update-manifest SHA-256 verification that fails closed, unit
+  tested). Opener actions are capability-scoped (`https://**` +
+  reveal-in-dir only). Shell: working Open Data Folder / Documentation menu
+  actions, preferences-backed sidebar persistence, log mirroring. Windows
+  packaging/updater/Sentry/QSettings-migration remain open on #279.
+  Details: `knowledge_map/task/2026-07-16-tauri-platform-services.md`.
+
 - **Qt → React/Tauri migration: BE-8 — autofocus/nanopositioner bridge**
   (2026-07-16, epic #246, issue #278) — Bridge ABI **v11**: facade
   `AutofocusCommand` surface (connect/disconnect/enable/jog/config) with

@@ -41,6 +41,15 @@ frontend through `@tauri-apps/plugin-dialog`'s `open`/`save`): a folder picker
 for the mock frame dir, a save dialog for the recording path, and an open dialog
 (HDF5 filter) for the review file — so paths are never hand-typed.
 
+**Platform services (BE-9, #279):** `src-tauri/src/platform.rs` provides
+stable app paths (`app_paths`), persisted shell preferences
+(`get/set_preferences` — one JSON document in the app-config dir, atomic
+writes), and a webview log sink (`shell_log` →
+`<app_log>/desktop-shell.log`). `src-tauri/src/updater.rs` verifies update
+manifests fail-closed (SHA-256 pinning, unit tested). Native open-URL /
+reveal-in-dir actions go through `tauri-plugin-opener`, capability-scoped to
+`https://**` and directory reveals only.
+
 ## Command layer
 
 Thin wrappers over the bridge (all take the managed `AppState`):

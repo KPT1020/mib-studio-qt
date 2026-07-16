@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   bridge,
   mono8ToImageData,
@@ -210,6 +211,9 @@ export default function App() {
 
   const append = useCallback((line: string) => {
     setLog((l) => [`${new Date().toLocaleTimeString()} ${line}`, ...l].slice(0, 50));
+    // Shell-side log sink (BE-9): every drawer line also lands in
+    // <app_log>/desktop-shell.log for correlation with the backend logs.
+    void bridge.shellLog("info", line).catch(() => {});
   }, []);
 
   // Initialize the backend on boot (empty data dir resolves to Tauri's
@@ -347,9 +351,29 @@ export default function App() {
 
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsed((c) => {
-      localStorage.setItem(SIDEBAR_KEY, c ? "0" : "1");
-      return !c;
+      const next = !c;
+      localStorage.setItem(SIDEBAR_KEY, next ? "1" : "0");
+      // Durable copy in the shell preferences file (BE-9) — survives
+      // webview-storage clearing.
+      void bridge
+        .getPreferences()
+        .then((prefs) => bridge.setPreferences({ ...prefs, sidebarCollapsed: next }))
+        .catch(() => {});
+      return next;
     });
+  }, []);
+
+  // Restore persisted shell preferences at boot (BE-9).
+  useEffect(() => {
+    bridge
+      .getPreferences()
+      .then((prefs) => {
+        if (typeof prefs.sidebarCollapsed === "boolean") {
+          setSidebarCollapsed(prefs.sidebarCollapsed);
+          localStorage.setItem(SIDEBAR_KEY, prefs.sidebarCollapsed ? "1" : "0");
+        }
+      })
+      .catch(() => {});
   }, []);
 
   // ---- Camera discovery/selection (BE-2) + camera actions ----
@@ -683,7 +707,15 @@ export default function App() {
           label="File"
           items={[
             { label: "Open Recording…", onClick: openReviewFromMenu },
-            { label: "Open Data Folder", pending: PENDING.platform },
+            {
+              label: "Open Data Folder",
+              onClick: () => {
+                void bridge
+                  .appPaths()
+                  .then((paths) => revealItemInDir(paths.app_data))
+                  .catch((e) => append(`open data folder failed: ${e}`));
+              },
+            },
             { label: "Exit", pending: PENDING.platform },
           ]}
         />
@@ -700,7 +732,14 @@ export default function App() {
           label="Help"
           items={[
             { label: "About", onClick: () => setShowAbout(true) },
-            { label: "Documentation", pending: PENDING.platform },
+            {
+              label: "Documentation",
+              onClick: () => {
+                void openUrl("https://kpt1020.github.io/mib-studio-qt/").catch((e) =>
+                  append(`open documentation failed: ${e}`),
+                );
+              },
+            },
             { label: "Report a Problem…", pending: PENDING.platform },
           ]}
         />
