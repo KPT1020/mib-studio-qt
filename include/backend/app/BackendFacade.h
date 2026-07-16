@@ -427,6 +427,58 @@ namespace backend::bridge
         std::vector<MonitoringObjectRow> rows;
     };
 
+    // Typed camera discovery results (BE-2, #272). `type` values are
+    // contract-pinned: 0 EGrabber, 1 MindVision, 2 Mock (the mock source is a
+    // synthetic entry so discovery/selection is headless-testable).
+    struct BackendDiscoveredCamera
+    {
+        int type{0};
+        int cameraIndex{-1};
+        int interfaceIndex{-1};
+        int deviceIndex{-1};
+        std::string interfaceId;
+        std::string deviceId;
+        std::string modelName;
+        std::string firmwareVersion;
+        std::string label;
+    };
+
+    struct BackendDiscoveredFramegrabber
+    {
+        int interfaceIndex{-1};
+        int deviceIndex{-1};
+        int streamIndex{-1};
+        std::string interfaceId;
+        std::string deviceId;
+        std::string streamId;
+        std::string modelName;
+        std::string label;
+    };
+
+    struct BackendCameraDiscovery
+    {
+        std::vector<BackendDiscoveredCamera> cameras;
+        std::vector<BackendDiscoveredFramegrabber> framegrabbers;
+    };
+
+    // Authoritative selected-device snapshot (BE-2). `mode` values are
+    // contract-pinned: 0 None, 1 Mock, 2 Hardware, 3 MindVision.
+    struct BackendCameraSelection
+    {
+        int mode{0};
+        int interfaceIndex{-1};
+        int deviceIndex{-1};
+        std::string label;
+        int mindVisionIndex{-1};
+        std::string mindVisionConfigPath;
+        std::string cameraScriptPath;
+        std::string mockFrameDir;
+        int mockIntervalMs{0};
+        bool mockLoop{true};
+        bool configured{false};
+        bool running{false};
+    };
+
     // Sorter trigger status snapshot (BE-5).
     struct BackendTriggerStatus
     {
@@ -466,6 +518,11 @@ namespace backend::bridge
         // rows across the valid+invalid ring buffers (metrics only, no images).
         bool fetchMonitoringSnapshot(BackendMonitoringSnapshot &out, std::size_t maxRows) const;
         bool fetchTriggerStatus(BackendTriggerStatus &out) const;
+        // Camera discovery/selection pulls (BE-2). Discovery enumerates
+        // EGrabber + MindVision devices (empty without the SDKs) plus the
+        // synthetic mock entry; the selection snapshot is authoritative.
+        bool fetchCameraDiscovery(BackendCameraDiscovery &out) const;
+        bool fetchCameraSelection(BackendCameraSelection &out) const;
 
         // ---- Operation tracking (BE-1, ADR 0004) ----
         // Long-running actions register here so they get a correlatable ID,

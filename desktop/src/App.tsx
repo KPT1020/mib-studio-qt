@@ -4,6 +4,8 @@ import {
   bridge,
   mono8ToImageData,
   type BridgeEvent,
+  type CameraDiscovery,
+  type CameraSelection,
   type ExperimentStatus,
   type FrameMeta,
   type MonitoringSnapshot,
@@ -129,12 +131,17 @@ export default function App() {
   const [fitWindow, setFitWindow] = useState(true);
   const [showAbout, setShowAbout] = useState(false);
 
-  // Mock camera configuration (the only bridged source today).
+  // Camera discovery/selection (bridge schema v7, BE-2). The selection
+  // snapshot from the backend is authoritative — no local mirror of it.
+  const [discovery, setDiscovery] = useState<CameraDiscovery | null>(null);
+  const [camSelection, setCamSelection] = useState<CameraSelection | null>(null);
+  const [pickedDevice, setPickedDevice] = useState<string | null>(null);
+
+  // Mock camera configuration modal.
   const [showMockConfig, setShowMockConfig] = useState(false);
   const [frameDir, setFrameDir] = useState("");
   const [intervalMs, setIntervalMs] = useState("33");
   const [loopFiles, setLoopFiles] = useState(true);
-  const [mockConfigured, setMockConfigured] = useState(false);
 
   // Recording.
   const [recording, setRecording] = useState(false);
@@ -322,20 +329,56 @@ export default function App() {
     });
   }, []);
 
-  // ---- Camera actions (main tab header) ----
+  // ---- Camera discovery/selection (BE-2) + camera actions ----
+
+  const refreshCameraState = useCallback(async () => {
+    try {
+      setDiscovery(await bridge.fetchCameraDiscovery());
+      setCamSelection(await bridge.fetchCameraSelection());
+    } catch (e) {
+      append(`discovery error: ${e}`);
+    }
+  }, [append]);
+
+  useEffect(() => {
+    if (ready) void refreshCameraState();
+  }, [ready, refreshCameraState]);
 
   const onConfigureMock = useCallback(async () => {
     try {
       const cfg = await bridge.configureMock(frameDir, Number(intervalMs) || 33, loopFiles);
       if (!cfg.ok) return append(`configure failed: ${cfg.message}`);
-      setMockConfigured(true);
       setShowMockConfig(false);
       setCamStatus("configured (mock)");
       append(`mock camera configured (${frameDir})`);
+      await refreshCameraState();
     } catch (e) {
       append(`configure error: ${e}`);
     }
-  }, [frameDir, intervalMs, loopFiles, append]);
+  }, [frameDir, intervalMs, loopFiles, append, refreshCameraState]);
+
+  const onConnectPicked = useCallback(async () => {
+    if (!pickedDevice || !discovery) return;
+    const cam = discovery.cameras.find(
+      (c) => `${c.camera_type}:${c.interface_index}:${c.device_index}:${c.camera_index}` === pickedDevice,
+    );
+    if (!cam) return;
+    try {
+      if (cam.camera_type === 2) {
+        // Mock source: configuration happens through the modal.
+        setShowMockConfig(true);
+        return;
+      }
+      const res =
+        cam.camera_type === 1
+          ? await bridge.selectMindVisionCamera(cam.camera_index, cam.label, "")
+          : await bridge.selectHardwareCamera(cam.interface_index, cam.device_index, cam.label);
+      append(res.ok ? `selected ${cam.label}` : `select failed: ${res.message}`);
+      await refreshCameraState();
+    } catch (e) {
+      append(`select error: ${e}`);
+    }
+  }, [pickedDevice, discovery, append, refreshCameraState]);
 
   const onStartCamera = useCallback(async () => {
     try {
@@ -487,10 +530,11 @@ export default function App() {
         ? "Experiment is already running"
         : undefined;
 
+  const cameraConfigured = camSelection?.configured ?? false;
   const startCameraReason = !ready
     ? "Backend is not initialized"
-    : !mockConfigured
-      ? "No camera configured — use Connect ▸ Configure Mock… (hardware discovery pending BE-2 #272)"
+    : !cameraConfigured
+      ? "No camera configured — select a device in the Connect tab"
       : running
         ? "Camera is already running"
         : undefined;
@@ -641,14 +685,48 @@ export default function App() {
                   </button>
                 </div>
                 <div className="subtab-body">
-                  <div className="devices-list">
-                    {connectTab === "cameras" && "No EGrabber camera enumeration available — pending BE-2 (#272)."}
-                    {connectTab === "mindvision" && "No MindVision enumeration available — pending BE-2 (#272)."}
-                    {connectTab === "framegrabbers" && "No framegrabber enumeration available — pending BE-2 (#272)."}
+                  <div className="devices-list" role="listbox" aria-label="Discovered devices">
+                    {connectTab !== "framegrabbers" &&
+                      (discovery?.cameras ?? [])
+                        .filter((c) => (connectTab === "mindvision" ? c.camera_type === 1 : c.camera_type !== 1))
+                        .map((c) => {
+                          const key = `${c.camera_type}:${c.interface_index}:${c.device_index}:${c.camera_index}`;
+                          return (
+                            <div key={key} style={{ padding: "2px 0" }}>
+                              <label>
+                                <input
+                                  type="radio"
+                                  name="device"
+                                  checked={pickedDevice === key}
+                                  onChange={() => setPickedDevice(key)}
+                                />{" "}
+                                {c.label}
+                              </label>
+                            </div>
+                          );
+                        })}
+                    {connectTab === "framegrabbers" &&
+                      (discovery?.framegrabbers ?? []).map((g) => (
+                        <div key={`${g.interface_index}:${g.device_index}:${g.stream_index}`} style={{ padding: "2px 0" }}>
+                          {g.label}
+                        </div>
+                      ))}
+                    {connectTab === "mindvision" && (discovery?.cameras ?? []).every((c) => c.camera_type !== 1) && (
+                      <div>No MindVision cameras found (SDK/hardware required).</div>
+                    )}
+                    {connectTab === "framegrabbers" && (discovery?.framegrabbers ?? []).length === 0 && (
+                      <div>No framegrabbers found (EGrabber SDK/hardware required).</div>
+                    )}
                   </div>
                   <div className="toolbar" style={{ marginTop: 8 }}>
-                    <button disabled title={PENDING.discovery}>Refresh</button>
-                    <button disabled title={PENDING.discovery}>Connect</button>
+                    <button onClick={refreshCameraState} disabled={!ready}>Refresh</button>
+                    <button
+                      onClick={onConnectPicked}
+                      disabled={!ready || !pickedDevice}
+                      title={pickedDevice ? undefined : "Pick a device first"}
+                    >
+                      Connect
+                    </button>
                     <div className="right">
                       <button className="btn" onClick={() => setShowMockConfig(true)} disabled={!ready} title={ready ? undefined : "Backend is not initialized"}>
                         Configure Mock…
@@ -656,9 +734,16 @@ export default function App() {
                     </div>
                   </div>
                   <p className="path-label">
-                    {mockConfigured
-                      ? `Mock camera configured: ${frameDir}`
-                      : "Hardware device discovery is not bridged yet (BE-2 #272) — the mock source is the only connectable camera."}
+                    Found {(discovery?.framegrabbers ?? []).length} framegrabber(s),{" "}
+                    {(discovery?.cameras ?? []).filter((c) => c.camera_type === 0).length} eGrabber camera(s),{" "}
+                    {(discovery?.cameras ?? []).filter((c) => c.camera_type === 1).length} MindVision camera(s)
+                    {camSelection?.configured
+                      ? ` · selected: ${
+                          camSelection.mode === 1
+                            ? `mock (${camSelection.mock_frame_dir || "no folder"})`
+                            : camSelection.label || "camera"
+                        }`
+                      : " · no camera selected"}
                   </p>
                 </div>
               </>

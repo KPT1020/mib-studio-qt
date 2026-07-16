@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Qt → React/Tauri migration: BE-2 — camera discovery/selection/status
+  bridge** (2026-07-16, epic #246, issue #272) — Bridge ABI **v7**: typed
+  discovery (`fetch_camera_discovery` over `CameraControlService`, plus a
+  synthetic mock entry for headless testing), an authoritative selected-device
+  snapshot on `AppBackend` (`cameraSelection()` — mode/indices/labels/config +
+  script paths/mock params, survives capture restarts), flat exports for
+  hardware/MindVision selection, camera-script apply, and hardware reset, with
+  structured errors for invalid indices/paths. The shell's Connect tab lists
+  real devices with Refresh/Connect. Windows hardware acceptance remains open
+  on #272. Details: `knowledge_map/task/2026-07-16-camera-discovery-bridge.md`.
+
 - **Qt → React/Tauri migration: BE-5 — bounded monitoring snapshots + sorter
   trigger contracts** (2026-07-16, epic #246, issue #275) — Bridge ABI **v6**:
   monitoring enable/disable/clear commands (visibility-gated accumulation),

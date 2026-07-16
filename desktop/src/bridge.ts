@@ -49,6 +49,55 @@ export interface ExperimentStatus {
   message: string;
 }
 
+/** One discovered camera (bridge schema v7, BE-2). `camera_type` is a
+ *  contract CAMERA_TYPES value (0 EGrabber, 1 MindVision, 2 Mock). */
+export interface DiscoveredCamera {
+  camera_type: number;
+  camera_index: number;
+  interface_index: number;
+  device_index: number;
+  interface_id: string;
+  device_id: string;
+  model_name: string;
+  firmware_version: string;
+  label: string;
+}
+
+export interface DiscoveredFramegrabber {
+  interface_index: number;
+  device_index: number;
+  stream_index: number;
+  interface_id: string;
+  device_id: string;
+  stream_id: string;
+  model_name: string;
+  label: string;
+}
+
+export interface CameraDiscovery {
+  valid: boolean;
+  cameras: DiscoveredCamera[];
+  framegrabbers: DiscoveredFramegrabber[];
+}
+
+/** Authoritative selected-device snapshot (bridge schema v7, BE-2). `mode`
+ *  is a contract CAMERA_SELECTION_MODES value. */
+export interface CameraSelection {
+  valid: boolean;
+  mode: number;
+  interface_index: number;
+  device_index: number;
+  label: string;
+  mindvision_index: number;
+  mindvision_config_path: string;
+  camera_script_path: string;
+  mock_frame_dir: string;
+  mock_interval_ms: number;
+  mock_loop: boolean;
+  configured: boolean;
+  running: boolean;
+}
+
 /** One monitoring metric row (bridge schema v6, BE-5). `(frame_index,
  *  object_id)` is a stable identity for reconciliation. */
 export interface MonitoringRow {
@@ -136,6 +185,16 @@ export const bridge = {
   experimentStop: () => invoke<CmdResult>("experiment_stop"),
   experimentCancel: () => invoke<CmdResult>("experiment_cancel"),
   fetchExperimentStatus: () => invoke<ExperimentStatus>("fetch_experiment_status"),
+  // Camera discovery/selection (bridge schema v7, BE-2).
+  fetchCameraDiscovery: () => invoke<CameraDiscovery>("fetch_camera_discovery"),
+  fetchCameraSelection: () => invoke<CameraSelection>("fetch_camera_selection"),
+  selectHardwareCamera: (interfaceIndex: number, deviceIndex: number, label: string) =>
+    invoke<CmdResult>("select_hardware_camera", { interfaceIndex, deviceIndex, label }),
+  selectMindVisionCamera: (cameraIndex: number, label: string, configPath: string) =>
+    invoke<CmdResult>("select_mindvision_camera", { cameraIndex, label, configPath }),
+  applyCameraScript: (scriptPath: string) =>
+    invoke<CmdResult>("apply_camera_script", { scriptPath }),
+  resetHardwareCamera: () => invoke<CmdResult>("reset_hardware_camera"),
   // Monitoring + sorter trigger (bridge schema v6, BE-5). Monitoring is
   // visibility-gated: enable only while the Monitoring view is shown.
   monitoringSetActive: (active: boolean) =>

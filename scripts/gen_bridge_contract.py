@@ -28,6 +28,8 @@ OUTPUT_TS = REPO_ROOT / "desktop/src/bridgeContract.ts"
 ENUM_GROUPS = [
     ("event_kinds", "EVENT_KINDS"),
     ("command_types", "COMMAND_TYPES"),
+    ("camera_types", "CAMERA_TYPES"),
+    ("camera_selection_modes", "CAMERA_SELECTION_MODES"),
     ("experiment_states", "EXPERIMENT_STATES"),
     ("error_sources", "ERROR_SOURCES"),
     ("operation_kinds", "OPERATION_KINDS"),

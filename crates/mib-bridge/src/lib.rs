@@ -110,6 +110,63 @@ pub mod ffi {
         pub message: String,
     }
 
+    /// One discovered camera (schema v7, BE-2). `camera_type` is a contract
+    /// `camera_types` value (0 EGrabber, 1 MindVision, 2 Mock — the mock
+    /// source is a synthetic always-present entry).
+    #[derive(Debug, Clone, Default)]
+    pub struct BridgeDiscoveredCamera {
+        pub camera_type: u32,
+        pub camera_index: i32,
+        pub interface_index: i32,
+        pub device_index: i32,
+        pub interface_id: String,
+        pub device_id: String,
+        pub model_name: String,
+        pub firmware_version: String,
+        pub label: String,
+    }
+
+    /// One discovered framegrabber stream (schema v7, BE-2).
+    #[derive(Debug, Clone, Default)]
+    pub struct BridgeDiscoveredFramegrabber {
+        pub interface_index: i32,
+        pub device_index: i32,
+        pub stream_index: i32,
+        pub interface_id: String,
+        pub device_id: String,
+        pub stream_id: String,
+        pub model_name: String,
+        pub label: String,
+    }
+
+    /// Camera discovery result (schema v7, BE-2). Hardware lists are empty on
+    /// platforms without the EGrabber/MindVision SDKs.
+    #[derive(Debug, Clone, Default)]
+    pub struct BridgeCameraDiscovery {
+        pub valid: bool,
+        pub cameras: Vec<BridgeDiscoveredCamera>,
+        pub framegrabbers: Vec<BridgeDiscoveredFramegrabber>,
+    }
+
+    /// Authoritative selected-device snapshot (schema v7, BE-2). `mode` is a
+    /// contract `camera_selection_modes` value.
+    #[derive(Debug, Clone, Default)]
+    pub struct BridgeCameraSelection {
+        pub valid: bool,
+        pub mode: u32,
+        pub interface_index: i32,
+        pub device_index: i32,
+        pub label: String,
+        pub mindvision_index: i32,
+        pub mindvision_config_path: String,
+        pub camera_script_path: String,
+        pub mock_frame_dir: String,
+        pub mock_interval_ms: i32,
+        pub mock_loop: bool,
+        pub configured: bool,
+        pub running: bool,
+    }
+
     /// One monitoring metric row (schema v6, BE-5): the per-object
     /// measurements that feed the Monitoring charts. `(frame_index,
     /// object_id)` is a stable identity for frontend reconciliation. Never
@@ -250,6 +307,40 @@ pub mod ffi {
 
         /// Pull the current experiment lifecycle snapshot (schema v5).
         fn fetch_experiment_status(self: Pin<&mut BackendBridge>) -> BridgeExperimentStatus;
+
+        /// Enumerate cameras/framegrabbers (schema v7, BE-2): EGrabber +
+        /// MindVision hardware (empty without the SDKs) plus the synthetic
+        /// mock entry. Discovery is a pull and touches no selection state.
+        fn fetch_camera_discovery(self: Pin<&mut BackendBridge>) -> BridgeCameraDiscovery;
+
+        /// Pull the authoritative selected-device snapshot (schema v7, BE-2).
+        fn fetch_camera_selection(self: Pin<&mut BackendBridge>) -> BridgeCameraSelection;
+
+        /// Select a hardware (EGrabber) camera by interface/device index
+        /// (schema v7, BE-2). Invalid indices fail with a structured error.
+        fn select_hardware_camera(
+            self: Pin<&mut BackendBridge>,
+            interface_index: i32,
+            device_index: i32,
+            label: &str,
+        ) -> BridgeCommandResult;
+
+        /// Select a MindVision camera by enumeration index; optionally apply a
+        /// JSON config file (schema v7, BE-2).
+        fn select_mindvision_camera(
+            self: Pin<&mut BackendBridge>,
+            camera_index: i32,
+            label: &str,
+            config_path: &str,
+        ) -> BridgeCommandResult;
+
+        /// Apply a JS camera script to the selected hardware camera (stops
+        /// capture first; capture stays stopped — schema v7, BE-2).
+        fn apply_camera_script(self: Pin<&mut BackendBridge>, script_path: &str)
+            -> BridgeCommandResult;
+
+        /// Issue a GenICam DeviceReset to the selected hardware camera.
+        fn reset_hardware_camera(self: Pin<&mut BackendBridge>) -> BridgeCommandResult;
 
         /// Enable/disable monitoring accumulation (schema v6, BE-5). Disabled
         /// monitoring skips the per-frame image clones entirely.

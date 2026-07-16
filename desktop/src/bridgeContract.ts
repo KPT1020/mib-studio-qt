@@ -3,7 +3,7 @@
 // Regenerate with: python3 scripts/gen_bridge_contract.py
 // CI verifies this file with: python3 scripts/gen_bridge_contract.py --check
 
-export const BRIDGE_ABI_VERSION = 6;
+export const BRIDGE_ABI_VERSION = 7;
 
 export const EVENT_KINDS = {
   FrameReady: 0,
@@ -27,6 +27,19 @@ export const COMMAND_TYPES = {
   Experiment: 6,
   Monitoring: 7,
   Trigger: 8,
+} as const;
+
+export const CAMERA_TYPES = {
+  EGrabber: 0,
+  MindVision: 1,
+  Mock: 2,
+} as const;
+
+export const CAMERA_SELECTION_MODES = {
+  None: 0,
+  Mock: 1,
+  Hardware: 2,
+  MindVision: 3,
 } as const;
 
 export const EXPERIMENT_STATES = {

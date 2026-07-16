@@ -6,6 +6,7 @@
 #include "backend/playback/FrameStore.h"
 #include "backend/playback/PlaybackService.h"
 #include "backend/recording/Hdf5Service.h"
+#include "backend/services/CameraControlService.h"
 #include "backend/services/CaptureService.h"
 #include "backend/services/TriggerService.h"
 
@@ -405,6 +406,14 @@ namespace backend::bridge
             return {true, BackendCommandType::Camera, "Mock camera configured"};
         }
         case CameraCommandAction::SelectHardwareCamera:
+            // Structured validation (BE-2): invalid indices are rejected here
+            // instead of failing deep inside capture start.
+            if (command.hardwareInterfaceIndex < 0 || command.hardwareDeviceIndex < 0)
+            {
+                const std::string message = "Invalid hardware camera indices";
+                emitEvent(BackendErrorEvent{BackendErrorSource::Camera, BackendCommandType::Camera, message});
+                return {false, BackendCommandType::Camera, message};
+            }
             backend_.setHardwareCameraSelection(command.hardwareInterfaceIndex,
                                                 command.hardwareDeviceIndex,
                                                 command.hardwareLabel);
@@ -412,6 +421,12 @@ namespace backend::bridge
             return {true, BackendCommandType::Camera, "Hardware camera selected"};
         case CameraCommandAction::SelectMindVisionCamera:
         {
+            if (command.mindVisionCameraIndex < 0)
+            {
+                const std::string message = "Invalid MindVision camera index";
+                emitEvent(BackendErrorEvent{BackendErrorSource::Camera, BackendCommandType::Camera, message});
+                return {false, BackendCommandType::Camera, message};
+            }
             backend_.setMindVisionCameraSelection(command.mindVisionCameraIndex,
                                                  command.mindVisionLabel);
             if (!command.mindVisionConfigPath.empty())
@@ -926,6 +941,75 @@ namespace backend::bridge
         out.lastTrackId = trigger.getLastTriggerTrackId();
         out.periodicActive = trigger.isPeriodicTestActive();
         out.periodicIntervalMs = trigger.getPeriodicTestIntervalMs();
+        return true;
+    }
+
+    bool BackendFacade::fetchCameraDiscovery(BackendCameraDiscovery &out) const
+    {
+        if (!initialized_)
+        {
+            return false;
+        }
+        out = BackendCameraDiscovery{};
+
+        auto &control = backend_.cameraControl();
+        for (const auto &cam : control.discoverAllCameras())
+        {
+            BackendDiscoveredCamera dto;
+            dto.type = static_cast<int>(cam.cameraType);
+            dto.cameraIndex = cam.cameraIndex;
+            dto.interfaceIndex = cam.interfaceIndex;
+            dto.deviceIndex = cam.deviceIndex;
+            dto.interfaceId = cam.interfaceID;
+            dto.deviceId = cam.deviceID;
+            dto.modelName = cam.modelName;
+            dto.firmwareVersion = cam.firmwareVersion;
+            dto.label = cam.label;
+            out.cameras.push_back(std::move(dto));
+        }
+        for (const auto &grabber : control.discoverFramegrabbers())
+        {
+            BackendDiscoveredFramegrabber dto;
+            dto.interfaceIndex = grabber.interfaceIndex;
+            dto.deviceIndex = grabber.deviceIndex;
+            dto.streamIndex = grabber.streamIndex;
+            dto.interfaceId = grabber.interfaceID;
+            dto.deviceId = grabber.deviceID;
+            dto.streamId = grabber.streamID;
+            dto.modelName = grabber.modelName;
+            dto.label = grabber.label;
+            out.framegrabbers.push_back(std::move(dto));
+        }
+
+        // Synthetic mock entry (type 2) so discovery/selection is
+        // headless-testable and the shell can always offer the mock source.
+        BackendDiscoveredCamera mock;
+        mock.type = 2;
+        mock.modelName = "Mock camera";
+        mock.label = "Mock camera (folder frame stream)";
+        out.cameras.push_back(std::move(mock));
+        return true;
+    }
+
+    bool BackendFacade::fetchCameraSelection(BackendCameraSelection &out) const
+    {
+        if (!initialized_)
+        {
+            return false;
+        }
+        const auto snapshot = backend_.cameraSelection();
+        out.mode = static_cast<int>(snapshot.mode);
+        out.interfaceIndex = snapshot.interfaceIndex;
+        out.deviceIndex = snapshot.deviceIndex;
+        out.label = snapshot.label;
+        out.mindVisionIndex = snapshot.mindVisionIndex;
+        out.mindVisionConfigPath = snapshot.mindVisionConfigPath;
+        out.cameraScriptPath = snapshot.cameraScriptPath;
+        out.mockFrameDir = snapshot.mockFrameDir;
+        out.mockIntervalMs = snapshot.mockIntervalMs;
+        out.mockLoop = snapshot.mockLoop;
+        out.configured = snapshot.configured;
+        out.running = backend_.capture().isRunning();
         return true;
     }
 

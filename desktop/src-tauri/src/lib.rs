@@ -334,6 +334,164 @@ fn fetch_experiment_status(state: State<AppState>) -> Result<ExperimentStatus, S
     })
 }
 
+/// One discovered camera for the webview (schema v7, BE-2).
+#[derive(Serialize, Clone, Default)]
+struct DiscoveredCamera {
+    camera_type: u32,
+    camera_index: i32,
+    interface_index: i32,
+    device_index: i32,
+    interface_id: String,
+    device_id: String,
+    model_name: String,
+    firmware_version: String,
+    label: String,
+}
+
+/// One discovered framegrabber stream for the webview (schema v7, BE-2).
+#[derive(Serialize, Clone, Default)]
+struct DiscoveredFramegrabber {
+    interface_index: i32,
+    device_index: i32,
+    stream_index: i32,
+    interface_id: String,
+    device_id: String,
+    stream_id: String,
+    model_name: String,
+    label: String,
+}
+
+/// Camera discovery result for the webview (schema v7, BE-2).
+#[derive(Serialize, Clone, Default)]
+struct CameraDiscovery {
+    valid: bool,
+    cameras: Vec<DiscoveredCamera>,
+    framegrabbers: Vec<DiscoveredFramegrabber>,
+}
+
+/// Authoritative selected-device snapshot for the webview (schema v7, BE-2).
+#[derive(Serialize, Clone, Default)]
+struct CameraSelection {
+    valid: bool,
+    mode: u32,
+    interface_index: i32,
+    device_index: i32,
+    label: String,
+    mindvision_index: i32,
+    mindvision_config_path: String,
+    camera_script_path: String,
+    mock_frame_dir: String,
+    mock_interval_ms: i32,
+    mock_loop: bool,
+    configured: bool,
+    running: bool,
+}
+
+/// Enumerate cameras/framegrabbers (EGrabber + MindVision + the mock entry).
+#[tauri::command]
+fn fetch_camera_discovery(state: State<AppState>) -> Result<CameraDiscovery, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    let d = guard.pin_mut().fetch_camera_discovery();
+    Ok(CameraDiscovery {
+        valid: d.valid,
+        cameras: d
+            .cameras
+            .into_iter()
+            .map(|c| DiscoveredCamera {
+                camera_type: c.camera_type,
+                camera_index: c.camera_index,
+                interface_index: c.interface_index,
+                device_index: c.device_index,
+                interface_id: c.interface_id,
+                device_id: c.device_id,
+                model_name: c.model_name,
+                firmware_version: c.firmware_version,
+                label: c.label,
+            })
+            .collect(),
+        framegrabbers: d
+            .framegrabbers
+            .into_iter()
+            .map(|g| DiscoveredFramegrabber {
+                interface_index: g.interface_index,
+                device_index: g.device_index,
+                stream_index: g.stream_index,
+                interface_id: g.interface_id,
+                device_id: g.device_id,
+                stream_id: g.stream_id,
+                model_name: g.model_name,
+                label: g.label,
+            })
+            .collect(),
+    })
+}
+
+/// Pull the authoritative selected-device snapshot.
+#[tauri::command]
+fn fetch_camera_selection(state: State<AppState>) -> Result<CameraSelection, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    let s = guard.pin_mut().fetch_camera_selection();
+    Ok(CameraSelection {
+        valid: s.valid,
+        mode: s.mode,
+        interface_index: s.interface_index,
+        device_index: s.device_index,
+        label: s.label,
+        mindvision_index: s.mindvision_index,
+        mindvision_config_path: s.mindvision_config_path,
+        camera_script_path: s.camera_script_path,
+        mock_frame_dir: s.mock_frame_dir,
+        mock_interval_ms: s.mock_interval_ms,
+        mock_loop: s.mock_loop,
+        configured: s.configured,
+        running: s.running,
+    })
+}
+
+/// Select a hardware (EGrabber) camera.
+#[tauri::command]
+fn select_hardware_camera(
+    state: State<AppState>,
+    interface_index: i32,
+    device_index: i32,
+    label: String,
+) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard
+        .pin_mut()
+        .select_hardware_camera(interface_index, device_index, &label)
+        .into())
+}
+
+/// Select a MindVision camera (optionally applying a JSON config).
+#[tauri::command]
+fn select_mindvision_camera(
+    state: State<AppState>,
+    camera_index: i32,
+    label: String,
+    config_path: String,
+) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard
+        .pin_mut()
+        .select_mindvision_camera(camera_index, &label, &config_path)
+        .into())
+}
+
+/// Apply a JS camera script to the selected hardware camera.
+#[tauri::command]
+fn apply_camera_script(state: State<AppState>, script_path: String) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().apply_camera_script(&script_path).into())
+}
+
+/// Issue a GenICam DeviceReset to the selected hardware camera.
+#[tauri::command]
+fn reset_hardware_camera(state: State<AppState>) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().reset_hardware_camera().into())
+}
+
 /// One monitoring metric row for the webview (schema v6, BE-5).
 #[derive(Serialize, Clone, Default)]
 struct MonitoringRow {
@@ -681,6 +839,12 @@ pub fn run() {
             experiment_stop,
             experiment_cancel,
             fetch_experiment_status,
+            fetch_camera_discovery,
+            fetch_camera_selection,
+            select_hardware_camera,
+            select_mindvision_camera,
+            apply_camera_script,
+            reset_hardware_camera,
             monitoring_set_active,
             monitoring_clear,
             fetch_monitoring_snapshot,

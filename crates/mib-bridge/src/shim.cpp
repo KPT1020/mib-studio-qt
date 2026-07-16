@@ -7,6 +7,7 @@
 
 #include "backend/app/AppBackend.h"
 #include "backend/app/BackendFacade.h"
+#include "backend/services/CameraControlService.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -48,6 +49,13 @@ static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Operation) == 5
 static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Experiment) == 6);
 static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Monitoring) == 7);
 static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Trigger) == 8);
+
+static_assert(static_cast<std::uint32_t>(backend::services::CameraType::EGrabber) == 0);
+static_assert(static_cast<std::uint32_t>(backend::services::CameraType::MindVision) == 1);
+static_assert(static_cast<std::uint32_t>(backend::AppBackend::CameraSelectionSnapshot::Mode::None) == 0);
+static_assert(static_cast<std::uint32_t>(backend::AppBackend::CameraSelectionSnapshot::Mode::Mock) == 1);
+static_assert(static_cast<std::uint32_t>(backend::AppBackend::CameraSelectionSnapshot::Mode::Hardware) == 2);
+static_assert(static_cast<std::uint32_t>(backend::AppBackend::CameraSelectionSnapshot::Mode::MindVision) == 3);
 
 static_assert(static_cast<std::uint32_t>(backend::ExperimentCoordinator::State::Idle) == 0);
 static_assert(static_cast<std::uint32_t>(backend::ExperimentCoordinator::State::Starting) == 1);
@@ -466,6 +474,124 @@ BridgeCommandResult BackendBridge::experiment_cancel() {
     }
 }
 
+BridgeCameraDiscovery BackendBridge::fetch_camera_discovery() {
+    BridgeCameraDiscovery out{};
+    backend::bridge::BackendCameraDiscovery discovery;
+    if (!impl_->facade.fetchCameraDiscovery(discovery)) {
+        out.valid = false;
+        return out;
+    }
+    out.valid = true;
+    for (const auto& cam : discovery.cameras) {
+        BridgeDiscoveredCamera dto{};
+        dto.camera_type = static_cast<std::uint32_t>(cam.type);
+        dto.camera_index = cam.cameraIndex;
+        dto.interface_index = cam.interfaceIndex;
+        dto.device_index = cam.deviceIndex;
+        dto.interface_id = rust::String(cam.interfaceId);
+        dto.device_id = rust::String(cam.deviceId);
+        dto.model_name = rust::String(cam.modelName);
+        dto.firmware_version = rust::String(cam.firmwareVersion);
+        dto.label = rust::String(cam.label);
+        out.cameras.push_back(std::move(dto));
+    }
+    for (const auto& grabber : discovery.framegrabbers) {
+        BridgeDiscoveredFramegrabber dto{};
+        dto.interface_index = grabber.interfaceIndex;
+        dto.device_index = grabber.deviceIndex;
+        dto.stream_index = grabber.streamIndex;
+        dto.interface_id = rust::String(grabber.interfaceId);
+        dto.device_id = rust::String(grabber.deviceId);
+        dto.stream_id = rust::String(grabber.streamId);
+        dto.model_name = rust::String(grabber.modelName);
+        dto.label = rust::String(grabber.label);
+        out.framegrabbers.push_back(std::move(dto));
+    }
+    return out;
+}
+
+BridgeCameraSelection BackendBridge::fetch_camera_selection() {
+    BridgeCameraSelection out{};
+    backend::bridge::BackendCameraSelection selection;
+    if (!impl_->facade.fetchCameraSelection(selection)) {
+        out.valid = false;
+        return out;
+    }
+    out.valid = true;
+    out.mode = static_cast<std::uint32_t>(selection.mode);
+    out.interface_index = selection.interfaceIndex;
+    out.device_index = selection.deviceIndex;
+    out.label = rust::String(selection.label);
+    out.mindvision_index = selection.mindVisionIndex;
+    out.mindvision_config_path = rust::String(selection.mindVisionConfigPath);
+    out.camera_script_path = rust::String(selection.cameraScriptPath);
+    out.mock_frame_dir = rust::String(selection.mockFrameDir);
+    out.mock_interval_ms = selection.mockIntervalMs;
+    out.mock_loop = selection.mockLoop;
+    out.configured = selection.configured;
+    out.running = selection.running;
+    return out;
+}
+
+BridgeCommandResult BackendBridge::select_hardware_camera(std::int32_t interface_index,
+                                                          std::int32_t device_index,
+                                                          rust::Str label) {
+    try {
+        backend::bridge::CameraCommand cmd;
+        cmd.action = backend::bridge::CameraCommandAction::SelectHardwareCamera;
+        cmd.hardwareInterfaceIndex = interface_index;
+        cmd.hardwareDeviceIndex = device_index;
+        cmd.hardwareLabel = toStd(label);
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("select_hardware_camera: ") + e.what());
+    } catch (...) {
+        return errorResult("select_hardware_camera: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::select_mindvision_camera(std::int32_t camera_index,
+                                                            rust::Str label,
+                                                            rust::Str config_path) {
+    try {
+        backend::bridge::CameraCommand cmd;
+        cmd.action = backend::bridge::CameraCommandAction::SelectMindVisionCamera;
+        cmd.mindVisionCameraIndex = camera_index;
+        cmd.mindVisionLabel = toStd(label);
+        cmd.mindVisionConfigPath = toStd(config_path);
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("select_mindvision_camera: ") + e.what());
+    } catch (...) {
+        return errorResult("select_mindvision_camera: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::apply_camera_script(rust::Str script_path) {
+    try {
+        backend::bridge::CameraCommand cmd;
+        cmd.action = backend::bridge::CameraCommandAction::ApplyCameraScript;
+        cmd.cameraScriptPath = toStd(script_path);
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("apply_camera_script: ") + e.what());
+    } catch (...) {
+        return errorResult("apply_camera_script: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::reset_hardware_camera() {
+    try {
+        backend::bridge::CameraCommand cmd;
+        cmd.action = backend::bridge::CameraCommandAction::ResetSelectedHardwareCamera;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("reset_hardware_camera: ") + e.what());
+    } catch (...) {
+        return errorResult("reset_hardware_camera: unknown error");
+    }
+}
+
 BridgeCommandResult BackendBridge::monitoring_set_active(bool active) {
     try {
         backend::bridge::MonitoringCommand cmd;
@@ -682,8 +808,11 @@ std::unique_ptr<BackendBridge> new_backend_bridge() {
 // operation_id), the bounded event queue with QueueOverflow, and the extended
 // error sources; v5 added the experiment lifecycle (experiment_start/stop/
 // cancel, fetch_experiment_status, ExperimentStatus events); v6 added the
-// bounded monitoring snapshot and sorter trigger commands/status (BE-5). All
-// additive over v1 (ADR 0003/0004). Must match contract/bridge-contract.json.
-std::uint32_t bridge_abi_version() { return 6; }
+// bounded monitoring snapshot and sorter trigger commands/status (BE-5); v7
+// added camera discovery/selection (fetch_camera_discovery/selection,
+// select_hardware/mindvision_camera, apply_camera_script,
+// reset_hardware_camera — BE-2). All additive over v1 (ADR 0003/0004). Must
+// match contract/bridge-contract.json.
+std::uint32_t bridge_abi_version() { return 7; }
 
 } // namespace mib_bridge

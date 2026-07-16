@@ -54,6 +54,12 @@ Rust owns an opaque `BackendBridge` (`UniquePtr`) that composes an `AppBackend`
   `cancel_operation(id)` requests cancellation and fails safely for
   unknown/finished IDs; `shutdown()` cancels all active operations first.
   RecordingLoad is the first tracked operation; BE-4/BE-6 build on this.
+- **Camera discovery/selection (v7, BE-2):** `fetch_camera_discovery`
+  (EGrabber + MindVision + a synthetic mock entry; typed DTOs),
+  `fetch_camera_selection` (authoritative snapshot incl. mock params, applied
+  script/config paths, configured/running), `select_hardware_camera`,
+  `select_mindvision_camera`, `apply_camera_script`, `reset_hardware_camera`
+  (structured errors for invalid indices/paths/no-selection).
 - **Monitoring + trigger (v6, BE-5):** `monitoring_set_active` /
   `monitoring_clear` / `fetch_monitoring_snapshot(max_rows)` (bounded,
   metrics-only rows with stable `(frame_index, object_id)` identity; evictions
@@ -98,13 +104,13 @@ via static_asserts in `shim.cpp`, Rust via `rust_enums_match_contract_json`,
 TypeScript via the generated `desktop/src/bridgeContract.ts`
 (`scripts/gen_bridge_contract.py --check` is a desktop-CI drift gate).
 
-The command/event set is a versioned schema: `bridge_abi_version()` returns `6`
+The command/event set is a versioned schema: `bridge_abi_version()` returns `7`
 (v2 added the review commands — `load_recording`, `playback_seek_index`,
 `fetch_frame_by_index`; v3 added the processing commands — `apply_processing`,
 `fetch_processing_stats`; v4 added operation state, `cancel_operation`,
 `queue_overflow_total`, the bounded queue, and the extended error sources;
 v5 added the experiment lifecycle (BE-4); v6 added monitoring snapshots and
-the sorter trigger (BE-5) —
+the sorter trigger (BE-5); v7 added camera discovery/selection (BE-2) —
 all additive over the v1 live-capture set); additive
 changes bump it. `tests/contract.rs` is the boundary gate and regression guard:
 `lifecycle_produces_status_and_frame_events` drives

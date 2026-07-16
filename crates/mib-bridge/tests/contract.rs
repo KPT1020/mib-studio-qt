@@ -52,8 +52,77 @@ fn abi_version_is_stable() {
     // The command/event schema is versioned (ADR 0003). v2 added the review
     // commands; v3 the processing commands; v4 operation state, the bounded
     // event queue, and the extended error sources (ADR 0004); v5 the
-    // experiment lifecycle (BE-4); v6 monitoring snapshots + trigger (BE-5).
-    assert_eq!(ffi::bridge_abi_version(), 6);
+    // experiment lifecycle (BE-4); v6 monitoring snapshots + trigger (BE-5);
+    // v7 camera discovery/selection (BE-2).
+    assert_eq!(ffi::bridge_abi_version(), 7);
+}
+
+// BE-2: camera discovery/selection contract — mock enumeration/selection is
+// headless-testable, invalid indices/paths return structured errors, and the
+// selected-device snapshot is authoritative and survives capture start/stop.
+#[test]
+#[serial]
+fn camera_discovery_and_selection_contract() {
+    let frame_dir = make_frame_dir();
+    let data_dir = std::env::temp_dir().join(format!("mib_bridge_cam_data_{}", std::process::id()));
+
+    let mut bridge = ffi::new_backend_bridge();
+    assert!(bridge.pin_mut().initialize(&data_dir.to_string_lossy()));
+
+    // Discovery always contains the synthetic mock entry (camera_type 2);
+    // hardware lists are empty without the SDKs on this platform.
+    let discovery = bridge.pin_mut().fetch_camera_discovery();
+    assert!(discovery.valid);
+    assert!(
+        discovery.cameras.iter().any(|c| c.camera_type == 2),
+        "mock camera entry missing from discovery"
+    );
+
+    // The boot selection is authoritative: on platforms without the camera
+    // SDKs the backend falls back to a mock factory at initialize, so the
+    // mode is either None (hardware default) or Mock (fallback) — never a
+    // hardware/MindVision claim without the SDK.
+    let selection = bridge.pin_mut().fetch_camera_selection();
+    assert!(selection.valid);
+    assert!(
+        selection.mode == 0 || selection.mode == 1,
+        "unexpected boot selection mode {}",
+        selection.mode
+    );
+
+    // Structured errors for invalid selections / paths.
+    assert!(!bridge.pin_mut().select_hardware_camera(-1, 0, "bad").ok);
+    assert!(!bridge.pin_mut().select_mindvision_camera(-1, "bad", "").ok);
+    let script = bridge.pin_mut().apply_camera_script("/nonexistent/script.js");
+    assert!(!script.ok && script.message.contains("No hardware camera selected"));
+    assert!(!bridge.pin_mut().reset_hardware_camera().ok);
+
+    // Configure the mock source; the snapshot becomes authoritative.
+    assert!(bridge
+        .pin_mut()
+        .configure_mock_camera(&frame_dir.to_string_lossy(), 7, true)
+        .ok);
+    let selection = bridge.pin_mut().fetch_camera_selection();
+    assert_eq!(selection.mode, 1, "expected Mock selection mode");
+    assert!(selection.configured);
+    assert_eq!(selection.mock_interval_ms, 7);
+    assert!(selection.mock_loop);
+    assert!(selection.mock_frame_dir.ends_with(
+        frame_dir.file_name().unwrap().to_str().unwrap()
+    ));
+    assert!(!selection.running);
+
+    // Selection survives capture start/stop and reports running state.
+    assert!(bridge.pin_mut().start_capture().ok);
+    let running = bridge.pin_mut().fetch_camera_selection();
+    assert!(running.running && running.mode == 1 && running.configured);
+    assert!(bridge.pin_mut().stop_capture().ok);
+    let stopped = bridge.pin_mut().fetch_camera_selection();
+    assert!(!stopped.running && stopped.mode == 1 && stopped.configured);
+
+    bridge.pin_mut().shutdown();
+    let _ = std::fs::remove_dir_all(&frame_dir);
+    let _ = std::fs::remove_dir_all(&data_dir);
 }
 
 // BE-5: bounded monitoring snapshot semantics and the sorter trigger contract
