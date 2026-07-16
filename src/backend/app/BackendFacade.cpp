@@ -13,6 +13,7 @@
 #include "backend/playback/FrameStore.h"
 #include "backend/playback/PlaybackService.h"
 #include "backend/recording/Hdf5Service.h"
+#include "backend/app/Tools.h"
 #include "backend/services/AutofocusService.h"
 #include "backend/services/CameraControlService.h"
 #include "backend/services/CaptureService.h"
@@ -74,9 +75,13 @@ namespace backend::bridge
                 {
                     return BackendCommandType::Review;
                 }
-                else
+                else if constexpr (std::is_same_v<Command, PumpCommand>)
                 {
                     return BackendCommandType::Pump;
+                }
+                else
+                {
+                    return BackendCommandType::Autofocus;
                 }
             }, command);
         }
@@ -134,6 +139,7 @@ namespace backend::bridge
             case BackendCommandType::Review:
                 return BackendErrorSource::Review;
             case BackendCommandType::Pump:
+            case BackendCommandType::Autofocus:
                 return BackendErrorSource::Hardware;
             }
             return BackendErrorSource::Lifecycle;
@@ -372,9 +378,13 @@ namespace backend::bridge
             {
                 return handleReviewCommand(typedCommand);
             }
-            else
+            else if constexpr (std::is_same_v<Command, PumpCommand>)
             {
                 return handlePumpCommand(typedCommand);
+            }
+            else
+            {
+                return handleAutofocusCommand(typedCommand);
             }
         }, command);
     }
@@ -1602,6 +1612,116 @@ namespace backend::bridge
         out.configuredFlowRate = config.flowRate;
         out.flowRateUnit = config.flowRateUnit;
         out.direction = static_cast<int>(config.direction);
+        return true;
+    }
+
+    BackendCommandResult BackendFacade::handleAutofocusCommand(const AutofocusCommand &command)
+    {
+        auto &autofocus = backend_.autofocus();
+        auto fail = [this](const std::string &message) -> BackendCommandResult {
+            emitEvent(BackendErrorEvent{BackendErrorSource::Hardware,
+                                        BackendCommandType::Autofocus, message});
+            return {false, BackendCommandType::Autofocus, message};
+        };
+
+        switch (command.action)
+        {
+        case AutofocusCommandAction::Connect:
+        {
+            if (command.comPort < 0)
+            {
+                return fail("Invalid COM port");
+            }
+            if (command.deviceAddress < 0 || command.deviceAddress > 255)
+            {
+                return fail("Invalid device address");
+            }
+            // Serial-port conflict rules (BE-7/BE-8): the pumps must not
+            // share the autofocus controller's port.
+            using Pump = services::SyringePumpService;
+            auto &pumps = backend_.syringePump();
+            for (int pumpId = 0; pumpId < Pump::PUMP_COUNT; ++pumpId)
+            {
+                const auto id = static_cast<Pump::PumpId>(pumpId);
+                if (pumps.isConnected(id) && pumps.getComPort(id) == command.comPort)
+                {
+                    return fail("COM port already in use by a syringe pump");
+                }
+            }
+            if (!autofocus.connect(command.comPort, command.baudRate,
+                                   static_cast<unsigned char>(command.deviceAddress)))
+            {
+                return fail("Autofocus controller connect failed");
+            }
+            return {true, BackendCommandType::Autofocus, "Autofocus controller connected"};
+        }
+        case AutofocusCommandAction::Disconnect:
+            // Disconnect disables control first so no motion outlives it.
+            autofocus.setEnabled(false);
+            autofocus.disconnect();
+            return {true, BackendCommandType::Autofocus, "Autofocus controller disconnected"};
+        case AutofocusCommandAction::SetEnabled:
+            if (command.enabled && !autofocus.isConnected())
+            {
+                return fail("Autofocus controller is not connected");
+            }
+            autofocus.setEnabled(command.enabled);
+            return {true, BackendCommandType::Autofocus,
+                    command.enabled ? "Autofocus enabled" : "Autofocus disabled"};
+        case AutofocusCommandAction::IncreaseVoltage:
+        case AutofocusCommandAction::DecreaseVoltage:
+            if (!autofocus.isConnected())
+            {
+                return fail("Autofocus controller is not connected");
+            }
+            if (command.action == AutofocusCommandAction::IncreaseVoltage)
+            {
+                autofocus.increaseVoltage();
+            }
+            else
+            {
+                autofocus.decreaseVoltage();
+            }
+            return {true, BackendCommandType::Autofocus, "Voltage jog requested"};
+        case AutofocusCommandAction::SetConfig:
+            if (command.config.minVoltage >= command.config.maxVoltage)
+            {
+                return fail("Invalid voltage range (min must be < max)");
+            }
+            autofocus.setConfig(command.config);
+            return {true, BackendCommandType::Autofocus, "Autofocus config applied"};
+        }
+        return {false, BackendCommandType::Autofocus, "Unknown autofocus command"};
+    }
+
+    bool BackendFacade::fetchAutofocusStatus(BackendAutofocusStatus &out) const
+    {
+        if (!initialized_)
+        {
+            return false;
+        }
+        auto &autofocus = backend_.autofocus();
+        out.connected = autofocus.isConnected();
+        out.enabled = autofocus.isEnabled();
+        out.currentVoltage = autofocus.getCurrentVoltage();
+        out.comPort = autofocus.getComPort();
+        out.averageRingRatio = autofocus.getAverageRingRatio();
+        out.medianRingRatio = autofocus.getMedianRingRatio();
+        out.lastRingRatioUpdateUs = autofocus.getLastRingRatioUpdateUs();
+        out.ringRatioAgeUs =
+            out.lastRingRatioUpdateUs == 0
+                ? 0
+                : Tools::getTimestamp() - out.lastRingRatioUpdateUs;
+        return true;
+    }
+
+    bool BackendFacade::fetchAutofocusConfig(services::AutofocusService::Config &out) const
+    {
+        if (!initialized_)
+        {
+            return false;
+        }
+        out = backend_.autofocus().getConfig();
         return true;
     }
 

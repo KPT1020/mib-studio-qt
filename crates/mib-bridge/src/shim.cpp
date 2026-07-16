@@ -52,6 +52,7 @@ static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Monitoring) == 
 static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Trigger) == 8);
 static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Review) == 9);
 static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Pump) == 10);
+static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Autofocus) == 11);
 
 static_assert(static_cast<std::uint32_t>(bb::BackendOperationKind::PumpScan) == 6);
 static_assert(static_cast<std::uint32_t>(backend::services::SyringePumpService::PumpId::Sample) == 0);
@@ -551,6 +552,129 @@ backend::bridge::PumpCommand makePumpCommand(backend::bridge::PumpCommandAction 
 }
 
 } // namespace
+
+BridgeCommandResult BackendBridge::autofocus_connect(std::int32_t com_port,
+                                                     std::int32_t baud_rate,
+                                                     std::int32_t device_address) {
+    try {
+        backend::bridge::AutofocusCommand cmd;
+        cmd.action = backend::bridge::AutofocusCommandAction::Connect;
+        cmd.comPort = com_port;
+        cmd.baudRate = baud_rate;
+        cmd.deviceAddress = device_address;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("autofocus_connect: ") + e.what());
+    } catch (...) {
+        return errorResult("autofocus_connect: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::autofocus_disconnect() {
+    try {
+        backend::bridge::AutofocusCommand cmd;
+        cmd.action = backend::bridge::AutofocusCommandAction::Disconnect;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("autofocus_disconnect: ") + e.what());
+    } catch (...) {
+        return errorResult("autofocus_disconnect: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::autofocus_set_enabled(bool enabled) {
+    try {
+        backend::bridge::AutofocusCommand cmd;
+        cmd.action = backend::bridge::AutofocusCommandAction::SetEnabled;
+        cmd.enabled = enabled;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("autofocus_set_enabled: ") + e.what());
+    } catch (...) {
+        return errorResult("autofocus_set_enabled: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::autofocus_jog(bool up) {
+    try {
+        backend::bridge::AutofocusCommand cmd;
+        cmd.action = up ? backend::bridge::AutofocusCommandAction::IncreaseVoltage
+                        : backend::bridge::AutofocusCommandAction::DecreaseVoltage;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("autofocus_jog: ") + e.what());
+    } catch (...) {
+        return errorResult("autofocus_jog: unknown error");
+    }
+}
+
+BridgeCommandResult BackendBridge::autofocus_set_config(BridgeAutofocusConfig config) {
+    try {
+        backend::bridge::AutofocusCommand cmd;
+        cmd.action = backend::bridge::AutofocusCommandAction::SetConfig;
+        cmd.config.focusSetpoint = config.focus_setpoint;
+        cmd.config.focusRange = config.focus_range;
+        cmd.config.voltageStep = config.voltage_step;
+        cmd.config.fineVoltageStep = config.fine_voltage_step;
+        cmd.config.maxVoltage = config.max_voltage;
+        cmd.config.minVoltage = config.min_voltage;
+        cmd.config.initialVoltage = config.initial_voltage;
+        cmd.config.manualVoltageStep = config.manual_voltage_step;
+        cmd.config.ringRatioStaleMs = config.ring_ratio_stale_ms;
+        cmd.config.requireNewSamplePerStep = config.require_new_sample_per_step;
+        cmd.config.minSamplesPerStep = config.min_samples_per_step;
+        cmd.config.safeShutdownVoltage = config.safe_shutdown_voltage;
+        cmd.config.focusDirection = config.focus_direction;
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("autofocus_set_config: ") + e.what());
+    } catch (...) {
+        return errorResult("autofocus_set_config: unknown error");
+    }
+}
+
+BridgeAutofocusStatus BackendBridge::fetch_autofocus_status() {
+    BridgeAutofocusStatus out{};
+    backend::bridge::BackendAutofocusStatus status;
+    if (!impl_->facade.fetchAutofocusStatus(status)) {
+        out.valid = false;
+        return out;
+    }
+    out.valid = true;
+    out.connected = status.connected;
+    out.enabled = status.enabled;
+    out.current_voltage = status.currentVoltage;
+    out.com_port = status.comPort;
+    out.average_ring_ratio = status.averageRingRatio;
+    out.median_ring_ratio = status.medianRingRatio;
+    out.last_ring_ratio_update_us = status.lastRingRatioUpdateUs;
+    out.ring_ratio_age_us = status.ringRatioAgeUs;
+    return out;
+}
+
+BridgeAutofocusConfig BackendBridge::fetch_autofocus_config() {
+    BridgeAutofocusConfig out{};
+    backend::services::AutofocusService::Config config;
+    if (!impl_->facade.fetchAutofocusConfig(config)) {
+        out.valid = false;
+        return out;
+    }
+    out.valid = true;
+    out.focus_setpoint = config.focusSetpoint;
+    out.focus_range = config.focusRange;
+    out.voltage_step = config.voltageStep;
+    out.fine_voltage_step = config.fineVoltageStep;
+    out.max_voltage = config.maxVoltage;
+    out.min_voltage = config.minVoltage;
+    out.initial_voltage = config.initialVoltage;
+    out.manual_voltage_step = config.manualVoltageStep;
+    out.ring_ratio_stale_ms = config.ringRatioStaleMs;
+    out.require_new_sample_per_step = config.requireNewSamplePerStep;
+    out.min_samples_per_step = config.minSamplesPerStep;
+    out.safe_shutdown_voltage = config.safeShutdownVoltage;
+    out.focus_direction = config.focusDirection;
+    return out;
+}
 
 BridgeCommandResult BackendBridge::pump_connect(std::uint32_t pump, std::int32_t com_port,
                                                 std::int32_t baud_rate,
@@ -1212,8 +1336,10 @@ std::unique_ptr<BackendBridge> new_backend_bridge() {
 // round-trip, ROI/background binary transfer, and processing-core status
 // (BE-3); v9 added paged HDF5 review (metadata, metrics pages, image/mask
 // pulls, cancellable CSV export jobs — BE-6); v10 added syringe-pump
-// commands/status for the sample/sheath pumps (BE-7). All additive over v1
-// (ADR 0003/0004). Must match contract/bridge-contract.json.
-std::uint32_t bridge_abi_version() { return 10; }
+// commands/status for the sample/sheath pumps (BE-7); v11 added autofocus/
+// nanopositioner control, config round-trip, and freshness-explicit status
+// (BE-8). All additive over v1 (ADR 0003/0004). Must match
+// contract/bridge-contract.json.
+std::uint32_t bridge_abi_version() { return 11; }
 
 } // namespace mib_bridge

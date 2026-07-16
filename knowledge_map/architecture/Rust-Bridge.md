@@ -54,6 +54,11 @@ Rust owns an opaque `BackendBridge` (`UniquePtr`) that composes an `AppBackend`
   `cancel_operation(id)` requests cancellation and fails safely for
   unknown/finished IDs; `shutdown()` cancels all active operations first.
   RecordingLoad is the first tracked operation; BE-4/BE-6 build on this.
+- **Autofocus / nanopositioner (v11, BE-8):** `autofocus_connect/disconnect/
+  set_enabled/jog/set_config`, `fetch_autofocus_status` (explicit ring-ratio
+  freshness/age), `fetch_autofocus_config` (plain-value round-trip). Linux
+  builds the platform stub; connect fails structurally without the Coremor
+  SDK.
 - **Syringe pumps (v10, BE-7):** flat `pump_*` commands (connect/disconnect/
   flow rate/direction/start/stop/purge/syringe volume/poll) with structured
   validation + COM-port conflict rules, `fetch_pump_status(pump)` snapshots
@@ -121,7 +126,7 @@ via static_asserts in `shim.cpp`, Rust via `rust_enums_match_contract_json`,
 TypeScript via the generated `desktop/src/bridgeContract.ts`
 (`scripts/gen_bridge_contract.py --check` is a desktop-CI drift gate).
 
-The command/event set is a versioned schema: `bridge_abi_version()` returns `10`
+The command/event set is a versioned schema: `bridge_abi_version()` returns `11`
 (v2 added the review commands — `load_recording`, `playback_seek_index`,
 `fetch_frame_by_index`; v3 added the processing commands — `apply_processing`,
 `fetch_processing_stats`; v4 added operation state, `cancel_operation`,
@@ -130,7 +135,8 @@ v5 added the experiment lifecycle (BE-4); v6 added monitoring snapshots and
 the sorter trigger (BE-5); v7 added camera discovery/selection (BE-2); v8
 added the processing-config round-trip, ROI/background, and core status
 (BE-3); v9 added paged HDF5 review and export jobs (BE-6); v10 added the
-syringe-pump surface (BE-7) —
+syringe-pump surface (BE-7); v11 added the autofocus/nanopositioner surface
+(BE-8) —
 all additive over the v1 live-capture set); additive
 changes bump it. `tests/contract.rs` is the boundary gate and regression guard:
 `lifecycle_produces_status_and_frame_events` drives

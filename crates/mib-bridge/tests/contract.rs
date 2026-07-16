@@ -55,8 +55,66 @@ fn abi_version_is_stable() {
     // experiment lifecycle (BE-4); v6 monitoring snapshots + trigger (BE-5);
     // v7 camera discovery/selection (BE-2); v8 config round-trip, ROI/
     // background, and core status (BE-3); v9 paged HDF5 review + export jobs
-    // (BE-6); v10 syringe-pump commands/status (BE-7).
-    assert_eq!(ffi::bridge_abi_version(), 10);
+    // (BE-6); v10 syringe-pump commands/status (BE-7); v11 autofocus/
+    // nanopositioner control (BE-8).
+    assert_eq!(ffi::bridge_abi_version(), 11);
+}
+
+// BE-8: the autofocus command surface fails safely without hardware, the
+// config round-trips without QSettings types, and the status exposes the
+// focus-metric freshness explicitly. (The Coremor transport is a platform
+// stub on Linux; the real sweep is the Windows half of #278.)
+#[test]
+#[serial]
+fn autofocus_commands_and_config_roundtrip() {
+    let data_dir = std::env::temp_dir().join(format!("mib_bridge_af_data_{}", std::process::id()));
+    let mut bridge = ffi::new_backend_bridge();
+    assert!(bridge.pin_mut().initialize(&data_dir.to_string_lossy()));
+
+    // Status is valid and disconnected; freshness is explicit (0 = never).
+    let status = bridge.pin_mut().fetch_autofocus_status();
+    assert!(status.valid && !status.connected && !status.enabled);
+    assert_eq!(status.last_ring_ratio_update_us, 0);
+    assert_eq!(status.ring_ratio_age_us, 0);
+
+    // Structured parameter errors and safe failure without hardware.
+    assert!(!bridge.pin_mut().autofocus_connect(-1, 115200, 1).ok);
+    assert!(!bridge.pin_mut().autofocus_connect(3, 115200, 999).ok);
+    let connect = bridge.pin_mut().autofocus_connect(3, 115200, 1);
+    assert!(!connect.ok, "connect must fail without the Coremor SDK/hardware");
+
+    // Control on a disconnected controller fails cleanly; disable is safe.
+    assert!(!bridge.pin_mut().autofocus_set_enabled(true).ok);
+    assert!(!bridge.pin_mut().autofocus_jog(true).ok);
+    assert!(!bridge.pin_mut().autofocus_jog(false).ok);
+    assert!(bridge.pin_mut().autofocus_set_enabled(false).ok);
+    assert!(bridge.pin_mut().autofocus_disconnect().ok, "disconnect is idempotent");
+
+    // Config round-trips through plain values (no QSettings anywhere).
+    let mut config = bridge.pin_mut().fetch_autofocus_config();
+    assert!(config.valid);
+    config.focus_setpoint = 22.5;
+    config.voltage_step = 2.0;
+    config.ring_ratio_stale_ms = 900;
+    config.require_new_sample_per_step = false;
+    config.focus_direction = false;
+    assert!(bridge.pin_mut().autofocus_set_config(config.clone()).ok);
+    let round = bridge.pin_mut().fetch_autofocus_config();
+    assert!((round.focus_setpoint - 22.5).abs() < 1e-9);
+    assert!((round.voltage_step - 2.0).abs() < 1e-9);
+    assert_eq!(round.ring_ratio_stale_ms, 900);
+    assert!(!round.require_new_sample_per_step);
+    assert!(!round.focus_direction);
+
+    // Invalid voltage range is a structured error that leaves config intact.
+    let mut bad = round.clone();
+    bad.min_voltage = 50.0;
+    bad.max_voltage = 10.0;
+    assert!(!bridge.pin_mut().autofocus_set_config(bad).ok);
+    assert!((bridge.pin_mut().fetch_autofocus_config().focus_setpoint - 22.5).abs() < 1e-9);
+
+    bridge.pin_mut().shutdown();
+    let _ = std::fs::remove_dir_all(&data_dir);
 }
 
 // BE-7: the pump command surface fails safely without hardware — structured

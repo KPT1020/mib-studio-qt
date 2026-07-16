@@ -5,6 +5,18 @@
 
 ## Features shipped
 
+- **Qt → React/Tauri migration: BE-8 — autofocus/nanopositioner bridge**
+  (2026-07-16, epic #246, issue #278) — Bridge ABI **v11**: facade
+  `AutofocusCommand` surface (connect/disconnect/enable/jog/config) with
+  structured validation, the pump↔autofocus COM-port conflict rule, safe
+  disable-before-disconnect, a full plain-value `Config` round-trip (no
+  QSettings), and a status pull with **explicit focus-metric freshness**
+  (ring-ratio age) so stale metrics are observable. Sidebar now shows live
+  autofocus state. The stub-transport sweep test and real closed-loop
+  acceptance remain open on #278 (Coremor SDK is Windows-only; Linux builds
+  the platform stub). Details:
+  `knowledge_map/task/2026-07-16-autofocus-bridge.md`.
+
 - **Qt → React/Tauri migration: BE-7 — syringe-pump commands/status bridge**
   (2026-07-16, epic #246, issue #277) — Bridge ABI **v10**: facade
   `PumpCommand` surface + authoritative per-pump snapshots for the Sample and

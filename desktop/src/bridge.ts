@@ -49,6 +49,38 @@ export interface ExperimentStatus {
   message: string;
 }
 
+/** Autofocus/nanopositioner status (schema v11, BE-8). `ring_ratio_age_us`
+ *  makes focus-metric staleness explicit (0 = never updated). */
+export interface AutofocusStatus {
+  valid: boolean;
+  connected: boolean;
+  enabled: boolean;
+  current_voltage: number;
+  com_port: number;
+  average_ring_ratio: number;
+  median_ring_ratio: number;
+  last_ring_ratio_update_us: number;
+  ring_ratio_age_us: number;
+}
+
+/** Autofocus configuration (schema v11, BE-8) — plain values end to end. */
+export interface AutofocusConfig {
+  valid: boolean;
+  focus_setpoint: number;
+  focus_range: number;
+  voltage_step: number;
+  fine_voltage_step: number;
+  max_voltage: number;
+  min_voltage: number;
+  initial_voltage: number;
+  manual_voltage_step: number;
+  ring_ratio_stale_ms: number;
+  require_new_sample_per_step: boolean;
+  min_samples_per_step: number;
+  safe_shutdown_voltage: number;
+  focus_direction: boolean;
+}
+
 /** Authoritative per-pump snapshot (schema v10, BE-7). `run_status` /
  *  `direction` are contract PUMP_RUN_STATES / PUMP_DIRECTIONS values. */
 export interface PumpStatus {
@@ -261,6 +293,17 @@ export const bridge = {
   experimentStop: () => invoke<CmdResult>("experiment_stop"),
   experimentCancel: () => invoke<CmdResult>("experiment_cancel"),
   fetchExperimentStatus: () => invoke<ExperimentStatus>("fetch_experiment_status"),
+  // Autofocus / nanopositioner (schema v11, BE-8).
+  autofocusConnect: (comPort: number, baudRate: number, deviceAddress: number) =>
+    invoke<CmdResult>("autofocus_connect", { comPort, baudRate, deviceAddress }),
+  autofocusDisconnect: () => invoke<CmdResult>("autofocus_disconnect"),
+  autofocusSetEnabled: (enabled: boolean) =>
+    invoke<CmdResult>("autofocus_set_enabled", { enabled }),
+  autofocusJog: (up: boolean) => invoke<CmdResult>("autofocus_jog", { up }),
+  autofocusSetConfig: (config: AutofocusConfig) =>
+    invoke<CmdResult>("autofocus_set_config", { config }),
+  fetchAutofocusStatus: () => invoke<AutofocusStatus>("fetch_autofocus_status"),
+  fetchAutofocusConfig: () => invoke<AutofocusConfig>("fetch_autofocus_config"),
   // Syringe pumps (schema v10, BE-7): pump 0 = Sample, 1 = Sheath.
   pumpConnect: (pump: number, comPort: number, baudRate: number, modbusAddress: number) =>
     invoke<CmdResult>("pump_connect", { pump, comPort, baudRate, modbusAddress }),

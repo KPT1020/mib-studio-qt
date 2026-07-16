@@ -167,6 +167,42 @@ pub mod ffi {
         pub running: bool,
     }
 
+    /// Autofocus / nanopositioner status (schema v11, BE-8). Freshness of
+    /// the focus metric is explicit (`ring_ratio_age_us`) so stale metrics
+    /// are observable and never silently drive a move.
+    #[derive(Debug, Clone, Default)]
+    pub struct BridgeAutofocusStatus {
+        pub valid: bool,
+        pub connected: bool,
+        pub enabled: bool,
+        pub current_voltage: f64,
+        pub com_port: i32,
+        pub average_ring_ratio: f64,
+        pub median_ring_ratio: f64,
+        pub last_ring_ratio_update_us: u64,
+        pub ring_ratio_age_us: u64,
+    }
+
+    /// Autofocus configuration (schema v11, BE-8) — plain values, no
+    /// QSettings types anywhere in the round-trip.
+    #[derive(Debug, Clone, Default)]
+    pub struct BridgeAutofocusConfig {
+        pub valid: bool,
+        pub focus_setpoint: f64,
+        pub focus_range: f64,
+        pub voltage_step: f64,
+        pub fine_voltage_step: f64,
+        pub max_voltage: f64,
+        pub min_voltage: f64,
+        pub initial_voltage: f64,
+        pub manual_voltage_step: f64,
+        pub ring_ratio_stale_ms: i32,
+        pub require_new_sample_per_step: bool,
+        pub min_samples_per_step: i32,
+        pub safe_shutdown_voltage: f64,
+        pub focus_direction: bool,
+    }
+
     /// Authoritative per-pump snapshot (schema v10, BE-7). `run_status` /
     /// `direction` are contract `pump_run_states` / `pump_directions` values.
     #[derive(Debug, Clone, Default)]
@@ -401,6 +437,28 @@ pub mod ffi {
 
         /// Pull the current experiment lifecycle snapshot (schema v5).
         fn fetch_experiment_status(self: Pin<&mut BackendBridge>) -> BridgeExperimentStatus;
+
+        /// Autofocus / nanopositioner commands (schema v11, BE-8). On
+        /// platforms without the Coremor SDK, connect fails with a structured
+        /// message and every other command stays safe.
+        fn autofocus_connect(
+            self: Pin<&mut BackendBridge>,
+            com_port: i32,
+            baud_rate: i32,
+            device_address: i32,
+        ) -> BridgeCommandResult;
+        /// Disconnect disables control first so no motion outlives it.
+        fn autofocus_disconnect(self: Pin<&mut BackendBridge>) -> BridgeCommandResult;
+        fn autofocus_set_enabled(self: Pin<&mut BackendBridge>, enabled: bool)
+            -> BridgeCommandResult;
+        /// Manual voltage jog: `up == true` increases, else decreases.
+        fn autofocus_jog(self: Pin<&mut BackendBridge>, up: bool) -> BridgeCommandResult;
+        fn autofocus_set_config(
+            self: Pin<&mut BackendBridge>,
+            config: BridgeAutofocusConfig,
+        ) -> BridgeCommandResult;
+        fn fetch_autofocus_status(self: Pin<&mut BackendBridge>) -> BridgeAutofocusStatus;
+        fn fetch_autofocus_config(self: Pin<&mut BackendBridge>) -> BridgeAutofocusConfig;
 
         /// Syringe pump commands (schema v10, BE-7). `pump` is a contract
         /// `pump_ids` value (0 Sample, 1 Sheath). Serial-port conflicts with

@@ -339,6 +339,130 @@ fn fetch_experiment_status(state: State<AppState>) -> Result<ExperimentStatus, S
     })
 }
 
+/// Autofocus/nanopositioner status for the webview (schema v11, BE-8).
+#[derive(Serialize, Clone, Default)]
+struct AutofocusStatus {
+    valid: bool,
+    connected: bool,
+    enabled: bool,
+    current_voltage: f64,
+    com_port: i32,
+    average_ring_ratio: f64,
+    median_ring_ratio: f64,
+    last_ring_ratio_update_us: u64,
+    ring_ratio_age_us: u64,
+}
+
+/// Autofocus configuration for the webview (schema v11, BE-8).
+#[derive(Serialize, serde::Deserialize, Clone, Default)]
+struct AutofocusConfig {
+    valid: bool,
+    focus_setpoint: f64,
+    focus_range: f64,
+    voltage_step: f64,
+    fine_voltage_step: f64,
+    max_voltage: f64,
+    min_voltage: f64,
+    initial_voltage: f64,
+    manual_voltage_step: f64,
+    ring_ratio_stale_ms: i32,
+    require_new_sample_per_step: bool,
+    min_samples_per_step: i32,
+    safe_shutdown_voltage: f64,
+    focus_direction: bool,
+}
+
+#[tauri::command]
+fn autofocus_connect(
+    state: State<AppState>,
+    com_port: i32,
+    baud_rate: i32,
+    device_address: i32,
+) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().autofocus_connect(com_port, baud_rate, device_address).into())
+}
+
+#[tauri::command]
+fn autofocus_disconnect(state: State<AppState>) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().autofocus_disconnect().into())
+}
+
+#[tauri::command]
+fn autofocus_set_enabled(state: State<AppState>, enabled: bool) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().autofocus_set_enabled(enabled).into())
+}
+
+/// Manual voltage jog: `up == true` increases, else decreases.
+#[tauri::command]
+fn autofocus_jog(state: State<AppState>, up: bool) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().autofocus_jog(up).into())
+}
+
+#[tauri::command]
+fn autofocus_set_config(state: State<AppState>, config: AutofocusConfig) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    let c = ffi::BridgeAutofocusConfig {
+        valid: true,
+        focus_setpoint: config.focus_setpoint,
+        focus_range: config.focus_range,
+        voltage_step: config.voltage_step,
+        fine_voltage_step: config.fine_voltage_step,
+        max_voltage: config.max_voltage,
+        min_voltage: config.min_voltage,
+        initial_voltage: config.initial_voltage,
+        manual_voltage_step: config.manual_voltage_step,
+        ring_ratio_stale_ms: config.ring_ratio_stale_ms,
+        require_new_sample_per_step: config.require_new_sample_per_step,
+        min_samples_per_step: config.min_samples_per_step,
+        safe_shutdown_voltage: config.safe_shutdown_voltage,
+        focus_direction: config.focus_direction,
+    };
+    Ok(guard.pin_mut().autofocus_set_config(c).into())
+}
+
+#[tauri::command]
+fn fetch_autofocus_status(state: State<AppState>) -> Result<AutofocusStatus, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    let s = guard.pin_mut().fetch_autofocus_status();
+    Ok(AutofocusStatus {
+        valid: s.valid,
+        connected: s.connected,
+        enabled: s.enabled,
+        current_voltage: s.current_voltage,
+        com_port: s.com_port,
+        average_ring_ratio: s.average_ring_ratio,
+        median_ring_ratio: s.median_ring_ratio,
+        last_ring_ratio_update_us: s.last_ring_ratio_update_us,
+        ring_ratio_age_us: s.ring_ratio_age_us,
+    })
+}
+
+#[tauri::command]
+fn fetch_autofocus_config(state: State<AppState>) -> Result<AutofocusConfig, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    let c = guard.pin_mut().fetch_autofocus_config();
+    Ok(AutofocusConfig {
+        valid: c.valid,
+        focus_setpoint: c.focus_setpoint,
+        focus_range: c.focus_range,
+        voltage_step: c.voltage_step,
+        fine_voltage_step: c.fine_voltage_step,
+        max_voltage: c.max_voltage,
+        min_voltage: c.min_voltage,
+        initial_voltage: c.initial_voltage,
+        manual_voltage_step: c.manual_voltage_step,
+        ring_ratio_stale_ms: c.ring_ratio_stale_ms,
+        require_new_sample_per_step: c.require_new_sample_per_step,
+        min_samples_per_step: c.min_samples_per_step,
+        safe_shutdown_voltage: c.safe_shutdown_voltage,
+        focus_direction: c.focus_direction,
+    })
+}
+
 /// Authoritative per-pump snapshot for the webview (schema v10, BE-7).
 #[derive(Serialize, Clone, Default)]
 struct PumpStatus {
@@ -1256,6 +1380,13 @@ pub fn run() {
             experiment_stop,
             experiment_cancel,
             fetch_experiment_status,
+            autofocus_connect,
+            autofocus_disconnect,
+            autofocus_set_enabled,
+            autofocus_jog,
+            autofocus_set_config,
+            fetch_autofocus_status,
+            fetch_autofocus_config,
             pump_connect,
             pump_disconnect,
             pump_set_flow_rate,

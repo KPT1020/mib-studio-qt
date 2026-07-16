@@ -2,6 +2,7 @@
 
 #include "backend/app/ExperimentCoordinator.h"
 #include "backend/processing/ProcessingService.h"
+#include "backend/services/AutofocusService.h"
 
 #include <atomic>
 #include <cstddef>
@@ -40,6 +41,7 @@ namespace backend::bridge
         Trigger,
         Review,
         Pump,
+        Autofocus,
     };
 
     enum class CameraCommandAction
@@ -257,6 +259,29 @@ namespace backend::bridge
         int scanTimeoutMs{300};
     };
 
+    // Autofocus / nanopositioner commands (BE-8, #278) over AutofocusService.
+    // On platforms without the Coremor SDK the service is a stub whose
+    // connect fails with a structured message — commands stay safe.
+    enum class AutofocusCommandAction
+    {
+        Connect,
+        Disconnect,
+        SetEnabled,
+        IncreaseVoltage,
+        DecreaseVoltage,
+        SetConfig,
+    };
+
+    struct AutofocusCommand
+    {
+        AutofocusCommandAction action{AutofocusCommandAction::SetEnabled};
+        int comPort{-1};
+        int baudRate{115200};
+        int deviceAddress{1};
+        bool enabled{false};
+        services::AutofocusService::Config config{};
+    };
+
     using BackendCommand = std::variant<CameraCommand,
                                         RecordingCommand,
                                         ProcessingSettingsCommand,
@@ -267,7 +292,8 @@ namespace backend::bridge
                                         MonitoringCommand,
                                         TriggerCommand,
                                         ReviewCommand,
-                                        PumpCommand>;
+                                        PumpCommand,
+                                        AutofocusCommand>;
 
     struct BackendCommandResult
     {
@@ -619,6 +645,21 @@ namespace backend::bridge
         int direction{0};
     };
 
+    // Autofocus / nanopositioner status snapshot (BE-8): connection, enable
+    // state, live voltage, and ring-ratio focus metrics with freshness (age)
+    // so stale metrics are observable and can never silently drive a move.
+    struct BackendAutofocusStatus
+    {
+        bool connected{false};
+        bool enabled{false};
+        double currentVoltage{0.0};
+        int comPort{-1};
+        double averageRingRatio{0.0};
+        double medianRingRatio{0.0};
+        std::uint64_t lastRingRatioUpdateUs{0};
+        std::uint64_t ringRatioAgeUs{0}; // now - last update; 0 when never
+    };
+
     // Sorter trigger status snapshot (BE-5).
     struct BackendTriggerStatus
     {
@@ -664,6 +705,8 @@ namespace backend::bridge
         bool fetchCameraDiscovery(BackendCameraDiscovery &out) const;
         bool fetchCameraSelection(BackendCameraSelection &out) const;
         bool fetchPumpStatus(int pumpId, BackendPumpStatus &out) const;
+        bool fetchAutofocusStatus(BackendAutofocusStatus &out) const;
+        bool fetchAutofocusConfig(services::AutofocusService::Config &out) const;
         // Processing configuration (BE-3): the full lossless config document
         // as JSON — image_processing (config.json schema), realtime settings,
         // flush interval, pixel→micron, ROI, background flag, and the
@@ -725,6 +768,7 @@ namespace backend::bridge
         BackendCommandResult handleTriggerCommand(const TriggerCommand &command);
         BackendCommandResult handleReviewCommand(const ReviewCommand &command);
         BackendCommandResult handlePumpCommand(const PumpCommand &command);
+        BackendCommandResult handleAutofocusCommand(const AutofocusCommand &command);
 
         BackendCommandResult lifecycleError(BackendCommandType command, const std::string &message);
         void emitEvent(const BackendEvent &event) const;

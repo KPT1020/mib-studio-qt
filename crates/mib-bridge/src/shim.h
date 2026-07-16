@@ -19,6 +19,8 @@ struct BridgeCameraSelection;
 struct BridgeCommandResult;
 struct BridgeConfigDocument;
 struct BridgeProcessingCoreStatus;
+struct BridgeAutofocusConfig;
+struct BridgeAutofocusStatus;
 struct BridgePumpStatus;
 struct BridgeReviewMetadata;
 struct BridgeReviewMetricsPage;
@@ -57,6 +59,14 @@ public:
     BridgeCommandResult experiment_stop();
     BridgeCommandResult experiment_cancel();
     BridgeExperimentStatus fetch_experiment_status();
+    BridgeCommandResult autofocus_connect(std::int32_t com_port, std::int32_t baud_rate,
+                                          std::int32_t device_address);
+    BridgeCommandResult autofocus_disconnect();
+    BridgeCommandResult autofocus_set_enabled(bool enabled);
+    BridgeCommandResult autofocus_jog(bool up);
+    BridgeCommandResult autofocus_set_config(BridgeAutofocusConfig config);
+    BridgeAutofocusStatus fetch_autofocus_status();
+    BridgeAutofocusConfig fetch_autofocus_config();
     BridgeCommandResult pump_connect(std::uint32_t pump, std::int32_t com_port,
                                      std::int32_t baud_rate, std::int32_t modbus_address);
     BridgeCommandResult pump_disconnect(std::uint32_t pump);

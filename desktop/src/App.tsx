@@ -3,6 +3,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   bridge,
   mono8ToImageData,
+  type AutofocusStatus,
   type BridgeEvent,
   type CameraDiscovery,
   type CameraSelection,
@@ -165,6 +166,9 @@ export default function App() {
   const [pulseUs, setPulseUs] = useState("1");
   const [periodicMs, setPeriodicMs] = useState("1000");
 
+  // Autofocus status (schema v11, BE-8).
+  const [afStatus, setAfStatus] = useState<AutofocusStatus | null>(null);
+
   // Processing config / ROI / background / core identity (schema v8, BE-3).
   const [configText, setConfigText] = useState("");
   const [configDirty, setConfigDirty] = useState(false);
@@ -308,6 +312,7 @@ export default function App() {
       await draw(meta, activeLiveCanvas());
       if (procEnabledRef.current) setStats(await bridge.fetchProcessingStats());
       setExpStatus(await bridge.fetchExperimentStatus());
+      setAfStatus(await bridge.fetchAutofocusStatus());
     } catch (e) {
       append(`tick error: ${e}`);
     }
@@ -726,9 +731,18 @@ export default function App() {
             <SideRow k="Display rate:" v={`${displayFps.toFixed(1)} fps`} />
             <SideRow k="Data rate:" v={`${dataRate.toFixed(1)} MB/s`} />
           </div>
-          <div className="side-section" title={PENDING.autofocus}>
+          <div className="side-section">
             <h4>Autofocus</h4>
-            <SideRow k="Ring width:" v="—" cls="dim" />
+            <SideRow
+              k="Ring width:"
+              v={afStatus?.valid && afStatus.last_ring_ratio_update_us > 0 ? afStatus.median_ring_ratio.toFixed(3) : "—"}
+              cls={afStatus?.valid && afStatus.last_ring_ratio_update_us > 0 ? "" : "dim"}
+            />
+            <SideRow
+              k="Controller:"
+              v={afStatus?.connected ? `connected (${afStatus.enabled ? "auto" : "manual"})` : "disconnected"}
+              cls={afStatus?.connected ? "ok" : "dim"}
+            />
           </div>
           <div className="side-section">
             <h4>Experiment</h4>
@@ -746,11 +760,27 @@ export default function App() {
               v={expActive ? formatRuntime(expStatus?.start_time_ns ?? 0, 0) : "00:00:00"}
             />
           </div>
-          <div className="side-section" title={PENDING.autofocus}>
+          <div className="side-section" title="Nanopositioner control panel lands with UI-3 (#268); values are the live backend state">
             <h4>Nanopositioner Autofocus</h4>
-            <SideRow k="COM Port:" v="—" cls="dim" />
-            <SideRow k="Baud Rate:" v="—" cls="dim" />
-            <SideRow k="Device Address:" v="—" cls="dim" />
+            <SideRow
+              k="COM Port:"
+              v={afStatus?.valid ? `COM${afStatus.com_port}` : "—"}
+              cls={afStatus?.valid ? "" : "dim"}
+            />
+            <SideRow
+              k="Voltage:"
+              v={afStatus?.connected ? `${afStatus.current_voltage.toFixed(1)} V` : "—"}
+              cls={afStatus?.connected ? "" : "dim"}
+            />
+            <SideRow
+              k="Metric age:"
+              v={
+                afStatus?.valid && afStatus.last_ring_ratio_update_us > 0
+                  ? `${(afStatus.ring_ratio_age_us / 1000).toFixed(0)} ms`
+                  : "—"
+              }
+              cls={afStatus?.valid && afStatus.last_ring_ratio_update_us > 0 ? "" : "dim"}
+            />
           </div>
         </aside>
         <button
