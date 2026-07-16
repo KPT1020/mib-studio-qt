@@ -19,6 +19,8 @@ struct BridgeCameraSelection;
 struct BridgeCommandResult;
 struct BridgeConfigDocument;
 struct BridgeProcessingCoreStatus;
+struct BridgeReviewMetadata;
+struct BridgeReviewMetricsPage;
 struct BridgeEvent;
 struct BridgeExperimentStatus;
 struct BridgeFrame;
@@ -54,6 +56,11 @@ public:
     BridgeCommandResult experiment_stop();
     BridgeCommandResult experiment_cancel();
     BridgeExperimentStatus fetch_experiment_status();
+    BridgeReviewMetadata fetch_review_metadata();
+    BridgeReviewMetricsPage fetch_review_metrics_page(bool valid, std::uint64_t offset,
+                                                      std::uint64_t count);
+    BridgeFrame fetch_review_image(std::uint32_t dataset, std::uint64_t index);
+    BridgeCommandResult review_export_csv(rust::Str output_path);
     BridgeConfigDocument fetch_processing_config_json();
     BridgeCommandResult apply_processing_config_json(rust::Str json);
     BridgeCommandResult set_processing_roi(std::int32_t x, std::int32_t y,

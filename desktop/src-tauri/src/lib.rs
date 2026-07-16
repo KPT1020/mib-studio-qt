@@ -21,6 +21,8 @@ struct AppState {
     /// Pixel bytes of the last `fetch_background` pull (separate cache so
     /// background pulls never clobber the live-frame channel).
     last_background: Mutex<Vec<u8>>,
+    /// Pixel bytes of the last `fetch_review_image` pull.
+    last_review_image: Mutex<Vec<u8>>,
 }
 
 /// Flattened command result handed to JS.
@@ -335,6 +337,160 @@ fn fetch_experiment_status(state: State<AppState>) -> Result<ExperimentStatus, S
         output_path: s.output_path,
         message: s.message,
     })
+}
+
+/// Per-dataset capabilities of the loaded review file (schema v9, BE-6).
+#[derive(Serialize, Clone, Default)]
+struct ReviewDatasetInfo {
+    present: bool,
+    count: u64,
+    height: i32,
+    width: i32,
+    channels: i32,
+}
+
+/// Review metadata of the loaded HDF5 file (schema v9, BE-6).
+#[derive(Serialize, Clone, Default)]
+struct ReviewMetadata {
+    valid: bool,
+    file_open: bool,
+    recording_file: bool,
+    start_time_ns: u64,
+    end_time_ns: u64,
+    total_valid: u64,
+    total_invalid: u64,
+    roi_x: i32,
+    roi_y: i32,
+    roi_w: i32,
+    roi_h: i32,
+    has_background: bool,
+    has_core_identity: bool,
+    core_version: String,
+    core_source: String,
+    core_release_tag: String,
+    valid_images: ReviewDatasetInfo,
+    invalid_images: ReviewDatasetInfo,
+    valid_masks: ReviewDatasetInfo,
+    invalid_masks: ReviewDatasetInfo,
+    recorded_images: ReviewDatasetInfo,
+    file_path: String,
+}
+
+/// One page of review metrics (schema v9, BE-6).
+#[derive(Serialize, Clone, Default)]
+struct ReviewMetricsPage {
+    valid: bool,
+    total: u64,
+    offset: u64,
+    rows: Vec<MonitoringRow>,
+}
+
+fn dataset_info(d: ffi::BridgeReviewDatasetInfo) -> ReviewDatasetInfo {
+    ReviewDatasetInfo {
+        present: d.present,
+        count: d.count,
+        height: d.height,
+        width: d.width,
+        channels: d.channels,
+    }
+}
+
+/// Pull the review metadata of the loaded HDF5 file.
+#[tauri::command]
+fn fetch_review_metadata(state: State<AppState>) -> Result<ReviewMetadata, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    let m = guard.pin_mut().fetch_review_metadata();
+    Ok(ReviewMetadata {
+        valid: m.valid,
+        file_open: m.file_open,
+        recording_file: m.recording_file,
+        start_time_ns: m.start_time_ns,
+        end_time_ns: m.end_time_ns,
+        total_valid: m.total_valid,
+        total_invalid: m.total_invalid,
+        roi_x: m.roi_x,
+        roi_y: m.roi_y,
+        roi_w: m.roi_w,
+        roi_h: m.roi_h,
+        has_background: m.has_background,
+        has_core_identity: m.has_core_identity,
+        core_version: m.core_version,
+        core_source: m.core_source,
+        core_release_tag: m.core_release_tag,
+        valid_images: dataset_info(m.valid_images),
+        invalid_images: dataset_info(m.invalid_images),
+        valid_masks: dataset_info(m.valid_masks),
+        invalid_masks: dataset_info(m.invalid_masks),
+        recorded_images: dataset_info(m.recorded_images),
+        file_path: m.file_path,
+    })
+}
+
+/// Pull one bounded page of review metrics.
+#[tauri::command]
+fn fetch_review_metrics_page(
+    state: State<AppState>,
+    valid: bool,
+    offset: u64,
+    count: u64,
+) -> Result<ReviewMetricsPage, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    let p = guard.pin_mut().fetch_review_metrics_page(valid, offset, count);
+    Ok(ReviewMetricsPage {
+        valid: p.valid,
+        total: p.total,
+        offset: p.offset,
+        rows: p
+            .rows
+            .into_iter()
+            .map(|r| MonitoringRow {
+                frame_index: r.frame_index,
+                timestamp_ns: r.timestamp_ns,
+                valid: r.valid,
+                target_group: r.target_group,
+                object_id: r.object_id,
+                object_count: r.object_count,
+                track_id: r.track_id,
+                centroid_x: r.centroid_x,
+                centroid_y: r.centroid_y,
+                area: r.area,
+                deformability: r.deformability,
+                area_ratio: r.area_ratio,
+                ring_ratio: r.ring_ratio,
+                youngs_modulus: r.youngs_modulus,
+            })
+            .collect(),
+    })
+}
+
+/// Pull one review image/mask by dataset id + index (bytes via
+/// `review_image_bytes`).
+#[tauri::command]
+fn fetch_review_image(
+    state: State<AppState>,
+    dataset: u32,
+    index: u64,
+) -> Result<FrameMeta, String> {
+    let mut bridge = state.bridge.lock().map_err(|e| e.to_string())?;
+    let frame = bridge.pin_mut().fetch_review_image(dataset, index);
+    let meta = frame_to_meta(&frame);
+    let mut last = state.last_review_image.lock().map_err(|e| e.to_string())?;
+    *last = frame.data;
+    Ok(meta)
+}
+
+/// Raw Mono8 bytes of the last `fetch_review_image` pull.
+#[tauri::command]
+fn review_image_bytes(state: State<AppState>) -> Result<Response, String> {
+    let last = state.last_review_image.lock().map_err(|e| e.to_string())?;
+    Ok(Response::new(last.clone()))
+}
+
+/// Start a cancellable metrics CSV export job for the loaded file.
+#[tauri::command]
+fn review_export_csv(state: State<AppState>, output_path: String) -> Result<CmdResult, String> {
+    let mut guard = state.bridge.lock().map_err(|e| e.to_string())?;
+    Ok(guard.pin_mut().review_export_csv(&output_path).into())
 }
 
 /// Full processing configuration document (schema v8, BE-3).
@@ -941,6 +1097,7 @@ pub fn run() {
             bridge: Mutex::new(ffi::new_backend_bridge()),
             last_frame: Mutex::new(Vec::new()),
             last_background: Mutex::new(Vec::new()),
+            last_review_image: Mutex::new(Vec::new()),
         })
         .invoke_handler(tauri::generate_handler![
             abi_version,
@@ -966,6 +1123,11 @@ pub fn run() {
             experiment_stop,
             experiment_cancel,
             fetch_experiment_status,
+            fetch_review_metadata,
+            fetch_review_metrics_page,
+            fetch_review_image,
+            review_image_bytes,
+            review_export_csv,
             fetch_processing_config_json,
             apply_processing_config_json,
             set_processing_roi,

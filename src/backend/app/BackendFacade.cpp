@@ -4,10 +4,12 @@
 #include "backend/app/BackgroundFrame.h"
 #include "backend/camera/mock/MockCamera.h"
 #include "backend/processing/ProcessingConfigJson.h"
+#include "backend/recording/ReviewExport.h"
 
 #include <nlohmann/json.hpp>
 
 #include <cstring>
+#include <thread>
 #include "backend/playback/FrameStore.h"
 #include "backend/playback/PlaybackService.h"
 #include "backend/recording/Hdf5Service.h"
@@ -62,9 +64,13 @@ namespace backend::bridge
                 {
                     return BackendCommandType::Monitoring;
                 }
-                else
+                else if constexpr (std::is_same_v<Command, TriggerCommand>)
                 {
                     return BackendCommandType::Trigger;
+                }
+                else
+                {
+                    return BackendCommandType::Review;
                 }
             }, command);
         }
@@ -119,6 +125,8 @@ namespace backend::bridge
                 return BackendErrorSource::Monitoring;
             case BackendCommandType::Trigger:
                 return BackendErrorSource::Hardware;
+            case BackendCommandType::Review:
+                return BackendErrorSource::Review;
             }
             return BackendErrorSource::Lifecycle;
         }
@@ -229,6 +237,22 @@ namespace backend::bridge
             experiment_->shutdown();
         }
         cancelAllOperations("Backend shutdown");
+        // Review export jobs observe their (now set) cancel flags and clean
+        // partial outputs; join them so no callback fires after destruction.
+        {
+            std::vector<std::thread> jobs;
+            {
+                std::scoped_lock lock(reviewJobsMutex_);
+                jobs.swap(reviewJobThreads_);
+            }
+            for (auto &job : jobs)
+            {
+                if (job.joinable())
+                {
+                    job.join();
+                }
+            }
+        }
 
         backend_.stopFrameRecording();
         backend_.capture().stop();
@@ -332,9 +356,13 @@ namespace backend::bridge
             {
                 return handleMonitoringCommand(typedCommand);
             }
-            else
+            else if constexpr (std::is_same_v<Command, TriggerCommand>)
             {
                 return handleTriggerCommand(typedCommand);
+            }
+            else
+            {
+                return handleReviewCommand(typedCommand);
             }
         }, command);
     }
@@ -679,6 +707,16 @@ namespace backend::bridge
 
     BackendCommandResult BackendFacade::handleRecordingLoadCommand(const RecordingLoadCommand &command)
     {
+        // The review file cannot replace the HDF5 handle underneath an
+        // active experiment (they share the service).
+        if (experiment_ && experiment_->isActive())
+        {
+            const std::string message = "Cannot load a recording while an experiment is active";
+            emitEvent(BackendErrorEvent{BackendErrorSource::Review,
+                                        BackendCommandType::RecordingLoad, message});
+            return {false, BackendCommandType::RecordingLoad, message};
+        }
+
         // Tracked as an operation (BE-1): synchronous today, but the shell
         // already correlates Started/terminal events by operationId so the
         // load can move off-thread without a contract change.
@@ -686,6 +724,12 @@ namespace backend::bridge
             beginOperation(BackendOperationKind::RecordingLoad, nullptr, command.filePath);
 
         auto &hdf5 = backend_.hdf5();
+        // Loading replaces the currently reviewed file (Qt parity: selecting
+        // a new HDF file closes the previous one).
+        if (hdf5.isFileOpen())
+        {
+            hdf5.closeFile();
+        }
         if (!hdf5.loadFile(command.filePath))
         {
             emitEvent(RecordingStatusEvent{
@@ -745,6 +789,15 @@ namespace backend::bridge
         }
 
         emitEvent(event);
+        {
+            // Remember the loaded path for review jobs and invalidate the
+            // paged-metrics cache (BE-6).
+            std::scoped_lock lock(reviewMutex_);
+            loadedRecordingPath_ = command.filePath;
+            reviewMetricsLoaded_ = false;
+            reviewValidMeta_.clear();
+            reviewInvalidMeta_.clear();
+        }
         finishOperation(operationId, BackendOperationState::Completed, command.filePath);
         return {true, BackendCommandType::RecordingLoad, "Recording loaded", operationId};
     }
@@ -1070,6 +1123,294 @@ namespace backend::bridge
         out.requiredVersion = processing.requiredProcessingCoreVersion();
         out.pinSatisfied = processing.isProcessingCorePinSatisfied();
         return true;
+    }
+
+    namespace
+    {
+        const char *reviewDatasetPath(ReviewImageDataset dataset)
+        {
+            switch (dataset)
+            {
+            case ReviewImageDataset::ValidImage:
+                return "/valid_frames/images";
+            case ReviewImageDataset::InvalidImage:
+                return "/invalid_frames/images";
+            case ReviewImageDataset::RecordedImage:
+                return "/recorded_frames/images";
+            case ReviewImageDataset::ValidMask:
+                return "/valid_frames/masks";
+            case ReviewImageDataset::InvalidMask:
+                return "/invalid_frames/masks";
+            }
+            return nullptr;
+        }
+
+        MonitoringObjectRow metricsRowFromFrame(const services::ProcessedFrame &frame)
+        {
+            const auto &v = frame.validation;
+            MonitoringObjectRow row;
+            row.frameIndex = frame.index;
+            row.timestampNs = frame.timestampNs;
+            row.valid = v.isValid;
+            row.targetGroup = v.isTargetGroup;
+            row.objectId = v.objectId;
+            row.objectCount = v.objectCount;
+            row.trackId = v.trackId;
+            row.centroidX = v.centroidX;
+            row.centroidY = v.centroidY;
+            row.area = v.area;
+            row.deformability = v.deformability;
+            row.areaRatio = v.areaRatio;
+            row.ringRatio = v.ringRatio;
+            row.youngsModulus = v.youngsModulus;
+            return row;
+        }
+    } // namespace
+
+    bool BackendFacade::fetchReviewMetadata(BackendReviewMetadata &out) const
+    {
+        if (!initialized_)
+        {
+            return false;
+        }
+        auto &hdf5 = backend_.hdf5();
+        out = BackendReviewMetadata{};
+        out.fileOpen = hdf5.isFileOpen();
+        if (!out.fileOpen)
+        {
+            return true;
+        }
+        {
+            std::scoped_lock lock(reviewMutex_);
+            out.filePath = loadedRecordingPath_;
+        }
+        out.recordingFile = hdf5.isRecordingFile();
+
+        if (out.recordingFile)
+        {
+            std::uint64_t total = 0;
+            std::uint64_t filtered = 0;
+            hdf5.readRecordingInfo(out.startTimeNs, out.endTimeNs, total, filtered);
+            out.totalValid = total;
+        }
+        else
+        {
+            std::size_t totalValid = 0;
+            std::size_t totalInvalid = 0;
+            hdf5.readExperimentInfo(out.startTimeNs, out.endTimeNs, totalValid, totalInvalid, &out.roi);
+            out.totalValid = totalValid;
+            out.totalInvalid = totalInvalid;
+        }
+
+        backend::processing::ProcessingCoreIdentity identity;
+        if (hdf5.readProcessingCoreIdentity(identity))
+        {
+            out.hasCoreIdentity = true;
+            out.coreVersion = identity.version;
+            out.coreSource = identity.source;
+            out.coreReleaseTag = identity.releaseTag;
+        }
+        {
+            cv::Mat bg;
+            out.hasBackground = hdf5.readBackgroundImage(bg) && !bg.empty();
+        }
+
+        auto fillInfo = [&hdf5](const char *path, BackendReviewDatasetInfo &info) {
+            std::size_t count = 0;
+            info.present = hdf5.getDatasetInfo(path, count, info.height, info.width, info.channels);
+            info.count = count;
+        };
+        fillInfo("/valid_frames/images", out.validImages);
+        fillInfo("/invalid_frames/images", out.invalidImages);
+        fillInfo("/valid_frames/masks", out.validMasks);
+        fillInfo("/invalid_frames/masks", out.invalidMasks);
+        fillInfo("/recorded_frames/images", out.recordedImages);
+        return true;
+    }
+
+    bool BackendFacade::fetchReviewMetricsPage(bool valid,
+                                               std::uint64_t offset,
+                                               std::uint64_t count,
+                                               std::vector<MonitoringObjectRow> &rows,
+                                               std::uint64_t &totalOut) const
+    {
+        if (!initialized_ || !backend_.hdf5().isFileOpen())
+        {
+            return false;
+        }
+
+        std::scoped_lock lock(reviewMutex_);
+        if (!reviewMetricsLoaded_)
+        {
+            // One metadata-only read per loaded file (no image payloads) —
+            // pages are then served from the cache with bounded IPC size.
+            auto &hdf5 = backend_.hdf5();
+            reviewValidMeta_.clear();
+            reviewInvalidMeta_.clear();
+            if (hdf5.isRecordingFile())
+            {
+                hdf5.readRecordingMetadata(reviewValidMeta_);
+            }
+            else
+            {
+                hdf5.readValidMetadata(reviewValidMeta_);
+                hdf5.readInvalidMetadata(reviewInvalidMeta_);
+            }
+            reviewMetricsLoaded_ = true;
+        }
+
+        const auto &source = valid ? reviewValidMeta_ : reviewInvalidMeta_;
+        totalOut = source.size();
+        rows.clear();
+        if (offset >= source.size())
+        {
+            return true;
+        }
+        const std::uint64_t end = std::min<std::uint64_t>(source.size(), offset + count);
+        rows.reserve(end - offset);
+        for (std::uint64_t i = offset; i < end; ++i)
+        {
+            rows.push_back(metricsRowFromFrame(source[i]));
+        }
+        return true;
+    }
+
+    bool BackendFacade::fetchReviewImage(ReviewImageDataset dataset,
+                                         std::uint64_t index,
+                                         BackendFrame &out) const
+    {
+        if (!initialized_ || !backend_.hdf5().isFileOpen())
+        {
+            return false;
+        }
+        const char *path = reviewDatasetPath(dataset);
+        if (!path)
+        {
+            return false;
+        }
+        cv::Mat image;
+        if (!backend_.hdf5().readImageByIndex(path, index, image) || image.empty())
+        {
+            return false;
+        }
+        cv::Mat gray;
+        if (image.channels() == 1)
+        {
+            gray = image;
+        }
+        else
+        {
+            cv::extractChannel(image, gray, 0);
+        }
+        out = BackendFrame{};
+        out.frameIndex = index;
+        out.width = static_cast<std::uint64_t>(gray.cols);
+        out.height = static_cast<std::uint64_t>(gray.rows);
+        out.pixelFormat = 0;
+        out.strideBytes = static_cast<std::size_t>(gray.cols);
+        out.data.resize(static_cast<std::size_t>(gray.cols) * gray.rows);
+        if (gray.isContinuous())
+        {
+            std::memcpy(out.data.data(), gray.data, out.data.size());
+        }
+        else
+        {
+            for (int row = 0; row < gray.rows; ++row)
+            {
+                std::memcpy(out.data.data() + static_cast<std::size_t>(row) * gray.cols,
+                            gray.ptr(row), static_cast<std::size_t>(gray.cols));
+            }
+        }
+        return true;
+    }
+
+    BackendCommandResult BackendFacade::handleReviewCommand(const ReviewCommand &command)
+    {
+        switch (command.action)
+        {
+        case ReviewCommandAction::ExportMetricsCsv:
+        {
+            std::string sourcePath;
+            {
+                std::scoped_lock lock(reviewMutex_);
+                sourcePath = loadedRecordingPath_;
+            }
+            if (sourcePath.empty())
+            {
+                const std::string message = "No recording loaded to export";
+                emitEvent(BackendErrorEvent{BackendErrorSource::Export,
+                                            BackendCommandType::Review, message});
+                return {false, BackendCommandType::Review, message};
+            }
+            if (command.outputPath.empty())
+            {
+                return {false, BackendCommandType::Review, "Export output path is empty"};
+            }
+
+            CancelFlag cancelFlag;
+            const std::uint64_t operationId =
+                beginOperation(BackendOperationKind::Export, &cancelFlag, command.outputPath);
+            const double pixelToMicron = backend_.processing().getPixelToMicronFactor();
+            const std::string outputPath = command.outputPath;
+
+            // The job opens its own read-only reader so it never races the
+            // interactive review reads, and the source file stays intact.
+            std::thread worker([this, operationId, cancelFlag, sourcePath, outputPath,
+                                pixelToMicron]() {
+                services::Hdf5Service reader;
+                std::vector<services::ProcessedFrame> valid;
+                std::vector<services::ProcessedFrame> invalid;
+                if (!reader.loadFile(sourcePath))
+                {
+                    finishOperation(operationId, BackendOperationState::Failed,
+                                    "Failed to open source recording: " + sourcePath);
+                    return;
+                }
+                if (reader.isRecordingFile())
+                {
+                    reader.readRecordingMetadata(valid);
+                }
+                else
+                {
+                    reader.readValidMetadata(valid);
+                    reader.readInvalidMetadata(invalid);
+                }
+                reader.closeFile();
+
+                std::string error;
+                const bool ok = review::writeMetricsCsv(
+                    outputPath, valid, invalid, pixelToMicron, &error,
+                    [this, operationId, &cancelFlag](std::uint64_t done, std::uint64_t total) {
+                        if (cancelFlag->load(std::memory_order_relaxed))
+                        {
+                            return false;
+                        }
+                        reportOperationProgress(operationId, done, total);
+                        return true;
+                    });
+                if (ok)
+                {
+                    finishOperation(operationId, BackendOperationState::Completed, outputPath);
+                }
+                else if (cancelFlag->load(std::memory_order_relaxed))
+                {
+                    finishOperation(operationId, BackendOperationState::Cancelled, error);
+                }
+                else
+                {
+                    emitEvent(BackendErrorEvent{BackendErrorSource::Export,
+                                                BackendCommandType::Review, error});
+                    finishOperation(operationId, BackendOperationState::Failed, error);
+                }
+            });
+            {
+                std::scoped_lock lock(reviewJobsMutex_);
+                reviewJobThreads_.push_back(std::move(worker));
+            }
+            return {true, BackendCommandType::Review, "Metrics CSV export started", operationId};
+        }
+        }
+        return {false, BackendCommandType::Review, "Unknown review command"};
     }
 
     bool BackendFacade::fetchBackgroundImage(BackendFrame &out) const

@@ -49,6 +49,13 @@ static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Operation) == 5
 static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Experiment) == 6);
 static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Monitoring) == 7);
 static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Trigger) == 8);
+static_assert(static_cast<std::uint32_t>(bb::BackendCommandType::Review) == 9);
+
+static_assert(static_cast<std::uint32_t>(bb::ReviewImageDataset::ValidImage) == 0);
+static_assert(static_cast<std::uint32_t>(bb::ReviewImageDataset::InvalidImage) == 1);
+static_assert(static_cast<std::uint32_t>(bb::ReviewImageDataset::RecordedImage) == 2);
+static_assert(static_cast<std::uint32_t>(bb::ReviewImageDataset::ValidMask) == 3);
+static_assert(static_cast<std::uint32_t>(bb::ReviewImageDataset::InvalidMask) == 4);
 
 static_assert(static_cast<std::uint32_t>(backend::services::CameraType::EGrabber) == 0);
 static_assert(static_cast<std::uint32_t>(backend::services::CameraType::MindVision) == 1);
@@ -490,6 +497,115 @@ BridgeCommandResult BackendBridge::experiment_cancel() {
     }
 }
 
+namespace {
+
+BridgeReviewDatasetInfo toDatasetInfo(const backend::bridge::BackendReviewDatasetInfo& info) {
+    BridgeReviewDatasetInfo out{};
+    out.present = info.present;
+    out.count = info.count;
+    out.height = info.height;
+    out.width = info.width;
+    out.channels = info.channels;
+    return out;
+}
+
+BridgeMonitoringRow toMonitoringRow(const backend::bridge::MonitoringObjectRow& row) {
+    BridgeMonitoringRow r{};
+    r.frame_index = row.frameIndex;
+    r.timestamp_ns = row.timestampNs;
+    r.valid = row.valid;
+    r.target_group = row.targetGroup;
+    r.object_id = row.objectId;
+    r.object_count = row.objectCount;
+    r.track_id = row.trackId;
+    r.centroid_x = row.centroidX;
+    r.centroid_y = row.centroidY;
+    r.area = row.area;
+    r.deformability = row.deformability;
+    r.area_ratio = row.areaRatio;
+    r.ring_ratio = row.ringRatio;
+    r.youngs_modulus = row.youngsModulus;
+    return r;
+}
+
+} // namespace
+
+BridgeReviewMetadata BackendBridge::fetch_review_metadata() {
+    BridgeReviewMetadata out{};
+    backend::bridge::BackendReviewMetadata meta;
+    if (!impl_->facade.fetchReviewMetadata(meta)) {
+        out.valid = false;
+        return out;
+    }
+    out.valid = true;
+    out.file_open = meta.fileOpen;
+    out.recording_file = meta.recordingFile;
+    out.start_time_ns = meta.startTimeNs;
+    out.end_time_ns = meta.endTimeNs;
+    out.total_valid = meta.totalValid;
+    out.total_invalid = meta.totalInvalid;
+    out.roi_x = meta.roi.x;
+    out.roi_y = meta.roi.y;
+    out.roi_w = meta.roi.w;
+    out.roi_h = meta.roi.h;
+    out.has_background = meta.hasBackground;
+    out.has_core_identity = meta.hasCoreIdentity;
+    out.core_version = rust::String(meta.coreVersion);
+    out.core_source = rust::String(meta.coreSource);
+    out.core_release_tag = rust::String(meta.coreReleaseTag);
+    out.valid_images = toDatasetInfo(meta.validImages);
+    out.invalid_images = toDatasetInfo(meta.invalidImages);
+    out.valid_masks = toDatasetInfo(meta.validMasks);
+    out.invalid_masks = toDatasetInfo(meta.invalidMasks);
+    out.recorded_images = toDatasetInfo(meta.recordedImages);
+    out.file_path = rust::String(meta.filePath);
+    return out;
+}
+
+BridgeReviewMetricsPage BackendBridge::fetch_review_metrics_page(bool valid,
+                                                                 std::uint64_t offset,
+                                                                 std::uint64_t count) {
+    BridgeReviewMetricsPage out{};
+    std::vector<backend::bridge::MonitoringObjectRow> rows;
+    std::uint64_t total = 0;
+    if (!impl_->facade.fetchReviewMetricsPage(valid, offset, count, rows, total)) {
+        out.valid = false;
+        return out;
+    }
+    out.valid = true;
+    out.total = total;
+    out.offset = offset;
+    for (const auto& row : rows) {
+        out.rows.push_back(toMonitoringRow(row));
+    }
+    return out;
+}
+
+BridgeFrame BackendBridge::fetch_review_image(std::uint32_t dataset, std::uint64_t index) {
+    if (dataset > static_cast<std::uint32_t>(backend::bridge::ReviewImageDataset::InvalidMask)) {
+        return BridgeFrame{};
+    }
+    backend::bridge::BackendFrame frame;
+    if (!impl_->facade.fetchReviewImage(
+            static_cast<backend::bridge::ReviewImageDataset>(dataset), index, frame)) {
+        return BridgeFrame{};
+    }
+    return toBridgeFrame(frame);
+}
+
+BridgeCommandResult BackendBridge::review_export_csv(rust::Str output_path) {
+    try {
+        backend::bridge::ReviewCommand cmd;
+        cmd.action = backend::bridge::ReviewCommandAction::ExportMetricsCsv;
+        cmd.outputPath = toStd(output_path);
+        return toBridgeResult(impl_->facade.dispatch(cmd));
+    } catch (const std::exception& e) {
+        return errorResult(std::string("review_export_csv: ") + e.what());
+    } catch (...) {
+        return errorResult("review_export_csv: unknown error");
+    }
+}
+
 BridgeConfigDocument BackendBridge::fetch_processing_config_json() {
     BridgeConfigDocument out{};
     std::string json;
@@ -902,8 +1018,9 @@ std::unique_ptr<BackendBridge> new_backend_bridge() {
 // select_hardware/mindvision_camera, apply_camera_script,
 // reset_hardware_camera — BE-2); v8 added the processing config document
 // round-trip, ROI/background binary transfer, and processing-core status
-// (BE-3). All additive over v1 (ADR 0003/0004). Must match
-// contract/bridge-contract.json.
-std::uint32_t bridge_abi_version() { return 8; }
+// (BE-3); v9 added paged HDF5 review (metadata, metrics pages, image/mask
+// pulls, cancellable CSV export jobs — BE-6). All additive over v1
+// (ADR 0003/0004). Must match contract/bridge-contract.json.
+std::uint32_t bridge_abi_version() { return 9; }
 
 } // namespace mib_bridge

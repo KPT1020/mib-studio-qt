@@ -5,6 +5,18 @@
 
 ## Features shipped
 
+- **Qt → React/Tauri migration: BE-6 — paged HDF5 review + export jobs**
+  (2026-07-16, epic #246, issue #276) — Bridge ABI **v9**: review metadata
+  (mode/counts/ROI/provenance/dataset capabilities), bounded metrics pages
+  from a metadata-only cache, single image/mask hyperslab pulls, and a
+  cancellable Qt-parity metrics CSV export job (new Qt-free
+  `backend::review::writeMetricsCsv`) running as a BE-1 tracked operation on
+  its own read-only reader with partial-output cleanup. RecordingLoad now
+  replaces the open file and is rejected during an active experiment. Shell
+  Review tab gains real Valid/Invalid Frames scrubbers, a paged metrics
+  table, and the export action. Batch/reanalysis jobs remain open on #276.
+  Details: `knowledge_map/task/2026-07-16-hdf5-review-bridge.md`.
+
 - **Qt → React/Tauri migration: BE-3 — processing config round-trip,
   ROI/background, core identity** (2026-07-16, epic #246, issue #273) —
   Bridge ABI **v8**: lossless config document pull/merge-apply (new Qt-free

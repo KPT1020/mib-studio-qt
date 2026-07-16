@@ -30,6 +30,7 @@ ENUM_GROUPS = [
     ("command_types", "COMMAND_TYPES"),
     ("camera_types", "CAMERA_TYPES"),
     ("camera_selection_modes", "CAMERA_SELECTION_MODES"),
+    ("review_image_datasets", "REVIEW_IMAGE_DATASETS"),
     ("experiment_states", "EXPERIMENT_STATES"),
     ("error_sources", "ERROR_SOURCES"),
     ("operation_kinds", "OPERATION_KINDS"),

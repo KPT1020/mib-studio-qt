@@ -49,6 +49,49 @@ export interface ExperimentStatus {
   message: string;
 }
 
+/** Per-dataset capabilities of the loaded review file (schema v9, BE-6). */
+export interface ReviewDatasetInfo {
+  present: boolean;
+  count: number;
+  height: number;
+  width: number;
+  channels: number;
+}
+
+/** Review metadata of the loaded HDF5 file (schema v9, BE-6). */
+export interface ReviewMetadata {
+  valid: boolean;
+  file_open: boolean;
+  recording_file: boolean;
+  start_time_ns: number;
+  end_time_ns: number;
+  total_valid: number;
+  total_invalid: number;
+  roi_x: number;
+  roi_y: number;
+  roi_w: number;
+  roi_h: number;
+  has_background: boolean;
+  has_core_identity: boolean;
+  core_version: string;
+  core_source: string;
+  core_release_tag: string;
+  valid_images: ReviewDatasetInfo;
+  invalid_images: ReviewDatasetInfo;
+  valid_masks: ReviewDatasetInfo;
+  invalid_masks: ReviewDatasetInfo;
+  recorded_images: ReviewDatasetInfo;
+  file_path: string;
+}
+
+/** One page of review metrics (schema v9, BE-6). */
+export interface ReviewMetricsPage {
+  valid: boolean;
+  total: number;
+  offset: number;
+  rows: MonitoringRow[];
+}
+
 /** Processing-core identity/pin status (bridge schema v8, BE-3). */
 export interface ProcessingCoreStatus {
   valid: boolean;
@@ -199,6 +242,18 @@ export const bridge = {
   experimentStop: () => invoke<CmdResult>("experiment_stop"),
   experimentCancel: () => invoke<CmdResult>("experiment_cancel"),
   fetchExperimentStatus: () => invoke<ExperimentStatus>("fetch_experiment_status"),
+  // Paged HDF5 review + export jobs (schema v9, BE-6).
+  fetchReviewMetadata: () => invoke<ReviewMetadata>("fetch_review_metadata"),
+  fetchReviewMetricsPage: (valid: boolean, offset: number, count: number) =>
+    invoke<ReviewMetricsPage>("fetch_review_metrics_page", { valid, offset, count }),
+  fetchReviewImage: (dataset: number, index: number) =>
+    invoke<FrameMeta>("fetch_review_image", { dataset, index }),
+  reviewImageBytes: async (): Promise<Uint8Array> => {
+    const buf = await invoke<ArrayBuffer>("review_image_bytes");
+    return new Uint8Array(buf);
+  },
+  reviewExportCsv: (outputPath: string) =>
+    invoke<CmdResult>("review_export_csv", { outputPath }),
   // Processing config / ROI / background / core identity (schema v8, BE-3).
   fetchProcessingConfigJson: () =>
     invoke<{ valid: boolean; json: string }>("fetch_processing_config_json"),

@@ -167,6 +167,53 @@ pub mod ffi {
         pub running: bool,
     }
 
+    /// Per-dataset capabilities of the loaded review file (schema v9, BE-6).
+    #[derive(Debug, Clone, Default)]
+    pub struct BridgeReviewDatasetInfo {
+        pub present: bool,
+        pub count: u64,
+        pub height: i32,
+        pub width: i32,
+        pub channels: i32,
+    }
+
+    /// Review metadata for the loaded HDF5 file (schema v9, BE-6).
+    #[derive(Debug, Clone, Default)]
+    pub struct BridgeReviewMetadata {
+        pub valid: bool,
+        pub file_open: bool,
+        pub recording_file: bool,
+        pub start_time_ns: u64,
+        pub end_time_ns: u64,
+        pub total_valid: u64,
+        pub total_invalid: u64,
+        pub roi_x: i32,
+        pub roi_y: i32,
+        pub roi_w: i32,
+        pub roi_h: i32,
+        pub has_background: bool,
+        pub has_core_identity: bool,
+        pub core_version: String,
+        pub core_source: String,
+        pub core_release_tag: String,
+        pub valid_images: BridgeReviewDatasetInfo,
+        pub invalid_images: BridgeReviewDatasetInfo,
+        pub valid_masks: BridgeReviewDatasetInfo,
+        pub invalid_masks: BridgeReviewDatasetInfo,
+        pub recorded_images: BridgeReviewDatasetInfo,
+        pub file_path: String,
+    }
+
+    /// One page of review frame/object metrics (schema v9, BE-6): bounded
+    /// rows served from a metadata-only cache — never image payloads.
+    #[derive(Debug, Clone, Default)]
+    pub struct BridgeReviewMetricsPage {
+        pub valid: bool,
+        pub total: u64,
+        pub offset: u64,
+        pub rows: Vec<BridgeMonitoringRow>,
+    }
+
     /// Full processing configuration document (schema v8, BE-3): a lossless
     /// JSON string — `image_processing` (exact config.json schema),
     /// `realtime_processing`, `flush_interval`, `pixel_to_micron`, `roi`,
@@ -334,6 +381,33 @@ pub mod ffi {
 
         /// Pull the current experiment lifecycle snapshot (schema v5).
         fn fetch_experiment_status(self: Pin<&mut BackendBridge>) -> BridgeExperimentStatus;
+
+        /// Pull the review metadata of the loaded HDF5 file (schema v9, BE-6).
+        fn fetch_review_metadata(self: Pin<&mut BackendBridge>) -> BridgeReviewMetadata;
+
+        /// Pull one bounded page of frame/object metrics from the loaded file
+        /// (schema v9, BE-6). `valid` selects the valid/invalid table.
+        fn fetch_review_metrics_page(
+            self: Pin<&mut BackendBridge>,
+            valid: bool,
+            offset: u64,
+            count: u64,
+        ) -> BridgeReviewMetricsPage;
+
+        /// Pull one review image/mask by index from a dataset (contract
+        /// `review_image_datasets` value) — bounded hyperslab read.
+        fn fetch_review_image(
+            self: Pin<&mut BackendBridge>,
+            dataset: u32,
+            index: u64,
+        ) -> BridgeFrame;
+
+        /// Start a cancellable metrics CSV export job for the loaded file
+        /// (schema v9, BE-6). Returns the job's operation_id; progress and the
+        /// terminal state arrive as OperationStatus events. Partial outputs
+        /// are removed on cancel/failure; the source file is opened read-only.
+        fn review_export_csv(self: Pin<&mut BackendBridge>, output_path: &str)
+            -> BridgeCommandResult;
 
         /// Pull the full processing configuration document (schema v8, BE-3).
         fn fetch_processing_config_json(self: Pin<&mut BackendBridge>) -> BridgeConfigDocument;

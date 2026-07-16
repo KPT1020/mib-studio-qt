@@ -11,6 +11,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <variant>
 #include <vector>
@@ -37,6 +38,7 @@ namespace backend::bridge
         Experiment,
         Monitoring,
         Trigger,
+        Review,
     };
 
     enum class CameraCommandAction
@@ -203,6 +205,20 @@ namespace backend::bridge
         int periodicIntervalMs{0}; // StartPeriodicTest
     };
 
+    // HDF5 review job commands (BE-6, #276). Jobs run on their own reader
+    // instance/thread as tracked operations (BE-1): the source file is opened
+    // read-only and partial outputs are cleaned on cancel/failure.
+    enum class ReviewCommandAction
+    {
+        ExportMetricsCsv,
+    };
+
+    struct ReviewCommand
+    {
+        ReviewCommandAction action{ReviewCommandAction::ExportMetricsCsv};
+        std::string outputPath;
+    };
+
     using BackendCommand = std::variant<CameraCommand,
                                         RecordingCommand,
                                         ProcessingSettingsCommand,
@@ -211,7 +227,8 @@ namespace backend::bridge
                                         OperationCommand,
                                         ExperimentCommand,
                                         MonitoringCommand,
-                                        TriggerCommand>;
+                                        TriggerCommand,
+                                        ReviewCommand>;
 
     struct BackendCommandResult
     {
@@ -484,6 +501,51 @@ namespace backend::bridge
         bool running{false};
     };
 
+    // Review metadata for the loaded HDF5 file (BE-6, #276): recording vs
+    // experiment mode, times/counts, ROI, provenance, and per-dataset
+    // capabilities (counts/dims discovered via getDatasetInfo).
+    struct BackendReviewDatasetInfo
+    {
+        bool present{false};
+        std::uint64_t count{0};
+        int height{0};
+        int width{0};
+        int channels{0};
+    };
+
+    struct BackendReviewMetadata
+    {
+        bool fileOpen{false};
+        bool recordingFile{false};
+        std::uint64_t startTimeNs{0};
+        std::uint64_t endTimeNs{0};
+        std::uint64_t totalValid{0};
+        std::uint64_t totalInvalid{0};
+        services::ProcessingService::Roi roi{};
+        bool hasBackground{false};
+        bool hasCoreIdentity{false};
+        std::string coreVersion;
+        std::string coreSource;
+        std::string coreReleaseTag;
+        BackendReviewDatasetInfo validImages;
+        BackendReviewDatasetInfo invalidImages;
+        BackendReviewDatasetInfo validMasks;
+        BackendReviewDatasetInfo invalidMasks;
+        BackendReviewDatasetInfo recordedImages;
+        std::string filePath;
+    };
+
+    // Review image datasets addressable by the binary pull (contract-pinned
+    // values; append-only).
+    enum class ReviewImageDataset
+    {
+        ValidImage = 0,
+        InvalidImage = 1,
+        RecordedImage = 2,
+        ValidMask = 3,
+        InvalidMask = 4,
+    };
+
     // Processing-core identity/trust status (BE-3, #273). Trust verification
     // and activation stay backend-owned; this is observability only.
     struct BackendProcessingCoreStatus
@@ -549,6 +611,20 @@ namespace backend::bridge
         // monotonic config_version for external-change detection.
         bool fetchProcessingConfigJson(std::string &out) const;
         bool fetchProcessingCoreStatus(BackendProcessingCoreStatus &out) const;
+        // HDF5 review pulls (BE-6). Metrics pages are served from a lazily
+        // cached metadata read (metrics only, no image payloads) that is
+        // invalidated on every RecordingLoad; images/masks are pulled one at
+        // a time via hyperslab reads (bounded memory).
+        bool fetchReviewMetadata(BackendReviewMetadata &out) const;
+        bool fetchReviewMetricsPage(bool valid,
+                                    std::uint64_t offset,
+                                    std::uint64_t count,
+                                    std::vector<MonitoringObjectRow> &rows,
+                                    std::uint64_t &totalOut) const;
+        bool fetchReviewImage(ReviewImageDataset dataset,
+                              std::uint64_t index,
+                              BackendFrame &out) const;
+
         // Background image (BE-3): binary get/set/clear (grayscale Mono8).
         bool fetchBackgroundImage(BackendFrame &out) const;
         BackendCommandResult setBackgroundImage(std::uint64_t width,
@@ -588,6 +664,7 @@ namespace backend::bridge
         BackendCommandResult handleExperimentCommand(const ExperimentCommand &command);
         BackendCommandResult handleMonitoringCommand(const MonitoringCommand &command);
         BackendCommandResult handleTriggerCommand(const TriggerCommand &command);
+        BackendCommandResult handleReviewCommand(const ReviewCommand &command);
 
         BackendCommandResult lifecycleError(BackendCommandType command, const std::string &message);
         void emitEvent(const BackendEvent &event) const;
@@ -616,6 +693,17 @@ namespace backend::bridge
         // cancelled through the generic operation surface.
         std::unique_ptr<ExperimentCoordinator> experiment_;
         std::atomic<std::uint64_t> experimentOperationId_{0};
+
+        // Review state (BE-6): the loaded file path (jobs open their own
+        // read-only reader on it) and the lazily cached metrics metadata.
+        mutable std::mutex reviewMutex_;
+        std::string loadedRecordingPath_;
+        mutable bool reviewMetricsLoaded_{false};
+        mutable std::vector<services::ProcessedFrame> reviewValidMeta_;
+        mutable std::vector<services::ProcessedFrame> reviewInvalidMeta_;
+        // Export jobs run detached; joined at shutdown.
+        std::vector<std::thread> reviewJobThreads_;
+        std::mutex reviewJobsMutex_;
     };
 
 } // namespace backend::bridge

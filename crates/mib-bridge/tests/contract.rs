@@ -54,8 +54,124 @@ fn abi_version_is_stable() {
     // event queue, and the extended error sources (ADR 0004); v5 the
     // experiment lifecycle (BE-4); v6 monitoring snapshots + trigger (BE-5);
     // v7 camera discovery/selection (BE-2); v8 config round-trip, ROI/
-    // background, and core status (BE-3).
-    assert_eq!(ffi::bridge_abi_version(), 8);
+    // background, and core status (BE-3); v9 paged HDF5 review + export jobs
+    // (BE-6).
+    assert_eq!(ffi::bridge_abi_version(), 9);
+}
+
+// BE-6: review metadata, paged metrics, bounded image pulls, and the
+// cancellable CSV export job — over a recording produced in-test, so
+// Qt-written fixtures and bridge-written files share one code path.
+#[test]
+#[serial]
+fn review_metadata_pages_images_and_export_job() {
+    let frame_dir = make_frame_dir();
+    let data_dir = std::env::temp_dir().join(format!("mib_bridge_rev6_data_{}", std::process::id()));
+    let rec_path = std::env::temp_dir().join(format!("mib_bridge_rev6_{}.h5", std::process::id()));
+    let csv_path = std::env::temp_dir().join(format!("mib_bridge_rev6_{}.csv", std::process::id()));
+
+    let mut bridge = ffi::new_backend_bridge();
+    assert!(bridge.pin_mut().initialize(&data_dir.to_string_lossy()));
+
+    // Without a loaded file: metadata reports closed, export fails safely.
+    let meta = bridge.pin_mut().fetch_review_metadata();
+    assert!(meta.valid && !meta.file_open);
+    assert!(!bridge.pin_mut().review_export_csv(&csv_path.to_string_lossy()).ok);
+
+    // Produce a short recording.
+    assert!(bridge
+        .pin_mut()
+        .configure_mock_camera(&frame_dir.to_string_lossy(), 5, true)
+        .ok);
+    assert!(bridge.pin_mut().start_capture().ok);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline && !bridge.pin_mut().fetch_latest_frame().valid {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(bridge.pin_mut().start_frame_recording(&rec_path.to_string_lossy()).ok);
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(bridge.pin_mut().stop_frame_recording().ok);
+    assert!(bridge.pin_mut().stop_capture().ok);
+    assert!(bridge.pin_mut().load_recording(&rec_path.to_string_lossy()).ok);
+
+    // Metadata: recording mode, counts, dataset capabilities.
+    let meta = bridge.pin_mut().fetch_review_metadata();
+    assert!(meta.valid && meta.file_open && meta.recording_file);
+    assert!(meta.total_valid > 0, "no recorded frames reported");
+    assert!(meta.recorded_images.present);
+    assert_eq!(meta.recorded_images.width, 512);
+    assert_eq!(meta.recorded_images.height, 96);
+    assert!(meta.file_path.ends_with(".h5"));
+
+    // Paged metrics: bounded pages, stable totals, out-of-range is empty.
+    let page = bridge.pin_mut().fetch_review_metrics_page(true, 0, 5);
+    assert!(page.valid);
+    assert!(page.total == meta.total_valid, "page total mismatch");
+    assert!(page.rows.len() <= 5);
+    let beyond = bridge.pin_mut().fetch_review_metrics_page(true, page.total + 10, 5);
+    assert!(beyond.valid && beyond.rows.is_empty());
+
+    // Bounded image pull from the recorded dataset; invalid dataset ids and
+    // out-of-range indices fail safely.
+    let image = bridge.pin_mut().fetch_review_image(2, 0);
+    assert!(image.valid && image.width == 512 && image.height == 96);
+    assert!(!image.data.is_empty());
+    assert!(!bridge.pin_mut().fetch_review_image(99, 0).valid);
+    assert!(!bridge.pin_mut().fetch_review_image(2, 1_000_000).valid);
+
+    // Export job: tracked operation with progress + Completed; CSV exists
+    // with the Qt-parity header; the source file remains readable.
+    let _ = bridge.pin_mut().poll_events();
+    let export = bridge.pin_mut().review_export_csv(&csv_path.to_string_lossy());
+    assert!(export.ok, "export failed to start: {}", export.message);
+    assert!(export.operation_id != 0);
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut completed = false;
+    while Instant::now() < deadline && !completed {
+        for e in bridge.pin_mut().poll_events() {
+            if e.kind == BridgeEventKind::OperationStatus && e.u0 == export.operation_id {
+                assert_ne!(e.u2, 3, "export failed: {}", e.text);
+                if e.u2 == 2 {
+                    completed = true;
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(completed, "export did not complete");
+    let csv = std::fs::read_to_string(&csv_path).unwrap();
+    assert!(csv.starts_with("Frame Type,Index,Timestamp,Object Id"));
+    assert!(csv.lines().count() as u64 >= meta.total_valid, "missing CSV rows");
+
+    // Failure path cleans partial outputs: unwritable directory fails the
+    // job and leaves no file behind.
+    let bad_path = "/nonexistent-dir/mib_export.csv";
+    let bad = bridge.pin_mut().review_export_csv(bad_path);
+    assert!(bad.ok, "job starts, then fails asynchronously");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut failed = false;
+    while Instant::now() < deadline && !failed {
+        for e in bridge.pin_mut().poll_events() {
+            if e.kind == BridgeEventKind::OperationStatus
+                && e.u0 == bad.operation_id
+                && e.u2 == 3
+            {
+                failed = true;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(failed, "bad-path export did not report Failed");
+    assert!(!std::path::Path::new(bad_path).exists());
+    // Source recording is intact after the failed job.
+    assert!(bridge.pin_mut().load_recording(&rec_path.to_string_lossy()).ok);
+
+    bridge.pin_mut().shutdown();
+    let _ = std::fs::remove_dir_all(&frame_dir);
+    let _ = std::fs::remove_dir_all(&data_dir);
+    let _ = std::fs::remove_file(&rec_path);
+    let _ = std::fs::remove_file(&csv_path);
 }
 
 // BE-3: lossless processing-config round-trip, ROI/background binary

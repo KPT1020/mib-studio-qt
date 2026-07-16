@@ -54,6 +54,13 @@ Rust owns an opaque `BackendBridge` (`UniquePtr`) that composes an `AppBackend`
   `cancel_operation(id)` requests cancellation and fails safely for
   unknown/finished IDs; `shutdown()` cancels all active operations first.
   RecordingLoad is the first tracked operation; BE-4/BE-6 build on this.
+- **Paged HDF5 review + export jobs (v9, BE-6):** `fetch_review_metadata`,
+  `fetch_review_metrics_page` (bounded, metadata-only cache),
+  `fetch_review_image(dataset, index)` (contract `review_image_datasets`,
+  hyperslab reads), `review_export_csv` (tracked Export operation on its own
+  read-only reader; Qt-parity CSV; partial outputs cleaned on
+  cancel/failure). RecordingLoad replaces an open file and is rejected during
+  an active experiment.
 - **Processing config/ROI/background/core (v8, BE-3):**
   `fetch/apply_processing_config_json` (lossless document, merge semantics,
   monotonic `config_version`), `set_processing_roi`,
@@ -109,7 +116,7 @@ via static_asserts in `shim.cpp`, Rust via `rust_enums_match_contract_json`,
 TypeScript via the generated `desktop/src/bridgeContract.ts`
 (`scripts/gen_bridge_contract.py --check` is a desktop-CI drift gate).
 
-The command/event set is a versioned schema: `bridge_abi_version()` returns `8`
+The command/event set is a versioned schema: `bridge_abi_version()` returns `9`
 (v2 added the review commands — `load_recording`, `playback_seek_index`,
 `fetch_frame_by_index`; v3 added the processing commands — `apply_processing`,
 `fetch_processing_stats`; v4 added operation state, `cancel_operation`,
@@ -117,7 +124,7 @@ The command/event set is a versioned schema: `bridge_abi_version()` returns `8`
 v5 added the experiment lifecycle (BE-4); v6 added monitoring snapshots and
 the sorter trigger (BE-5); v7 added camera discovery/selection (BE-2); v8
 added the processing-config round-trip, ROI/background, and core status
-(BE-3) —
+(BE-3); v9 added paged HDF5 review and export jobs (BE-6) —
 all additive over the v1 live-capture set); additive
 changes bump it. `tests/contract.rs` is the boundary gate and regression guard:
 `lifecycle_produces_status_and_frame_events` drives
