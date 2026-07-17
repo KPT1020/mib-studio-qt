@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Release-lane gating for the develop/main pipeline** (2026-07-17) — The
+  feature → `develop` (beta) → `main` (stable) lanes now gate what actually
+  releases. The `develop` auto-beta in `build-windows.yml` is path-filtered
+  to app-affecting changes, so docs/vault/`tools/`/`tests/`/wheel-lane-only
+  merges (e.g. the Ultra96 exploration, PR #264 → stray
+  `v1.0.6-beta.0e398db`) no longer publish a beta; edits to the workflow
+  itself still release. `mib-processing-v*` GitHub releases are created with
+  `--latest=false` so the repository "Latest" badge always points at the
+  newest stable desktop release. Lanes documented in
+  `docs/howto/branching-and-releases.md`.
+
 - **Ultra96 direct-DDR FPGA pipeline** (2026-07-15) — Replaced the exact
   4-PPC/250-MHz image core's full-frame AXI-BRAM MMIO path with XRT/CMA buffer
   objects over the 128-bit PS HP0 DDR port. The board now matches all 171 MIB
