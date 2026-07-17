@@ -60,7 +60,7 @@ it:
 | steady device tick gap but growing host grab gap | frames buffer inside the camera/SDK before `grabFrame` returns — acquisition-side delay, not app-side |
 | `dropped_to_latest` high | live view intentionally skipping to newest (drop-frames mode, default ON outside experiments) — overlay lag, not loss |
 | `ring_behind` non-zero | consumer fell out of the FrameStore window — genuine overrun |
-| `coalesced` non-zero | several target-group frames merged into one pulse (single-bool request flag) |
+| `TriggerService::getDroppedRequestCount()` non-zero | target-group frames arrived faster than pulses could fire for longer than the 8-deep request queue could absorb — sustained overload (`coalesced` in the CSV is 0 since the per-request queue landed; it only appears in pre-#283 recordings) |
 | accounting mismatch | unexplained frame loss — investigate |
 
 `grab -> fire (END2END)` in the trigger section is the acquisition→pulse
@@ -94,12 +94,22 @@ python3 scripts/analyze_pipeline_timing.py /tmp/timing_run/pipeline_timing
 Options: `--roi x,y,w,h`, `--background <image>`, `--drop-frames` (default is
 every-frame mode), `--fps`, `--duration`.
 
-Reference numbers from a 20 s / 500 fps run of `gavinlouuu/512x96stream`
-(1000 frames, Linux container, every-frame mode): 9,904 frames captured,
-zero drops, accounting conserved; grab→algo-start p50 ≈ 1.0 ms (bounded by
-the realtime loop's 2 ms idle poll), algo p50 ≈ 0.30 ms, trigger
-request→fire p50 ≈ 0.05 ms with rare scheduling outliers (max ≈ 30 ms — the
-P9 no-RT-priority tech debt), end-to-end grab→fire p50 ≈ 1.4 ms.
+Reference numbers from 20 s / 500 fps runs of `gavinlouuu/512x96stream`
+(1000 frames, Linux container, every-frame mode), zero drops and accounting
+conserved in both:
+
+| stage (p50 / p95) | before #282+#283 | after |
+| --- | --- | --- |
+| grab → algo start | 1.03 / 2.01 ms (2 ms idle-poll bound) | 0.083 / 0.138 ms (event-driven wake) |
+| algo duration | 0.30 / 0.44 ms | 0.34 / 0.47 ms |
+| trigger request → fire | 0.053 / 0.094 ms | 0.060 / 0.106 ms |
+| grab → fire (end-to-end) | 1.44 / 2.41 ms | 0.50 / 0.70 ms |
+
+Trigger accounting before: 5/2176 requests coalesced (single-bool flag);
+after: exactly one pulse per target frame, zero coalesced, zero dropped.
+Rare multi-ms scheduling outliers remain on both stages (max ≈ 30-40 ms) —
+that is the no-RT-thread-priority tech debt (P9 / issue #227), not the
+pipeline structure.
 
 ## 4. Caveats
 

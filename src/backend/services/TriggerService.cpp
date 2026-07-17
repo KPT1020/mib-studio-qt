@@ -8,7 +8,9 @@ namespace backend::services {
 
 TriggerService::TriggerService() = default;
 
-TriggerService::~TriggerService() { stop(); }
+TriggerService::~TriggerService() {
+    stop();
+}
 
 void TriggerService::start() {
     if (running_.load()) return;
@@ -48,31 +50,37 @@ void TriggerService::onTargetGroupResult(const TargetGroupSignal& signal) {
         return;
     }
 
-    SPDLOG_DEBUG("TriggerService target-group callback: objectId={}, trackId={}", signal.objectId, signal.trackId);
+    SPDLOG_DEBUG("TriggerService target-group callback: objectId={}, trackId={}", signal.objectId,
+                 signal.trackId);
 
     lastTriggerObjectId_.store(signal.objectId, std::memory_order_release);
     lastTriggerTrackId_.store(signal.trackId, std::memory_order_release);
     const bool recordTiming = backend::diagnostics::PipelineTimingRecorder::instance().isEnabled();
     const uint64_t requestUs =
         recordTiming ? backend::diagnostics::PipelineTimingRecorder::nowUs() : 0;
-    // Set the request flag while holding the same mutex the trigger thread uses
-    // for its wait() predicate. Storing it lock-free races with the consumer's
-    // predicate check: if the flag is set after the consumer evaluates the
+    // Enqueue while holding the same mutex the trigger thread uses for its
+    // wait() predicate. Mutating the queue lock-free races with the consumer's
+    // predicate check: if the entry lands after the consumer evaluates the
     // predicate but before it blocks, the notify is lost and the trigger is
-    // delayed until the next request (or dropped entirely under bursts). Taking
-    // the lock closes that window.
+    // delayed until the next request. Taking the lock closes that window.
+    // Every request gets its own queue entry — and its own pulse, in arrival
+    // order (issue #283); the old single-bool flag silently coalesced
+    // requests arriving while the trigger thread was mid-pulse. Overflow
+    // drops the OLDEST entry (a backlog of stale pulses is worse than a
+    // counted drop) and is surfaced via getDroppedRequestCount().
     {
         std::lock_guard<std::mutex> lk(triggerMutex_);
-        if (triggerRequested_.load(std::memory_order_relaxed)) {
-            // A pulse request is already pending: this request coalesces into
-            // it (single-bool limitation). Keep the pending identity — its
-            // request has waited longest — and count the merge.
-            ++pendingRequest_.coalesced;
-        } else {
-            pendingRequest_ =
-                PendingRequest{signal.frameIndex, signal.hostTimestampUs, requestUs, 0};
+        if (pendingRequests_.size() >= kMaxPendingRequests) {
+            pendingRequests_.pop_front();
+            const uint64_t dropped = droppedRequests_.fetch_add(1, std::memory_order_relaxed) + 1;
+            if (dropped == 1 || (dropped % 100) == 0) {
+                SPDLOG_WARN("TriggerService: pending-request queue full ({}), dropped oldest "
+                            "request (total dropped: {})",
+                            kMaxPendingRequests, dropped);
+            }
         }
-        triggerRequested_.store(true, std::memory_order_release);
+        pendingRequests_.push_back(
+            PendingRequest{signal.frameIndex, signal.hostTimestampUs, requestUs});
     }
     triggerCV_.notify_one();
 }
@@ -83,54 +91,52 @@ void TriggerService::triggerLoop() {
         PendingRequest pending;
         {
             std::unique_lock<std::mutex> lk(triggerMutex_);
-            triggerCV_.wait(lk, [this] {
-                return !running_.load() || triggerRequested_.load(std::memory_order_acquire);
-            });
-            pending = pendingRequest_;
+            triggerCV_.wait(lk, [this] { return !running_.load() || !pendingRequests_.empty(); });
+            if (!running_.load()) break;
+            pending = pendingRequests_.front();
+            pendingRequests_.pop_front();
         }
-        if (!running_.load()) break;
 
-        if (triggerRequested_.exchange(false, std::memory_order_acq_rel)) {
-            auto* cam = camera_.load(std::memory_order_acquire);
-            if (!cam) continue;
+        auto* cam = camera_.load(std::memory_order_acquire);
+        if (!cam) continue;
 
-            const bool recordTiming = timingRecorder.isEnabled();
-            const uint64_t wakeUs =
-                recordTiming ? backend::diagnostics::PipelineTimingRecorder::nowUs() : 0;
+        const bool recordTiming = timingRecorder.isEnabled();
+        const uint64_t wakeUs =
+            recordTiming ? backend::diagnostics::PipelineTimingRecorder::nowUs() : 0;
 
-            // Fire trigger pulse: High -> busy-wait ~1us -> Low
-            // Mirrors processTrigger() in MIB-Studio/src/mib_grabber/mib_grabber.cpp
-            auto start = std::chrono::high_resolution_clock::now();
-            if (!cam->setTriggerOutput(true)) continue;
-            auto onset = std::chrono::high_resolution_clock::now();
-            const uint64_t fireUs =
-                recordTiming ? backend::diagnostics::PipelineTimingRecorder::nowUs() : 0;
+        // Fire trigger pulse: High -> busy-wait ~1us -> Low
+        // Mirrors processTrigger() in MIB-Studio/src/mib_grabber/mib_grabber.cpp
+        auto start = std::chrono::high_resolution_clock::now();
+        if (!cam->setTriggerOutput(true)) continue;
+        auto onset = std::chrono::high_resolution_clock::now();
+        const uint64_t fireUs =
+            recordTiming ? backend::diagnostics::PipelineTimingRecorder::nowUs() : 0;
 
-            // Busy-wait for the configured pulse duration
-            auto pulseUs = std::chrono::microseconds(pulseDurationUs_.load(std::memory_order_relaxed));
-            while (running_.load() &&
-                   std::chrono::high_resolution_clock::now() - onset < pulseUs) {
-                // Busy-wait
-            }
+        // Busy-wait for the configured pulse duration
+        auto pulseUs = std::chrono::microseconds(pulseDurationUs_.load(std::memory_order_relaxed));
+        while (running_.load() && std::chrono::high_resolution_clock::now() - onset < pulseUs) {
+            // Busy-wait
+        }
 
-            cam->setTriggerOutput(false);
+        cam->setTriggerOutput(false);
 
-            // Record metrics
-            auto onsetUs = std::chrono::duration<double, std::micro>(onset - start).count();
-            lastOnsetUs_.store(onsetUs, std::memory_order_relaxed);
-            triggerCount_.fetch_add(1, std::memory_order_relaxed);
+        // Record metrics
+        auto onsetUs = std::chrono::duration<double, std::micro>(onset - start).count();
+        lastOnsetUs_.store(onsetUs, std::memory_order_relaxed);
+        triggerCount_.fetch_add(1, std::memory_order_relaxed);
 
-            if (recordTiming) {
-                backend::diagnostics::TriggerTimingRecord record;
-                record.frameIndex = pending.frameIndex;
-                record.grabUs = pending.hostTimestampUs;
-                record.requestUs = pending.requestUs;
-                record.wakeUs = wakeUs;
-                record.fireUs = fireUs;
-                record.pulseDoneUs = backend::diagnostics::PipelineTimingRecorder::nowUs();
-                record.coalesced = pending.coalesced;
-                timingRecorder.recordTrigger(record);
-            }
+        if (recordTiming) {
+            backend::diagnostics::TriggerTimingRecord record;
+            record.frameIndex = pending.frameIndex;
+            record.grabUs = pending.hostTimestampUs;
+            record.requestUs = pending.requestUs;
+            record.wakeUs = wakeUs;
+            record.fireUs = fireUs;
+            record.pulseDoneUs = backend::diagnostics::PipelineTimingRecorder::nowUs();
+            // With the per-request queue nothing coalesces; overflow shows up
+            // in getDroppedRequestCount() instead.
+            record.coalesced = 0;
+            timingRecorder.recordTrigger(record);
         }
     }
 }

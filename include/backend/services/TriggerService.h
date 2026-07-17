@@ -2,11 +2,15 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstddef>
+#include <deque>
 #include <functional>
 #include <mutex>
 #include <thread>
 
-namespace camera::common { class ICamera; }
+namespace camera::common {
+class ICamera;
+}
 
 namespace backend::services {
 
@@ -44,15 +48,31 @@ public:
     // Metrics
     uint64_t getTriggerCount() const { return triggerCount_.load(std::memory_order_relaxed); }
     double getLastOnsetUs() const { return lastOnsetUs_.load(std::memory_order_relaxed); }
-    int getLastTriggerObjectId() const { return lastTriggerObjectId_.load(std::memory_order_relaxed); }
-    int getLastTriggerTrackId() const { return lastTriggerTrackId_.load(std::memory_order_relaxed); }
+    int getLastTriggerObjectId() const {
+        return lastTriggerObjectId_.load(std::memory_order_relaxed);
+    }
+    int getLastTriggerTrackId() const {
+        return lastTriggerTrackId_.load(std::memory_order_relaxed);
+    }
+    // Requests evicted from a full pending queue (oldest dropped first). A
+    // non-zero value means target-group frames arrived faster than pulses
+    // could be driven for longer than the queue could absorb (issue #283).
+    uint64_t getDroppedRequestCount() const {
+        return droppedRequests_.load(std::memory_order_relaxed);
+    }
 
     void resetMetrics() {
         triggerCount_.store(0, std::memory_order_relaxed);
         lastOnsetUs_.store(0.0, std::memory_order_relaxed);
         lastTriggerObjectId_.store(-1, std::memory_order_relaxed);
         lastTriggerTrackId_.store(-1, std::memory_order_relaxed);
+        droppedRequests_.store(0, std::memory_order_relaxed);
     }
+
+    // Bound on the pending-request queue. Sized to absorb a realistic burst
+    // of same-window target frames; beyond it the OLDEST request is dropped
+    // (and counted) — a backlog of stale pulses is worse than a counted drop.
+    static constexpr size_t kMaxPendingRequests = 8;
 
 private:
     void triggerLoop();
@@ -63,20 +83,20 @@ private:
     // Trigger request signaling
     std::mutex triggerMutex_;
     std::condition_variable triggerCV_;
-    std::atomic<bool> triggerRequested_{false};
 
-    // Metadata of the pending trigger request, for latency instrumentation
-    // (PipelineTimingRecorder). Written by onTargetGroupResult and read by
-    // triggerLoop, both under triggerMutex_, so it needs no extra locking.
-    // When requests coalesce into one pulse the FIRST request's identity is
-    // kept (it has waited longest) and `coalesced` counts the merged extras.
+    // Per-request metadata for pulses and latency instrumentation
+    // (PipelineTimingRecorder). Every target-group request gets its own entry
+    // — and therefore its own pulse, in arrival order — instead of the old
+    // single-bool flag that silently coalesced requests arriving while the
+    // trigger thread was mid-pulse (issue #283). Bounded by
+    // kMaxPendingRequests with counted drop-oldest overflow. Accessed only
+    // under triggerMutex_.
     struct PendingRequest {
         uint64_t frameIndex{0};
         uint64_t hostTimestampUs{0};
         uint64_t requestUs{0};
-        uint32_t coalesced{0};
     };
-    PendingRequest pendingRequest_;
+    std::deque<PendingRequest> pendingRequests_;
 
     // Camera reference (non-owning)
     std::atomic<camera::common::ICamera*> camera_{nullptr};
@@ -89,6 +109,7 @@ private:
     // Metrics
     std::atomic<uint64_t> triggerCount_{0};
     std::atomic<double> lastOnsetUs_{0.0};
+    std::atomic<uint64_t> droppedRequests_{0};
 };
 
 } // namespace backend::services

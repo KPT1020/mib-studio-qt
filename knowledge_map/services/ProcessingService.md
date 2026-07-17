@@ -65,9 +65,13 @@ same mask/empty-frame algorithm is used on both sides of the boundary.
 
 - **Worker pool** (`start(size_t n = hardware_concurrency())`) — generic
   `Job` queue (not heavily used at present; realtime loop carries most work).
-- **Realtime thread** (`startRealtime(frameStore)`) — polls FrameStore
-  write-index; processes every frame or only latest depending on
-  `setRealtimeDropFrames`. Experiments force every-frame.
+- **Realtime thread** (`startRealtime(frameStore)`) — consumes FrameStore
+  by write-index; when caught up it blocks in
+  `FrameStore::waitForFrame` (event-driven wake from `pushFrame`, issue
+  #282 — the old fixed 2 ms sleep-poll put a uniform 0-2 ms wait in front
+  of every frame and dominated end-to-end latency). Processes every frame
+  or only latest depending on `setRealtimeDropFrames`. Experiments force
+  every-frame.
 - **Async batch workers** (`startBatchPipeline`) — consume a bounded frame
   queue in configured-size batches. `enqueueBatchFrame` returns immediately
   with accepted/dropped status so capture can keep running while workers process
