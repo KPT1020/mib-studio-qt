@@ -11,8 +11,12 @@
 ## Responsibility
 
 - One thread per service: `run()` blocks on the camera's blocking `grabFrame`.
-- Copies frame bytes into `FrameStore` and fires `FrameCallback` (used by UI
-  for live preview).
+- Stamps `Frame::hostTimestampUs` (host monotonic µs, `Tools::getTimestamp`)
+  the moment `grabFrame` returns — the acquisition anchor for all
+  downstream latency measurement ([[../diagnostics/PipelineTimingRecorder]]).
+  The camera's own `timestamp` is a device tick on a different clock.
+- Copies frame bytes into `FrameStore` (including the host stamp) and fires
+  `FrameCallback` (used by UI for live preview).
 - Exposes `CaptureStats` — `framesProcessed`, `lastFrameRate`,
   `lastDataRateMBps` (the latter two come from EGrabber StreamModule).
 

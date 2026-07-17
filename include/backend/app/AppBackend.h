@@ -113,8 +113,21 @@ namespace backend
         using FatalSaveErrorCallback = std::function<void(const std::string&)>;
         void setFatalSaveErrorCallback(FatalSaveErrorCallback callback);
 
+        // Pipeline latency instrumentation (PipelineTimingRecorder). Enabled at
+        // startup via MIB_PIPELINE_TIMING=1 (dump directory override:
+        // MIB_PIPELINE_TIMING_DIR) or at runtime through these methods. CSVs
+        // are dumped automatically on capture stop and shutdown, or on demand.
+        void setPipelineTimingEnabled(bool enabled);
+        bool isPipelineTimingEnabled() const;
+        // Dump to `directory` (empty = configured/default directory). Returns
+        // false and fills errorOut on failure.
+        bool dumpPipelineTiming(const std::string& directory = {},
+                                std::string* errorOut = nullptr);
+
     private:
         void reportFatalSaveError(const std::string& msg);
+        // Best-effort auto-dump used at capture stop/shutdown; logs on failure.
+        void dumpPipelineTimingIfEnabled();
 
         FatalSaveErrorCallback fatalSaveErrorCb_;
 
@@ -137,6 +150,9 @@ namespace backend
         int selectedMvCameraIndex_{-1};
         std::string lastMindVisionConfigPath_;
         bool mockCameraConfigured_{false};
+
+        // Where pipeline-timing CSVs are dumped (set in initialize()).
+        std::string pipelineTimingDir_;
 
         // Frame recording state
         std::unique_ptr<std::thread> frameRecordingThread_;

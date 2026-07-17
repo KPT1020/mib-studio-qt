@@ -31,11 +31,18 @@ struct TargetGroupEvent {
     bool isTargetGroup{false};
     int objectId{-1};
     int trackId{-1};
+    // Source-frame identity for end-to-end latency correlation (see
+    // PipelineTimingRecorder). frameIndex is the FrameStore write index;
+    // hostTimestampUs is the host monotonic acquisition stamp (0 if unknown).
+    uint64_t frameIndex{0};
+    uint64_t hostTimestampUs{0};
 };
 
 struct ProcessedFrame {
     uint64_t index{0};
     uint64_t timestampNs{0};
+    // Host monotonic acquisition stamp carried from playback::Frame (0 if unknown).
+    uint64_t hostTimestampUs{0};
     cv::Mat originalImage;
     cv::Mat processedImage; // mask
     FilterResult validation;
@@ -327,7 +334,8 @@ public:
     // emit completed batches through the callback.
     bool startBatchPipeline(BatchPipelineConfig config, BatchResultCallback callback);
     void stopBatchPipeline();
-    bool enqueueBatchFrame(const cv::Mat& grayImage, uint64_t index, uint64_t timestampNs = 0);
+    bool enqueueBatchFrame(const cv::Mat& grayImage, uint64_t index, uint64_t timestampNs = 0,
+                           uint64_t hostTimestampUs = 0);
     bool enqueueBatchFrame(const backend::playback::Frame& frame, uint64_t index);
     BatchPipelineStats getBatchPipelineStats() const;
 
@@ -357,6 +365,20 @@ private:
         cv::Mat gray;
         uint64_t index{0};
         uint64_t timestampNs{0};
+        uint64_t hostTimestampUs{0};
+    };
+
+    // Per-frame stamps handed to publishRealtimeValidationCallbacks so the
+    // shared callback chokepoint can emit one PipelineTimingRecorder record
+    // per processed frame. All fields are host monotonic microseconds;
+    // algoStartUs/algoEndUs are 0 in async-batch mode (aggregate batch timing
+    // only). present=false (the default) records nothing.
+    struct RealtimeFrameTiming {
+        bool present{false};
+        uint64_t frameIndex{0};
+        uint64_t grabUs{0};
+        uint64_t algoStartUs{0};
+        uint64_t algoEndUs{0};
     };
 
     void workerLoop();
@@ -367,7 +389,9 @@ private:
     BatchPipelineConfig makeRealtimeBatchPipelineConfig() const;
     void refreshRealtimeBatchPipelineConfig();
     void publishRealtimeBatchFrame(ProcessedFrame&& frame);
-    void publishRealtimeValidationCallbacks(const std::vector<FilterResult>& validations, uint64_t timestampNs);
+    void publishRealtimeValidationCallbacks(const std::vector<FilterResult>& validations,
+                                            uint64_t timestampNs,
+                                            const RealtimeFrameTiming& timing);
     void appendRealtimeMonitoringFrame(uint64_t index,
                                        uint64_t timestampNs,
                                        const FilterResult& validation,

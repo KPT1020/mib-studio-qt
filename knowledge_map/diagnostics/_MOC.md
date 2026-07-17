@@ -7,6 +7,9 @@
 
 - [[CrashStateMirror]] — lock-free state snapshot store read by the crash
   handler to produce per-crash `.json` sidecars.
+- [[PipelineTimingRecorder]] — lock-free per-frame latency recorder
+  (acquisition → algorithm → trigger stamps + skip accounting) behind the
+  pipeline-delay diagnosis workflow.
 
 ## Related services / conventions
 

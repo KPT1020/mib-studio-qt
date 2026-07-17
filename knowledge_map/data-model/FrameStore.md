@@ -23,9 +23,15 @@ struct Frame {
     uint64_t pixelFormat;   // PFNC code
     size_t linePitch;       // bytes per line
     uint64_t timestamp;     // device ticks OR nanoseconds (source-dependent)
+    uint64_t hostTimestampUs; // host monotonic acquisition stamp (0 = unknown)
     std::vector<uint8_t> data;
 };
 ```
+
+`hostTimestampUs` is stamped by [[../services/CaptureService]] at grab time
+and carried through `pushFrame`/`getByWriteIndex[ROI]` so consumers can
+measure acquisition→stage latency on one clock
+([[../diagnostics/PipelineTimingRecorder]]).
 
 ## Absolute indexing
 
@@ -40,7 +46,8 @@ window:
 ## Push / query APIs
 
 ```cpp
-void pushFrame(src, size, w, h, linePitch, pixelFormat, timestamp);
+void pushFrame(src, size, w, h, linePitch, pixelFormat, timestamp,
+               hostTimestampUs = 0);
 
 bool getLatest(Frame& out) const;
 bool getByWriteIndex(uint64_t idx, Frame& out) const;

@@ -250,6 +250,16 @@ target_link_libraries(e2e_trigger_timing_test PRIVATE Threads::Threads)
 add_test(NAME integration.e2e_trigger_timing COMMAND $<TARGET_FILE:e2e_trigger_timing_test>)
 set_tests_properties(integration.e2e_trigger_timing PROPERTIES LABELS "integration;e2e;trigger" TIMEOUT 120)
 
+mib_add_backend_test_executable(pipeline_timing_recorder_test backend/pipeline_timing_recorder_test.cpp)
+target_link_libraries(pipeline_timing_recorder_test PRIVATE Threads::Threads)
+add_test(NAME backend.pipeline_timing_recorder COMMAND $<TARGET_FILE:pipeline_timing_recorder_test>)
+set_tests_properties(backend.pipeline_timing_recorder PROPERTIES LABELS "backend;diagnostics" TIMEOUT 30)
+
+mib_add_backend_test_executable(e2e_pipeline_timing_test integration/e2e_pipeline_timing_test.cpp)
+target_link_libraries(e2e_pipeline_timing_test PRIVATE Threads::Threads)
+add_test(NAME integration.e2e_pipeline_timing COMMAND $<TARGET_FILE:e2e_pipeline_timing_test>)
+set_tests_properties(integration.e2e_pipeline_timing PROPERTIES LABELS "integration;e2e;trigger;diagnostics" TIMEOUT 120)
+
 mib_add_backend_test_executable(e2e_pipeline_stress_test integration/e2e_pipeline_stress_test.cpp)
 target_link_libraries(e2e_pipeline_stress_test PRIVATE Threads::Threads)
 # Lifecycle start/stop race test. Has an in-process watchdog that _Exit(99)s

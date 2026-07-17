@@ -31,7 +31,8 @@ void FrameStore::reserveFrameBytes(size_t frameBytes) {
 }
 
 void FrameStore::pushFrame(const uint8_t* src, size_t size, uint64_t width, uint64_t height,
-                           size_t linePitch, uint64_t pixelFormat, uint64_t timestamp) {
+                           size_t linePitch, uint64_t pixelFormat, uint64_t timestamp,
+                           uint64_t hostTimestampUs) {
     if (capacity_.load(std::memory_order_acquire) == 0 || src == nullptr || size == 0) return;
 
     const uint64_t w = totalWritten_.fetch_add(1) + 1; // next write count
@@ -58,6 +59,7 @@ void FrameStore::pushFrame(const uint8_t* src, size_t size, uint64_t width, uint
         f.pixelFormat = pixelFormat;
         f.linePitch = linePitch;
         f.timestamp = timestamp;
+        f.hostTimestampUs = hostTimestampUs;
         f.data.resize(size);
         std::copy_n(src, size, f.data.begin());
         slotWriteIndices_[idx] = w - 1;
@@ -144,6 +146,7 @@ bool FrameStore::getByWriteIndexROI(uint64_t writeIndex, int roiX, int roiY, int
     out.height = static_cast<uint64_t>(clampedH);
     out.pixelFormat = src.pixelFormat;
     out.timestamp = src.timestamp;
+    out.hostTimestampUs = src.hostTimestampUs;
     out.linePitch = 0; // ROI will be contiguous
 
     // Extract ROI region

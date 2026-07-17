@@ -3,6 +3,7 @@
 #include "backend/services/Logger.h"
 #include "backend/services/CrashReporter.h"
 #include "backend/diagnostics/CrashStateMirror.h"
+#include "backend/diagnostics/PipelineTimingRecorder.h"
 #include "backend/database/SqliteService.h"
 #include "backend/recording/Hdf5Service.h"
 #include "backend/recording/HdfWriteQueue.h"
@@ -156,6 +157,9 @@ namespace backend
             processingService_->stopBatchPipeline();
             processingService_->stop();
         }
+        // All pipeline threads are stopped now, so the dump is an exact
+        // snapshot of the recorded latency data.
+        dumpPipelineTimingIfEnabled();
     }
 
     bool AppBackend::initialize(const std::string &dataDir)
@@ -165,6 +169,26 @@ namespace backend
         // Use user-writable location for logs if dataDir is in Program Files
         std::string logPath = getLogPath(dataDir);
         backend::services::Logger::init(logPath);
+
+        // Pipeline latency instrumentation: opt in via environment so field
+        // diagnosis needs no rebuild. CSVs land in pipelineTimingDir_ on
+        // capture stop / shutdown (see PipelineTimingRecorder).
+        pipelineTimingDir_ = (std::filesystem::path(dataDir) / "pipeline_timing").string();
+        if (const char *timingDir = std::getenv("MIB_PIPELINE_TIMING_DIR"))
+        {
+            if (*timingDir != '\0') pipelineTimingDir_ = timingDir;
+        }
+        if (const char *timingEnv = std::getenv("MIB_PIPELINE_TIMING"))
+        {
+            const std::string value(timingEnv);
+            if (value == "1" || value == "true" || value == "on")
+            {
+                diagnostics::PipelineTimingRecorder::instance().setEnabled(true);
+                SPDLOG_INFO("AppBackend: pipeline timing instrumentation enabled "
+                            "(MIB_PIPELINE_TIMING), dump dir: {}",
+                            pipelineTimingDir_);
+            }
+        }
 
         sqliteService_ = std::make_unique<services::SqliteService>();
         hdf5Service_ = std::make_unique<services::Hdf5Service>();
@@ -395,6 +419,8 @@ namespace backend
                     signal.isTargetGroup = event.isTargetGroup;
                     signal.objectId = event.objectId;
                     signal.trackId = event.trackId;
+                    signal.frameIndex = event.frameIndex;
+                    signal.hostTimestampUs = event.hostTimestampUs;
                     triggerService_->onTargetGroupResult(signal);
                 }
             });
@@ -418,6 +444,9 @@ namespace backend
                         triggerService_->start();
                     } else {
                         triggerService_->stop();
+                        // Capture just stopped and the trigger thread has been
+                        // joined: dump the latency CSVs for this session.
+                        dumpPipelineTimingIfEnabled();
                     }
                 }
             });
@@ -1097,6 +1126,41 @@ namespace backend
     void AppBackend::reportFatalSaveError(const std::string& msg) {
         SPDLOG_ERROR("Fatal save error: {}", msg);
         if (fatalSaveErrorCb_) fatalSaveErrorCb_(msg);
+    }
+
+    void AppBackend::setPipelineTimingEnabled(bool enabled) {
+        diagnostics::PipelineTimingRecorder::instance().setEnabled(enabled);
+        SPDLOG_INFO("AppBackend: pipeline timing instrumentation {}",
+                    enabled ? "enabled" : "disabled");
+    }
+
+    bool AppBackend::isPipelineTimingEnabled() const {
+        return diagnostics::PipelineTimingRecorder::instance().isEnabled();
+    }
+
+    bool AppBackend::dumpPipelineTiming(const std::string& directory, std::string* errorOut) {
+        const std::string dir = directory.empty() ? pipelineTimingDir_ : directory;
+        if (dir.empty()) {
+            if (errorOut) *errorOut = "no pipeline timing dump directory configured";
+            return false;
+        }
+        std::string error;
+        auto& recorder = diagnostics::PipelineTimingRecorder::instance();
+        if (!recorder.dumpCsv(dir, &error)) {
+            SPDLOG_ERROR("AppBackend: pipeline timing dump failed: {}", error);
+            if (errorOut) *errorOut = error;
+            return false;
+        }
+        SPDLOG_INFO("AppBackend: pipeline timing dumped to {} (frames={}, triggers={})", dir,
+                    recorder.frameRecordCount(), recorder.triggerRecordCount());
+        return true;
+    }
+
+    void AppBackend::dumpPipelineTimingIfEnabled() {
+        auto& recorder = diagnostics::PipelineTimingRecorder::instance();
+        if (!recorder.isEnabled()) return;
+        if (recorder.frameRecordCount() == 0 && recorder.triggerRecordCount() == 0) return;
+        dumpPipelineTiming();
     }
 
     void AppBackend::setLastConfigJson(const std::string& json) {

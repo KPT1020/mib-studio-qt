@@ -196,6 +196,20 @@ cache refreshes when the background changes.
 `getTotalValidFlushed` for experiment totals, and dropped-frame counters for
 the bounded experiment backlog.
 
+**Per-frame latency records** ([[../diagnostics/PipelineTimingRecorder]],
+opt-in): the three realtime inline-loop paths capture host-monotonic
+`algoStartUs`/`algoEndUs` next to the existing steady_clock stamps and hand a
+`RealtimeFrameTiming{frameIndex, grabUs, algoStartUs, algoEndUs}` into
+`publishRealtimeValidationCallbacks` — the shared chokepoint of all realtime
+paths — which writes one `FrameTimingRecord` per processed frame and attaches
+`frameIndex`/`hostTimestampUs` to the `TargetGroupEvent` so
+[[TriggerService]] can measure end-to-end latency. Skips are counted by
+reason (drop-to-latest, ring-behind, empty frame, kernel error, batch queue
+rejected) so pushed == records + skips (frame accounting conserved; index 0
+is the realtime loop's never-consumed sentinel). The timing capture is
+lock-free and keeps the callback-ordering invariant: nothing is taken before
+the target-group callback.
+
 ## Batch processing (offline / re-runs)
 
 For re-generating masks from stream images that are **not** coming from a
