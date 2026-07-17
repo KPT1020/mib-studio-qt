@@ -210,7 +210,10 @@ paths — which writes one `FrameTimingRecord` per processed frame and attaches
 [[TriggerService]] can measure end-to-end latency. Skips are counted by
 reason (drop-to-latest, ring-behind, empty frame, kernel error, batch queue
 rejected) so pushed == records + skips (frame accounting conserved; index 0
-is the realtime loop's never-consumed sentinel). The timing capture is
+is the realtime loop's never-consumed sentinel). Skip ranges are counted
+only when the consumer actually advances `rtLastProcessed_` past them — a
+failed slot fetch (mid-write/evicted) retries without recounting, which
+previously double-counted drop-to-latest skips on slow machines. The timing capture is
 lock-free and keeps the callback-ordering invariant: nothing is taken before
 the target-group callback.
 
