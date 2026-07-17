@@ -5,6 +5,56 @@
 
 ## Features shipped
 
+- **Realtime latency fixes: event-driven wake + trigger request queue**
+  (2026-07-17, #282/#283) — `FrameStore::waitForFrame` replaces the realtime
+  loops' fixed 2 ms sleep-poll with a condition-variable wake from
+  `pushFrame` (Dekker-guarded waiter counter; one relaxed load per push
+  while nobody waits), and `TriggerService` replaces its single-bool request
+  flag with a bounded per-request queue (drop-oldest overflow counted via
+  `getDroppedRequestCount()`). Measured with the mock harness (500 fps,
+  `gavinlouuu/512x96stream`): grab→algo p50 1.03 → 0.083 ms, end-to-end
+  grab→trigger-fire p50 1.44 → 0.50 ms, and exactly one pulse per target
+  frame (was 5/2176 coalesced). Guards: `backend.frame_store_wait`,
+  `integration.e2e_pipeline_timing` phases 3–4. Task record:
+  [[../task/2026-07-17-realtime-latency-fixes]].
+
+- **Pipeline latency instrumentation** (2026-07-17) — Added
+  [[../diagnostics/PipelineTimingRecorder]], a lock-free per-frame latency
+  recorder for diagnosing realtime-pipeline and trigger delay: host-monotonic
+  stamps at acquisition (`Frame::hostTimestampUs`, stamped in
+  CaptureService and carried through FrameStore), algorithm start/end,
+  callback dispatch, and trigger request/wake/fire/pulse-done, with
+  per-reason skip counters so frame accounting is conserved (no silent
+  loss). `TargetGroupEvent`/`TargetGroupSignal` now carry source-frame
+  identity; coalesced trigger requests are counted. Enable with
+  `MIB_PIPELINE_TIMING=1`; CSVs dump on capture stop and are analysed by
+  `scripts/analyze_pipeline_timing.py` (per-stage percentiles + end-to-end
+  grab→fire). Guards: `backend.pipeline_timing_recorder`,
+  `integration.e2e_pipeline_timing`. How-to:
+  `docs/howto/pipeline-latency-diagnosis.md`. Task record:
+  [[../task/2026-07-17-pipeline-latency-instrumentation]].
+
+- **Release-lane gating for the develop/main pipeline** (2026-07-17) — The
+  feature → `develop` (beta) → `main` (stable) lanes now gate what actually
+  releases. The `develop` auto-beta in `build-windows.yml` is path-filtered
+  to app-affecting changes, so docs/vault/`tools/`/`tests/`/wheel-lane-only
+  merges (e.g. the Ultra96 exploration, PR #264 → stray
+  `v1.0.6-beta.0e398db`) no longer publish a beta; edits to the workflow
+  itself still release. `mib-processing-v*` GitHub releases are created with
+  `--latest=false` so the repository "Latest" badge always points at the
+  newest stable desktop release. Lanes documented in
+  `docs/howto/branching-and-releases.md`.
+
+- **Ultra96 direct-DDR FPGA pipeline** (2026-07-15) — Replaced the exact
+  4-PPC/250-MHz image core's full-frame AXI-BRAM MMIO path with XRT/CMA buffer
+  objects over the 128-bit PS HP0 DDR port. The board now matches all 171 MIB
+  reference frames exactly (8,404,992 mask pixels, 920 ordered contours, 176
+  records, 21 valid objects, 7 targets), asserts exact masks over the
+  5,000-frame steady pass, and profiles contour extraction, hierarchy,
+  metrics, and tracking separately. Serial performance improved from 260.5 to
+  1,251 fps; two-buffer FPGA/ARM overlap reaches 1,344 fps. Task record:
+  [[../task/2026-07-15-ultra96-direct-ddr]].
+
 - **Kernel-owned scientific pipeline** (2026-07-14, A7/#242) — Moved contour
   extraction, per-object metrics/LUT/target gating, brightness quantiles, and
   batch track matching behind `IProcessingKernel`

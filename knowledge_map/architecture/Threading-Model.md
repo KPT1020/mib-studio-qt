@@ -27,7 +27,12 @@
 - `FrameStore` internal mutex serialises push/query. See
   [[../data-model/FrameStore]].
 - `ProcessingService` uses `std::condition_variable_any` for the worker
-  queue; realtime loop polls FrameStore by absolute write-index.
+  queue; the realtime loop consumes FrameStore by absolute write-index and,
+  when caught up, blocks in `FrameStore::waitForFrame` (condition variable
+  notified by `pushFrame` behind a Dekker-guarded waiter counter — one
+  relaxed atomic load per push while nobody waits; issue #282 replaced the
+  old 2 ms sleep-poll). TriggerService pulses drain a bounded per-request
+  deque under `triggerMutex_` (issue #283).
 - `processingKernelMutex_` is the operation/activation boundary. Realtime,
   experiment/batch, raw-recording, and buffer-export paths hold a shared
   `CoreOperationLease` for their full operation and provenance lifetime;
@@ -36,6 +41,12 @@
   modules remain loaded until process exit to avoid teardown races.
 - Qt signals from non-GUI threads go through
   [[../frontend/System-Utilities]] `BackgroundCaptureNotifier` (signal bridge).
+- [[../diagnostics/PipelineTimingRecorder]] (opt-in latency instrumentation)
+  adds no threads and no locks: single-writer rings (frame records written
+  only by the realtime thread, trigger records only by the trigger thread)
+  plus relaxed-atomic skip counters; disabled it is one relaxed load per
+  hook. Trigger pending-request metadata rides under the existing
+  `triggerMutex_`.
 
 ## Experiment vs Monitoring vs Realtime
 

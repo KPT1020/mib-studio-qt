@@ -31,7 +31,8 @@ void FrameStore::reserveFrameBytes(size_t frameBytes) {
 }
 
 void FrameStore::pushFrame(const uint8_t* src, size_t size, uint64_t width, uint64_t height,
-                           size_t linePitch, uint64_t pixelFormat, uint64_t timestamp) {
+                           size_t linePitch, uint64_t pixelFormat, uint64_t timestamp,
+                           uint64_t hostTimestampUs) {
     if (capacity_.load(std::memory_order_acquire) == 0 || src == nullptr || size == 0) return;
 
     const uint64_t w = totalWritten_.fetch_add(1) + 1; // next write count
@@ -58,9 +59,24 @@ void FrameStore::pushFrame(const uint8_t* src, size_t size, uint64_t width, uint
         f.pixelFormat = pixelFormat;
         f.linePitch = linePitch;
         f.timestamp = timestamp;
+        f.hostTimestampUs = hostTimestampUs;
         f.data.resize(size);
         std::copy_n(src, size, f.data.begin());
         slotWriteIndices_[idx] = w - 1;
+    }
+
+    // Wake consumers blocked in waitForFrame, after the slot copy so the
+    // frame is readable on wake. seq_cst load pairs with the waiter's seq_cst
+    // registration (Dekker): if we miss the waiter here, the waiter's
+    // predicate is guaranteed to see the new totalWritten_ and not block.
+    // Taking waitMutex_ (empty critical section) before notify closes the
+    // window where a registered waiter has passed its predicate check but not
+    // yet blocked. No cost on the hot path while nobody waits.
+    if (waitWaiters_.load(std::memory_order_seq_cst) > 0) {
+        {
+            std::lock_guard<std::mutex> wk(waitMutex_);
+        }
+        waitCv_.notify_all();
     }
 
     // Periodic stats
@@ -70,6 +86,24 @@ void FrameStore::pushFrame(const uint8_t* src, size_t size, uint64_t width, uint
                      static_cast<unsigned long long>(w), avail,
                      capacity_.load(std::memory_order_acquire));
     }
+}
+
+uint64_t FrameStore::waitForFrame(uint64_t lastSeenTotal, std::chrono::microseconds timeout) {
+    uint64_t total = totalWritten_.load(std::memory_order_seq_cst);
+    if (total > lastSeenTotal) return total;
+
+    // Register BEFORE re-checking the predicate under the mutex (Dekker pair
+    // with pushFrame's post-copy waiter check — see the comment there).
+    waitWaiters_.fetch_add(1, std::memory_order_seq_cst);
+    {
+        std::unique_lock<std::mutex> lk(waitMutex_);
+        waitCv_.wait_for(lk, timeout, [&] {
+            total = totalWritten_.load(std::memory_order_seq_cst);
+            return total > lastSeenTotal;
+        });
+    }
+    waitWaiters_.fetch_sub(1, std::memory_order_relaxed);
+    return totalWritten_.load(std::memory_order_seq_cst);
 }
 
 bool FrameStore::getLatest(Frame& out) const {
@@ -144,6 +178,7 @@ bool FrameStore::getByWriteIndexROI(uint64_t writeIndex, int roiX, int roiY, int
     out.height = static_cast<uint64_t>(clampedH);
     out.pixelFormat = src.pixelFormat;
     out.timestamp = src.timestamp;
+    out.hostTimestampUs = src.hostTimestampUs;
     out.linePitch = 0; // ROI will be contiguous
 
     // Extract ROI region

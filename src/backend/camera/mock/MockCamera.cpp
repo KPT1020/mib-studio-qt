@@ -193,6 +193,21 @@ namespace camera::mock
         return true;
     }
 
+    void MockCamera::configureTriggerOutput(const std::string &lineSelector)
+    {
+        SPDLOG_INFO("MockCamera: simulated trigger output configured on line '{}'", lineSelector);
+    }
+
+    bool MockCamera::setTriggerOutput(bool high)
+    {
+        const bool wasHigh = triggerLineHigh_.exchange(high, std::memory_order_acq_rel);
+        if (high && !wasHigh)
+        {
+            triggerPulseCount_.fetch_add(1, std::memory_order_relaxed);
+        }
+        return true;
+    }
+
     void MockCamera::setFrameInterval(std::chrono::microseconds interval)
     {
         options_.frameInterval = interval;

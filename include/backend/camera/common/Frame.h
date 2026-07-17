@@ -19,6 +19,11 @@ struct Frame {
     uint64_t pixelFormat = 0;  // Use PFNC codes to match Euresys metadata.
     size_t linePitch = 0;      // Bytes per line in the buffer (may exceed width).
     uint64_t timestamp = 0;    // Nanoseconds or device ticks depending on source.
+    // Host monotonic microseconds (Tools::getTimestamp clock) stamped by
+    // CaptureService when grabFrame returns. 0 when the frame never went
+    // through the capture loop. Unlike `timestamp` this is comparable across
+    // pipeline stages, so it anchors end-to-end latency measurements.
+    uint64_t hostTimestampUs = 0;
     std::vector<uint8_t> data; // Raw image payload copied from the source buffer.
 };
 

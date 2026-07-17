@@ -34,8 +34,13 @@ bool loopFiles{true};
 
 ## Gotchas
 
-- Mock camera does not support trigger output (`setTriggerOutput` returns
-  false) — [[../services/TriggerService]] pulses become no-ops.
+- Mock camera **simulates** trigger output: `setTriggerOutput` flips an
+  atomic line level and counts rising edges (`triggerPulseCount()`), always
+  returning true, so [[../services/TriggerService]] fires real pulses (and
+  [[../diagnostics/PipelineTimingRecorder]] records them) in headless
+  pipeline dry-runs — see `tests/tools/mock_pipeline_timing_run.cpp` and
+  `docs/howto/pipeline-latency-diagnosis.md`. No electrical output exists,
+  of course.
 - Timestamps are synthesized from steady-clock deltas, not device ticks —
   useful for dev, not for absolute timing.
 - See `docs/howto/mock-camera-dev-mode.md` and task

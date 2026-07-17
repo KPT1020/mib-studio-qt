@@ -23,9 +23,15 @@ struct Frame {
     uint64_t pixelFormat;   // PFNC code
     size_t linePitch;       // bytes per line
     uint64_t timestamp;     // device ticks OR nanoseconds (source-dependent)
+    uint64_t hostTimestampUs; // host monotonic acquisition stamp (0 = unknown)
     std::vector<uint8_t> data;
 };
 ```
+
+`hostTimestampUs` is stamped by [[../services/CaptureService]] at grab time
+and carried through `pushFrame`/`getByWriteIndex[ROI]` so consumers can
+measure acquisition→stage latency on one clock
+([[../diagnostics/PipelineTimingRecorder]]).
 
 ## Absolute indexing
 
@@ -40,7 +46,16 @@ window:
 ## Push / query APIs
 
 ```cpp
-void pushFrame(src, size, w, h, linePitch, pixelFormat, timestamp);
+void pushFrame(src, size, w, h, linePitch, pixelFormat, timestamp,
+               hostTimestampUs = 0);
+
+// Event-driven consumer wake (issue #282): block until totalWritten()
+// exceeds lastSeenTotal, a frame is pushed, or timeout elapses.
+// pushFrame notifies after the slot copy via a Dekker-guarded waiter
+// counter (one relaxed load per push while nobody waits, no lost
+// wakeups). Replaced the realtime loops' fixed 2 ms sleep-poll, which
+// put a uniform 0-2 ms wait in front of every frame.
+uint64_t waitForFrame(uint64_t lastSeenTotal, std::chrono::microseconds timeout);
 
 bool getLatest(Frame& out) const;
 bool getByWriteIndex(uint64_t idx, Frame& out) const;

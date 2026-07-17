@@ -46,6 +46,7 @@ following `[[WikiLinks]]`. If you are a new agent, start here:
 ### Diagnostics
 - [[diagnostics/_MOC|Diagnostics MOC]]
 - [[diagnostics/CrashStateMirror]] — lock-free service-state snapshot
+- [[diagnostics/PipelineTimingRecorder]] — per-frame pipeline latency recorder
 - [[services/CrashReporter]] — process-level crash handler + Sentry
 
 ### Domain

@@ -65,9 +65,13 @@ same mask/empty-frame algorithm is used on both sides of the boundary.
 
 - **Worker pool** (`start(size_t n = hardware_concurrency())`) — generic
   `Job` queue (not heavily used at present; realtime loop carries most work).
-- **Realtime thread** (`startRealtime(frameStore)`) — polls FrameStore
-  write-index; processes every frame or only latest depending on
-  `setRealtimeDropFrames`. Experiments force every-frame.
+- **Realtime thread** (`startRealtime(frameStore)`) — consumes FrameStore
+  by write-index; when caught up it blocks in
+  `FrameStore::waitForFrame` (event-driven wake from `pushFrame`, issue
+  #282 — the old fixed 2 ms sleep-poll put a uniform 0-2 ms wait in front
+  of every frame and dominated end-to-end latency). Processes every frame
+  or only latest depending on `setRealtimeDropFrames`. Experiments force
+  every-frame.
 - **Async batch workers** (`startBatchPipeline`) — consume a bounded frame
   queue in configured-size batches. `enqueueBatchFrame` returns immediately
   with accepted/dropped status so capture can keep running while workers process
@@ -195,6 +199,23 @@ cache refreshes when the background changes.
 `getAlgoAvgUs1s`. Plus `getBufferedFrameCounts()` for cheap UI/status polling,
 `getTotalValidFlushed` for experiment totals, and dropped-frame counters for
 the bounded experiment backlog.
+
+**Per-frame latency records** ([[../diagnostics/PipelineTimingRecorder]],
+opt-in): the three realtime inline-loop paths capture host-monotonic
+`algoStartUs`/`algoEndUs` next to the existing steady_clock stamps and hand a
+`RealtimeFrameTiming{frameIndex, grabUs, algoStartUs, algoEndUs}` into
+`publishRealtimeValidationCallbacks` — the shared chokepoint of all realtime
+paths — which writes one `FrameTimingRecord` per processed frame and attaches
+`frameIndex`/`hostTimestampUs` to the `TargetGroupEvent` so
+[[TriggerService]] can measure end-to-end latency. Skips are counted by
+reason (drop-to-latest, ring-behind, empty frame, kernel error, batch queue
+rejected) so pushed == records + skips (frame accounting conserved; index 0
+is the realtime loop's never-consumed sentinel). Skip ranges are counted
+only when the consumer actually advances `rtLastProcessed_` past them — a
+failed slot fetch (mid-write/evicted) retries without recounting, which
+previously double-counted drop-to-latest skips on slow machines. The timing capture is
+lock-free and keeps the callback-ordering invariant: nothing is taken before
+the target-group callback.
 
 ## Batch processing (offline / re-runs)
 

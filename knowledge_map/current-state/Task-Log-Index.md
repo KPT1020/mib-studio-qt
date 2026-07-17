@@ -52,13 +52,16 @@
 - `task/2026-04-15-trigger-timing-bug.md`
 - `task/2026-04-16-thread-performance-audit.md`
 - `task/2026-07-02-realtime-performance-plan.md`
+- `task/2026-07-15-ultra96-direct-ddr.md`
+- `task/2026-07-17-pipeline-latency-instrumentation.md`
+- `task/2026-07-17-realtime-latency-fixes.md`
 
 ### Portable processing / Biowork
 - `task/2026-07-13-hot-swappable-processing-core-native.md`
 - `task/2026-07-13-processing-conformance.md`
 - `task/2026-07-13-processing-core-registry.md`
 
-## By filename (all 32)
+## By filename (selected historical records)
 
 ```
 2025-11-14-safe-start-stop-egrabber.md
@@ -80,6 +83,7 @@
 2026-07-13-processing-conformance.md
 2026-07-13-processing-core-registry.md
 2026-07-13-hot-swappable-processing-core-native.md
+2026-07-15-ultra96-direct-ddr.md
 camera-reset.md
 diagnostic-logging.md
 external-config-browse.md

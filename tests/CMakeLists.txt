@@ -250,6 +250,27 @@ target_link_libraries(e2e_trigger_timing_test PRIVATE Threads::Threads)
 add_test(NAME integration.e2e_trigger_timing COMMAND $<TARGET_FILE:e2e_trigger_timing_test>)
 set_tests_properties(integration.e2e_trigger_timing PROPERTIES LABELS "integration;e2e;trigger" TIMEOUT 120)
 
+mib_add_backend_test_executable(frame_store_wait_test backend/frame_store_wait_test.cpp)
+target_link_libraries(frame_store_wait_test PRIVATE Threads::Threads)
+add_test(NAME backend.frame_store_wait COMMAND $<TARGET_FILE:frame_store_wait_test>)
+set_tests_properties(backend.frame_store_wait PROPERTIES LABELS "backend" TIMEOUT 60)
+
+mib_add_backend_test_executable(pipeline_timing_recorder_test backend/pipeline_timing_recorder_test.cpp)
+target_link_libraries(pipeline_timing_recorder_test PRIVATE Threads::Threads)
+add_test(NAME backend.pipeline_timing_recorder COMMAND $<TARGET_FILE:pipeline_timing_recorder_test>)
+set_tests_properties(backend.pipeline_timing_recorder PROPERTIES LABELS "backend;diagnostics" TIMEOUT 30)
+
+mib_add_backend_test_executable(e2e_pipeline_timing_test integration/e2e_pipeline_timing_test.cpp)
+target_link_libraries(e2e_pipeline_timing_test PRIVATE Threads::Threads)
+add_test(NAME integration.e2e_pipeline_timing COMMAND $<TARGET_FILE:e2e_pipeline_timing_test>)
+set_tests_properties(integration.e2e_pipeline_timing PROPERTIES LABELS "integration;e2e;trigger;diagnostics" TIMEOUT 120)
+
+# Manual diagnosis harness (no add_test: needs a local frames folder).
+# Full mock pipeline dry-run with latency instrumentation — see
+# docs/howto/pipeline-latency-diagnosis.md.
+mib_add_backend_test_executable(mock_pipeline_timing_run tools/mock_pipeline_timing_run.cpp)
+target_link_libraries(mock_pipeline_timing_run PRIVATE Threads::Threads)
+
 mib_add_backend_test_executable(e2e_pipeline_stress_test integration/e2e_pipeline_stress_test.cpp)
 target_link_libraries(e2e_pipeline_stress_test PRIVATE Threads::Threads)
 # Lifecycle start/stop race test. Has an in-process watchdog that _Exit(99)s

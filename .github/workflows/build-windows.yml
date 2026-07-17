@@ -1,6 +1,24 @@
 name: Build Windows
 
 on:
+  push:
+    branches: [develop]
+    # Dev-lane release gate: a develop merge only cuts an auto-beta when it
+    # can change the shipped desktop app. Docs, vault, tooling/exploration,
+    # wheel-lane, and other-workflow merges must not advance the beta channel
+    # (later patterns win; the final re-include keeps edits to this workflow
+    # itself releasing so pipeline changes are exercised).
+    paths:
+      - '**'
+      - '!docs/**'
+      - '!knowledge_map/**'
+      - '!tools/**'
+      - '!tests/**'
+      - '!bindings/python/**'
+      - '!mkdocs.yml'
+      - '!**.md'
+      - '!.github/**'
+      - '.github/workflows/build-windows.yml'
   workflow_dispatch:
     inputs:
       mode:
@@ -19,6 +37,10 @@ on:
           - patch
           - minor
           - major
+
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:

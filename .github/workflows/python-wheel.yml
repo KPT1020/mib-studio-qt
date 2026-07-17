@@ -977,6 +977,9 @@ jobs:
             if [ "$PROCESSING_CHANNEL" = beta ]; then
               release_flags+=(--prerelease)
             fi
+            # Never claim the repository "Latest" badge: that must always
+            # point at the newest stable desktop release, not core wheels.
+            release_flags+=(--latest=false)
             gh release create "$tag" \
               --repo "${{ github.repository }}" \
               --verify-tag \
