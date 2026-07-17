@@ -67,7 +67,41 @@ it:
 latency the trigger-timing investigations previously could not observe in
 software (see the 2026-04-15 trigger-timing case study in the vault).
 
-## 3. Caveats
+## 3. Dry-run without hardware (mock camera)
+
+The full pipeline (MockCamera → CaptureService → FrameStore →
+ProcessingService → TriggerService) can be exercised headlessly with the
+`mock_pipeline_timing_run` harness. MockCamera simulates the trigger output
+line, so pulses and their timing records are real.
+
+```bash
+# fetch stream frames from the public HF dataset (512x96 grayscale TIFFs)
+python3 scripts/fetch_hf_512x96stream.py --out /tmp/frames512x96 --count 1000
+
+cmake --preset linux-backend-only
+cmake --build --preset linux-backend-only-build --target mock_pipeline_timing_run
+
+# ROI defaults to the RIGHT THIRD of the field of view; background defaults
+# to the per-pixel median of sampled frames; target-group gates are wide
+# open so every valid detection fires TriggerService.
+./build/linux-backend/mock_pipeline_timing_run \
+    --frames /tmp/frames512x96 --fps 500 --duration 20 \
+    --data-dir /tmp/timing_run --out /tmp/timing_run/pipeline_timing
+
+python3 scripts/analyze_pipeline_timing.py /tmp/timing_run/pipeline_timing
+```
+
+Options: `--roi x,y,w,h`, `--background <image>`, `--drop-frames` (default is
+every-frame mode), `--fps`, `--duration`.
+
+Reference numbers from a 20 s / 500 fps run of `gavinlouuu/512x96stream`
+(1000 frames, Linux container, every-frame mode): 9,904 frames captured,
+zero drops, accounting conserved; grab→algo-start p50 ≈ 1.0 ms (bounded by
+the realtime loop's 2 ms idle poll), algo p50 ≈ 0.30 ms, trigger
+request→fire p50 ≈ 0.05 ms with rare scheduling outliers (max ≈ 30 ms — the
+P9 no-RT-priority tech debt), end-to-end grab→fire p50 ≈ 1.4 ms.
+
+## 4. Caveats
 
 - The frame's own `timestamp` (device tick) is **not** on the host clock;
   only `*_us` columns are mutually comparable.

@@ -38,4 +38,17 @@ in `mib_processing`), `CaptureService.cpp`, `FrameStore.{h,cpp}`,
 `TriggerService.{h,cpp}`, `AppBackend.{h,cpp}`,
 `scripts/analyze_pipeline_timing.py`, tests, vault notes.
 
+**Follow-up (same day) — mock dry-run harness:** MockCamera now simulates
+the trigger output line (atomic level + rising-edge counter, returns true),
+and `tests/tools/mock_pipeline_timing_run.cpp` drives the full production
+wiring headlessly from a frames folder (fetched with
+`scripts/fetch_hf_512x96stream.py` from HF `gavinlouuu/512x96stream`):
+ROI = right third of FOV, per-pixel-median background, wide-open
+target-group gates so every valid detection fires TriggerService. First
+measured session (500 fps × 20 s, every-frame): 9,904 captured / 0 dropped /
+accounting conserved; grab→algo p50 1.03 ms (dominated by the realtime
+loop's 2 ms idle poll), algo p50 0.30 ms, request→fire p50 0.053 ms
+(max 30 ms scheduling outlier → P9 RT-priority debt), end-to-end grab→fire
+p50 1.44 ms, 5/2176 requests coalesced.
+
 Status: Done

@@ -28,6 +28,15 @@ public:
     bool grabFrame(camera::common::Frame& out) override;
     bool pollStats(camera::common::CameraStats& out) const override;
 
+    // Simulated digital trigger output so TriggerService works end-to-end in
+    // mock mode (headless pipeline dry-runs, latency instrumentation). The
+    // "line" only records level changes; rising edges are counted.
+    void configureTriggerOutput(const std::string& lineSelector) override;
+    bool setTriggerOutput(bool high) override;
+    uint64_t triggerPulseCount() const {
+        return triggerPulseCount_.load(std::memory_order_relaxed);
+    }
+
     void setFrameInterval(std::chrono::microseconds interval);
     void setLooping(bool loop);
 
@@ -45,6 +54,10 @@ private:
     std::atomic<bool> running_{false};
     std::chrono::steady_clock::time_point lastFrameTime_{};
     mutable camera::common::CameraStats stats_{};
+
+    // Simulated trigger line (written by the trigger thread).
+    std::atomic<bool> triggerLineHigh_{false};
+    std::atomic<uint64_t> triggerPulseCount_{0};
 };
 
 } // namespace camera::mock
