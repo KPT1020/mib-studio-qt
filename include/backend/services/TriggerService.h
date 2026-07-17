@@ -14,6 +14,11 @@ struct TargetGroupSignal {
     bool isTargetGroup{false};
     int objectId{-1};
     int trackId{-1};
+    // Source-frame identity for end-to-end latency correlation (see
+    // PipelineTimingRecorder): FrameStore write index and host monotonic
+    // acquisition stamp (microseconds; 0 if unknown).
+    uint64_t frameIndex{0};
+    uint64_t hostTimestampUs{0};
 };
 
 class TriggerService {
@@ -59,6 +64,19 @@ private:
     std::mutex triggerMutex_;
     std::condition_variable triggerCV_;
     std::atomic<bool> triggerRequested_{false};
+
+    // Metadata of the pending trigger request, for latency instrumentation
+    // (PipelineTimingRecorder). Written by onTargetGroupResult and read by
+    // triggerLoop, both under triggerMutex_, so it needs no extra locking.
+    // When requests coalesce into one pulse the FIRST request's identity is
+    // kept (it has waited longest) and `coalesced` counts the merged extras.
+    struct PendingRequest {
+        uint64_t frameIndex{0};
+        uint64_t hostTimestampUs{0};
+        uint64_t requestUs{0};
+        uint32_t coalesced{0};
+    };
+    PendingRequest pendingRequest_;
 
     // Camera reference (non-owning)
     std::atomic<camera::common::ICamera*> camera_{nullptr};

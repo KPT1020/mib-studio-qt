@@ -2,6 +2,7 @@
 #include "backend/processing/ProcessingScience.h"
 #include "backend/recording/Hdf5Service.h"
 #include "backend/diagnostics/CrashStateMirror.h"
+#include "backend/diagnostics/PipelineTimingRecorder.h"
 #include "backend/playback/FrameStore.h"
 #include "backend/app/Tools.h"
 
@@ -1063,7 +1064,7 @@ void ProcessingService::stopBatchPipeline() {
 }
 
 bool ProcessingService::enqueueBatchFrame(const cv::Mat& grayImage, uint64_t index,
-                                          uint64_t timestampNs) {
+                                          uint64_t timestampNs, uint64_t hostTimestampUs) {
     if (!batchRunning_.load(std::memory_order_acquire) || grayImage.empty()) {
         return false;
     }
@@ -1088,7 +1089,7 @@ bool ProcessingService::enqueueBatchFrame(const cv::Mat& grayImage, uint64_t ind
             return false;
         }
 
-        batchQueue_.push(QueuedBatchFrame{std::move(gray), index, timestampNs});
+        batchQueue_.push(QueuedBatchFrame{std::move(gray), index, timestampNs, hostTimestampUs});
         batchFramesAccepted_.fetch_add(1, std::memory_order_relaxed);
 
         const size_t depth = batchQueue_.size();
@@ -1115,7 +1116,7 @@ bool ProcessingService::enqueueBatchFrame(const backend::playback::Frame& frame,
     if (gray.empty()) {
         return false;
     }
-    return enqueueBatchFrame(gray, index, frame.timestamp);
+    return enqueueBatchFrame(gray, index, frame.timestamp, frame.hostTimestampUs);
 }
 
 ProcessingService::BatchPipelineStats ProcessingService::getBatchPipelineStats() const {
@@ -1180,6 +1181,7 @@ void ProcessingService::batchWorkerLoop() {
                 ProcessedFrame base =
                     computeProcessedFrame(item.gray, config.background, config.processing,
                                           config.roi, item.index, item.timestampNs);
+                base.hostTimestampUs = item.hostTimestampUs;
                 if (base.originalImage.empty() || base.processedImage.empty()) {
                     results.emplace_back(std::move(base));
                     continue;
@@ -1214,6 +1216,7 @@ void ProcessingService::batchWorkerLoop() {
                     ProcessedFrame objectFrame;
                     objectFrame.index = base.index;
                     objectFrame.timestampNs = base.timestampNs;
+                    objectFrame.hostTimestampUs = base.hostTimestampUs;
                     objectFrame.originalImage = base.originalImage.clone();
                     objectFrame.processedImage = base.processedImage.clone();
                     objectFrame.validation = std::move(validation);
@@ -1559,15 +1562,29 @@ TargetGroupEvent ProcessingService::selectTargetGroupTriggerOwner(
 }
 
 void ProcessingService::publishRealtimeValidationCallbacks(
-    const std::vector<FilterResult>& validations, uint64_t timestampNs) {
-    const auto targetOwner = selectTargetGroupTriggerOwner(validations);
+    const std::vector<FilterResult>& validations, uint64_t timestampNs,
+    const RealtimeFrameTiming& timing) {
+    // Latency-critical ordering invariant: the target-group (trigger) callback
+    // fires FIRST and no heavy lock is taken before it (see
+    // knowledge_map/task/2026-04-15-trigger-timing-bug.md). Timing capture
+    // below is lock-free and gated to a relaxed atomic load when disabled.
+    auto& timingRecorder = backend::diagnostics::PipelineTimingRecorder::instance();
+    const bool recordTiming = timing.present && timingRecorder.isEnabled();
+    uint64_t triggerDispatchUs = 0;
+
+    auto targetOwner = selectTargetGroupTriggerOwner(validations);
     if (targetOwner.isTargetGroup) {
+        targetOwner.frameIndex = timing.frameIndex;
+        targetOwner.hostTimestampUs = timing.grabUs;
         TargetGroupCallback tgCb;
         {
             std::scoped_lock cbLk(targetGroupCallbackMutex_);
             tgCb = targetGroupCallback_;
         }
         if (tgCb) tgCb(targetOwner);
+        if (recordTiming) {
+            triggerDispatchUs = backend::diagnostics::PipelineTimingRecorder::nowUs();
+        }
     }
 
     // Hoist the callback copy out of the per-object loop: one mutex-guarded
@@ -1577,13 +1594,33 @@ void ProcessingService::publishRealtimeValidationCallbacks(
         std::scoped_lock cbLk(ringRatioCallbackMutex_);
         rrCb = ringRatioCallback_;
     }
-    if (!rrCb) return;
-
-    for (const auto& validation : validations) {
-        if (!validation.isValid || validation.ringRatio <= 0.0) {
-            continue;
+    if (rrCb) {
+        for (const auto& validation : validations) {
+            if (!validation.isValid || validation.ringRatio <= 0.0) {
+                continue;
+            }
+            rrCb(validation.ringRatio, static_cast<int64_t>(timestampNs));
         }
-        rrCb(validation.ringRatio, static_cast<int64_t>(timestampNs));
+    }
+
+    if (recordTiming) {
+        backend::diagnostics::FrameTimingRecord record;
+        record.frameIndex = timing.frameIndex;
+        record.deviceTimestamp = timestampNs;
+        record.grabUs = timing.grabUs;
+        record.algoStartUs = timing.algoStartUs;
+        record.algoEndUs = timing.algoEndUs;
+        record.triggerDispatchUs = triggerDispatchUs;
+        record.callbacksDoneUs = backend::diagnostics::PipelineTimingRecorder::nowUs();
+        for (const auto& validation : validations) {
+            if (validation.isValid) {
+                ++record.validCount;
+            } else {
+                ++record.invalidCount;
+            }
+        }
+        record.isTargetGroup = targetOwner.isTargetGroup ? 1 : 0;
+        timingRecorder.recordFrame(record);
     }
 }
 
@@ -1692,7 +1729,18 @@ void ProcessingService::realtimeBatchLoop() {
         std::vector<FilterResult> frameValidations;
         uint64_t lastFrameIndex = 0;
         uint64_t lastFrameTimestamp = 0;
+        uint64_t lastFrameHostUs = 0;
         bool hasPendingFrame = false;
+
+        // Async-batch mode has no per-frame algo stamps (batch timing is
+        // aggregate), so the timing record carries frame identity only.
+        const auto makeTiming = [](uint64_t frameIndex, uint64_t hostUs) {
+            RealtimeFrameTiming timing;
+            timing.present = true;
+            timing.frameIndex = frameIndex;
+            timing.grabUs = hostUs;
+            return timing;
+        };
 
         for (auto& frame : batch) {
             if (frame.validation.isValid) {
@@ -1703,12 +1751,15 @@ void ProcessingService::realtimeBatchLoop() {
             if (!hasPendingFrame) {
                 lastFrameIndex = frame.index;
                 lastFrameTimestamp = frame.timestampNs;
+                lastFrameHostUs = frame.hostTimestampUs;
                 hasPendingFrame = true;
             } else if (frame.index != lastFrameIndex || frame.timestampNs != lastFrameTimestamp) {
-                publishRealtimeValidationCallbacks(frameValidations, lastFrameTimestamp);
+                publishRealtimeValidationCallbacks(frameValidations, lastFrameTimestamp,
+                                                   makeTiming(lastFrameIndex, lastFrameHostUs));
                 frameValidations.clear();
                 lastFrameIndex = frame.index;
                 lastFrameTimestamp = frame.timestampNs;
+                lastFrameHostUs = frame.hostTimestampUs;
             }
 
             frameValidations.push_back(frame.validation);
@@ -1716,7 +1767,8 @@ void ProcessingService::realtimeBatchLoop() {
         }
 
         if (hasPendingFrame && !frameValidations.empty()) {
-            publishRealtimeValidationCallbacks(frameValidations, lastFrameTimestamp);
+            publishRealtimeValidationCallbacks(frameValidations, lastFrameTimestamp,
+                                               makeTiming(lastFrameIndex, lastFrameHostUs));
         }
     });
     if (!started) {
@@ -1775,6 +1827,8 @@ void ProcessingService::realtimeBatchLoop() {
         if (last + 1 < earliest) {
             const uint64_t skipped = earliest - (last + 1);
             skippedSinceSummary += skipped;
+            backend::diagnostics::PipelineTimingRecorder::instance().countSkipped(
+                backend::diagnostics::PipelineSkipReason::RingBehind, skipped);
             last = earliest - 1;
             rtLastProcessed_.store(last, std::memory_order_relaxed);
             SPDLOG_DEBUG(
@@ -1790,6 +1844,9 @@ void ProcessingService::realtimeBatchLoop() {
             const uint64_t firstIdx = dropFrames ? latest : last + 1;
             if (dropFrames && last + 1 < firstIdx) {
                 skippedSinceSummary += firstIdx - (last + 1);
+                backend::diagnostics::PipelineTimingRecorder::instance().countSkipped(
+                    backend::diagnostics::PipelineSkipReason::DroppedToLatest,
+                    firstIdx - (last + 1));
             }
 
             for (uint64_t idx = firstIdx;
@@ -1809,6 +1866,8 @@ void ProcessingService::realtimeBatchLoop() {
                     ++queuedSinceSummary;
                 } else {
                     ++skippedSinceSummary;
+                    backend::diagnostics::PipelineTimingRecorder::instance().countSkipped(
+                        backend::diagnostics::PipelineSkipReason::BatchQueueRejected);
                 }
                 rtLastProcessed_.store(idx, std::memory_order_relaxed);
 
@@ -1909,6 +1968,9 @@ void ProcessingService::realtimeLoop() {
 void ProcessingService::realtimeInlineLoop() {
     rtLastProcessed_.store(0);
     using clock = std::chrono::steady_clock;
+    // Per-frame latency instrumentation sink (no-op unless enabled; see
+    // knowledge_map/diagnostics/PipelineTimingRecorder.md).
+    auto& rtTimingRecorder = backend::diagnostics::PipelineTimingRecorder::instance();
     auto lastSummaryTs = clock::now();
     uint64_t framesSinceSummary = 0;
     uint64_t framesSkippedSinceSummary = 0;
@@ -1967,6 +2029,8 @@ void ProcessingService::realtimeInlineLoop() {
             // Skip ahead if our pointer fell behind the ring window
             uint64_t skipped = earliest - (last + 1);
             framesSkippedSinceSummary += skipped;
+            rtTimingRecorder.countSkipped(
+                backend::diagnostics::PipelineSkipReason::RingBehind, skipped);
             last = earliest - 1;
             SPDLOG_DEBUG("Processing fell behind, skipping {} frames (last={}, earliest={})",
                          skipped, last, earliest);
@@ -1985,6 +2049,9 @@ void ProcessingService::realtimeInlineLoop() {
             const uint64_t nextIdx = latest;
             if (last + 1 < nextIdx) {
                 framesSkippedSinceSummary += (nextIdx - (last + 1));
+                rtTimingRecorder.countSkipped(
+                    backend::diagnostics::PipelineSkipReason::DroppedToLatest,
+                    nextIdx - (last + 1));
             }
             const uint64_t idx = nextIdx;
             const auto frameStart = clock::now();
@@ -2027,6 +2094,8 @@ void ProcessingService::realtimeInlineLoop() {
                 cv::Mat mask(roi.h, roi.w, CV_8UC1, cv::Scalar(0));
                 cv::Mat blurredCurr, blurredBg, thresh;
                 const auto algoStart = clock::now();
+                const uint64_t algoStartUsRec =
+                    rtTimingRecorder.isEnabled() ? rtTimingRecorder.nowUs() : 0;
                 auto toOdd = [](int v) -> int {
                     if (v < 1) v = 1;
                     if ((v % 2) == 0) v += 1;
@@ -2104,6 +2173,8 @@ void ProcessingService::realtimeInlineLoop() {
                     SPDLOG_TRACE("Empty frame detected (idx={}, pixel_count={}, threshold={}), "
                                  "skipping further processing",
                                  idx, pixelCount, config.empty_frame_pixel_threshold);
+                    rtTimingRecorder.countSkipped(
+                        backend::diagnostics::PipelineSkipReason::EmptyFrame);
 
                     // Auto-capture logic (only when experiment is NOT running)
                     if (config.auto_background_enabled && !experimentActive_.load()) {
@@ -2185,6 +2256,8 @@ void ProcessingService::realtimeInlineLoop() {
                                                  &kernelError)) {
                     SPDLOG_ERROR("Realtime processing core failed for frame {}: {}", idx,
                                  kernelError);
+                    rtTimingRecorder.countSkipped(
+                        backend::diagnostics::PipelineSkipReason::KernelError);
                     rtLastProcessed_.store(idx);
                     continue;
                 }
@@ -2211,6 +2284,8 @@ void ProcessingService::realtimeInlineLoop() {
                     }
                 }
                 const auto algoEnd = clock::now();
+                const uint64_t algoEndUsRec =
+                    algoStartUsRec != 0 ? rtTimingRecorder.nowUs() : 0;
                 const double algoMs =
                     std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
                 algoMsSinceSummary += algoMs;
@@ -2222,7 +2297,9 @@ void ProcessingService::realtimeInlineLoop() {
                     }
                 }
 
-                publishRealtimeValidationCallbacks(validations, f.timestamp);
+                publishRealtimeValidationCallbacks(
+                    validations, f.timestamp,
+                    {true, idx, f.hostTimestampUs, algoStartUsRec, algoEndUsRec});
 
                 // Always accumulate frames for monitoring (with size limit)
                 for (const auto& objectValidation : validations) {
@@ -2449,6 +2526,8 @@ void ProcessingService::realtimeInlineLoop() {
                 cv::Mat roiCurr = gray(cvRoi);
                 cv::Mat blurredCurr, blurredBg, thresh;
                 const auto algoStart = clock::now();
+                const uint64_t algoStartUsRec =
+                    rtTimingRecorder.isEnabled() ? rtTimingRecorder.nowUs() : 0;
                 auto toOdd = [](int v) -> int {
                     if (v < 1) v = 1;
                     if ((v % 2) == 0) v += 1;
@@ -2521,6 +2600,8 @@ void ProcessingService::realtimeInlineLoop() {
                     SPDLOG_TRACE("Empty frame detected (idx={}, pixel_count={}, threshold={}), "
                                  "skipping further processing",
                                  idx, pixelCount, config.empty_frame_pixel_threshold);
+                    rtTimingRecorder.countSkipped(
+                        backend::diagnostics::PipelineSkipReason::EmptyFrame);
 
                     // Auto-capture logic (only when experiment is NOT running)
                     if (config.auto_background_enabled && !experimentActive_.load()) {
@@ -2609,6 +2690,8 @@ void ProcessingService::realtimeInlineLoop() {
                         &kernelError)) {
                     SPDLOG_ERROR("Realtime processing core failed for frame {}: {}", idx,
                                  kernelError);
+                    rtTimingRecorder.countSkipped(
+                        backend::diagnostics::PipelineSkipReason::KernelError);
                     rtLastProcessed_.store(idx);
                     continue;
                 }
@@ -2624,6 +2707,8 @@ void ProcessingService::realtimeInlineLoop() {
                     validation.allContours ? *validation.allContours
                                            : std::vector<std::vector<cv::Point>>{};
                 const auto algoEnd = clock::now();
+                const uint64_t algoEndUsRec =
+                    algoStartUsRec != 0 ? rtTimingRecorder.nowUs() : 0;
                 const double algoMs =
                     std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
                 algoMsSinceSummary += algoMs;
@@ -2635,7 +2720,9 @@ void ProcessingService::realtimeInlineLoop() {
                     }
                 }
 
-                publishRealtimeValidationCallbacks(validations, f.timestamp);
+                publishRealtimeValidationCallbacks(
+                    validations, f.timestamp,
+                    {true, idx, f.hostTimestampUs, algoStartUsRec, algoEndUsRec});
 
                 // Always accumulate frames for monitoring (with size limit)
                 cv::Mat roiOriginal = gray(cvRoi);
@@ -2834,6 +2921,8 @@ void ProcessingService::realtimeInlineLoop() {
                 cv::Mat roiCurr = gray(cvRoi);
                 cv::Mat blurredCurr, blurredBg, thresh;
                 const auto algoStart = clock::now();
+                const uint64_t algoStartUsRec =
+                    rtTimingRecorder.isEnabled() ? rtTimingRecorder.nowUs() : 0;
                 auto toOdd = [](int v) -> int {
                     if (v < 1) v = 1;
                     if ((v % 2) == 0) v += 1;
@@ -2906,6 +2995,8 @@ void ProcessingService::realtimeInlineLoop() {
                     SPDLOG_TRACE("Empty frame detected (idx={}, pixel_count={}, threshold={}), "
                                  "skipping further processing",
                                  idx, pixelCount, config.empty_frame_pixel_threshold);
+                    rtTimingRecorder.countSkipped(
+                        backend::diagnostics::PipelineSkipReason::EmptyFrame);
 
                     // Auto-capture logic (only when experiment is NOT running)
                     if (config.auto_background_enabled && !experimentActive_.load()) {
@@ -3013,6 +3104,8 @@ void ProcessingService::realtimeInlineLoop() {
                         &kernelError)) {
                     SPDLOG_ERROR("Realtime processing core failed for frame {}: {}", idx,
                                  kernelError);
+                    rtTimingRecorder.countSkipped(
+                        backend::diagnostics::PipelineSkipReason::KernelError);
                     rtLastProcessed_.store(idx);
                     continue;
                 }
@@ -3043,6 +3136,8 @@ void ProcessingService::realtimeInlineLoop() {
                     }
                 }
                 const auto algoEnd = clock::now();
+                const uint64_t algoEndUsRec =
+                    algoStartUsRec != 0 ? rtTimingRecorder.nowUs() : 0;
                 const double algoMs =
                     std::chrono::duration<double, std::milli>(algoEnd - algoStart).count();
                 algoMsSinceSummary += algoMs;
@@ -3054,7 +3149,9 @@ void ProcessingService::realtimeInlineLoop() {
                     }
                 }
 
-                publishRealtimeValidationCallbacks(validations, f.timestamp);
+                publishRealtimeValidationCallbacks(
+                    validations, f.timestamp,
+                    {true, idx, f.hostTimestampUs, algoStartUsRec, algoEndUsRec});
 
                 // Always accumulate frames for monitoring (with size limit)
                 cv::Mat roiOriginal = gray(cvRoi);

@@ -36,6 +36,12 @@
   modules remain loaded until process exit to avoid teardown races.
 - Qt signals from non-GUI threads go through
   [[../frontend/System-Utilities]] `BackgroundCaptureNotifier` (signal bridge).
+- [[../diagnostics/PipelineTimingRecorder]] (opt-in latency instrumentation)
+  adds no threads and no locks: single-writer rings (frame records written
+  only by the realtime thread, trigger records only by the trigger thread)
+  plus relaxed-atomic skip counters; disabled it is one relaxed load per
+  hook. Trigger pending-request metadata rides under the existing
+  `triggerMutex_`.
 
 ## Experiment vs Monitoring vs Realtime
 

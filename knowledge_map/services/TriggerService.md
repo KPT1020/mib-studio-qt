@@ -15,9 +15,16 @@
   [[../architecture/AppBackend]]).
 - On `onTargetGroupResult(signal)`, signal the trigger thread to raise the
   configured output line, sleep `pulseDurationUs_`, then lower it.
-- `TargetGroupSignal` carries source identity (`objectId`, `trackId`) and is used
+- `TargetGroupSignal` carries source identity (`objectId`, `trackId`) plus
+  source-frame identity for latency correlation (`frameIndex`,
+  `hostTimestampUs` — the host monotonic acquisition stamp) and is used
   for metadata at trigger fire time.
 - Expose metrics: `getTriggerCount`, `getLastOnsetUs`, `resetMetrics`.
+- When [[../diagnostics/PipelineTimingRecorder]] is enabled, each pulse also
+  writes a `TriggerTimingRecord` (request/wake/fire/pulse-done stamps +
+  coalesced count) keyed by the source frame, enabling true end-to-end
+  acquisition→pulse latency measurement. Pending-request metadata lives
+  under `triggerMutex_` (same lock discipline as the lost-wakeup fixes).
 
 ## Threading
 
@@ -45,7 +52,10 @@ microseconds (default 1 µs).
 - Requires `ProcessingService::enable_target_group` + thresholds to be set.
 - `getLastOnsetUs()` measures only the duration of the
   `setTriggerOutput(true)` call, not end-to-end frame→trigger latency. For
-  end-to-end latency use an oscilloscope on the TTL line. See
+  software-observable end-to-end latency enable
+  [[../diagnostics/PipelineTimingRecorder]] (`MIB_PIPELINE_TIMING=1`, see
+  `docs/howto/pipeline-latency-diagnosis.md`); for electrical ground truth
+  use an oscilloscope on the TTL line. See
   [[ProcessingService]] "Callback ordering invariant" — the callback is
   dispatched outside `monitoringFramesMutex_` to keep wake-up latency flat,
   and the target-group callback fires **before** the ring-ratio callback
@@ -80,6 +90,9 @@ microseconds (default 1 µs).
   `capture.stop`); that test is the regression guard.
 - **Known limitation:** `triggerRequested_` is a single bool, so multiple
   target-group results arriving while the thread is mid-pulse coalesce into
-  one fire. Residual latency jitter (tens to ~hundreds of µs under load)
-  is inherent to OS scheduling of the busy-wait thread; sub-10 µs
-  determinism would require real-time thread priority.
+  one fire. Coalesced requests are now visible: the pulse's
+  `TriggerTimingRecord.coalesced` counts merged extras (the FIRST pending
+  request's identity is kept — it has waited longest). Residual latency
+  jitter (tens to ~hundreds of µs under load) is inherent to OS scheduling
+  of the busy-wait thread; sub-10 µs determinism would require real-time
+  thread priority.

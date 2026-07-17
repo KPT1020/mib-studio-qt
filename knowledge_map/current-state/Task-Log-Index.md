@@ -53,6 +53,7 @@
 - `task/2026-04-16-thread-performance-audit.md`
 - `task/2026-07-02-realtime-performance-plan.md`
 - `task/2026-07-15-ultra96-direct-ddr.md`
+- `task/2026-07-17-pipeline-latency-instrumentation.md`
 
 ### Portable processing / Biowork
 - `task/2026-07-13-hot-swappable-processing-core-native.md`

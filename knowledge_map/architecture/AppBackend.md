@@ -88,6 +88,19 @@ Notes:
 - Services are still constructed to preserve existing references in frontend
   and backend code; toggles control startup wiring/initialization.
 
+### Pipeline latency instrumentation (`MIB_PIPELINE_TIMING`)
+
+`initialize` also reads `MIB_PIPELINE_TIMING` (`1`/`true`/`on` enables
+[[../diagnostics/PipelineTimingRecorder]]) and `MIB_PIPELINE_TIMING_DIR`
+(dump directory, default `<dataDir>/pipeline_timing`). The camera-ready
+callback dumps the latency CSVs when capture stops (after the trigger thread
+is joined), and `shutdown()` dumps again as a final snapshot. Runtime API:
+`setPipelineTimingEnabled` / `isPipelineTimingEnabled` /
+`dumpPipelineTiming(dir, errorOut)`. The target-group wiring forwards
+`frameIndex` + `hostTimestampUs` from `TargetGroupEvent` to
+`TargetGroupSignal` so [[../services/TriggerService]] can correlate pulses
+with source frames. See `docs/howto/pipeline-latency-diagnosis.md`.
+
 ## Shutdown
 
 `shutdown()` stops every service-owned thread in dependency order — capture

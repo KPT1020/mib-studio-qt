@@ -18,6 +18,10 @@ namespace backend::playback
         uint64_t pixelFormat = 0; // PFNC code from Euresys
         size_t linePitch = 0;     // bytes per line
         uint64_t timestamp = 0;   // raw unit from source
+        // Host monotonic microseconds (Tools::getTimestamp clock) stamped at
+        // acquisition by CaptureService; 0 for frames from other producers.
+        // Comparable across pipeline stages (see PipelineTimingRecorder).
+        uint64_t hostTimestampUs = 0;
         std::vector<uint8_t> data;
     };
 
@@ -36,14 +40,16 @@ namespace backend::playback
     public:
         explicit FrameStore(size_t capacity = 512);
 
-        // Copy frame data into the ring buffer
+        // Copy frame data into the ring buffer. hostTimestampUs is the host
+        // monotonic acquisition stamp (0 = unknown/not applicable).
         void pushFrame(const uint8_t *src,
                        size_t size,
                        uint64_t width,
                        uint64_t height,
                        size_t linePitch,
                        uint64_t pixelFormat,
-                       uint64_t timestamp);
+                       uint64_t timestamp,
+                       uint64_t hostTimestampUs = 0);
 
         // Retrieve a copy of the latest frame; returns false if empty
         bool getLatest(Frame &out) const;

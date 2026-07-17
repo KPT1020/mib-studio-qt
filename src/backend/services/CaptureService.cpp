@@ -149,7 +149,13 @@ void CaptureService::run() {
             }
 
             camera::common::Frame frame;
-            if (!camera->grabFrame(frame)) {
+            const bool grabbed = camera->grabFrame(frame);
+            // Host monotonic acquisition stamp: the anchor every downstream
+            // latency measurement (algo start/end, trigger fire) compares
+            // against. The frame's own `timestamp` is a device tick and lives
+            // on a different clock.
+            frame.hostTimestampUs = Tools::getTimestamp();
+            if (!grabbed) {
                 if (!running_.load()) {
                     break;
                 }
@@ -183,7 +189,8 @@ void CaptureService::run() {
                                        frame.height,
                                        frame.linePitch,
                                        frame.pixelFormat,
-                                       frame.timestamp);
+                                       frame.timestamp,
+                                       frame.hostTimestampUs);
             }
             stats_.framesProcessed.fetch_add(1, std::memory_order_relaxed);
             backend::diagnostics::CrashStateMirror::instance().capture.framesProcessed

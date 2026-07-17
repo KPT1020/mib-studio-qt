@@ -5,6 +5,22 @@
 
 ## Features shipped
 
+- **Pipeline latency instrumentation** (2026-07-17) — Added
+  [[../diagnostics/PipelineTimingRecorder]], a lock-free per-frame latency
+  recorder for diagnosing realtime-pipeline and trigger delay: host-monotonic
+  stamps at acquisition (`Frame::hostTimestampUs`, stamped in
+  CaptureService and carried through FrameStore), algorithm start/end,
+  callback dispatch, and trigger request/wake/fire/pulse-done, with
+  per-reason skip counters so frame accounting is conserved (no silent
+  loss). `TargetGroupEvent`/`TargetGroupSignal` now carry source-frame
+  identity; coalesced trigger requests are counted. Enable with
+  `MIB_PIPELINE_TIMING=1`; CSVs dump on capture stop and are analysed by
+  `scripts/analyze_pipeline_timing.py` (per-stage percentiles + end-to-end
+  grab→fire). Guards: `backend.pipeline_timing_recorder`,
+  `integration.e2e_pipeline_timing`. How-to:
+  `docs/howto/pipeline-latency-diagnosis.md`. Task record:
+  [[../task/2026-07-17-pipeline-latency-instrumentation]].
+
 - **Release-lane gating for the develop/main pipeline** (2026-07-17) — The
   feature → `develop` (beta) → `main` (stable) lanes now gate what actually
   releases. The `develop` auto-beta in `build-windows.yml` is path-filtered
