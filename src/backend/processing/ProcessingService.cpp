@@ -1808,7 +1808,7 @@ void ProcessingService::realtimeBatchLoop() {
 
         const uint64_t total = rtStore_->totalWritten();
         if (total == 0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            rtStore_->waitForFrame(0, std::chrono::milliseconds(5));
             continue;
         }
 
@@ -1837,7 +1837,9 @@ void ProcessingService::realtimeBatchLoop() {
         }
 
         if (last >= latest) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            // Event-driven wake instead of sleep-polling (issue #282); see
+            // the matching comment in realtimeInlineLoop.
+            rtStore_->waitForFrame(total, std::chrono::milliseconds(2));
         } else {
             const bool dropFrames = rtDropFrames_.load(std::memory_order_relaxed) &&
                                     !experimentActive_.load(std::memory_order_relaxed);
@@ -2011,7 +2013,7 @@ void ProcessingService::realtimeInlineLoop() {
         }
         const uint64_t total = rtStore_->totalWritten();
         if (total == 0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            rtStore_->waitForFrame(0, std::chrono::milliseconds(5));
             continue;
         }
         const uint64_t earliest = rtStore_->earliestAvailableIndex();
@@ -2036,7 +2038,12 @@ void ProcessingService::realtimeInlineLoop() {
                          skipped, last, earliest);
         }
         if (last >= latest) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            // Caught up: block until the producer pushes the next frame
+            // (event-driven, issue #282) instead of sleep-polling — the old
+            // fixed 2 ms poll put a uniform 0-2 ms wait in front of every
+            // frame and dominated end-to-end latency. The timeout preserves
+            // stop responsiveness (rtRunning_ is rechecked each iteration).
+            rtStore_->waitForFrame(total, std::chrono::milliseconds(2));
             continue;
         }
 

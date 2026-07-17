@@ -49,6 +49,14 @@ window:
 void pushFrame(src, size, w, h, linePitch, pixelFormat, timestamp,
                hostTimestampUs = 0);
 
+// Event-driven consumer wake (issue #282): block until totalWritten()
+// exceeds lastSeenTotal, a frame is pushed, or timeout elapses.
+// pushFrame notifies after the slot copy via a Dekker-guarded waiter
+// counter (one relaxed load per push while nobody waits, no lost
+// wakeups). Replaced the realtime loops' fixed 2 ms sleep-poll, which
+// put a uniform 0-2 ms wait in front of every frame.
+uint64_t waitForFrame(uint64_t lastSeenTotal, std::chrono::microseconds timeout);
+
 bool getLatest(Frame& out) const;
 bool getByWriteIndex(uint64_t idx, Frame& out) const;
 bool getByWriteIndexROI(uint64_t idx, int roiX, int roiY, int roiW, int roiH,

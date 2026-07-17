@@ -47,7 +47,10 @@ in [[../services/CaptureService]] right after `grabFrame`), `algoStartUs`,
 `TriggerTimingRecord` (one per pulse actually driven): `frameIndex`,
 `grabUs` (echoed from the source frame through
 `TargetGroupEvent`→`TargetGroupSignal`), `requestUs`, `wakeUs`, `fireUs`,
-`pulseDoneUs`, `coalesced` (extra requests merged into this pulse).
+`pulseDoneUs`, `coalesced`. Since the per-request trigger queue (issue
+#283) `coalesced` is always 0 — overload appears in
+`TriggerService::getDroppedRequestCount()` instead; non-zero values only
+occur in recordings from before that change.
 
 `PipelineSkipReason` counters make frame accounting conserved — pushed
 frames == frame records + counted skips (`dropped_to_latest`, `ring_behind`,

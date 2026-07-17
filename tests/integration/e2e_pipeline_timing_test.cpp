@@ -17,8 +17,13 @@
 //   Phase 3 (trigger correlation): drives TriggerService with a stub camera
 //   and asserts each pulse's record carries the source frame identity
 //   (frameIndex + grab stamp echo) with monotonic
-//   request <= wake <= fire <= pulseDone stamps, and that coalesced requests
-//   are accounted (records + coalesced == requests).
+//   request <= wake <= fire <= pulseDone stamps, and that with the
+//   per-request pending queue (issue #283) paced requests neither coalesce
+//   nor drop — exactly one pulse per request.
+//
+//   Phase 4 (trigger queue overflow): a burst faster than the pulse rate
+//   must drop the OLDEST requests with counted conservation
+//   (pulses + dropped == requests) and the newest request always fires.
 //
 // Timing gates are ordering/accounting invariants only (no absolute-ms
 // thresholds), per docs/architecture/testing-strategy.md.
@@ -245,16 +250,12 @@ void runTriggerPhase(mib::test::Watchdog& watchdog) {
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
 
-    // Settle: no pulse can be pending once the fire count has been stable for
-    // a while (requests are all sent and the flag is a single bool).
-    uint64_t stableCount = camera.fireCount();
+    // Settle on the exact completion condition: every request either fired a
+    // pulse or was counted as an overflow drop, and each pulse's record has
+    // been written. No stability heuristic — nothing arrives after the loop.
     waitUntil(watchdog, "trigger-settle", 5000, [&] {
-        const uint64_t now = camera.fireCount();
-        if (now != stableCount) {
-            stableCount = now;
-            return false;
-        }
-        return now >= 1 && rec.triggerRecordCount() == now;
+        return camera.fireCount() + trigger.getDroppedRequestCount() == kRequests &&
+               rec.triggerRecordCount() == camera.fireCount();
     });
     trigger.stop();
 
@@ -274,11 +275,72 @@ void runTriggerPhase(mib::test::Watchdog& watchdog) {
         }
     }
     std::cout << "[trigger] requests=" << kRequests << " pulses=" << camera.fireCount()
-              << " records=" << records.size() << " coalesced=" << coalescedTotal << "\n";
-    CHECK_MSG(records.size() + coalescedTotal == kRequests,
-              "trigger accounting records=" << records.size() << " coalesced=" << coalescedTotal
-                                            << " requests=" << kRequests);
+              << " records=" << records.size() << " coalesced=" << coalescedTotal
+              << " dropped=" << trigger.getDroppedRequestCount() << "\n";
+    // Per-request queue (issue #283): paced requests each get their own pulse
+    // — no coalescing, no drops, exact one-record-per-request accounting.
+    CHECK_MSG(coalescedTotal == 0, "paced requests must not coalesce with the request queue");
+    CHECK_MSG(trigger.getDroppedRequestCount() == 0, "paced requests must not overflow the queue");
+    CHECK_MSG(records.size() == kRequests,
+              "trigger accounting records=" << records.size() << " requests=" << kRequests);
     CHECK(records.size() == camera.fireCount());
+}
+
+// Deliberate overflow of the bounded pending-request queue (issue #283): a
+// burst far faster than the pulse rate must drop the OLDEST requests, count
+// them, and keep accounting conserved (pulses + drops == requests).
+void runTriggerOverflowPhase(mib::test::Watchdog& watchdog) {
+    auto& rec = PipelineTimingRecorder::instance();
+    rec.clear();
+    rec.setEnabled(true);
+
+    AckCamera camera;
+    TriggerService trigger;
+    // Long pulses so the burst below outruns the drain deterministically:
+    // draining even one entry takes 5 ms while the whole burst is enqueued in
+    // well under a millisecond.
+    trigger.setPulseDurationUs(5000);
+    trigger.setCamera(&camera);
+    trigger.start();
+
+    constexpr uint64_t kBurst = TriggerService::kMaxPendingRequests + 12;
+    for (uint64_t i = 0; i < kBurst; ++i) {
+        TargetGroupSignal signal;
+        signal.isTargetGroup = true;
+        signal.objectId = static_cast<int>(i);
+        signal.trackId = static_cast<int>(i);
+        signal.frameIndex = 5000 + i;
+        signal.hostTimestampUs = PipelineTimingRecorder::nowUs();
+        trigger.onTargetGroupResult(signal);
+    }
+
+    // Settle on the exact completion condition (see runTriggerPhase): every
+    // burst request either fired or was counted dropped, records flushed.
+    waitUntil(watchdog, "overflow-settle", 5000, [&] {
+        return camera.fireCount() + trigger.getDroppedRequestCount() == kBurst &&
+               rec.triggerRecordCount() == camera.fireCount();
+    });
+    trigger.stop();
+
+    const uint64_t pulses = camera.fireCount();
+    const uint64_t dropped = trigger.getDroppedRequestCount();
+    std::cout << "[trigger-overflow] burst=" << kBurst << " pulses=" << pulses
+              << " dropped=" << dropped << "\n";
+    CHECK_MSG(dropped > 0, "burst must overflow the bounded queue");
+    CHECK_MSG(pulses + dropped == kBurst,
+              "overflow accounting pulses=" << pulses << " dropped=" << dropped
+                                            << " burst=" << kBurst);
+    // The newest request always survives drop-oldest, so the LAST pulse must
+    // carry the final frame of the burst. (Early pulses legitimately carry
+    // the oldest frames — they fired before the queue overflowed — so the
+    // exact surviving set in between is timing-dependent.)
+    const auto records = rec.triggerRecords();
+    CHECK(!records.empty());
+    if (!records.empty()) {
+        CHECK_MSG(records.back().frameIndex == 5000 + kBurst - 1,
+                  "last pulse should carry the newest request, got frame "
+                      << records.back().frameIndex);
+    }
 }
 
 } // namespace
@@ -293,6 +355,8 @@ int main() {
     runInlinePhase(watchdog, /*dropFrames=*/true, /*frameCount=*/2000);
     watchdog.mark("phase3-trigger");
     runTriggerPhase(watchdog);
+    watchdog.mark("phase4-trigger-overflow");
+    runTriggerOverflowPhase(watchdog);
 
     PipelineTimingRecorder::instance().setEnabled(false);
     PipelineTimingRecorder::instance().clear();

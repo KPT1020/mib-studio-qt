@@ -5,6 +5,19 @@
 
 ## Features shipped
 
+- **Realtime latency fixes: event-driven wake + trigger request queue**
+  (2026-07-17, #282/#283) — `FrameStore::waitForFrame` replaces the realtime
+  loops' fixed 2 ms sleep-poll with a condition-variable wake from
+  `pushFrame` (Dekker-guarded waiter counter; one relaxed load per push
+  while nobody waits), and `TriggerService` replaces its single-bool request
+  flag with a bounded per-request queue (drop-oldest overflow counted via
+  `getDroppedRequestCount()`). Measured with the mock harness (500 fps,
+  `gavinlouuu/512x96stream`): grab→algo p50 1.03 → 0.083 ms, end-to-end
+  grab→trigger-fire p50 1.44 → 0.50 ms, and exactly one pulse per target
+  frame (was 5/2176 coalesced). Guards: `backend.frame_store_wait`,
+  `integration.e2e_pipeline_timing` phases 3–4. Task record:
+  [[../task/2026-07-17-realtime-latency-fixes]].
+
 - **Pipeline latency instrumentation** (2026-07-17) — Added
   [[../diagnostics/PipelineTimingRecorder]], a lock-free per-frame latency
   recorder for diagnosing realtime-pipeline and trigger delay: host-monotonic

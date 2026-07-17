@@ -20,11 +20,18 @@
   `hostTimestampUs` — the host monotonic acquisition stamp) and is used
   for metadata at trigger fire time.
 - Expose metrics: `getTriggerCount`, `getLastOnsetUs`, `resetMetrics`.
+- Requests are queued per-request (issue #283): a bounded
+  `pendingRequests_` deque (capacity `kMaxPendingRequests` = 8, under
+  `triggerMutex_`) replaces the old single-bool flag, so every
+  target-group request gets its own pulse in arrival order instead of
+  silently coalescing while the thread is mid-pulse. Overflow drops the
+  OLDEST entry and counts it (`getDroppedRequestCount()`, throttled WARN)
+  — a backlog of stale pulses is worse than a counted drop.
 - When [[../diagnostics/PipelineTimingRecorder]] is enabled, each pulse also
-  writes a `TriggerTimingRecord` (request/wake/fire/pulse-done stamps +
-  coalesced count) keyed by the source frame, enabling true end-to-end
-  acquisition→pulse latency measurement. Pending-request metadata lives
-  under `triggerMutex_` (same lock discipline as the lost-wakeup fixes).
+  writes a `TriggerTimingRecord` (request/wake/fire/pulse-done stamps)
+  keyed by the source frame, enabling true end-to-end acquisition→pulse
+  latency measurement. The record's `coalesced` field is now always 0;
+  overload shows up in the dropped-request counter instead.
 
 ## Threading
 
@@ -67,13 +74,14 @@ microseconds (default 1 µs).
   calls `onTargetGroupResult` for the manual `sortTriggerBtn` /
   `periodicTriggerBtn` paths — those are non-blocking by construction. No
   UI mutex is held across a trigger wake-up.
-- **Lost-wakeup fix:** `onTargetGroupResult` sets `triggerRequested_` while
-  holding `triggerMutex_` (the same mutex guarding the consumer's
-  `wait()` predicate) before `notify_one()`. Storing the flag lock-free
-  races with the consumer's predicate check — if the flag flips after the
-  predicate is evaluated but before the thread blocks, the notification is
-  lost and the trigger is delayed until the next request (or dropped under
-  bursts). This was the root cause of "variable delay / occasional missed
+- **Lost-wakeup fix:** `onTargetGroupResult` mutates the pending-request
+  queue while holding `triggerMutex_` (the same mutex guarding the
+  consumer's `wait()` predicate) before `notify_one()` — originally this
+  applied to the `triggerRequested_` flag the queue replaced. Mutating the
+  request state lock-free races with the consumer's predicate check — if
+  it lands after the predicate is evaluated but before the thread blocks,
+  the notification is lost and the trigger is delayed until the next
+  request. This was the root cause of "variable delay / occasional missed
   trigger." Regression guard: `tests/integration/e2e_trigger_timing_test.cpp`
   (`integration.e2e_trigger_timing`) asserts zero missed pulses and reports
   the request→fire latency distribution under CPU load.
@@ -88,11 +96,13 @@ microseconds (default 1 µs).
   camera restart. Intermittent and platform-independent. Found by the
   `integration.e2e_pipeline_stress` lifecycle test (its watchdog pinpointed
   `capture.stop`); that test is the regression guard.
-- **Known limitation:** `triggerRequested_` is a single bool, so multiple
-  target-group results arriving while the thread is mid-pulse coalesce into
-  one fire. Coalesced requests are now visible: the pulse's
-  `TriggerTimingRecord.coalesced` counts merged extras (the FIRST pending
-  request's identity is kept — it has waited longest). Residual latency
-  jitter (tens to ~hundreds of µs under load) is inherent to OS scheduling
-  of the busy-wait thread; sub-10 µs determinism would require real-time
-  thread priority.
+- **Resolved limitation (issue #283):** the old single-bool
+  `triggerRequested_` coalesced target-group results arriving mid-pulse
+  into one fire (measured: 5/2176 requests merged in a 500 fps mock run).
+  The bounded per-request queue gives every request its own pulse; only
+  sustained overload beyond `kMaxPendingRequests` drops (oldest-first,
+  counted). Guards: `integration.e2e_pipeline_timing` phases 3-4 (paced =
+  exactly one pulse per request; burst = conservation + newest survives).
+  Residual latency jitter (tens to ~hundreds of µs under load) is inherent
+  to OS scheduling of the busy-wait thread; sub-10 µs determinism would
+  require real-time thread priority (#227).
