@@ -153,7 +153,13 @@ current desktop version.
 
 The desktop has three maintained publishers: local `release.ps1`, manual
 `.github/workflows/build-windows.yml`, and tag-triggered
-`.github/workflows/release.yml`. Each cleans `build/dist`, derives the numeric
+`.github/workflows/release.yml`. The `develop` auto-beta trigger in
+`build-windows.yml` is path-gated: merges touching only docs, the vault,
+`tools/`, `tests/`, `bindings/python/`, markdown, or other workflows do not
+build or publish a beta (changes to that workflow itself still release).
+Processing-core `mib-processing-v*` GitHub releases pass `--latest=false` so
+the repository "Latest" badge always names the newest stable desktop release.
+Each publisher cleans `build/dist`, derives the numeric
 installer artifact version separately from a possible `-beta.*` release tag,
 and requires the exact Setup and Update filenames before hashing or publishing.
 Wildcards are limited to cleanup/unexpected-output detection; GitHub Release,
