@@ -5,6 +5,20 @@
 
 ## Features shipped
 
+- **Trigger-path hardening** (2026-07-18, issue #227) — the
+  [[../services/TriggerService]] thread elevates itself to
+  `THREAD_PRIORITY_TIME_CRITICAL` on Windows (best-effort `SCHED_FIFO`
+  elsewhere) so background load — e.g. the HDF5 writer draining an
+  experiment flush — cannot preempt a pending LED/sort pulse (measured
+  request→wake tail at default priority: p50 ~53 µs but max 30 ms of pure
+  OS scheduling in a 20 s / 500 fps mock run). And
+  `EGrabberCamera::setTriggerOutput` now caches the `LineSelector`
+  selection per camera session (`triggerLineApplied_`, reset on start /
+  reconfigure / write failure) so each pulse edge is a single `LineSource`
+  register write instead of two — halving per-pulse PCIe transactions.
+  Guard: `integration.e2e_trigger_timing`; before/after via the mock
+  timing harness (`docs/howto/pipeline-latency-diagnosis.md`).
+
 - **Realtime latency fixes: event-driven wake + trigger request queue**
   (2026-07-17, #282/#283) — `FrameStore::waitForFrame` replaces the realtime
   loops' fixed 2 ms sleep-poll with a condition-variable wake from

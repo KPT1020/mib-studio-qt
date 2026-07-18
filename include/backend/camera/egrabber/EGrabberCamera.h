@@ -70,9 +70,14 @@ private:
     // stateMutex_, which stop() holds across ~360 ms of teardown sleeps.
     mutable std::mutex triggerMutex_;
 
-    // Trigger output state
+    // Trigger output state. triggerLineApplied_ tracks whether LineSelector
+    // has been written on the current grabber_'s nodemap: the selection is
+    // GenApi client state owned by that EGrabber instance, so it survives
+    // between pulses and only needs (re)applying after start() or a trigger
+    // reconfiguration. Guarded by triggerMutex_ alongside grabber_.
     std::string triggerLineSelector_;
     bool triggerConfigured_{false};
+    bool triggerLineApplied_{false};
 };
 
 } // namespace camera::common
