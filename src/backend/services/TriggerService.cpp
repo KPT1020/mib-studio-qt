@@ -4,7 +4,47 @@
 #include <spdlog/spdlog.h>
 #include <chrono>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <pthread.h>
+#include <sched.h>
+#endif
+
 namespace backend::services {
+
+namespace {
+
+// The trigger thread's wake-up latency and busy-wait pulse timing are directly
+// visible on the TTL line (LED/sort pulse onset + width). Elevate its
+// scheduling priority so background load (e.g. the HDF5 writer flushing an
+// experiment batch) cannot preempt a pending pulse. Best-effort: failure is
+// logged and the thread runs at default priority.
+void raiseTriggerThreadPriority() {
+#ifdef _WIN32
+    if (!SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL)) {
+        SPDLOG_WARN("TriggerService: failed to raise trigger thread priority (error={})",
+                    GetLastError());
+    } else {
+        SPDLOG_INFO("TriggerService: trigger thread priority set to TIME_CRITICAL");
+    }
+#else
+    sched_param sp{};
+    sp.sched_priority = sched_get_priority_min(SCHED_FIFO);
+    if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp) != 0) {
+        // Real-time scheduling normally needs elevated privileges on Linux;
+        // dev/CI runs fall back to default priority.
+        SPDLOG_DEBUG("TriggerService: real-time priority unavailable, using default");
+    } else {
+        SPDLOG_INFO("TriggerService: trigger thread scheduled SCHED_FIFO");
+    }
+#endif
+}
+
+} // namespace
 
 TriggerService::TriggerService() = default;
 
@@ -86,6 +126,7 @@ void TriggerService::onTargetGroupResult(const TargetGroupSignal& signal) {
 }
 
 void TriggerService::triggerLoop() {
+    raiseTriggerThreadPriority();
     auto& timingRecorder = backend::diagnostics::PipelineTimingRecorder::instance();
     while (running_.load()) {
         PendingRequest pending;
