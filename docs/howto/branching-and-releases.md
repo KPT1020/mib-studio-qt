@@ -42,9 +42,21 @@ feature/fix branch ──PR──▶ develop ──PR──▶ main ──dispat
 - Promote by opening a PR from `develop` (or a release branch) into `main`.
   Protected: **1 review + required status checks**.
 - A **stable** release is cut by dispatching `build-windows.yml` with
-  `mode=release` from `main` (bumps the version, tags `vX.Y.Z`, pushes the
-  tag, and publishes the stable installer to the R2 stable channel). The
-  workflow refuses `mode=release` off any other ref.
+  `mode=release` from `main`. The flow is **tag-first**: the workflow
+  computes the next version, builds and validates the installer, then
+  pushes only the annotated tag `vX.Y.Z` pointing at the exact `main` SHA
+  it built — it never pushes to `main` itself (branch protection rejects
+  direct pushes, including the workflow's own token; this failed the first
+  v1.0.7 attempt with GH006). Version resolution is tag-based everywhere
+  (`scripts/resolve_desktop_release_version.py`, `cmake/MIBVersion.cmake`),
+  so the tag alone is authoritative.
+- After tagging, the workflow opens an automated **sync PR into `develop`**
+  (`chore/release-vX.Y.Z-sync`) carrying the `DEFAULT_VERSION` no-git
+  fallback bump and any refreshed manual screenshots. Merge it like any dev
+  PR; if its checks did not start (PRs opened by `GITHUB_TOKEN` do not
+  trigger CI), close and reopen it. A failed sync PR never blocks the
+  release — the workflow warns and the release proceeds.
+- The workflow refuses `mode=release` off any other ref.
 - The repository **Latest** badge always belongs to the newest stable
   desktop release: `mib-processing-v*` releases are created with
   `--latest=false`, and betas are prereleases.

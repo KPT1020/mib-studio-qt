@@ -47,6 +47,8 @@ jobs:
     runs-on: windows-2022
     permissions:
       contents: write
+      # Release mode opens the fallback-version sync PR into develop.
+      pull-requests: write
 
     steps:
       - name: Checkout
@@ -460,14 +462,25 @@ jobs:
       # Stable release mode is allowed to mutate refs only after configure,
       # build, tests, screenshot artifact handling, packaging, exact-artifact
       # validation, and artifact upload have all succeeded.
-      - name: Publish verified release refs
+      #
+      # TAG-FIRST: only the release tag is pushed, pointing at the exact
+      # trigger SHA that was built and validated. `main` is never pushed —
+      # its branch protection (PR + required checks) rejects direct pushes,
+      # including this workflow's own GITHUB_TOKEN (GH006, see the v1.0.7
+      # first attempt). Version resolution is tag-based everywhere
+      # (scripts/resolve_desktop_release_version.py takes the max of
+      # DEFAULT_VERSION and reachable v* tags; cmake/MIBVersion.cmake reads
+      # git tags at configure time), so the tag alone is sufficient for all
+      # future version math. The DEFAULT_VERSION fallback bump and any
+      # refreshed manual screenshots ride back to develop in a sync PR
+      # opened by the follow-up step below.
+      - name: Publish verified release tag
         if: inputs.mode == 'release'
         shell: pwsh
         env:
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
           TRIGGER_SHA: ${{ github.sha }}
-          SCREENSHOTS_OK: ${{ steps.screenshots.outputs.ok }}
         run: |
           if ('${{ github.ref }}' -ne 'refs/heads/main') {
             throw 'Stable release mode must be dispatched from refs/heads/main'
@@ -480,25 +493,66 @@ jobs:
 
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git add -- cmake/MIBVersion.cmake
-          if ($env:SCREENSHOTS_OK -eq 'true') {
-            git add -- docs/manual/images
-          }
-          git diff --cached --check
-          if ($LASTEXITCODE -ne 0) { throw 'Release commit failed whitespace validation' }
-          git diff --cached --quiet
-          if ($LASTEXITCODE -eq 0) { throw 'Prospective release produced no version commit' }
-          git commit -m "chore: bump version to $env:RELEASE_VERSION"
-          if ($LASTEXITCODE -ne 0) { throw 'Release commit failed' }
 
           git show-ref --verify --quiet "refs/tags/$env:RELEASE_TAG"
           if ($LASTEXITCODE -eq 0) {
             throw "Release tag $env:RELEASE_TAG already exists; refusing to move it"
           }
-          git tag -a "$env:RELEASE_TAG" -m "Version $env:RELEASE_VERSION"
+          git tag -a "$env:RELEASE_TAG" -m "Version $env:RELEASE_VERSION" $env:TRIGGER_SHA
           if ($LASTEXITCODE -ne 0) { throw 'Release tag creation failed' }
-          git push --atomic origin HEAD:main "refs/tags/$env:RELEASE_TAG"
-          if ($LASTEXITCODE -ne 0) { throw 'Atomic main/tag push failed' }
+          git push origin "refs/tags/$env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) { throw 'Release tag push failed' }
+
+      # Best-effort follow-up: land the DEFAULT_VERSION fallback bump (and
+      # refreshed screenshots) back on develop through the normal PR lane.
+      # The release itself is already published via the tag above, so a
+      # failure here warns instead of aborting the remaining publish steps.
+      # Note: PRs opened with GITHUB_TOKEN do not auto-trigger CI; if the
+      # checks are needed, close and reopen the PR (human actor) to start
+      # them.
+      - name: Open fallback-version sync PR into develop
+        if: inputs.mode == 'release'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          SCREENSHOTS_OK: ${{ steps.screenshots.outputs.ok }}
+        run: |
+          $syncBranch = "chore/release-$env:RELEASE_TAG-sync"
+          try {
+            git add -- cmake/MIBVersion.cmake
+            if ($env:SCREENSHOTS_OK -eq 'true') {
+              git add -- docs/manual/images
+            }
+            git diff --cached --check
+            if ($LASTEXITCODE -ne 0) { throw 'Sync commit failed whitespace validation' }
+            git diff --cached --quiet
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host 'No fallback/screenshot changes to sync; skipping PR'
+              exit 0
+            }
+            git commit -m "chore: sync DEFAULT_VERSION fallback to $env:RELEASE_VERSION after $env:RELEASE_TAG"
+            if ($LASTEXITCODE -ne 0) { throw 'Sync commit failed' }
+            git push origin "HEAD:refs/heads/$syncBranch"
+            if ($LASTEXITCODE -ne 0) { throw 'Sync branch push failed' }
+            $prBody = @(
+              "Automated follow-up to the $env:RELEASE_TAG stable release (tag-first flow).",
+              "",
+              "Updates the no-git ``DEFAULT_VERSION`` fallback in ``cmake/MIBVersion.cmake``",
+              "to $env:RELEASE_VERSION and lands any refreshed manual screenshots. Version",
+              "resolution itself is tag-based, so this PR only keeps the fallback fresh.",
+              "",
+              "If required checks did not start (PRs opened by GITHUB_TOKEN do not trigger",
+              "CI), close and reopen this PR to run them."
+            ) -join [Environment]::NewLine
+            & gh pr create --base develop --head $syncBranch `
+              --title "chore: sync version fallback after $env:RELEASE_TAG" `
+              --body $prBody
+            if ($LASTEXITCODE -ne 0) { throw 'Sync PR creation failed' }
+          } catch {
+            Write-Host "::warning::Fallback sync PR failed ($_); the $env:RELEASE_TAG release is unaffected. Sync cmake/MIBVersion.cmake DEFAULT_VERSION to $env:RELEASE_VERSION manually via a PR to develop."
+          }
 
       # ── GitHub Release ─────────────────────────────────────────
       - name: Create GitHub Release
@@ -518,7 +572,7 @@ jobs:
             # Beta: pre-release; gh creates the tag server-side on this commit
             & gh release create $tag @installers --title "v$version" --generate-notes --prerelease --target ${{ github.sha }}
           } else {
-            # Release: full release (verified main + tag were atomically pushed above)
+            # Release: full release (verified tag at the trigger SHA was pushed above)
             & gh release create $tag @installers --title "v$version" --generate-notes
           }
           if ($LASTEXITCODE -ne 0) { throw 'GitHub Release creation failed' }

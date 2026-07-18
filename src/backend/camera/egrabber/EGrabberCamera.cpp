@@ -57,6 +57,7 @@ bool EGrabberCamera::start() {
             }
             std::lock_guard<std::mutex> triggerLock(triggerMutex_);
             grabber_ = std::move(grabber);
+            triggerLineApplied_ = false; // fresh nodemap: LineSelector unset
         }
 
         // CRITICAL: Verify device is accessible before proceeding
@@ -356,8 +357,10 @@ bool EGrabberCamera::checkDeviceHealth() const {
 }
 
 void EGrabberCamera::configureTriggerOutput(const std::string& lineSelector) {
+    std::lock_guard<std::mutex> triggerLock(triggerMutex_);
     triggerLineSelector_ = lineSelector;
     triggerConfigured_ = true;
+    triggerLineApplied_ = false; // re-select on the next pulse
     SPDLOG_INFO("EGrabberCamera: trigger output configured on {}", lineSelector);
 }
 
@@ -371,10 +374,18 @@ bool EGrabberCamera::setTriggerOutput(bool high) {
     std::lock_guard<std::mutex> triggerLock(triggerMutex_);
     if (!triggerConfigured_ || !running_.load(std::memory_order_acquire) || !grabber_) return false;
     try {
-        grabber_->setString<Euresys::InterfaceModule>("LineSelector", triggerLineSelector_);
+        // LineSelector is GenApi nodemap state on this grabber_ instance —
+        // select once after start()/reconfigure, then each pulse edge is a
+        // single LineSource register write (halves PCIe transactions per
+        // pulse, which dominate onset latency and pulse width).
+        if (!triggerLineApplied_) {
+            grabber_->setString<Euresys::InterfaceModule>("LineSelector", triggerLineSelector_);
+            triggerLineApplied_ = true;
+        }
         grabber_->setString<Euresys::InterfaceModule>("LineSource", high ? "High" : "Low");
         return true;
     } catch (const std::exception& ex) {
+        triggerLineApplied_ = false; // unknown selector state: re-select next pulse
         SPDLOG_WARN("EGrabberCamera trigger output failed: {}", ex.what());
         return false;
     }

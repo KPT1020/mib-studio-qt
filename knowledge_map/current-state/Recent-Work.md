@@ -5,6 +5,31 @@
 
 ## Features shipped
 
+- **Trigger-path hardening** (2026-07-18, issue #227) — the
+  [[../services/TriggerService]] thread elevates itself to
+  `THREAD_PRIORITY_TIME_CRITICAL` on Windows (best-effort `SCHED_FIFO`
+  elsewhere) so background load — e.g. the HDF5 writer draining an
+  experiment flush — cannot preempt a pending LED/sort pulse (measured
+  request→wake tail at default priority: p50 ~53 µs but max 30 ms of pure
+  OS scheduling in a 20 s / 500 fps mock run). And
+  `EGrabberCamera::setTriggerOutput` now caches the `LineSelector`
+  selection per camera session (`triggerLineApplied_`, reset on start /
+  reconfigure / write failure) so each pulse edge is a single `LineSource`
+  register write instead of two — halving per-pulse PCIe transactions.
+  Guard: `integration.e2e_trigger_timing`; before/after via the mock
+  timing harness (`docs/howto/pipeline-latency-diagnosis.md`).
+
+- **Tag-first stable release flow** (2026-07-17) — `build-windows.yml`
+  release mode no longer pushes to `main` (its branch protection rejected
+  the workflow's own version-bump push with GH006, failing the first
+  v1.0.7 attempt). The workflow now pushes only the annotated `vX.Y.Z`
+  tag at the exact validated `main` SHA — version resolution is tag-based
+  (`resolve_desktop_release_version.py` / `MIBVersion.cmake`), so the tag
+  is authoritative — and opens an automated `chore/release-vX.Y.Z-sync`
+  PR into `develop` for the `DEFAULT_VERSION` no-git fallback bump and
+  refreshed manual screenshots (best-effort; never blocks the release).
+  Lanes doc updated: `docs/howto/branching-and-releases.md`.
+
 - **Realtime latency fixes: event-driven wake + trigger request queue**
   (2026-07-17, #282/#283) — `FrameStore::waitForFrame` replaces the realtime
   loops' fixed 2 ms sleep-poll with a condition-variable wake from
