@@ -5,6 +5,18 @@
 
 ## Features shipped
 
+- **Tag-first stable release flow** (2026-07-17) — `build-windows.yml`
+  release mode no longer pushes to `main` (its branch protection rejected
+  the workflow's own version-bump push with GH006, failing the first
+  v1.0.7 attempt). The workflow now pushes only the annotated `vX.Y.Z`
+  tag at the exact validated `main` SHA — version resolution is tag-based
+  (`resolve_desktop_release_version.py` / `MIBVersion.cmake`), so the tag
+  is authoritative — and opens an automated `chore/release-vX.Y.Z-sync`
+  PR into `develop` for the `DEFAULT_VERSION` no-git fallback bump and
+  refreshed manual screenshots (best-effort; never blocks the release).
+  Lanes doc updated: `docs/howto/branching-and-releases.md`.
+
+
 - **Realtime latency fixes: event-driven wake + trigger request queue**
   (2026-07-17, #282/#283) — `FrameStore::waitForFrame` replaces the realtime
   loops' fixed 2 ms sleep-poll with a condition-variable wake from
