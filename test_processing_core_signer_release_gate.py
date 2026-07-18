@@ -252,13 +252,21 @@ class DesktopReleaseSafetyWiringTest(unittest.TestCase):
 
         tests = content.index("name: Run tests")
         package = content.index("name: Build update package")
-        publish_refs = content.index("name: Publish verified release refs")
+        publish_refs = content.index("name: Publish verified release tag")
         self.assertLess(tests, publish_refs)
         self.assertLess(package, publish_refs)
         publish_block = content[publish_refs:]
-        self.assertIn("git commit", publish_block)
         self.assertIn("git tag", publish_block)
-        self.assertIn("git push --atomic", publish_block)
+        # Tag-first flow: only the release tag ref is ever pushed. main is
+        # branch-protected (PR + required checks) and rejects direct pushes,
+        # including the workflow's own GITHUB_TOKEN — the fallback-version
+        # bump rides a sync PR into develop instead of a branch push.
+        self.assertIn('git push origin "refs/tags/$env:RELEASE_TAG"', publish_block)
+        self.assertNotIn("HEAD:main", content)
+        self.assertNotIn("git push --atomic", content)
+        sync_pr = content.index("name: Open fallback-version sync PR into develop")
+        self.assertLess(publish_refs, sync_pr)
+        self.assertIn("gh pr create --base develop", content[sync_pr:])
 
     def test_manual_release_consumes_only_exact_versioned_installers(self) -> None:
         content = self.read(".github/workflows/build-windows.yml")
