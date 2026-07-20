@@ -19,6 +19,15 @@
   Guard: `integration.e2e_trigger_timing`; before/after via the mock
   timing harness (`docs/howto/pipeline-latency-diagnosis.md`).
 
+- **Release sync-PR step made truly best-effort** (2026-07-20) — the
+  v1.0.7 stable dispatch pushed the tag, then died in the "Open
+  fallback-version sync PR" step: `gh pr create` was denied ("GitHub
+  Actions is not permitted to create or approve pull requests" — repo
+  Actions setting), and although the `catch` printed its best-effort
+  warning, the leftover non-zero `$LASTEXITCODE` failed the job before
+  "Create GitHub Release" / R2 publish ran. The step now ends with
+  `exit 0` so a caught sync failure can never block the release again.
+
 - **Tag-first stable release flow** (2026-07-17) — `build-windows.yml`
   release mode no longer pushes to `main` (its branch protection rejected
   the workflow's own version-bump push with GH006, failing the first

@@ -553,6 +553,12 @@ jobs:
           } catch {
             Write-Host "::warning::Fallback sync PR failed ($_); the $env:RELEASE_TAG release is unaffected. Sync cmake/MIBVersion.cmake DEFAULT_VERSION to $env:RELEASE_VERSION manually via a PR to develop."
           }
+          # This step is best-effort by contract (see the comment above the
+          # step): a caught failure must not fail the job, or the release /
+          # R2 publish steps below never run (v1.0.7: gh pr create was
+          # denied by repo policy and the leftover $LASTEXITCODE=1 killed
+          # the job before "Create GitHub Release").
+          exit 0
 
       # ── GitHub Release ─────────────────────────────────────────
       - name: Create GitHub Release
