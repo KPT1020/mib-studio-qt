@@ -26,6 +26,8 @@
 #endif
 #include <QFrame>
 #include <QGroupBox>
+#include <QFormLayout>
+#include <QProgressBar>
 #include <QSpinBox>
 #include <QDoubleSpinBox>
 #include <QCheckBox>
@@ -153,6 +155,7 @@ namespace frontend
         ui->topRowLayout->addWidget(roiLabel_);
 
         setupCharts();
+        setupBrightnessDashboard();
         setupTuneParamsPanel();
 
         // Connect signals
@@ -180,12 +183,27 @@ namespace frontend
         connect(ui->validOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
         connect(ui->invalidOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
 
+        // Reflow the Experiment dashboard so brightness is presented in the left column
+        // above the existing scatterplot and frame grids.
+        ui->gridLayout->removeWidget(scatterplotView_);
+        ui->gridLayout->removeWidget(histogramView_);
+        ui->gridLayout->removeWidget(ui->validFramesContainer);
+        ui->gridLayout->removeWidget(ui->invalidFramesContainer);
+        ui->gridLayout->removeWidget(ui->tuneParamsPlaceholder);
+        ui->gridLayout->addWidget(brightnessDashboardGroup_, 1, 0);
+        ui->gridLayout->addWidget(scatterplotView_, 2, 0);
+        ui->gridLayout->addWidget(histogramView_, 2, 1);
+        ui->gridLayout->addWidget(ui->validFramesContainer, 3, 0);
+        ui->gridLayout->addWidget(ui->invalidFramesContainer, 3, 1);
+        ui->gridLayout->addWidget(ui->tuneParamsPlaceholder, 0, 2, 4, 1);
+
         // Set column stretch to make panels equal size
         ui->gridLayout->setColumnStretch(0, 1);
         ui->gridLayout->setColumnStretch(1, 1);
         ui->gridLayout->setColumnStretch(2, 0); // Tune panel: minimum width
-        ui->gridLayout->setRowStretch(1, 1); // Charts row
-        ui->gridLayout->setRowStretch(2, 1); // Frame grids row
+        ui->gridLayout->setRowStretch(1, 0); // Brightness dashboard
+        ui->gridLayout->setRowStretch(2, 1); // Charts row
+        ui->gridLayout->setRowStretch(3, 1); // Frame grids row
 
         // Setup update timer
         updateTimer_ = new QTimer(this);
@@ -209,6 +227,44 @@ namespace frontend
         }
         isoelasticCurves_.clear();
         delete ui;
+    }
+
+
+    void ExperimentMonitoringTab::setupBrightnessDashboard()
+    {
+        brightnessDashboardGroup_ = new QGroupBox(tr("Image Brightness"), this);
+        brightnessDashboardGroup_->setToolTip(tr(
+            "Brightness detection uses quartiles from the segmented pixels in recent valid and invalid experiment-tab images. "
+            "The compact dashboard presents median exposure first, then IQR contrast and upper-range levels so dim, bright, "
+            "saturated, and low-contrast images can be spotted quickly."));
+
+        auto* layout = new QVBoxLayout(brightnessDashboardGroup_);
+        layout->setContentsMargins(8, 6, 8, 6);
+        layout->setSpacing(4);
+
+        brightnessStatusLabel_ = new QLabel(tr("Status: waiting for images"), brightnessDashboardGroup_);
+        brightnessStatusLabel_->setStyleSheet("font-weight: bold;");
+        layout->addWidget(brightnessStatusLabel_);
+
+        brightnessMedianBar_ = new QProgressBar(brightnessDashboardGroup_);
+        brightnessMedianBar_->setRange(0, 255);
+        brightnessMedianBar_->setTextVisible(true);
+        brightnessMedianBar_->setFormat(tr("Median %v / 255"));
+        layout->addWidget(brightnessMedianBar_);
+
+        auto* form = new QFormLayout();
+        form->setContentsMargins(0, 0, 0, 0);
+        form->setHorizontalSpacing(8);
+        form->setVerticalSpacing(2);
+        brightnessMedianLabel_ = new QLabel(tr("--"), brightnessDashboardGroup_);
+        brightnessIqrLabel_ = new QLabel(tr("--"), brightnessDashboardGroup_);
+        brightnessRangeLabel_ = new QLabel(tr("--"), brightnessDashboardGroup_);
+        brightnessSampleLabel_ = new QLabel(tr("--"), brightnessDashboardGroup_);
+        form->addRow(tr("Median"), brightnessMedianLabel_);
+        form->addRow(tr("IQR contrast"), brightnessIqrLabel_);
+        form->addRow(tr("Q1/Max"), brightnessRangeLabel_);
+        form->addRow(tr("Samples"), brightnessSampleLabel_);
+        layout->addLayout(form);
     }
 
     void ExperimentMonitoringTab::setupTuneParamsPanel()
@@ -570,6 +626,7 @@ namespace frontend
         // Update all panels using rolling buffers
         updateScatterplot(recentValidFrames_);
         updateHistogram(recentValidFrames_);
+        updateBrightnessDashboard(recentValidFrames_, recentInvalidFrames_);
         updateValidFramesGrid(recentValidFrames_);
         updateInvalidFramesGrid(recentInvalidFrames_);
     }
@@ -751,6 +808,89 @@ namespace frontend
         histogramChart_->addAxis(histogramCategoryAxis_, Qt::AlignBottom);
         barSeries_->attachAxis(histogramCategoryAxis_);
 #endif
+    }
+
+
+    void ExperimentMonitoringTab::updateBrightnessDashboard(
+        const std::vector<backend::services::ProcessedFrame> &validFrames,
+        const std::vector<backend::services::ProcessedFrame> &invalidFrames)
+    {
+        if (!brightnessStatusLabel_ || !brightnessMedianBar_)
+        {
+            return;
+        }
+
+        double medianSum = 0.0;
+        double iqrSum = 0.0;
+        double q1Brightness = std::numeric_limits<double>::max();
+        double maxBrightness = 0.0;
+        int samples = 0;
+
+        auto accumulate = [&](const std::vector<backend::services::ProcessedFrame> &frames) {
+            for (const auto &frame : frames)
+            {
+                const auto &b = frame.validation.brightness;
+                if (b.q4 <= 0.0)
+                {
+                    continue;
+                }
+                medianSum += b.q2;
+                iqrSum += std::max(0.0, b.q3 - b.q1);
+                q1Brightness = std::min(q1Brightness, b.q1);
+                maxBrightness = std::max(maxBrightness, b.q4);
+                ++samples;
+            }
+        };
+
+        accumulate(validFrames);
+        accumulate(invalidFrames);
+
+        if (samples == 0)
+        {
+            brightnessStatusLabel_->setText(tr("Status: waiting for segmented images"));
+            brightnessStatusLabel_->setStyleSheet("font-weight: bold;");
+            brightnessMedianBar_->setValue(0);
+            brightnessMedianLabel_->setText(tr("--"));
+            brightnessIqrLabel_->setText(tr("--"));
+            brightnessRangeLabel_->setText(tr("--"));
+            brightnessSampleLabel_->setText(tr("0 recent images"));
+            return;
+        }
+
+        const double avgMedian = medianSum / samples;
+        const double avgIqr = iqrSum / samples;
+        const int medianValue = static_cast<int>(std::round(std::clamp(avgMedian, 0.0, 255.0)));
+        brightnessMedianBar_->setValue(medianValue);
+
+        QString status = tr("Nominal exposure");
+        QString color = QStringLiteral("#2e7d32");
+        if (maxBrightness >= 250.0)
+        {
+            status = tr("Saturation detected");
+            color = QStringLiteral("#c62828");
+        }
+        else if (avgMedian >= 220.0)
+        {
+            status = tr("Bright exposure");
+            color = QStringLiteral("#ef6c00");
+        }
+        else if (avgMedian <= 40.0)
+        {
+            status = tr("Dim exposure");
+            color = QStringLiteral("#1565c0");
+        }
+        else if (avgIqr < 5.0)
+        {
+            status = tr("Low contrast");
+            color = QStringLiteral("#6a1b9a");
+        }
+
+        brightnessStatusLabel_->setText(tr("Status: %1").arg(status));
+        brightnessStatusLabel_->setStyleSheet(QStringLiteral("font-weight: bold; color: %1;").arg(color));
+        brightnessMedianLabel_->setText(tr("%1 / 255").arg(avgMedian, 0, 'f', 1));
+        brightnessIqrLabel_->setText(tr("%1 gray levels").arg(avgIqr, 0, 'f', 1));
+        brightnessRangeLabel_->setText(tr("%1–%2").arg(q1Brightness, 0, 'f', 0).arg(maxBrightness, 0, 'f', 0));
+        brightnessSampleLabel_->setText(tr("%1 recent images").arg(samples));
     }
 
     void ExperimentMonitoringTab::updateValidFramesGrid(const std::vector<backend::services::ProcessedFrame> &validFrames)
@@ -1038,6 +1178,7 @@ namespace frontend
             // Update displays
             updateScatterplot(recentValidFrames_);
             updateHistogram(recentValidFrames_);
+            updateBrightnessDashboard(recentValidFrames_, recentInvalidFrames_);
             updateValidFramesGrid(recentValidFrames_);
             updateInvalidFramesGrid(recentInvalidFrames_);
             SPDLOG_INFO("Monitoring buffer cleared");
