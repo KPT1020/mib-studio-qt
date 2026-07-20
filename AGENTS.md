@@ -105,3 +105,36 @@ part of the change.
 - Test performance metrics go to MLflow at `mlflow.yofo.bio` via
   `MLFLOW_TRACKING_USERNAME` / `MLFLOW_TRACKING_PASSWORD` env vars — never
   hardcode credentials.
+
+## Cursor Cloud specific instructions
+
+Linux/cloud dev runs on system apt packages (no Conan). The startup update
+script installs the toolchain + Qt6/OpenCV/HDF5/etc; build/test/run commands
+below are run manually.
+
+- **Backend is the validated Linux path.** Build/test with the
+  `linux-backend-only` preset (mirrors `backend-ci.yml`):
+  `cmake --preset linux-backend-only` → `cmake --build --preset linux-backend-only-build`
+  → `ctest --preset linux-backend-only-test --output-on-failure` (14 tests).
+- **Do not use Conan on Linux.** Both `linux-backend-only` and
+  `linux-system-release` resolve everything from system packages; the Conan
+  graph (`qt/opencv/onnxruntime`) does not resolve here. The CI Conan step is a
+  non-fatal probe only.
+- **ONNX Runtime is absent on Linux** → build links `YoloService.stub.cpp` and
+  logs `MIB_HAS_ONNXRUNTIME=0`; the "YOLO model not loaded" warning is expected,
+  not an error.
+- **Headless Qt:** prefix GUI/Qt executables with `QT_QPA_PLATFORM=offscreen`.
+- **End-to-end app smoke without hardware or GUI:** run the capture-proof
+  binary built by the backend preset —
+  `QT_QPA_PLATFORM=offscreen ./build/linux-backend/kin6_mib_app_capture_proof`.
+  It drives the real `AppBackend` + `MockCamera` + `CaptureService` +
+  `ProcessingService` (capture → async batch processing → contour/mask output)
+  and exits 0 on success.
+- **Full GUI on Linux:** `linux-system-release` (Ninja, system packages) builds
+  `mib_studio_qt` and needs `qt6-charts-dev`. Run it headed on the VM display
+  with mock frames:
+  `DISPLAY=:1 MIB_CAMERA_MODE=mock MIB_MOCK_CAMERA_DIR=/workspace/data/mock_frames MIB_MOCK_CAMERA_LOOP=true ./build/linux-system/mib_studio_qt`.
+  Sample frames ship in `data/mock_frames/`. The window has Connect / Overview /
+  Experiment / Review tabs; the Overview tab shows the live mock preview.
+- The stale `mock_studio_qt` target referenced in some docs no longer exists;
+  mock mode is a runtime mode of `mib_studio_qt` (forced on non-Windows).
