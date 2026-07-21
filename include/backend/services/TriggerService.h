@@ -60,6 +60,23 @@ public:
     uint64_t getDroppedRequestCount() const {
         return droppedRequests_.load(std::memory_order_relaxed);
     }
+    // Pulses that a dequeued request could not drive because no camera was
+    // bound at fire time. A non-zero value means a target was identified for
+    // sorting but the actuation hardware was absent — a silent sort loss until
+    // this counter was added.
+    uint64_t getDroppedPulsesNoCameraCount() const {
+        return droppedPulsesNoCamera_.load(std::memory_order_relaxed);
+    }
+    // Pulses lost because the camera's setTriggerOutput(true) call failed. Same
+    // meaning as above: a selected target never got its TTL edge.
+    uint64_t getDroppedPulsesSetFailedCount() const {
+        return droppedPulsesSetFailed_.load(std::memory_order_relaxed);
+    }
+    // Total pulses lost after a request was dequeued (no-camera + set-failed).
+    uint64_t getDroppedPulseCount() const {
+        return droppedPulsesNoCamera_.load(std::memory_order_relaxed) +
+               droppedPulsesSetFailed_.load(std::memory_order_relaxed);
+    }
 
     void resetMetrics() {
         triggerCount_.store(0, std::memory_order_relaxed);
@@ -67,6 +84,8 @@ public:
         lastTriggerObjectId_.store(-1, std::memory_order_relaxed);
         lastTriggerTrackId_.store(-1, std::memory_order_relaxed);
         droppedRequests_.store(0, std::memory_order_relaxed);
+        droppedPulsesNoCamera_.store(0, std::memory_order_relaxed);
+        droppedPulsesSetFailed_.store(0, std::memory_order_relaxed);
     }
 
     // Bound on the pending-request queue. Sized to absorb a realistic burst
@@ -110,6 +129,11 @@ private:
     std::atomic<uint64_t> triggerCount_{0};
     std::atomic<double> lastOnsetUs_{0.0};
     std::atomic<uint64_t> droppedRequests_{0};
+    // Pulses lost after a request was already dequeued — the target was
+    // selected but no TTL edge was driven. Split by cause so a missing camera
+    // (setup/teardown race) is distinguishable from a hardware set failure.
+    std::atomic<uint64_t> droppedPulsesNoCamera_{0};
+    std::atomic<uint64_t> droppedPulsesSetFailed_{0};
 };
 
 } // namespace backend::services

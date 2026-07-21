@@ -477,10 +477,17 @@ void ProcessingService::startExperiment() {
     droppedInvalidFrames_.store(0, std::memory_order_relaxed);
     lastDropLogUs_.store(0, std::memory_order_relaxed);
     resetRealtimeMetrics();
+    backend::diagnostics::PipelineTimingRecorder::instance().resetLiveLatency();
     // Reset auto-capture counter when experiment starts
     consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
     experimentActive_.store(true);
-    backend::diagnostics::CrashStateMirror::instance().processing.experimentActive.store(true);
+    {
+        auto& m = backend::diagnostics::CrashStateMirror::instance().processing;
+        m.experimentActive.store(true);
+        m.droppedValidFrames.store(0, std::memory_order_relaxed);
+        m.targetGroupObjects.store(0, std::memory_order_relaxed);
+        m.unservedTargetGroupObjects.store(0, std::memory_order_relaxed);
+    }
     SPDLOG_INFO("ProcessingService: experiment started, frame buffers cleared (flush interval: {} "
                 "frames, max buffered: {}, invalid sampling: every {}th)",
                 flushInterval, maxBuffered, invalidFrameSamplingRate_.load());
@@ -1609,6 +1616,88 @@ void ProcessingService::publishRealtimeValidationCallbacks(
     }
 }
 
+void ProcessingService::accumulateIdentificationCounters(
+    const std::vector<FilterResult>& validations, const ProcessingConfig& config,
+    double pixelToMicronFactor) {
+    namespace science = backend::processing::science;
+    static_assert(science::kInvalidReasonCount == 6,
+                  "idReasonCounts_ / IdentificationCounters.reasonCounts size must match "
+                  "science::kInvalidReasonCount");
+
+    idFramesProcessed_.fetch_add(1, std::memory_order_relaxed);
+
+    bool anyObject = false;
+    uint64_t targetGroupThisFrame = 0;
+    for (const auto& v : validations) {
+        // filterProcessedObjects emits at least one (possibly empty) result per
+        // frame; a real detection has a contour. objectCount > 0 marks frames
+        // that actually contained something to classify.
+        if (v.objectCount > 0 || v.innerContourCount > 0) {
+            anyObject = true;
+        }
+        if (v.isValid) {
+            idValidObjects_.fetch_add(1, std::memory_order_relaxed);
+            if (v.isTargetGroup) {
+                ++targetGroupThisFrame;
+            }
+        } else {
+            idInvalidObjects_.fetch_add(1, std::memory_order_relaxed);
+            for (auto reason : science::classifyInvalidReasons(v, config, pixelToMicronFactor)) {
+                idReasonCounts_[static_cast<size_t>(reason)].fetch_add(1,
+                                                                       std::memory_order_relaxed);
+            }
+        }
+    }
+
+    if (anyObject) {
+        idFramesWithObjects_.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (targetGroupThisFrame > 0) {
+        idTargetGroupObjects_.fetch_add(targetGroupThisFrame, std::memory_order_relaxed);
+        // selectTargetGroupTriggerOwner dispatches only the first target-group
+        // object per frame; the rest are identified sort targets that never get
+        // a pulse. Count them as an identification loss.
+        idUnservedTargetGroupObjects_.fetch_add(targetGroupThisFrame - 1,
+                                                std::memory_order_relaxed);
+    }
+
+    // Mirror the headline loss values so crash reports carry live state (cheap
+    // relaxed stores; off the trigger-critical path).
+    auto& mirror = backend::diagnostics::CrashStateMirror::instance().processing;
+    mirror.targetGroupObjects.store(idTargetGroupObjects_.load(std::memory_order_relaxed),
+                                    std::memory_order_relaxed);
+    mirror.unservedTargetGroupObjects.store(
+        idUnservedTargetGroupObjects_.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    mirror.droppedValidFrames.store(droppedValidFrames_.load(std::memory_order_relaxed),
+                                    std::memory_order_relaxed);
+}
+
+ProcessingService::IdentificationCounters ProcessingService::getIdentificationCounters() const {
+    IdentificationCounters c;
+    c.framesProcessed = idFramesProcessed_.load(std::memory_order_relaxed);
+    c.framesWithObjects = idFramesWithObjects_.load(std::memory_order_relaxed);
+    c.validObjects = idValidObjects_.load(std::memory_order_relaxed);
+    c.invalidObjects = idInvalidObjects_.load(std::memory_order_relaxed);
+    c.targetGroupObjects = idTargetGroupObjects_.load(std::memory_order_relaxed);
+    c.unservedTargetGroupObjects = idUnservedTargetGroupObjects_.load(std::memory_order_relaxed);
+    for (size_t i = 0; i < 6; ++i) {
+        c.reasonCounts[i] = idReasonCounts_[i].load(std::memory_order_relaxed);
+    }
+    return c;
+}
+
+void ProcessingService::resetIdentificationCounters() {
+    idFramesProcessed_.store(0, std::memory_order_relaxed);
+    idFramesWithObjects_.store(0, std::memory_order_relaxed);
+    idValidObjects_.store(0, std::memory_order_relaxed);
+    idInvalidObjects_.store(0, std::memory_order_relaxed);
+    idTargetGroupObjects_.store(0, std::memory_order_relaxed);
+    idUnservedTargetGroupObjects_.store(0, std::memory_order_relaxed);
+    for (auto& r : idReasonCounts_) {
+        r.store(0, std::memory_order_relaxed);
+    }
+}
+
 void ProcessingService::appendRealtimeMonitoringFrame(uint64_t index, uint64_t timestampNs,
                                                       const FilterResult& validation,
                                                       const cv::Mat& originalImage,
@@ -2319,6 +2408,11 @@ void ProcessingService::realtimeInlineLoop() {
                     validations, f.timestamp,
                     {true, idx, f.hostTimestampUs, algoStartUsRec, algoEndUsRec});
 
+                // Off the trigger-critical path: update the identification
+                // funnel + invalid-reason histogram from this frame's objects.
+                accumulateIdentificationCounters(
+                    validations, config, pixelToMicronFactor_.load(std::memory_order_relaxed));
+
                 // Always accumulate frames for monitoring (with size limit)
                 for (const auto& objectValidation : validations) {
                     appendRealtimeMonitoringFrame(idx, f.timestamp, objectValidation, grayROI,
@@ -2741,6 +2835,11 @@ void ProcessingService::realtimeInlineLoop() {
                 publishRealtimeValidationCallbacks(
                     validations, f.timestamp,
                     {true, idx, f.hostTimestampUs, algoStartUsRec, algoEndUsRec});
+
+                // Off the trigger-critical path: update the identification
+                // funnel + invalid-reason histogram from this frame's objects.
+                accumulateIdentificationCounters(
+                    validations, config, pixelToMicronFactor_.load(std::memory_order_relaxed));
 
                 // Always accumulate frames for monitoring (with size limit)
                 cv::Mat roiOriginal = gray(cvRoi);
@@ -3167,6 +3266,11 @@ void ProcessingService::realtimeInlineLoop() {
                 publishRealtimeValidationCallbacks(
                     validations, f.timestamp,
                     {true, idx, f.hostTimestampUs, algoStartUsRec, algoEndUsRec});
+
+                // Off the trigger-critical path: update the identification
+                // funnel + invalid-reason histogram from this frame's objects.
+                accumulateIdentificationCounters(
+                    validations, config, pixelToMicronFactor_.load(std::memory_order_relaxed));
 
                 // Always accumulate frames for monitoring (with size limit)
                 cv::Mat roiOriginal = gray(cvRoi);

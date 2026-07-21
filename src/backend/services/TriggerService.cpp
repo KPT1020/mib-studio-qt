@@ -1,5 +1,6 @@
 #include "backend/services/TriggerService.h"
 #include "backend/camera/common/ICamera.h"
+#include "backend/diagnostics/CrashStateMirror.h"
 #include "backend/diagnostics/PipelineTimingRecorder.h"
 #include <spdlog/spdlog.h>
 #include <chrono>
@@ -55,6 +56,7 @@ TriggerService::~TriggerService() {
 void TriggerService::start() {
     if (running_.load()) return;
     running_.store(true);
+    backend::diagnostics::CrashStateMirror::instance().trigger.running.store(true);
     thread_ = std::thread(&TriggerService::triggerLoop, this);
     SPDLOG_INFO("TriggerService started");
 }
@@ -75,6 +77,7 @@ void TriggerService::stop() {
     }
     triggerCV_.notify_all();
     if (thread_.joinable()) thread_.join();
+    backend::diagnostics::CrashStateMirror::instance().trigger.running.store(false);
     SPDLOG_INFO("TriggerService stopped");
 }
 
@@ -139,7 +142,19 @@ void TriggerService::triggerLoop() {
         }
 
         auto* cam = camera_.load(std::memory_order_acquire);
-        if (!cam) continue;
+        if (!cam) {
+            // The request was dequeued but there is no camera to drive the
+            // pulse: a selected target is lost. Count it instead of dropping
+            // silently (previously a bare `continue`).
+            const uint64_t lost =
+                droppedPulsesNoCamera_.fetch_add(1, std::memory_order_relaxed) + 1;
+            if (lost == 1 || (lost % 100) == 0) {
+                SPDLOG_WARN("TriggerService: no camera bound, dropped pulse for frame {} "
+                            "(total no-camera drops: {})",
+                            pending.frameIndex, lost);
+            }
+            continue;
+        }
 
         const bool recordTiming = timingRecorder.isEnabled();
         const uint64_t wakeUs =
@@ -148,7 +163,19 @@ void TriggerService::triggerLoop() {
         // Fire trigger pulse: High -> busy-wait ~1us -> Low
         // Mirrors processTrigger() in MIB-Studio/src/mib_grabber/mib_grabber.cpp
         auto start = std::chrono::high_resolution_clock::now();
-        if (!cam->setTriggerOutput(true)) continue;
+        if (!cam->setTriggerOutput(true)) {
+            // The hardware refused the rising edge: the selected target is not
+            // sorted. Count it instead of dropping silently (previously a bare
+            // `continue`).
+            const uint64_t lost =
+                droppedPulsesSetFailed_.fetch_add(1, std::memory_order_relaxed) + 1;
+            if (lost == 1 || (lost % 100) == 0) {
+                SPDLOG_WARN("TriggerService: setTriggerOutput(true) failed for frame {} "
+                            "(total set-failed drops: {})",
+                            pending.frameIndex, lost);
+            }
+            continue;
+        }
         auto onset = std::chrono::high_resolution_clock::now();
         const uint64_t fireUs =
             recordTiming ? backend::diagnostics::PipelineTimingRecorder::nowUs() : 0;
@@ -165,6 +192,30 @@ void TriggerService::triggerLoop() {
         auto onsetUs = std::chrono::duration<double, std::micro>(onset - start).count();
         lastOnsetUs_.store(onsetUs, std::memory_order_relaxed);
         triggerCount_.fetch_add(1, std::memory_order_relaxed);
+
+        // Always-on live end-to-end target latency: acquisition (host grab
+        // stamp of the source frame) -> pulse onset. Independent of the
+        // detailed timing recorder so it is visible without MIB_PIPELINE_TIMING.
+        if (pending.hostTimestampUs != 0) {
+            const uint64_t nowUs = backend::diagnostics::PipelineTimingRecorder::nowUs();
+            if (nowUs >= pending.hostTimestampUs) {
+                timingRecorder.noteTargetLatency(nowUs - pending.hostTimestampUs);
+            }
+        }
+
+        // Mirror trigger/sort state so crash reports carry live values.
+        {
+            auto& m = backend::diagnostics::CrashStateMirror::instance().trigger;
+            m.triggerCount.store(triggerCount_.load(std::memory_order_relaxed),
+                                 std::memory_order_relaxed);
+            m.lastOnsetUs.store(static_cast<uint64_t>(onsetUs), std::memory_order_relaxed);
+            m.droppedRequests.store(droppedRequests_.load(std::memory_order_relaxed),
+                                    std::memory_order_relaxed);
+            m.droppedPulses.store(getDroppedPulseCount(), std::memory_order_relaxed);
+            m.targetLatencyUs.store(
+                static_cast<uint64_t>(timingRecorder.avgTargetLatencyUs()),
+                std::memory_order_relaxed);
+        }
 
         if (recordTiming) {
             backend::diagnostics::TriggerTimingRecord record;
