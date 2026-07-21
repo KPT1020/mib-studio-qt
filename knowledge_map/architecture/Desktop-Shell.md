@@ -44,6 +44,8 @@ The repo root `src/` is the C++ tree, so the whole Tauri app lives under
   (UX-8), with `desktop/src/contextBar.test.ts` vitest coverage.
 - `desktop/src/commissioning.ts` — pure Operator/Service-mode actuation gate
   (UX-9), with `desktop/src/commissioning.test.ts` vitest coverage.
+- `desktop/src/operations.ts` — pure key-metrics + alerts derivation for the
+  integrated dashboard (UX-7), with `desktop/src/operations.test.ts` coverage.
 
 **Guided workflow (UX-1, issue #305):** `desktop/src/workflow.ts` layers an
 authoritative *stage state* on the Connect / Overview / Experiment / Review
@@ -104,6 +106,19 @@ those checks; arming is one-shot and clears on mode exit or an active
 experiment. A running periodic test stays stoppable in operator mode as a safety
 fallback. Details:
 `knowledge_map/task/2026-07-21-ux9-commissioning-mode.md`.
+
+**Integrated operations dashboard (UX-7 slice, issue #311):**
+`desktop/src/operations.ts` — `deriveKeyMetrics` (total/valid events, validity
+rate, throughput, evicted rows) and `deriveAlerts` (critical-first: failed /
+bridge error / dropped events; warnings: stale metrics, low validity, failing
+quality gates, evictions, flushing). The Experiment/Preview view shows the key
+metrics + quality-gate strip (UX-4) + alerts beside the live image, so routine
+operation needs no Preview/Monitoring sub-tab switch. Metric **collection** runs
+throughout the Experiment stage and any active run (`monitoringActive`), while
+snapshot polling runs while the tab is shown; freshness (Live/Stale/Idle) comes
+from a change-tracking ref. Run header / quick-adjust / trend charts / drawers
+are follow-ups. Details:
+`knowledge_map/task/2026-07-21-ux7-ops-dashboard.md`.
 
 Native **file pickers** use `tauri-plugin-dialog` (registered in `run()`,
 granted via `dialog:default` in `capabilities/default.json`, called from the
