@@ -20,6 +20,16 @@
   `hostTimestampUs` — the host monotonic acquisition stamp) and is used
   for metadata at trigger fire time.
 - Expose metrics: `getTriggerCount`, `getLastOnsetUs`, `resetMetrics`.
+- Count **lost pulses** that were previously dropped silently: after a
+  request is dequeued the loop may still fail to drive the TTL edge because
+  no camera is bound (`getDroppedPulsesNoCameraCount`) or
+  `setTriggerOutput(true)` returns false (`getDroppedPulsesSetFailedCount`);
+  both are a selected sort target that never fired (`getDroppedPulseCount` =
+  sum, throttled WARN). Each pulse also feeds the always-on live
+  acquisition→pulse latency gauge via
+  `PipelineTimingRecorder::noteTargetLatency`, and mirrors trigger count /
+  onset / dropped requests / dropped pulses / target latency into
+  [[../diagnostics/CrashStateMirror]] (`trigger` slot).
 - Requests are queued per-request (issue #283): a bounded
   `pendingRequests_` deque (capacity `kMaxPendingRequests` = 8, under
   `triggerMutex_`) replaces the old single-bool flag, so every

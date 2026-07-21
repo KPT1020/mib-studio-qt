@@ -105,6 +105,10 @@ mib_add_backend_test_executable(processing_science_golden_test processing/proces
 add_test(NAME processing.science_golden COMMAND $<TARGET_FILE:processing_science_golden_test>)
 set_tests_properties(processing.science_golden PROPERTIES LABELS "processing;backend" TIMEOUT 30)
 
+mib_add_backend_test_executable(processing_identification_metrics_test processing/processing_identification_metrics_test.cpp)
+add_test(NAME processing.identification_metrics COMMAND $<TARGET_FILE:processing_identification_metrics_test>)
+set_tests_properties(processing.identification_metrics PROPERTIES LABELS "processing;backend" TIMEOUT 30)
+
 mib_add_backend_test_executable(processing_pipeline_smoke_test processing/processing_pipeline_smoke_test.cpp)
 add_test(NAME processing.pipeline_smoke COMMAND $<TARGET_FILE:processing_pipeline_smoke_test>)
 set_tests_properties(processing.pipeline_smoke PROPERTIES LABELS "processing;backend")

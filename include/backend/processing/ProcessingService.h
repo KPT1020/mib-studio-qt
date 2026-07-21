@@ -230,8 +230,31 @@ public:
         invalidFps1s_.store(0.0, std::memory_order_relaxed);
         algoAvgUs1s_.store(0.0, std::memory_order_relaxed);
         algoAvgUs1sUpdatedUs_.store(0, std::memory_order_relaxed);
+        resetIdentificationCounters();
     }
     
+    // ---- Identification funnel + loss counters (monotonic, always-on) ----
+    // Accumulated on the realtime inline path once per processed frame, off the
+    // trigger-critical section. Cheap relaxed atomics, readable from any thread.
+    // Rates are derived by the consumer from deltas against a wall clock. This
+    // is the quantitative basis for "loss of target identification": the funnel
+    // (frames -> objects -> valid -> target-group -> served) plus the per-reason
+    // rejection histogram, plus unserved extra targets a single frame produced.
+    struct IdentificationCounters {
+        uint64_t framesProcessed{0};   // frames reaching object validation
+        uint64_t framesWithObjects{0}; // frames with >=1 detected object
+        uint64_t validObjects{0};      // objects passing all range gates
+        uint64_t invalidObjects{0};    // objects failing >=1 gate
+        uint64_t targetGroupObjects{0};         // valid objects in the sort target group
+        uint64_t unservedTargetGroupObjects{0}; // target-group objects beyond the frame's
+                                                // first — no pulse is dispatched for them
+        // Invalid-reason histogram, indexed by science::InvalidReasonCode:
+        // {NoContour, Border, Area, Ring, Deform, AreaRatio}.
+        uint64_t reasonCounts[6]{};
+    };
+    IdentificationCounters getIdentificationCounters() const;
+    void resetIdentificationCounters();
+
     // Totals for current experiment
     uint64_t getTotalValidFlushed() const { return totalValidFlushed_.load(std::memory_order_relaxed); }
     uint64_t getDroppedValidFrames() const { return droppedValidFrames_.load(std::memory_order_relaxed); }
@@ -392,6 +415,12 @@ private:
     void publishRealtimeValidationCallbacks(const std::vector<FilterResult>& validations,
                                             uint64_t timestampNs,
                                             const RealtimeFrameTiming& timing);
+    // Update the identification funnel + invalid-reason histogram from one
+    // frame's validations. Called off the trigger-critical path (after the
+    // trigger callback has already fired) with the loop's cached config.
+    void accumulateIdentificationCounters(const std::vector<FilterResult>& validations,
+                                          const ProcessingConfig& config,
+                                          double pixelToMicronFactor);
     void appendRealtimeMonitoringFrame(uint64_t index,
                                        uint64_t timestampNs,
                                        const FilterResult& validation,
@@ -584,6 +613,17 @@ private:
     std::atomic<uint64_t> droppedValidFrames_{0};
     std::atomic<uint64_t> droppedInvalidFrames_{0};
     std::atomic<uint64_t> lastDropLogUs_{0};
+
+    // Identification funnel + loss counters (see IdentificationCounters). The
+    // reason array is indexed by science::InvalidReasonCode (size checked with
+    // a static_assert in the .cpp).
+    std::atomic<uint64_t> idFramesProcessed_{0};
+    std::atomic<uint64_t> idFramesWithObjects_{0};
+    std::atomic<uint64_t> idValidObjects_{0};
+    std::atomic<uint64_t> idInvalidObjects_{0};
+    std::atomic<uint64_t> idTargetGroupObjects_{0};
+    std::atomic<uint64_t> idUnservedTargetGroupObjects_{0};
+    std::atomic<uint64_t> idReasonCounts_[6]{};
     
     // Pixel to micron conversion factor (default: 0.4886)
     std::atomic<double> pixelToMicronFactor_{0.4886};

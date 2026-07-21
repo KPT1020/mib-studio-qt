@@ -5,6 +5,18 @@
 
 ## Features shipped
 
+- **Latency & target-identification-loss metrics** (2026-07-21, issue #292) —
+  quantifies pipeline latency and lost sort targets. New counted losses:
+  [[../services/TriggerService]] no-camera / set-failed pulse drops
+  (previously silent `continue`s) and target-group objects beyond the first
+  in a frame that never get a pulse (`selectTargetGroupTriggerOwner` serves
+  only the first). New always-on identification funnel + invalid-reason
+  histogram on [[../services/ProcessingService]] (`getIdentificationCounters`,
+  reasons from the shared `science::classifyInvalidReasons`), a
+  [[../diagnostics/PipelineTimingRecorder]] `summarize()` percentile view plus
+  an always-on live acquisition→pulse latency gauge, status-bar surfacing,
+  [[../diagnostics/CrashStateMirror]] loss fields, and a funnel/loss section in
+  `analyze_pipeline_timing.py`. Test: `processing.identification_metrics`.
 - **Trigger-path hardening** (2026-07-18, issue #227) — the
   [[../services/TriggerService]] thread elevates itself to
   `THREAD_PRIORITY_TIME_CRITICAL` on Windows (best-effort `SCHED_FIFO`

@@ -200,6 +200,21 @@ cache refreshes when the background changes.
 `getTotalValidFlushed` for experiment totals, and dropped-frame counters for
 the bounded experiment backlog.
 
+**Identification funnel + loss** (`getIdentificationCounters` →
+`IdentificationCounters`, monotonic, always-on, reset by `resetRealtimeMetrics`
+/ `startExperiment`): the quantitative basis for "loss of target
+identification". Accumulated once per frame in `accumulateIdentificationCounters`,
+off the trigger-critical path, using the loop's cached config —
+`framesProcessed`, `framesWithObjects`, `validObjects`, `invalidObjects`,
+`targetGroupObjects`, `unservedTargetGroupObjects` (target-group objects
+beyond the frame's first, which `selectTargetGroupTriggerOwner` never
+dispatches a pulse for), and a per-reason invalid histogram
+(`reasonCounts[6]`). The reason set comes from
+`science::classifyInvalidReasons` (ProcessingScience) — the single source of
+truth shared with the [[../frontend/ExperimentMonitoringTab]] tooltip so they
+cannot disagree. Headline loss values mirror into
+[[../diagnostics/CrashStateMirror]] (`processing` slot).
+
 **Per-frame latency records** ([[../diagnostics/PipelineTimingRecorder]],
 opt-in): the three realtime inline-loop paths capture host-monotonic
 `algoStartUs`/`algoEndUs` next to the existing steady_clock stamps and hand a

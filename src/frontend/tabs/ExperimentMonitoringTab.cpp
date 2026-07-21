@@ -50,6 +50,7 @@
 #include "frontend/widgets/ZoomableChartView.h"
 #include "backend/app/AppBackend.h"
 #include "backend/processing/ProcessingService.h"
+#include "backend/processing/ProcessingScience.h"
 #include "backend/services/TriggerService.h"
 
 #include <spdlog/spdlog.h>
@@ -69,69 +70,48 @@ std::vector<InvalidReason> getInvalidReasons(
     const backend::services::ProcessingConfig& config,
     double pixelToMicronFactor = 1.0)
 {
+    // Which reasons apply comes from the shared classifier so this tooltip and
+    // the live invalid-reason histogram never disagree. The detailed value text
+    // is built here (the classifier returns codes only).
+    namespace science = backend::processing::science;
+    const double areaUm = result.area * pixelToMicronFactor * pixelToMicronFactor;
+
     std::vector<InvalidReason> reasons;
-
-    // Check early-exit conditions first (metrics not computed in these cases)
-    if (config.require_single_inner_contour && result.innerContourCount == 0) {
-        reasons.push_back({"No contour", "No inner contour found"});
-        return reasons;
-    }
-
-    if (config.enable_border_check && result.touchesBorder) {
-        reasons.push_back({"Border", "Contour touches ROI border"});
-        // When border check fails, metrics are not computed — don't check them
-        return reasons;
-    }
-
-    // Convert pixel area to μm² to match config threshold units
-    double areaUm = result.area * pixelToMicronFactor * pixelToMicronFactor;
-
-    // Metrics were computed — check which range checks failed
-    if (config.enable_area_range_check) {
-        if (areaUm < config.area_threshold_min || areaUm > config.area_threshold_max) {
-            reasons.push_back({
-                "Area",
-                QString("Area: %1 μm² (range: %2-%3)")
-                    .arg(areaUm, 0, 'f', 0)
-                    .arg(config.area_threshold_min)
-                    .arg(config.area_threshold_max)
-            });
-        }
-    }
-
-    if (config.enable_ring_ratio_check) {
-        if (result.ringRatio <= config.ring_ratio_min || result.ringRatio >= config.ring_ratio_max) {
-            reasons.push_back({
-                "Ring",
-                QString("Ring ratio: %1 (range: %2-%3)")
-                    .arg(result.ringRatio, 0, 'f', 1)
-                    .arg(config.ring_ratio_min, 0, 'f', 1)
-                    .arg(config.ring_ratio_max, 0, 'f', 1)
-            });
-        }
-    }
-
-    if (config.enable_deformability_range_check) {
-        if (result.deformability < config.deformability_threshold_min ||
-            result.deformability > config.deformability_threshold_max) {
-            reasons.push_back({
-                "Deform",
-                QString("Deformability: %1 (range: %2-%3)")
-                    .arg(result.deformability, 0, 'f', 3)
-                    .arg(config.deformability_threshold_min, 0, 'f', 3)
-                    .arg(config.deformability_threshold_max, 0, 'f', 3)
-            });
-        }
-    }
-
-    if (config.enable_area_ratio_check) {
-        if (result.areaRatio > config.area_ratio_threshold_max) {
-            reasons.push_back({
-                "Ratio",
-                QString("Area ratio: %1 (max: %2)")
-                    .arg(result.areaRatio, 0, 'f', 2)
-                    .arg(config.area_ratio_threshold_max, 0, 'f', 2)
-            });
+    for (auto code : science::classifyInvalidReasons(result, config, pixelToMicronFactor)) {
+        switch (code) {
+        case science::InvalidReasonCode::NoContour:
+            reasons.push_back({"No contour", "No inner contour found"});
+            break;
+        case science::InvalidReasonCode::Border:
+            reasons.push_back({"Border", "Contour touches ROI border"});
+            break;
+        case science::InvalidReasonCode::Area:
+            reasons.push_back({"Area",
+                               QString("Area: %1 μm² (range: %2-%3)")
+                                   .arg(areaUm, 0, 'f', 0)
+                                   .arg(config.area_threshold_min)
+                                   .arg(config.area_threshold_max)});
+            break;
+        case science::InvalidReasonCode::Ring:
+            reasons.push_back({"Ring",
+                               QString("Ring ratio: %1 (range: %2-%3)")
+                                   .arg(result.ringRatio, 0, 'f', 1)
+                                   .arg(config.ring_ratio_min, 0, 'f', 1)
+                                   .arg(config.ring_ratio_max, 0, 'f', 1)});
+            break;
+        case science::InvalidReasonCode::Deform:
+            reasons.push_back({"Deform",
+                               QString("Deformability: %1 (range: %2-%3)")
+                                   .arg(result.deformability, 0, 'f', 3)
+                                   .arg(config.deformability_threshold_min, 0, 'f', 3)
+                                   .arg(config.deformability_threshold_max, 0, 'f', 3)});
+            break;
+        case science::InvalidReasonCode::AreaRatio:
+            reasons.push_back({"Ratio",
+                               QString("Area ratio: %1 (max: %2)")
+                                   .arg(result.areaRatio, 0, 'f', 2)
+                                   .arg(config.area_ratio_threshold_max, 0, 'f', 2)});
+            break;
         }
     }
 
