@@ -5,6 +5,20 @@
 
 ## Features shipped
 
+- **UX redesign: UX-1 — guided four-stage operator workflow** (2026-07-21,
+  epic #304, issue #305) — New `desktop/src/workflow.ts`: a pure
+  `deriveWorkflow(facts)` that layers authoritative stage state
+  (Not started / Needs attention / Ready / Running / Complete), blocking
+  checks, and a single recommended next action on the Connect / Overview /
+  Experiment / Review tabs. Derived from backend snapshots plus explicit
+  operator confirmations — camera detection alone never completes Preflight,
+  and a device/core change invalidates the confirmation. Shell renders status
+  on each tab (text + dot, never colour alone) and a "Next" banner, and lands
+  startup on the earliest incomplete stage. 18 vitest cases
+  (`workflow.test.ts`, new `npm test` + Desktop CI step). Per-stage content is
+  the rest of epic #304 (UX-2…UX-11). Details:
+  `knowledge_map/task/2026-07-21-ux1-guided-workflow.md`.
+
 - **Qt → React/Tauri migration: BE-9 — Tauri platform services (Linux
   subset)** (2026-07-16, epic #246, issue #279) — New
   `desktop/src-tauri/src/platform.rs` (stable app paths, atomic persisted

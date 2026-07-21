@@ -34,6 +34,24 @@ The repo root `src/` is the C++ tree, so the whole Tauri app lives under
   (`Mutex<UniquePtr<BackendBridge>>` + a cached last-frame buffer) and the
   `#[tauri::command]` layer; `main.rs` calls `run()`.
 - `desktop/scripts/xvfb-smoke.sh` — headless GUI smoke launcher.
+- `desktop/src/workflow.ts` — pure guided-workflow stage derivation (UX-1),
+  with `desktop/src/workflow.test.ts` vitest coverage.
+
+**Guided workflow (UX-1, issue #305):** `desktop/src/workflow.ts` layers an
+authoritative *stage state* on the Connect / Overview / Experiment / Review
+tabs. `deriveWorkflow(facts)` is a pure function of backend snapshots (camera
+selection/running, processing-core pin, experiment status, review metadata)
+plus explicit operator confirmations, returning each stage's status
+(`not-started` / `needs-attention` / `ready` / `running` / `complete`), its
+blocking checks, and the single recommended next action. Preflight and
+Alignment reach `complete` only via an explicit confirmation whose stored
+device+core *signature* still matches — detection alone never completes a
+stage, and changing the device invalidates the confirmation. The shell renders
+status on each tab (text + dot, never colour alone) and a "Next" action banner,
+and lands startup on the earliest incomplete stage. Unit-tested in
+`workflow.test.ts` (`npm test`, gated in Desktop CI). Detailed per-stage content
+is the rest of epic #304 (UX-2…UX-11). Details:
+`knowledge_map/task/2026-07-21-ux1-guided-workflow.md`.
 
 Native **file pickers** use `tauri-plugin-dialog` (registered in `run()`,
 granted via `dialog:default` in `capabilities/default.json`, called from the

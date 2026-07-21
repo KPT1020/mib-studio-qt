@@ -97,6 +97,13 @@ jobs:
           npm install
           npm run build
 
+      - name: Unit-test workflow derivation (UX-1)
+        shell: bash
+        working-directory: desktop
+        run: |
+          set -o pipefail
+          npm test
+
       - name: Build Tauri app + run headless bridge test
         shell: bash
         working-directory: desktop/src-tauri

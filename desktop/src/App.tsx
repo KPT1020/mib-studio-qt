@@ -18,6 +18,7 @@ import {
   type TriggerStatus,
 } from "./bridge";
 import { BRIDGE_ABI_VERSION, EXPERIMENT_STATES } from "./bridgeContract";
+import { deriveWorkflow, type StageTab, type WorkflowFacts } from "./workflow";
 import "./App.css";
 
 const H5_FILTER = [{ name: "HDF5", extensions: ["h5"] }];
@@ -128,6 +129,13 @@ export default function App() {
 
   // Shell state.
   const [tab, setTab] = useState<MainTab>("connect");
+  // UX-1 guided workflow: explicit operator confirmations, stored as the
+  // device/core signature they were confirmed against so they auto-invalidate
+  // when the hardware changes. Kept in memory (not persisted) so every session
+  // re-confirms readiness. `didInitStage` guards the one-time startup landing.
+  const [preflightConfirmedFor, setPreflightConfirmedFor] = useState("");
+  const [alignmentConfirmedFor, setAlignmentConfirmedFor] = useState("");
+  const didInitStage = useRef(false);
   const [connectTab, setConnectTab] = useState<"cameras" | "mindvision" | "framegrabbers">("cameras");
   const [expTab, setExpTab] = useState<"preview" | "monitoring">("preview");
   const [configTab, setConfigTab] = useState<"app" | "script">("app");
@@ -699,6 +707,78 @@ export default function App() {
         ? "Camera is already running"
         : undefined;
 
+  // ---- UX-1 guided four-stage workflow (issue #305) ----
+  // Signatures the operator confirms against: change the device or the pinned
+  // processing core and the prior confirmation no longer matches.
+  const deviceIdentity = cameraConfigured
+    ? `${camSelection?.mode ?? ""}|${camSelection?.label ?? ""}`
+    : "";
+  const preflightSignature = cameraConfigured
+    ? `${deviceIdentity}|core:${coreStatus?.valid ? coreStatus.active_version : ""}`
+    : "";
+  const alignmentSignature = deviceIdentity;
+  const experimentCompleted =
+    expState === EXPERIMENT_STATES.Idle &&
+    !!expStatus?.valid &&
+    !expStatus.cancelled &&
+    expStatus.output_path !== "" &&
+    expStatus.valid_saved + expStatus.invalid_saved > 0;
+
+  const workflowFacts: WorkflowFacts = {
+    backendReady: ready,
+    cameraConfigured,
+    cameraRunning: running,
+    preflightSignature,
+    preflightConfirmedFor,
+    alignmentSignature,
+    alignmentConfirmedFor,
+    coreValid: coreStatus?.valid ?? false,
+    corePinSatisfied: coreStatus?.pin_satisfied ?? false,
+    requiredCoreVersion: coreStatus?.required_version ?? "",
+    experimentState: expState,
+    experimentCompleted,
+    reviewFileOpen: reviewMeta?.file_open ?? false,
+    reviewValid: reviewMeta?.valid ?? false,
+  };
+  const workflow = deriveWorkflow(workflowFacts);
+  const stageByTab = Object.fromEntries(workflow.stages.map((s) => [s.tab, s])) as Record<
+    StageTab,
+    (typeof workflow.stages)[number]
+  >;
+  const currentStage = workflow.stages.find((s) => s.id === workflow.currentStageId)!;
+  // A confirmation cannot be applied while a run is active (setup is locked).
+  const recNeedsConfirm = !!workflow.recommended && workflow.recommended.kind !== "navigate";
+  const recDisabled = recNeedsConfirm && expActive;
+
+  const doRecommended = () => {
+    const rec = workflow.recommended;
+    if (!rec) return;
+    if (rec.kind === "confirm-preflight" && !expActive) {
+      setPreflightConfirmedFor(preflightSignature);
+      setTab("connect");
+    } else if (rec.kind === "confirm-alignment" && !expActive) {
+      setAlignmentConfirmedFor(alignmentSignature);
+      setTab("overview");
+    } else {
+      setTab(rec.tab);
+    }
+  };
+
+  // Startup lands on the earliest incomplete stage (UX-1), unless an active or
+  // recoverable experiment demands the Experiment stage. Runs once, after the
+  // first camera snapshot arrives so the landing reflects real backend state.
+  useEffect(() => {
+    if (didInitStage.current || !ready || camSelection === null) return;
+    didInitStage.current = true;
+    if (expActive || expState === EXPERIMENT_STATES.Failed) {
+      setTab("experiment");
+      return;
+    }
+    const cur = workflow.stages.find((s) => s.id === workflow.currentStageId);
+    if (cur) setTab(cur.tab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, camSelection, expActive, expState]);
+
   return (
     <div className="app">
       {/* ---- Menu row ---- */}
@@ -834,18 +914,27 @@ export default function App() {
         {/* ---- Main tabbed area ---- */}
         <main className="main">
           <div className="tabs-header">
-            <div className="tabbar" role="tablist" aria-label="Workflow tabs">
-              {(["connect", "overview", "experiment", "review"] as MainTab[]).map((t) => (
-                <button
-                  key={t}
-                  role="tab"
-                  aria-selected={tab === t}
-                  className={tab === t ? "active" : ""}
-                  onClick={() => setTab(t)}
-                >
-                  {t[0].toUpperCase() + t.slice(1)}
-                </button>
-              ))}
+            <div className="tabbar" role="tablist" aria-label="Workflow stages">
+              {(["connect", "overview", "experiment", "review"] as StageTab[]).map((t) => {
+                const stage = stageByTab[t];
+                return (
+                  <button
+                    key={t}
+                    role="tab"
+                    aria-selected={tab === t}
+                    aria-label={`${stage.title}: ${stage.statusLabel}`}
+                    className={`stage-tab${tab === t ? " active" : ""}`}
+                    title={stage.blocking.length ? stage.blocking.join("; ") : stage.summary}
+                    onClick={() => setTab(t)}
+                  >
+                    <span className={`stage-dot ${stage.status}`} aria-hidden="true" />
+                    <span className="stage-tab-text">
+                      <span className="stage-tab-name">{stage.title}</span>
+                      <span className="stage-tab-status">{stage.statusLabel}</span>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
             <div className="spacer" />
             <div className="camera-actions">
@@ -867,6 +956,34 @@ export default function App() {
               </button>
             </div>
           </div>
+
+          {ready && (
+            <div className="workflow-next" role="status" aria-live="polite">
+              {workflow.recommended ? (
+                <>
+                  <span className="workflow-next-text">
+                    <strong>Next:</strong> {currentStage.title} — {currentStage.summary}
+                  </span>
+                  <button
+                    className="workflow-next-action"
+                    onClick={doRecommended}
+                    disabled={recDisabled}
+                    title={
+                      recDisabled
+                        ? "Setup is locked while an experiment is active"
+                        : undefined
+                    }
+                  >
+                    {workflow.recommended.label}
+                  </button>
+                </>
+              ) : (
+                <span className="workflow-next-text">
+                  <strong>Workflow complete</strong> — all stages ready and data reviewed.
+                </span>
+              )}
+            </div>
+          )}
 
           <div className="tab-body">
             {/* ---- Connect ---- */}
