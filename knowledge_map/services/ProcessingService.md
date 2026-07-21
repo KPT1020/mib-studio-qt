@@ -9,7 +9,9 @@
 `src/backend/processing/BundledProcessingKernel.cpp`,
 `src/backend/processing/ProcessingCoreLoader.cpp`,
 `src/backend/processing/ProcessingCoreCache.cpp`,
+`src/backend/processing/ChannelRoiDetect.cpp`,
 `include/backend/processing/ProcessingService.h`,
+`include/backend/processing/ChannelRoiDetect.h`,
 `include/backend/processing/ProcessingCoreAbi.h`
 **Related:** [[CaptureService]], [[Hdf5Service]], [[AutofocusService]],
 [[TriggerService]], [[../architecture/Data-Flow]],
@@ -144,6 +146,8 @@ All gates in one struct. Notable fields:
 - `empty_frame_pixel_threshold` — drives empty-frame skipping
 - `auto_background_enabled` + `auto_background_empty_frames`,
   `auto_background_cooldown_frames`
+- `auto_roi_from_background` (+ `auto_roi_wall_gradient_ratio`,
+  `auto_roi_wall_margin`) — see [[#Auto-fit ROI from background]]
 - Target-group gate: `target_group_area_*`, `target_group_deformability_*`,
   `enable_target_group_emodulus` + `target_group_emodulus_*` (uses
   `EModulusLut`, which is now fed from the managed LUT cache prepared by
@@ -192,6 +196,34 @@ read path. Snapshot is immutable; readers are safe without extra locking.
 `configVersion_` is also bumped by `setRealtimeBackgroundGray` (in addition to
 `setProcessingConfig` / `setRealtimeRoi`), so the realtime loop's hoisted-config
 cache refreshes when the background changes.
+
+## Auto-fit ROI from background
+
+Including the microfluidic **channel walls** in the processing ROI injects
+noise (spurious wall-edge contours) and defeats the empty-frame fast path,
+while cropping too tight clips real cells via the border check — so the ROI is
+a *window* that must clear the walls without cutting the cell band (see
+issue #295 for the measured tradeoff on `gavinlouuu/512x96stream`).
+
+`auto_roi_from_background` (default **off**) automates that choice.
+`detectChannelRoi` (`ChannelRoiDetect.{h,cpp}`, a pure OpenCV-only free
+function in `backend::processing`, part of the Qt-free `mib_processing` core)
+takes a captured background and returns a full-width ROI with the wall rows
+excluded: it takes the mean vertical-gradient (`cv::Sobel` + `cv::reduce`) row
+profile, treats rows whose gradient exceeds `auto_roi_wall_gradient_ratio` ×
+the central-channel baseline as walls, keeps the largest contiguous non-wall
+band, and trims `auto_roi_wall_margin` rows inward. It **fails safe** — empty,
+flat, or ambiguous input returns the full frame — so the result is always
+applyable.
+
+Wiring: `setRealtimeBackgroundGray` is the single chokepoint every background
+capture (manual and auto-background, all loop variants) funnels through. When
+the flag is set it calls `computeAutoRoiFromBackground` (maps
+`ProcessingConfig` → `ChannelRoiParams`, runs the detector) after releasing
+`rtMutex_`, applies the result via `setRealtimeRoi`, and fires
+`SuggestedRoiCallback` so the UI can reflect the chosen ROI. Off by default the
+manually drawn ROI is never touched. (Frontend surfacing of the callback is a
+follow-up; the backend applies the ROI directly today.)
 
 ## Metrics exposed
 

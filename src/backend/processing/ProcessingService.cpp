@@ -1,4 +1,5 @@
 #include "backend/processing/ProcessingService.h"
+#include "backend/processing/ChannelRoiDetect.h"
 #include "backend/processing/ProcessingScience.h"
 #include "backend/recording/Hdf5Service.h"
 #include "backend/diagnostics/CrashStateMirror.h"
@@ -409,6 +410,7 @@ ProcessingService::Roi ProcessingService::getRealtimeRoi() const {
 }
 
 void ProcessingService::setRealtimeBackgroundGray(const cv::Mat& bg) {
+    std::shared_ptr<const cv::Mat> stored;
     {
         std::scoped_lock lk(rtMutex_);
         if (!bg.empty() && bg.type() == CV_8UC1) {
@@ -420,10 +422,32 @@ void ProcessingService::setRealtimeBackgroundGray(const cv::Mat& bg) {
         } else {
             rtBgGray_.reset();
         }
+        stored = rtBgGray_;
     }
     configVersion_.fetch_add(
         1, std::memory_order_release); // wake cached-config refresh in realtime loop
     refreshRealtimeBatchPipelineConfig();
+
+    // Auto-fit the processing ROI to the channel so the operator can keep the
+    // full sensor frame while the wall bands (a noise source that also defeats
+    // the empty-frame fast path) are excluded. Off unless opted in. Done after
+    // the rtMutex_ scope so setRealtimeRoi can take the lock without re-entry.
+    if (stored && !stored->empty()) {
+        const Roi autoRoi = computeAutoRoiFromBackground(*stored);
+        if (autoRoi.w > 0 && autoRoi.h > 0) {
+            setRealtimeRoi(autoRoi);
+            SuggestedRoiCallback cb;
+            {
+                std::scoped_lock lk(suggestedRoiCallbackMutex_);
+                cb = suggestedRoiCallback_;
+            }
+            if (cb) {
+                cb(autoRoi, lastAutoBackgroundFrame_.load(std::memory_order_relaxed));
+            }
+            SPDLOG_INFO("Auto-fit processing ROI from background: x={} y={} w={} h={}", autoRoi.x,
+                        autoRoi.y, autoRoi.w, autoRoi.h);
+        }
+    }
 }
 
 cv::Mat ProcessingService::getRealtimeBackgroundGray() const {
@@ -1249,6 +1273,29 @@ void ProcessingService::setTargetGroupCallback(TargetGroupCallback callback) {
 void ProcessingService::setBackgroundCaptureCallback(BackgroundCaptureCallback callback) {
     std::scoped_lock lk(backgroundCaptureCallbackMutex_);
     backgroundCaptureCallback_ = std::move(callback);
+}
+
+void ProcessingService::setSuggestedRoiCallback(SuggestedRoiCallback callback) {
+    std::scoped_lock lk(suggestedRoiCallbackMutex_);
+    suggestedRoiCallback_ = std::move(callback);
+}
+
+ProcessingService::Roi
+ProcessingService::computeAutoRoiFromBackground(const cv::Mat& backgroundGray) const {
+    ProcessingConfig config;
+    {
+        std::scoped_lock lk(configMutex_);
+        config = processingConfig_;
+    }
+    if (!config.auto_roi_from_background || backgroundGray.empty()) {
+        return Roi{}; // disabled / no background: empty ROI == full frame
+    }
+    backend::processing::ChannelRoiParams params;
+    params.wallGradientRatio = config.auto_roi_wall_gradient_ratio;
+    params.marginRows = config.auto_roi_wall_margin;
+    const backend::processing::ChannelRoi detected =
+        backend::processing::detectChannelRoi(backgroundGray, params);
+    return Roi{detected.x, detected.y, detected.w, detected.h};
 }
 
 ProcessingService::DroppedFrameCounts
