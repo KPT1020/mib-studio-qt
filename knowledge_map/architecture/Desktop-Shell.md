@@ -42,6 +42,8 @@ The repo root `src/` is the C++ tree, so the whole Tauri app lives under
   (UX-4), with `desktop/src/quality.test.ts` vitest coverage.
 - `desktop/src/contextBar.ts` — pure persistent active-context bar derivation
   (UX-8), with `desktop/src/contextBar.test.ts` vitest coverage.
+- `desktop/src/commissioning.ts` — pure Operator/Service-mode actuation gate
+  (UX-9), with `desktop/src/commissioning.test.ts` vitest coverage.
 
 **Guided workflow (UX-1, issue #305):** `desktop/src/workflow.ts` layers an
 authoritative *stage state* on the Connect / Overview / Experiment / Review
@@ -91,6 +93,17 @@ target. Status mirrors the guided-workflow readiness; Warnings counts preflight
 px→µm. Profile (UX-2 #306), operator identity, and storage free-space are
 `pending` until bridged — shown explicitly, never faked. Details:
 `knowledge_map/task/2026-07-21-ux8-context-bar.md`.
+
+**Operator / Service-Commissioning mode (UX-9, issue #313):**
+`desktop/src/commissioning.ts` — `canActuate/canStartPeriodic/canStopPeriodic`
+gate hardware-actuating trigger tests. Every session starts in `operator` mode
+(`DEFAULT_MODE`); a menubar toggle enters `service` mode behind a confirm, with
+a persistent banner. The Monitoring trigger controls (Sort Trigger, Set Pulse,
+Periodic Test) render only in service mode behind an **Arm** checkbox, gated by
+those checks; arming is one-shot and clears on mode exit or an active
+experiment. A running periodic test stays stoppable in operator mode as a safety
+fallback. Details:
+`knowledge_map/task/2026-07-21-ux9-commissioning-mode.md`.
 
 Native **file pickers** use `tauri-plugin-dialog` (registered in `run()`,
 granted via `dialog:default` in `capabilities/default.json`, called from the

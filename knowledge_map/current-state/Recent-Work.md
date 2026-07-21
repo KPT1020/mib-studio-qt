@@ -5,6 +5,16 @@
 
 ## Features shipped
 
+- **UX redesign: UX-9 — Operator vs Service/Commissioning mode** (2026-07-21,
+  epic #304, issue #313) — New `desktop/src/commissioning.ts`: `canActuate` and
+  friends gate hardware-actuating trigger tests (service mode → not during a run
+  → trigger attached → armed). Every session starts in Operator mode; a menubar
+  toggle enters Service mode behind a confirm with a persistent banner. The
+  Monitoring trigger controls (Sort Trigger, Set Pulse, Periodic Test) render
+  only in Service mode behind a one-shot Arm; a running periodic test stays
+  stoppable in Operator mode. 9 vitest cases (`commissioning.test.ts`). Details:
+  `knowledge_map/task/2026-07-21-ux9-commissioning-mode.md`.
+
 - **UX redesign: UX-8 — persistent active-context bar** (2026-07-21, epic #304,
   issue #312) — New `desktop/src/contextBar.ts`: `deriveContextBar(facts)`
   builds the always-visible bottom bar (Profile / Camera / Calibration / Status

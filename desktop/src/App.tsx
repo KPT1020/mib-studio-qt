@@ -23,6 +23,13 @@ import { deriveWorkflow, type StageTab, type WorkflowFacts } from "./workflow";
 import { CHECK_STATUS_LABEL, derivePreflight, type PreflightInput } from "./preflight";
 import { deriveQualityGates, GATE_STATUS_LABEL, type QualityInput } from "./quality";
 import { deriveContextBar, SEG_STATUS_LABEL, type ContextBarFacts } from "./contextBar";
+import {
+  canActuate,
+  canStartPeriodic,
+  canStopPeriodic,
+  DEFAULT_MODE,
+  type OperatingMode,
+} from "./commissioning";
 import "./App.css";
 
 const H5_FILTER = [{ name: "HDF5", extensions: ["h5"] }];
@@ -178,6 +185,10 @@ export default function App() {
   const [trigStatus, setTrigStatus] = useState<TriggerStatus | null>(null);
   const [pulseUs, setPulseUs] = useState("1");
   const [periodicMs, setPeriodicMs] = useState("1000");
+  // UX-9: routine Operator vs Service/Commissioning mode. Every session starts
+  // in Operator mode; `triggerArmed` is a one-shot safety arm for actuation.
+  const [operatingMode, setOperatingMode] = useState<OperatingMode>(DEFAULT_MODE);
+  const [triggerArmed, setTriggerArmed] = useState(false);
 
   // Autofocus status (schema v11, BE-8).
   const [afStatus, setAfStatus] = useState<AutofocusStatus | null>(null);
@@ -863,6 +874,40 @@ export default function App() {
   };
   const contextBar = deriveContextBar(contextFacts);
 
+  // ---- UX-9 Operator vs Service/Commissioning mode (issue #313) ----
+  // Leaving Service mode, or an experiment going active, disarms actuation.
+  useEffect(() => {
+    if (operatingMode !== "service" || expActive) setTriggerArmed(false);
+  }, [operatingMode, expActive]);
+
+  const enterMode = (next: OperatingMode) => {
+    if (next === "service") {
+      const ok = window.confirm(
+        "Enter Service / Commissioning mode?\n\nThis exposes hardware-actuating controls (trigger tests). Use only for bring-up and diagnostics.",
+      );
+      if (!ok) return;
+      append("entered Service / Commissioning mode");
+    } else {
+      append("returned to Operator mode");
+    }
+    setOperatingMode(next);
+    if (next !== "service") setTriggerArmed(false);
+  };
+
+  const actuateCheck = canActuate({
+    mode: operatingMode,
+    experimentActive: expActive,
+    triggerAttached: trigStatus?.camera_attached ?? false,
+    armed: triggerArmed,
+  });
+  const startPeriodicCheck = canStartPeriodic({
+    mode: operatingMode,
+    experimentActive: expActive,
+    triggerAttached: trigStatus?.camera_attached ?? false,
+    armed: triggerArmed,
+  });
+  const stopPeriodicCheck = canStopPeriodic({ periodicActive: trigStatus?.periodic_active ?? false });
+
   const doRecommended = () => {
     const rec = workflow.recommended;
     if (!rec) return;
@@ -936,7 +981,29 @@ export default function App() {
             { label: "Report a Problem…", pending: PENDING.platform },
           ]}
         />
+        <div className="menubar-spacer" />
+        <button
+          type="button"
+          className={`mode-toggle ${operatingMode}`}
+          onClick={() => enterMode(operatingMode === "service" ? "operator" : "service")}
+          title="Switch between routine Operator mode and Service / Commissioning mode"
+          aria-label={`Operating mode: ${operatingMode === "service" ? "Service / Commissioning" : "Operator"}. Click to switch.`}
+        >
+          Mode: {operatingMode === "service" ? "Service ⚠" : "Operator"}
+        </button>
       </nav>
+
+      {operatingMode === "service" && (
+        <div className="service-banner" role="alert">
+          <span>
+            <strong>Service / Commissioning mode</strong> — hardware-actuating controls are enabled.
+            Not for routine operation.
+          </span>
+          <button type="button" onClick={() => enterMode("operator")}>
+            Exit to Operator
+          </button>
+        </div>
+      )}
 
       <div className="body">
         {/* ---- Telemetry sidebar ---- */}
@@ -1517,64 +1584,106 @@ export default function App() {
                       >
                         Clear Buffer
                       </button>
-                      <button
-                        onClick={async () => {
-                          const res = await bridge.triggerManualPulse();
-                          if (!res.ok) append(`sort trigger failed: ${res.message}`);
-                        }}
-                        disabled={!trigStatus?.camera_attached}
-                        title={trigStatus?.camera_attached ? "Fire one manual sorter pulse" : "No camera attached for trigger output"}
-                      >
-                        Sort Trigger
-                      </button>
-                      <label>
-                        <input
-                          type="number"
-                          style={{ width: 64 }}
-                          value={pulseUs}
-                          onChange={(e) => setPulseUs(e.target.value)}
-                          aria-label="Pulse duration (µs)"
-                        />{" "}
-                        µs
-                      </label>
-                      <button
-                        className="btn"
-                        onClick={async () => {
-                          const res = await bridge.triggerSetPulseDuration(Number(pulseUs) || 1);
-                          append(res.ok ? `pulse duration ${pulseUs} µs` : `pulse duration failed: ${res.message}`);
-                        }}
-                        disabled={!ready}
-                      >
-                        Set Pulse
-                      </button>
-                      <button
-                        onClick={async () => {
-                          const res = trigStatus?.periodic_active
-                            ? await bridge.triggerPeriodicStop()
-                            : await bridge.triggerPeriodicStart(Number(periodicMs) || 1000);
-                          if (!res.ok) append(`periodic test failed: ${res.message}`);
-                          setTrigStatus(await bridge.fetchTriggerStatus());
-                        }}
-                        disabled={!trigStatus?.camera_attached && !trigStatus?.periodic_active}
-                        title={
-                          trigStatus?.camera_attached || trigStatus?.periodic_active
-                            ? undefined
-                            : "No camera attached for trigger output"
-                        }
-                      >
-                        {trigStatus?.periodic_active ? "Stop Periodic Test" : "Periodic Test"}
-                      </button>
-                      <label>
-                        <input
-                          type="number"
-                          style={{ width: 72 }}
-                          value={periodicMs}
-                          onChange={(e) => setPeriodicMs(e.target.value)}
-                          disabled={trigStatus?.periodic_active}
-                          aria-label="Periodic interval (ms)"
-                        />{" "}
-                        ms
-                      </label>
+                      {/* UX-9: trigger tests are commissioning controls, gated
+                          behind Service mode; a running periodic test stays
+                          stoppable in Operator mode as a safety fallback. */}
+                      {operatingMode === "service" ? (
+                        <>
+                          <label className="arm-toggle" title="Arm the hardware-actuating trigger controls">
+                            <input
+                              type="checkbox"
+                              checked={triggerArmed}
+                              onChange={(e) => setTriggerArmed(e.target.checked)}
+                              disabled={expActive || !trigStatus?.camera_attached}
+                            />{" "}
+                            Arm
+                          </label>
+                          <button
+                            onClick={async () => {
+                              const res = await bridge.triggerManualPulse();
+                              append(res.ok ? `manual sort pulse fired (${pulseUs} µs)` : `sort trigger failed: ${res.message}`);
+                              setTriggerArmed(false);
+                            }}
+                            disabled={!actuateCheck.allowed}
+                            title={actuateCheck.allowed ? `Fire one manual sorter pulse (${pulseUs} µs)` : actuateCheck.reason}
+                          >
+                            Sort Trigger
+                          </button>
+                          <label>
+                            <input
+                              type="number"
+                              style={{ width: 64 }}
+                              value={pulseUs}
+                              onChange={(e) => setPulseUs(e.target.value)}
+                              aria-label="Pulse duration (µs)"
+                            />{" "}
+                            µs
+                          </label>
+                          <button
+                            className="btn"
+                            onClick={async () => {
+                              const res = await bridge.triggerSetPulseDuration(Number(pulseUs) || 1);
+                              append(res.ok ? `pulse duration ${pulseUs} µs` : `pulse duration failed: ${res.message}`);
+                            }}
+                            disabled={!ready}
+                          >
+                            Set Pulse
+                          </button>
+                          <button
+                            onClick={async () => {
+                              const active = trigStatus?.periodic_active;
+                              const res = active
+                                ? await bridge.triggerPeriodicStop()
+                                : await bridge.triggerPeriodicStart(Number(periodicMs) || 1000);
+                              append(
+                                res.ok
+                                  ? active
+                                    ? "periodic test stopped"
+                                    : `periodic test started (${periodicMs} ms)`
+                                  : `periodic test failed: ${res.message}`,
+                              );
+                              setTriggerArmed(false);
+                              setTrigStatus(await bridge.fetchTriggerStatus());
+                            }}
+                            disabled={trigStatus?.periodic_active ? !stopPeriodicCheck.allowed : !startPeriodicCheck.allowed}
+                            title={
+                              trigStatus?.periodic_active
+                                ? "Stop the running periodic test"
+                                : startPeriodicCheck.allowed
+                                  ? `Start a periodic test every ${periodicMs} ms`
+                                  : startPeriodicCheck.reason
+                            }
+                          >
+                            {trigStatus?.periodic_active ? "Stop Periodic Test" : "Periodic Test"}
+                          </button>
+                          <label>
+                            <input
+                              type="number"
+                              style={{ width: 72 }}
+                              value={periodicMs}
+                              onChange={(e) => setPeriodicMs(e.target.value)}
+                              disabled={trigStatus?.periodic_active}
+                              aria-label="Periodic interval (ms)"
+                            />{" "}
+                            ms
+                          </label>
+                        </>
+                      ) : trigStatus?.periodic_active ? (
+                        <button
+                          onClick={async () => {
+                            const res = await bridge.triggerPeriodicStop();
+                            append(res.ok ? "periodic test stopped" : `periodic test failed: ${res.message}`);
+                            setTrigStatus(await bridge.fetchTriggerStatus());
+                          }}
+                          title="Stop the running periodic test"
+                        >
+                          Stop Periodic Test
+                        </button>
+                      ) : (
+                        <span className="commissioning-hint mono">
+                          Trigger tests are in Service / Commissioning mode
+                        </span>
+                      )}
                       <span className="mono right">
                         triggers {trigStatus?.trigger_count ?? 0} · buffered v{monSnapshot?.valid_held ?? 0}/i
                         {monSnapshot?.invalid_held ?? 0} · evicted{" "}
