@@ -13,12 +13,14 @@ import {
   type MonitoringSnapshot,
   type ProcessingCoreStatus,
   type ProcessingStats,
+  type PumpStatus,
   type ReviewMetadata,
   type ReviewMetricsPage,
   type TriggerStatus,
 } from "./bridge";
-import { BRIDGE_ABI_VERSION, EXPERIMENT_STATES } from "./bridgeContract";
+import { BRIDGE_ABI_VERSION, EXPERIMENT_STATES, PUMP_IDS } from "./bridgeContract";
 import { deriveWorkflow, type StageTab, type WorkflowFacts } from "./workflow";
+import { CHECK_STATUS_LABEL, derivePreflight, type PreflightInput } from "./preflight";
 import "./App.css";
 
 const H5_FILTER = [{ name: "HDF5", extensions: ["h5"] }];
@@ -177,6 +179,9 @@ export default function App() {
 
   // Autofocus status (schema v11, BE-8).
   const [afStatus, setAfStatus] = useState<AutofocusStatus | null>(null);
+  // UX-3 preflight: pump/trigger snapshots polled while on the Preflight stage.
+  const [samplePump, setSamplePump] = useState<PumpStatus | null>(null);
+  const [sheathPump, setSheathPump] = useState<PumpStatus | null>(null);
 
   // Processing config / ROI / background / core identity (schema v8, BE-3).
   const [configText, setConfigText] = useState("");
@@ -452,6 +457,36 @@ export default function App() {
   useEffect(() => {
     if (ready) void refreshCameraState();
   }, [ready, refreshCameraState]);
+
+  // UX-3: poll every subsystem the preflight checklist needs. Runs off the
+  // capture loop so preflight works before the camera is started.
+  const refreshPreflight = useCallback(async () => {
+    try {
+      const [sel, core, af, sample, sheath, trig] = await Promise.all([
+        bridge.fetchCameraSelection(),
+        bridge.fetchProcessingCoreStatus(),
+        bridge.fetchAutofocusStatus(),
+        bridge.fetchPumpStatus(PUMP_IDS.Sample),
+        bridge.fetchPumpStatus(PUMP_IDS.Sheath),
+        bridge.fetchTriggerStatus(),
+      ]);
+      setCamSelection(sel);
+      setCoreStatus(core);
+      setAfStatus(af);
+      setSamplePump(sample);
+      setSheathPump(sheath);
+      setTrigStatus(trig);
+    } catch {
+      /* backend gone — the capture loop / next poll surfaces it */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!ready || tab !== "connect") return;
+    void refreshPreflight();
+    const id = window.setInterval(() => void refreshPreflight(), 1500);
+    return () => window.clearInterval(id);
+  }, [ready, tab, refreshPreflight]);
 
   const onConfigureMock = useCallback(async () => {
     try {
@@ -749,6 +784,42 @@ export default function App() {
   // A confirmation cannot be applied while a run is active (setup is locked).
   const recNeedsConfirm = !!workflow.recommended && workflow.recommended.kind !== "navigate";
   const recDisabled = recNeedsConfirm && expActive;
+
+  // ---- UX-3 profile-aware hardware preflight (issue #307) ----
+  const preflightInput: PreflightInput = {
+    backendReady: ready,
+    cameraConfigured,
+    cameraRunning: running,
+    cameraIdentity: camSelection?.label || (camSelection?.mode === 1 ? "Mock camera" : ""),
+    cameraExpected: "", // profile-declared expected identity — UX-2 (#306) follow-up
+    coreValid: coreStatus?.valid ?? false,
+    corePinSatisfied: coreStatus?.pin_satisfied ?? false,
+    coreVersion: coreStatus?.active_version ?? "",
+    requiredCoreVersion: coreStatus?.required_version ?? "",
+    autofocus: {
+      valid: afStatus?.valid ?? false,
+      connected: afStatus?.connected ?? false,
+      identity: afStatus?.valid ? `COM${afStatus.com_port}` : "",
+    },
+    samplePump: {
+      valid: samplePump?.valid ?? false,
+      connected: samplePump?.connected ?? false,
+      identity: samplePump?.valid ? `COM${samplePump.com_port}` : "",
+    },
+    sheathPump: {
+      valid: sheathPump?.valid ?? false,
+      connected: sheathPump?.connected ?? false,
+      identity: sheathPump?.valid ? `COM${sheathPump.com_port}` : "",
+    },
+    trigger: { valid: trigStatus?.valid ?? false, cameraAttached: trigStatus?.camera_attached ?? false },
+    // Authoritative storage/free-space status is not bridged yet (backend
+    // follow-up); the check stays informational until it is.
+    storageKnown: false,
+    storageWritable: false,
+    storageFreeOk: false,
+    storagePath: "",
+  };
+  const preflight = derivePreflight(preflightInput);
 
   const doRecommended = () => {
     const rec = workflow.recommended;
@@ -1061,6 +1132,65 @@ export default function App() {
                             : camSelection.label || "camera"
                         }`
                       : " · no camera selected"}
+                  </p>
+                </div>
+
+                {/* ---- UX-3 hardware preflight checklist ---- */}
+                <div className="preflight-panel">
+                  <div className="preflight-head">
+                    <h4>Hardware preflight</h4>
+                    <span className="preflight-summary">
+                      {preflight.passed} passed · {preflight.warning} warning · {preflight.failed} failed
+                      {preflight.notRequired ? ` · ${preflight.notRequired} n/a` : ""}
+                    </span>
+                    <button className="btn" onClick={() => void refreshPreflight()} disabled={!ready}>
+                      Refresh
+                    </button>
+                  </div>
+                  <ul className="preflight-list">
+                    {preflight.checks.map((c) => (
+                      <li key={c.id} className={`preflight-check ${c.status}`}>
+                        <span className={`check-dot ${c.status}`} aria-hidden="true" />
+                        <span className="check-main">
+                          <span className="check-label">
+                            {c.label}
+                            {c.requirement === "required" && <span className="req-badge">required</span>}
+                          </span>
+                          <span className="check-detail">{c.detail}</span>
+                          {(c.expected || c.detected !== "—") && (
+                            <span className="check-identity">
+                              {c.expected ? `expected ${c.expected} · ` : ""}
+                              detected {c.detected}
+                            </span>
+                          )}
+                        </span>
+                        <span
+                          className="check-status"
+                          aria-label={`${c.label}: ${CHECK_STATUS_LABEL[c.status]}`}
+                        >
+                          {CHECK_STATUS_LABEL[c.status]}
+                        </span>
+                        {c.recovery.length > 0 && (
+                          <span className="check-recovery">
+                            {c.recovery.map((a) => (
+                              <button
+                                key={a.kind}
+                                className="btn small"
+                                onClick={() => void refreshPreflight()}
+                                disabled={!ready}
+                              >
+                                {a.label}
+                              </button>
+                            ))}
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className={`preflight-foot ${preflight.criticalPassed ? "ok" : "warn"}`}>
+                    {preflight.criticalPassed
+                      ? "Required checks pass — confirm readiness in the workflow bar to complete Preflight."
+                      : "Required checks must pass before Preflight can be confirmed."}
                   </p>
                 </div>
               </>

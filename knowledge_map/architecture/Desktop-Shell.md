@@ -36,6 +36,8 @@ The repo root `src/` is the C++ tree, so the whole Tauri app lives under
 - `desktop/scripts/xvfb-smoke.sh` — headless GUI smoke launcher.
 - `desktop/src/workflow.ts` — pure guided-workflow stage derivation (UX-1),
   with `desktop/src/workflow.test.ts` vitest coverage.
+- `desktop/src/preflight.ts` — pure hardware-preflight checklist derivation
+  (UX-3), with `desktop/src/preflight.test.ts` vitest coverage.
 
 **Guided workflow (UX-1, issue #305):** `desktop/src/workflow.ts` layers an
 authoritative *stage state* on the Connect / Overview / Experiment / Review
@@ -52,6 +54,19 @@ and lands startup on the earliest incomplete stage. Unit-tested in
 `workflow.test.ts` (`npm test`, gated in Desktop CI). Detailed per-stage content
 is the rest of epic #304 (UX-2…UX-11). Details:
 `knowledge_map/task/2026-07-21-ux1-guided-workflow.md`.
+
+**Hardware preflight (UX-3, issue #307):** `desktop/src/preflight.ts` —
+`derivePreflight(input, requirements)` builds the Preflight stage's checklist
+(camera, processing-core/trust, capture stream, autofocus, sample/sheath pumps,
+trigger, storage), each a `passed`/`warning`/`failed`/`not-required` status with
+requirement, expected-vs-detected identity, cause, and recovery actions;
+`criticalPassed` gates on all `required` checks. Required/optional/n-a per device
+is meant to come from the selected profile (not bridged yet → `DEFAULT_REQUIREMENTS`
+until UX-2 #306). The shell polls camera/core/autofocus/pumps/trigger every 1.5 s
+while the Preflight tab is shown (off the capture loop) and renders the checklist
+in the Connect tab. Storage writability/free-space stays informational until a
+backend status contract exists. Details:
+`knowledge_map/task/2026-07-21-ux3-hardware-preflight.md`.
 
 Native **file pickers** use `tauri-plugin-dialog` (registered in `run()`,
 granted via `dialog:default` in `capabilities/default.json`, called from the
