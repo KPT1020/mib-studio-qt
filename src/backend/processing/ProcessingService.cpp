@@ -1,4 +1,5 @@
 #include "backend/processing/ProcessingService.h"
+#include "backend/processing/ImageFilterPipeline.h"
 #include "backend/processing/ProcessingScience.h"
 #include "backend/recording/Hdf5Service.h"
 #include "backend/diagnostics/CrashStateMirror.h"
@@ -658,17 +659,15 @@ bool ProcessingService::isFrameEmpty(const backend::playback::Frame& frame,
     effectiveRoi.h = std::max(1, std::min(effectiveRoi.h, gray.rows - effectiveRoi.y));
 
     cv::Rect cvRoi(effectiveRoi.x, effectiveRoi.y, effectiveRoi.w, effectiveRoi.h);
-    cv::Mat roiCurr = gray(cvRoi);
-
-    // Apply same processing as realtime loop
-    cv::Mat blurredCurr, blurredBg, diff, thresh;
-    cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(3, 3), 0);
-
-    if (!background.empty() && background.size() == gray.size() && background.type() == CV_8UC1) {
-        cv::GaussianBlur(background(cvRoi), blurredBg, cv::Size(3, 3), 0);
-        cv::subtract(blurredCurr, blurredBg, diff);
-    } else {
-        diff = blurredCurr;
+    // Shared difference path (identity preprocessing, Contract-1 saturating
+    // subtraction, fixed 3x3 blur to match the legacy empty-frame filter).
+    const backend::processing::ImageFilterPipeline identityStages;
+    cv::Mat diff, thresh;
+    std::string diffError;
+    if (!backend::processing::buildDifferenceImage(gray, background, cvRoi, identityStages,
+                                                   identityStages, /*gaussianBlurSize=*/3,
+                                                   /*absoluteDifference=*/false, diff, &diffError)) {
+        return true; // undecidable difference counts as empty
     }
 
     cv::threshold(diff, thresh, config.bg_subtract_threshold, 255, cv::THRESH_BINARY);
@@ -702,15 +701,22 @@ bool ProcessingService::isFrameEmpty(const backend::playback::Frame& frame,
         makeGrayROI(frame, effectiveRoi.x, effectiveRoi.y, effectiveRoi.w, effectiveRoi.h);
 
     cv::Rect cvRoi(effectiveRoi.x, effectiveRoi.y, effectiveRoi.w, effectiveRoi.h);
-    cv::Mat blurredCurr, blurredBg, diff, thresh;
-    cv::GaussianBlur(roiCurr, blurredCurr, cv::Size(3, 3), 0);
 
+    // Shared difference path over the already-cropped ROI (identity
+    // preprocessing, Contract-1 saturating subtraction, fixed 3x3 blur).
+    const backend::processing::ImageFilterPipeline identityStages;
+    cv::Mat bgRoi;
     if (background && !background->empty() && background->cols == frameW &&
         background->rows == frameH && background->type() == CV_8UC1) {
-        cv::GaussianBlur((*background)(cvRoi), blurredBg, cv::Size(3, 3), 0);
-        cv::subtract(blurredCurr, blurredBg, diff);
-    } else {
-        diff = blurredCurr;
+        bgRoi = (*background)(cvRoi);
+    }
+    cv::Mat diff, thresh;
+    std::string diffError;
+    if (!backend::processing::buildDifferenceImageCropped(roiCurr, bgRoi, identityStages,
+                                                          identityStages, /*gaussianBlurSize=*/3,
+                                                          /*absoluteDifference=*/false, diff,
+                                                          &diffError)) {
+        return true; // undecidable difference counts as empty
     }
 
     cv::threshold(diff, thresh, config.bg_subtract_threshold, 255, cv::THRESH_BINARY);

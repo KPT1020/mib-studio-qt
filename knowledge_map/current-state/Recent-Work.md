@@ -5,6 +5,16 @@
 
 ## Features shipped
 
+- **Processing Contract v2 — preprocessing filters + shared absdiff path**
+  (2026-07-21, issue #298, epic #296) — second slice (V2-2). Adds the Qt-free
+  `ImageFilterPipeline` (identity/invert/linear_contrast/gamma/clahe, compiled
+  once, fail-closed on bad stages) and one shared `buildDifferenceImage`
+  (input filters applied symmetrically, `cv::absdiff` under Contract 2 vs
+  saturating `cv::subtract` under Contract 1, incompatible-background error
+  under v2). The bundled kernel routes `processMask` **and** `isEmpty` through
+  it, and the host `isFrameEmpty` helpers too, so mask + empty-frame can't
+  diverge. Contract-1 output unchanged (golden/seam/multi-object tests pass).
+  Test: `processing.image_filter_pipeline`.
 - **Processing Contract v2 — schema/migration boundary** (2026-07-21, issue
   #297, epic #296) — first slice (V2-1) of the Contract-v2 epic. Adds the
   Qt-free `backend::processing::contract` module

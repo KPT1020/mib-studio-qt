@@ -77,5 +77,18 @@ Branches are stacked in this order (`claude/pc2-v2-1-schema` → … ).
       closed on unknown schema; `copyUpgradeConfigToV2` bridges to the migrator).
 - [x] Vault notes updated; `check_docs.py` green.
 
-### V2-2…V2-7
+### V2-2 — preprocessing filters + shared absdiff path
+- [x] Qt-free `ImageFilterPipeline` (identity/invert/linear_contrast/gamma/
+      clahe), compiled once, fail-closed on unknown/invalid stages.
+- [x] One shared `buildDifferenceImage` (+ cropped variant): input filters
+      symmetric, contract-gated absdiff vs subtract, difference filters,
+      incompatible-background error under v2, ROI zero-outside preserved.
+- [x] Bundled kernel `processMask` + `isEmpty` and host `isFrameEmpty` helpers
+      routed through the one helper. Contract-1 output unchanged.
+- [x] Tests (`processing.image_filter_pipeline`) + vault. Golden/seam/
+      multi-object regression green.
+- [ ] Real preprocessing stages fed from a v2 config/ABI (deferred to V2-5/V2-6;
+      pipelines are identity until then).
+
+### V2-3…V2-7
 - [ ] Not started (stacked branches created as each slice begins).

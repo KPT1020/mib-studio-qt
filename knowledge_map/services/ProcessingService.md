@@ -10,8 +10,10 @@
 `src/backend/processing/ProcessingCoreLoader.cpp`,
 `src/backend/processing/ProcessingCoreCache.cpp`,
 `src/backend/processing/ProcessingContract.cpp`,
+`src/backend/processing/ImageFilterPipeline.cpp`,
 `include/backend/processing/ProcessingService.h`,
 `include/backend/processing/ProcessingContract.h`,
+`include/backend/processing/ImageFilterPipeline.h`,
 `include/backend/processing/ProcessingCoreAbi.h`
 **Related:** [[CaptureService]], [[Hdf5Service]], [[AutofocusService]],
 [[TriggerService]], [[../architecture/Data-Flow]],
@@ -175,6 +177,29 @@ deliberately in `mib_processing` so the backend-only CTest lane exercises it
 Rationale and the full compatibility matrix:
 `docs/decisions/0001-processing-contract-v2.md`,
 `docs/architecture/processing-contract-compatibility.md`.
+
+## Preprocessing filters & shared difference path (v2)
+
+`ImageFilterPipeline` (`ImageFilterPipeline.{h,cpp}`) is a Qt-free, ordered
+Gray8→Gray8 preprocessing pipeline compiled and validated once from a config
+(`compile` fails closed on an unknown stage or an out-of-range parameter).
+Stages: `identity`, `invert`, `linear_contrast(alpha,beta)`, `gamma`, `clahe`.
+An empty pipeline is the identity.
+
+`buildDifferenceImage` (and its already-cropped variant
+`buildDifferenceImageCropped`) is the **single** background-difference
+implementation. Order: input stages applied symmetrically to the current and
+background ROI crops → Gaussian blur → difference → difference stages. The
+difference is `cv::absdiff` under Contract 2 (`absoluteBackgroundDifference`
+set) and saturating `cv::subtract` under Contract 1. A supplied-but-incompatible
+background is a hard error under Contract 2 and a current-only fallback under
+Contract 1 (legacy behavior).
+
+The bundled kernel routes **both** `processMask` and `isEmpty` through
+`buildDifferenceImage`, and the host empty-frame helpers (`isFrameEmpty`) route
+through the same helper, so mask generation and empty-frame classification can
+no longer diverge. Preprocessing pipelines are identity until an ABI-v2 core /
+v2 config supplies real stages (V2-5/V2-6). Contract-1 output is unchanged.
 
 ## Accumulation modes
 
