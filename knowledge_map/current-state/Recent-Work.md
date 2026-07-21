@@ -5,6 +5,16 @@
 
 ## Features shipped
 
+- **UX redesign: UX-4 (slice) — Camera & Alignment quality gates**
+  (2026-07-21, epic #304, issue #308) — New `desktop/src/quality.ts`:
+  `deriveQualityGates(input)` derives Focus / Background / ROI / Calibration
+  gates (pass/warn/fail/unknown) from bridged signals (autofocus ring-ratio +
+  freshness, config background/ROI, frame size, px→µm), rendered as a strip
+  under the live image in the Camera & Alignment tab. Illumination, channel-wall
+  ROI insets (#295), Auto-Focus, and save-to-profile (UX-2) are follow-ups.
+  12 vitest cases (`quality.test.ts`). Details:
+  `knowledge_map/task/2026-07-21-ux4-quality-gates.md`.
+
 - **UX redesign: UX-3 — profile-aware hardware preflight checklist**
   (2026-07-21, epic #304, issue #307) — New `desktop/src/preflight.ts`:
   `derivePreflight(input, requirements)` turns the Preflight stage into an

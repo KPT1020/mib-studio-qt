@@ -21,6 +21,7 @@ import {
 import { BRIDGE_ABI_VERSION, EXPERIMENT_STATES, PUMP_IDS } from "./bridgeContract";
 import { deriveWorkflow, type StageTab, type WorkflowFacts } from "./workflow";
 import { CHECK_STATUS_LABEL, derivePreflight, type PreflightInput } from "./preflight";
+import { deriveQualityGates, GATE_STATUS_LABEL, type QualityInput } from "./quality";
 import "./App.css";
 
 const H5_FILTER = [{ name: "HDF5", extensions: ["h5"] }];
@@ -821,6 +822,26 @@ export default function App() {
   };
   const preflight = derivePreflight(preflightInput);
 
+  // ---- UX-4 Camera & Alignment quality gates (issue #308) ----
+  // Focus staleness threshold: the autofocus config's ring_ratio_stale_ms is
+  // not polled into the shell yet, so use a conservative default until it is.
+  const FOCUS_STALE_MS = 1000;
+  const qualityInput: QualityInput = {
+    cameraRunning: running,
+    focusConnected: afStatus?.connected ?? false,
+    focusMetric: afStatus?.median_ring_ratio ?? 0,
+    focusUpdatedUs: afStatus?.last_ring_ratio_update_us ?? 0,
+    focusAgeMs: afStatus ? afStatus.ring_ratio_age_us / 1000 : 0,
+    focusStaleMs: FOCUS_STALE_MS,
+    backgroundSet,
+    roiW: Number(roiFields.w) || 0,
+    roiH: Number(roiFields.h) || 0,
+    frameW: lastMeta?.width ?? 0,
+    frameH: lastMeta?.height ?? 0,
+    pixelToMicron: stats?.valid ? stats.pixel_to_micron : Number(pixelToMicron) || 0,
+  };
+  const quality = deriveQualityGates(qualityInput);
+
   const doRecommended = () => {
     const rec = workflow.recommended;
     if (!rec) return;
@@ -1222,6 +1243,35 @@ export default function App() {
                   {!lastMeta && <span className="canvas-hint">No frame yet — configure a camera and press Start Camera</span>}
                   <canvas ref={liveCanvasRef} className={fitWindow ? "fit" : ""} />
                 </div>
+
+                {/* ---- UX-4 image quality gates ---- */}
+                <div className="quality-panel" aria-label="Image quality gates">
+                  <div className="quality-head">
+                    <h4>Quality gates</h4>
+                    <span className="quality-summary">
+                      {quality.pass} pass · {quality.warn} warn · {quality.fail} fail
+                      {quality.unknown ? ` · ${quality.unknown} unknown` : ""}
+                    </span>
+                  </div>
+                  <div className="quality-gates">
+                    {quality.gates.map((g) => (
+                      <div key={g.id} className={`quality-gate ${g.status}`} title={g.detail}>
+                        <span className="gate-top">
+                          <span className={`gate-dot ${g.status}`} aria-hidden="true" />
+                          <span className="gate-label">{g.label}</span>
+                        </span>
+                        <span className="gate-value">{g.value}</span>
+                        <span
+                          className="gate-status"
+                          aria-label={`${g.label}: ${GATE_STATUS_LABEL[g.status]}`}
+                        >
+                          {GATE_STATUS_LABEL[g.status]}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="toolbar" style={{ marginTop: 6 }}>
                   <button disabled title={PENDING.script}>Reset</button>
                   <button disabled title={PENDING.script}>Save</button>
