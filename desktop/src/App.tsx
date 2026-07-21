@@ -22,6 +22,7 @@ import { BRIDGE_ABI_VERSION, EXPERIMENT_STATES, PUMP_IDS } from "./bridgeContrac
 import { deriveWorkflow, type StageTab, type WorkflowFacts } from "./workflow";
 import { CHECK_STATUS_LABEL, derivePreflight, type PreflightInput } from "./preflight";
 import { deriveQualityGates, GATE_STATUS_LABEL, type QualityInput } from "./quality";
+import { deriveContextBar, SEG_STATUS_LABEL, type ContextBarFacts } from "./contextBar";
 import "./App.css";
 
 const H5_FILTER = [{ name: "HDF5", extensions: ["h5"] }];
@@ -841,6 +842,26 @@ export default function App() {
     pixelToMicron: stats?.valid ? stats.pixel_to_micron : Number(pixelToMicron) || 0,
   };
   const quality = deriveQualityGates(qualityInput);
+
+  // ---- UX-8 persistent active-context bar (issue #312) ----
+  // Warnings = unresolved attention items surfaced by preflight + quality.
+  const warningsCount = preflight.failed + preflight.warning + quality.warn + quality.fail;
+  const contextFacts: ContextBarFacts = {
+    profileName: "", // Experiment Profile management not bridged yet (UX-2 #306)
+    cameraConfigured,
+    cameraRunning: running,
+    cameraLabel: camSelection?.label || (camSelection?.mode === 1 ? "Mock camera" : ""),
+    pixelToMicron: stats?.valid ? stats.pixel_to_micron : Number(pixelToMicron) || 0,
+    currentStageTitle: currentStage.title,
+    currentStageStatus: currentStage.status,
+    allStagesComplete: workflow.recommended === null,
+    experimentActive: expActive,
+    experimentFailed: expState === EXPERIMENT_STATES.Failed,
+    operatorName: "", // operator identity not captured yet
+    outputPath: expStatus?.output_path ?? "",
+    warningsCount,
+  };
+  const contextBar = deriveContextBar(contextFacts);
 
   const doRecommended = () => {
     const rec = workflow.recommended;
@@ -1809,6 +1830,31 @@ export default function App() {
       </div>
 
       {/* ---- Status bar ---- */}
+      {/* ---- UX-8 persistent active-context bar (all stages) ---- */}
+      <div className="context-bar" role="region" aria-label="Active context">
+        {contextBar.segments.map((s) => {
+          const label = `${s.label}: ${s.value} (${SEG_STATUS_LABEL[s.status]})`;
+          const clickable = !!s.tab;
+          return (
+            <button
+              key={s.id}
+              type="button"
+              className={`context-seg ${s.status}${clickable ? " clickable" : ""}`}
+              title={s.detail}
+              aria-label={label}
+              disabled={!clickable}
+              onClick={clickable ? () => setTab(s.tab!) : undefined}
+            >
+              <span className={`seg-dot ${s.status}`} aria-hidden="true" />
+              <span className="seg-text">
+                <span className="seg-label">{s.label}</span>
+                <span className="seg-value">{s.value}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
       <footer className="statusbar">
         <span>
           Bridge ABI: {abi ?? "…"} · backend: {ready ? "ready" : "not initialized"}
