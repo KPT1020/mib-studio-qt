@@ -48,12 +48,15 @@ cmake --build --preset linux-backend-only-build
 - `screenshot_tour` — headless UI tour regenerating the user-manual
   screenshots ([`docs/manual/README.md`](docs/manual/README.md))
 
-**Fresh cloud agent / no Qt6:** the base image has `cmake`/`ninja`/`g++` but no
-Qt and an empty Conan cache, so the presets above cannot configure. Build the
-Qt-free `mib_processing` core (system OpenCV + HDF5 + spdlog) for a fast local
-loop — steps in [`docs/howto/linux-build.md`](docs/howto/linux-build.md)
-("Processing-only build"). Qt-dependent code (`TriggerService`, `CaptureService`,
-frontend, CTest suite) is verified by `backend-ci.yml`, not locally.
+**Fresh cloud agent / container:** the base image has `cmake`/`ninja`/`g++` but
+no Qt, no OpenCV/HDF5/spdlog, and an empty Conan cache, so provision system
+packages first (`apt-get update` — the index is stale). Qt6 installs cleanly
+from apt (Ubuntu Noble ships 6.4.2, older than the pinned 6.7.3 but it builds
+and passes the `linux-backend-only` CTest suite); or skip Qt entirely and build
+the `mib_processing` core for the fastest loop. Both paths, with exact package
+lists and commands, are in
+[`docs/howto/linux-build.md`](docs/howto/linux-build.md) ("Cloud agent / fresh
+container setup").
 
 ## Verification
 
