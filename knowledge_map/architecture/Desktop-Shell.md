@@ -40,6 +40,8 @@ The repo root `src/` is the C++ tree, so the whole Tauri app lives under
   (UX-3), with `desktop/src/preflight.test.ts` vitest coverage.
 - `desktop/src/quality.ts` — pure Camera & Alignment quality-gate derivation
   (UX-4), with `desktop/src/quality.test.ts` vitest coverage.
+- `desktop/src/contextBar.ts` — pure persistent active-context bar derivation
+  (UX-8), with `desktop/src/contextBar.test.ts` vitest coverage.
 
 **Guided workflow (UX-1, issue #305):** `desktop/src/workflow.ts` layers an
 authoritative *stage state* on the Connect / Overview / Experiment / Review
@@ -79,6 +81,16 @@ Rendered as a strip under the live image in the Overview tab. Illumination,
 channel-wall ROI insets (#295), Auto-Focus, and save-to-profile (UX-2 #306)
 are follow-ups — gates only report what the backend exposes. Details:
 `knowledge_map/task/2026-07-21-ux4-quality-gates.md`.
+
+**Active-context bar (UX-8, issue #312):** `desktop/src/contextBar.ts` —
+`deriveContextBar(facts)` builds the persistent bottom bar shown on every stage:
+Profile / Camera / Calibration / Status / Operator / Storage / Warnings, each a
+value + `ok`/`warn`/`blocked`/`pending`/`neutral` status + optional navigate
+target. Status mirrors the guided-workflow readiness; Warnings counts preflight
++ quality attention items; Camera/Calibration come from the bridged selection +
+px→µm. Profile (UX-2 #306), operator identity, and storage free-space are
+`pending` until bridged — shown explicitly, never faked. Details:
+`knowledge_map/task/2026-07-21-ux8-context-bar.md`.
 
 Native **file pickers** use `tauri-plugin-dialog` (registered in `run()`,
 granted via `dialog:default` in `capabilities/default.json`, called from the

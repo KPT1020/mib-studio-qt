@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **UX redesign: UX-8 — persistent active-context bar** (2026-07-21, epic #304,
+  issue #312) — New `desktop/src/contextBar.ts`: `deriveContextBar(facts)`
+  builds the always-visible bottom bar (Profile / Camera / Calibration / Status
+  / Operator / Storage / Warnings), each a value + ok/warn/blocked/pending
+  status + optional navigate target. Status mirrors the guided-workflow
+  readiness (UX-1); Warnings counts preflight+quality attention items;
+  camera/calibration from the bridged selection + px→µm. Profile (UX-2),
+  operator, and storage free-space are shown as explicit `pending` until
+  bridged. 11 vitest cases (`contextBar.test.ts`). Details:
+  `knowledge_map/task/2026-07-21-ux8-context-bar.md`.
+
 - **UX redesign: UX-4 (slice) — Camera & Alignment quality gates**
   (2026-07-21, epic #304, issue #308) — New `desktop/src/quality.ts`:
   `deriveQualityGates(input)` derives Focus / Background / ROI / Calibration
