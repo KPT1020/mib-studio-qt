@@ -109,6 +109,10 @@ mib_add_backend_test_executable(processing_contract_v2_migration_test processing
 add_test(NAME processing.contract_v2_migration COMMAND $<TARGET_FILE:processing_contract_v2_migration_test>)
 set_tests_properties(processing.contract_v2_migration PROPERTIES LABELS "processing;backend" TIMEOUT 30)
 
+mib_add_backend_test_executable(processing_contract2_conformance_test processing/processing_contract2_conformance_test.cpp)
+add_test(NAME processing.contract2_conformance COMMAND $<TARGET_FILE:processing_contract2_conformance_test>)
+set_tests_properties(processing.contract2_conformance PROPERTIES LABELS "processing;backend" TIMEOUT 30)
+
 mib_add_backend_test_executable(image_filter_pipeline_test processing/image_filter_pipeline_test.cpp)
 add_test(NAME processing.image_filter_pipeline COMMAND $<TARGET_FILE:image_filter_pipeline_test>)
 set_tests_properties(processing.image_filter_pipeline PROPERTIES LABELS "processing;backend" TIMEOUT 30)

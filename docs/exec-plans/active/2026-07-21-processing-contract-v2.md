@@ -143,5 +143,26 @@ Branches are stacked in this order (`claude/pc2-v2-1-schema` → … ).
       config controls, legacy-labeling, mismatch warnings, screenshots/docs —
       follow-on (frontend, needs the running app).
 
-### V2-7
-- [ ] Not started (stacked branch created when the slice begins).
+### V2-7 — calibration & validation (release gate)
+- [x] Deterministic synthetic conformance gate
+      (`processing.contract2_conformance`) tying together polarity symmetry,
+      filter identity/order, blur→lower focus, inversion-preserves, object
+      isolation, tiny/no-object NaN, invalid-background rejection, and
+      focus-gate default-off.
+- [x] `docs/processing-contract-v2-validation.md`: calibration decisions (gate
+      ships disabled; no threshold converted from ring), the deterministic
+      coverage matrix, and the explicit pending list.
+- [ ] Real-corpus + hardware experiments, MLflow uploads, calibrated
+      thresholds, native/bundled/Python conformance references, latency/stress/
+      TSan/fault-injection/long-run, Contract-1 downgrade on real files —
+      require the approved corpus, hardware, MLflow, and the signed native v2
+      plugin (not available in CI/container). Tracked in the validation doc.
+
+## Status summary
+
+Slices V2-1…V2-7 landed as stacked branches. Every deterministic, container-
+verifiable behavior is implemented and tested (Contract-1 output byte-for-byte
+unchanged throughout). The remaining work is resource-dependent and enumerated
+in `docs/processing-contract-v2-validation.md`: the native v2 plugin + loader
+activation (V2-5), the HDF5 compound + exporters + review/monitoring UI (V2-6),
+and the real-corpus/hardware/MLflow calibration + release references (V2-7).

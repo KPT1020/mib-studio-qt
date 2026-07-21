@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Processing Contract v2 — validation release gate (deterministic)**
+  (2026-07-21, issue #303, epic #296) — seventh slice (V2-7). Adds
+  `processing.contract2_conformance`, one deterministic synthetic gate tying the
+  v2 properties together (absdiff polarity symmetry, filter identity/order,
+  blur lowers focus, inversion preserves it, object isolation, tiny/no-object
+  NaN, invalid-background rejection, focus gate default-off), and
+  `docs/processing-contract-v2-validation.md` recording the calibration
+  decisions (gate ships disabled; no threshold converted from ring) and the
+  full list of remaining real-corpus / hardware / MLflow / native-plugin work.
+  The deterministic portion is complete; the resource-dependent portion stays
+  open on the gate.
 - **Processing Contract v2 — contract-aware metrics schema** (2026-07-21, issue
   #302, epic #296) — sixth slice (V2-6), persisted/contract surface. Makes
   `docs/gold_standard_metrics.schema.json` contract-aware: `ring_ratio` is now
