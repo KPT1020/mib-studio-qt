@@ -1,8 +1,7 @@
 # Agent Guide — MIB Studio Qt
 
-C++17 / Qt 6.7.3 desktop app for real-time microscopy image capture,
-processing, and HDF5 experiment storage. OpenCV for image processing, Euresys
-EGrabber for hardware cameras, optional ONNX Runtime YOLO segmentation.
+C++17 / Qt 6.7.3 desktop app for real-time microscopy capture, processing, and
+HDF5 storage. OpenCV imaging, Euresys EGrabber cameras, optional ONNX YOLO.
 
 This file is a map, not a manual. Deep knowledge lives in the vault and docs.
 
@@ -107,11 +106,14 @@ part of the change.
 
 ## Hard Conventions
 
+- **Know your architecture layer before changing backend code**
+  ([`Overview`](knowledge_map/architecture/Overview.md), [`backend-boundaries`](docs/architecture/backend-boundaries.md)).
+  The Qt-free processing core in `src/backend/processing/` is an ABI-stable, signed, swappable plugin —
+  preserve `ProcessingCoreAbi.h` + gold-standard conformance; a behavior change needs a version bump + re-sign.
 - **spdlog** for logging; never `std::cout` in app code.
 - Headers mirror source layout under `include/`.
 - Review existing `Tools` ([`src/backend/app/Tools.cpp`](src/backend/app/Tools.cpp)) before writing new utilities.
 - Prefer ready-made EGrabber SDK patterns over hand-rolled camera code.
 - Runtime data (logs, sqlite, HDF5, mock frames) lives under `data/`.
 - Test performance metrics go to MLflow at `mlflow.yofo.bio` via
-  `MLFLOW_TRACKING_USERNAME` / `MLFLOW_TRACKING_PASSWORD` env vars — never
-  hardcode credentials.
+  `MLFLOW_TRACKING_USERNAME` / `MLFLOW_TRACKING_PASSWORD` env vars (never hardcode).
