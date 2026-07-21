@@ -48,6 +48,13 @@ cmake --build --preset linux-backend-only-build
 - `screenshot_tour` — headless UI tour regenerating the user-manual
   screenshots ([`docs/manual/README.md`](docs/manual/README.md))
 
+**Fresh cloud agent / no Qt6:** the base image has `cmake`/`ninja`/`g++` but no
+Qt and an empty Conan cache, so the presets above cannot configure. Build the
+Qt-free `mib_processing` core (system OpenCV + HDF5 + spdlog) for a fast local
+loop — steps in [`docs/howto/linux-build.md`](docs/howto/linux-build.md)
+("Processing-only build"). Qt-dependent code (`TriggerService`, `CaptureService`,
+frontend, CTest suite) is verified by `backend-ci.yml`, not locally.
+
 ## Verification
 
 ```bash
