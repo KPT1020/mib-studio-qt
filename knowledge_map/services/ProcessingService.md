@@ -9,7 +9,9 @@
 `src/backend/processing/BundledProcessingKernel.cpp`,
 `src/backend/processing/ProcessingCoreLoader.cpp`,
 `src/backend/processing/ProcessingCoreCache.cpp`,
+`src/backend/processing/ProcessingContract.cpp`,
 `include/backend/processing/ProcessingService.h`,
+`include/backend/processing/ProcessingContract.h`,
 `include/backend/processing/ProcessingCoreAbi.h`
 **Related:** [[CaptureService]], [[Hdf5Service]], [[AutofocusService]],
 [[TriggerService]], [[../architecture/Data-Flow]],
@@ -149,6 +151,30 @@ All gates in one struct. Notable fields:
   `EModulusLut`, which is now fed from the managed LUT cache prepared by
   `AppBackend` at startup)
 - Multi-image mode: `multi_image_enabled`, `multi_image_count`
+
+## Processing Contract versioning (v2)
+
+`backend::processing::contract` (`ProcessingContract.{h,cpp}`) is the Qt-free
+boundary between Contract v1 (the frozen `ProcessingConfig`/metrics contract
+above) and the new [[../domain/Glossary]] **Processing Contract v2**. It is
+deliberately in `mib_processing` so the backend-only CTest lane exercises it
+(`processing.contract_v2_migration`).
+
+- Version constants for both axes (`processing_contract_version`,
+  `config_schema_version`) — both `2` for v2, matched by equality.
+- `classifyConfigSchema(source, target)` → `Same` / `UpgradeNeeded` /
+  `Incompatible`, so a schema-1 document is never silently rewritten with
+  schema-2 keys and a newer/unknown schema fails closed.
+- `resolveDifferenceThreshold(...)` reads the canonical `difference_threshold`,
+  falling back to the legacy `bg_subtract_threshold`.
+- `migrateProfileConfigV1ToV2(...)` produces a v2 config: preserves unrelated
+  values, removes ring thresholds + their enable flag, renames the difference
+  threshold, installs an identity preprocessing chain, and leaves the Laplacian
+  gate disabled. It never selects or activates a core.
+
+Rationale and the full compatibility matrix:
+`docs/decisions/0001-processing-contract-v2.md`,
+`docs/architecture/processing-contract-compatibility.md`.
 
 ## Accumulation modes
 

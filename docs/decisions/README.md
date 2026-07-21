@@ -28,7 +28,7 @@ What becomes easier/harder; what future agents must respect.
 
 | ADR | Title | Status |
 |-----|-------|--------|
-| _none yet_ | | |
+| [0001](0001-processing-contract-v2.md) | Processing Contract v2 | accepted |
 
 Decisions made before this index existed live implicitly in
 [`../architecture/`](../architecture/) and the vault

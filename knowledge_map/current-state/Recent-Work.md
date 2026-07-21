@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Processing Contract v2 — schema/migration boundary** (2026-07-21, issue
+  #297, epic #296) — first slice (V2-1) of the Contract-v2 epic. Adds the
+  Qt-free `backend::processing::contract` module
+  (`ProcessingContract.{h,cpp}`): two version axes, `classifyConfigSchema`
+  (same/upgrade/incompatible), the canonical `difference_threshold` adapter
+  (`resolveDifferenceThreshold`), and `migrateProfileConfigV1ToV2` (removes
+  ring science, installs an identity preprocessing chain, disables the
+  Laplacian gate, preserves unrelated values, never activates a core). Plus
+  ADR `docs/decisions/0001-processing-contract-v2.md`, the compatibility-matrix
+  doc, and the active exec-plan. Contract v1 is unchanged. Test:
+  `processing.contract_v2_migration`.
 - **Latency & target-identification-loss metrics** (2026-07-21, issue #292) —
   quantifies pipeline latency and lost sort targets. New counted losses:
   [[../services/TriggerService]] no-camera / set-failed pulse drops

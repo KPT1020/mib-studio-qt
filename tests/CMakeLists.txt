@@ -101,6 +101,10 @@ mib_add_backend_test_executable(processing_science_seam_test processing/processi
 add_test(NAME processing.science_seam COMMAND $<TARGET_FILE:processing_science_seam_test>)
 set_tests_properties(processing.science_seam PROPERTIES LABELS "processing;backend" TIMEOUT 30)
 
+mib_add_backend_test_executable(processing_contract_v2_migration_test processing/processing_contract_v2_migration_test.cpp)
+add_test(NAME processing.contract_v2_migration COMMAND $<TARGET_FILE:processing_contract_v2_migration_test>)
+set_tests_properties(processing.contract_v2_migration PROPERTIES LABELS "processing;backend" TIMEOUT 30)
+
 mib_add_backend_test_executable(processing_science_golden_test processing/processing_science_golden_test.cpp)
 add_test(NAME processing.science_golden COMMAND $<TARGET_FILE:processing_science_golden_test>)
 set_tests_properties(processing.science_golden PROPERTIES LABELS "processing;backend" TIMEOUT 30)

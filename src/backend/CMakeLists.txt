@@ -31,6 +31,7 @@ add_library(mib_processing STATIC
     ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingCoreEd25519.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingCoreSha256.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingScience.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingContract.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/processing/ProcessingService.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/processing/BatchMaskSources.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/recording/Hdf5Service.cpp
