@@ -127,5 +127,21 @@ Branches are stacked in this order (`claude/pc2-v2-1-schema` → … ).
       filter chain + science) + loader v2 activation/conformance + signing
       (large; intersects packaging/hardware — follow-on within V2-5).
 
-### V2-6…V2-7
-- [ ] Not started (stacked branches created as each slice begins).
+### V2-6 — migrate persisted/UI surfaces to Contract 2
+- [x] Contract-aware gold-standard metrics schema: `ring_ratio` optional
+      (documented legacy Contract 1), new optional `laplacian_variance`
+      (Contract 2, `NaN`→`null`); both contracts validate under
+      `additionalProperties:false`. No global `contract_version` bump.
+- [x] `gold_standard_metrics.md` updated. Test
+      `scripts.gold_standard_schema_contract`.
+- [ ] HDF5 compound migration (write/read `laplacian_variance`, contract/ABI/
+      preprocessing metadata, reader selection) + round-trip tests — follow-on
+      (large Hdf5Service change).
+- [ ] Python/JSON/CSV exporters emit v2 focus field, no placeholder ring —
+      follow-on (rides the HDF5 compound).
+- [ ] Review/monitoring models, focus-score histograms, invalid reasons,
+      config controls, legacy-labeling, mismatch warnings, screenshots/docs —
+      follow-on (frontend, needs the running app).
+
+### V2-7
+- [ ] Not started (stacked branch created when the slice begins).

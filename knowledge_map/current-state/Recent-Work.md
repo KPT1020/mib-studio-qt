@@ -5,6 +5,18 @@
 
 ## Features shipped
 
+- **Processing Contract v2 — contract-aware metrics schema** (2026-07-21, issue
+  #302, epic #296) — sixth slice (V2-6), persisted/contract surface. Makes
+  `docs/gold_standard_metrics.schema.json` contract-aware: `ring_ratio` is now
+  optional and documented as **legacy Contract 1**, and a new optional
+  `laplacian_variance` (Contract-2 focus metric, `NaN`→`null`) is declared, so
+  a Contract-1 document (ring, no laplacian) and a Contract-2 document
+  (laplacian, no ring) both validate under `additionalProperties:false`. No
+  global `contract_version` bump (v2 stays a coexisting per-document contract).
+  Docs (`gold_standard_metrics.md`) updated. Test:
+  `scripts.gold_standard_schema_contract`. The HDF5 compound round-trip, the
+  Python/JSON/CSV exporters, and the review/monitoring UI + screenshots are
+  larger surfaces tracked as follow-on within V2-6.
 - **Processing Contract v2 — engine ABI v2 surface** (2026-07-21, issue #301,
   epic #296) — fifth slice (V2-5). Adds engine ABI v2 to `ProcessingCoreAbi.h`
   **additively** (v1 layout pinned unchanged): POD filter-chain / v2-config /

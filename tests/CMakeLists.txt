@@ -497,6 +497,15 @@ if(Python3_Interpreter_FOUND)
     )
 
     add_test(
+        NAME scripts.gold_standard_schema_contract
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/test_gold_standard_schema_contract.py
+    )
+    set_tests_properties(scripts.gold_standard_schema_contract PROPERTIES
+        LABELS "scripts;hdf5"
+        TIMEOUT 30
+    )
+
+    add_test(
         NAME scripts.publish_processing_core
         COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/test_publish_processing_core.py
     )
