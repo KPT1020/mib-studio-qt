@@ -5,6 +5,16 @@
 
 ## Features shipped
 
+- **Processing Contract v2 — focus-score autofocus controller** (2026-07-21,
+  issue #300, epic #296) — fourth slice (V2-4). Adds the Qt-free
+  `AutofocusFocusScore.h`: `FocusSample` (Laplacian variance/frame/timestamp/
+  object/track), a finite-only validity policy, `medianFocusScore` (de-dups by
+  `(frame, identity)`, `NaN` when empty — never manufactured), and
+  `FocusScoreController`, a maximize-score hill-climb (direction probe,
+  reverse-on-wrong-way stays coarse, reverse+refine on overshoot, hold within
+  tolerance, clamped). The Contract-1 ring-width setpoint controller
+  (`AutofocusMath.h`) is untouched. Service/UI wiring rides on V2-6. Test:
+  `backend.autofocus_focus_score`.
 - **Processing Contract v2 — per-object Laplacian variance** (2026-07-21,
   issue #299, epic #296) — third slice (V2-3). Adds
   `science::calculateLaplacianVariance` (filled object mask, crop to bbox+kernel

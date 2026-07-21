@@ -46,6 +46,10 @@ mib_add_backend_test_executable(autofocus_math_test backend/autofocus_math_test.
 add_test(NAME backend.autofocus_math COMMAND $<TARGET_FILE:autofocus_math_test>)
 set_tests_properties(backend.autofocus_math PROPERTIES LABELS "backend" TIMEOUT 30)
 
+mib_add_backend_test_executable(autofocus_focus_score_test backend/autofocus_focus_score_test.cpp)
+add_test(NAME backend.autofocus_focus_score COMMAND $<TARGET_FILE:autofocus_focus_score_test>)
+set_tests_properties(backend.autofocus_focus_score PROPERTIES LABELS "backend" TIMEOUT 30)
+
 mib_add_backend_test_executable(hdf_write_queue_test backend/hdf_write_queue_test.cpp)
 target_link_libraries(hdf_write_queue_test PRIVATE Threads::Threads)
 add_test(NAME backend.hdf_write_queue COMMAND $<TARGET_FILE:hdf_write_queue_test>)

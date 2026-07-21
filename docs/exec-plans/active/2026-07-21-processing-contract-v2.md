@@ -105,5 +105,15 @@ Branches are stacked in this order (`claude/pc2-v2-1-schema` → … ).
 - [ ] Removing ring from the v2 *surface* (HDF5/exports/UI) lands in V2-6; here
       ring stays computed for v1 and the new field/gate are additive.
 
-### V2-4…V2-7
+### V2-4 — focus-score autofocus controller
+- [x] Qt-free `AutofocusFocusScore.h`: `FocusSample`, validity policy,
+      `medianFocusScore` (dedup by frame/identity, `NaN` when empty), and the
+      maximize-score `FocusScoreController` (probe/reverse/refine/hold, clamped).
+- [x] Contract-1 setpoint controller (`AutofocusMath.h`) untouched.
+- [x] Test `backend.autofocus_focus_score` (converge both sides, plateau/noise
+      stable, clamp, sample validity + dedup) + vault.
+- [ ] `AutofocusService` `onFocusSample` feed + contract-gated controller
+      selection + focus-score UI rename (rides V2-6's config/contract plumbing).
+
+### V2-5…V2-7
 - [ ] Not started (stacked branches created as each slice begins).
