@@ -201,6 +201,24 @@ through the same helper, so mask generation and empty-frame classification can
 no longer diverge. Preprocessing pipelines are identity until an ABI-v2 core /
 v2 config supplies real stages (V2-5/V2-6). Contract-1 output is unchanged.
 
+## Object focus metric — Laplacian variance (v2)
+
+`calculateLaplacianVariance(originalImage, objectContour, kernelSize)`
+(ProcessingScience) is the Contract-2 replacement for ring width. It is computed
+**only after detection, once per emitted object**, from the object's own
+contour (the inner contour for nested candidates, the selected top-level contour
+otherwise — never the parent/halo). It fills an object mask, crops the Gray8
+image to the contour bbox plus kernel context (clipped to image bounds), runs
+`cv::Laplacian` on the **unmasked** crop (masking before convolution would forge
+an artificial boundary), and takes the variance with `meanStdDev` over the mask
+so only object pixels contribute. Unusable samples emit `NaN`.
+
+Result field `FilterResult::laplacianVariance` (`laplacian_variance`); config
+`laplacian_variance_min/max` + `enable_laplacian_variance_check` (in `filters`).
+The gate is **disabled by default** (thresholds calibrated in V2-7), so Contract
+1 is unaffected; `InvalidReasonCode::Laplacian` reports it when enabled. Ring
+width/ratio stays computed for Contract-1 compatibility.
+
 ## Accumulation modes
 
 - **Monitoring rings** — `monitoringValidFrames_` / `monitoringInvalidFrames_`,

@@ -5,6 +5,7 @@
 // implementation (ProcessingScience). Qt-free by design.
 
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -36,6 +37,12 @@ struct ProcessingConfig {
     double ring_ratio_min{15.0};
     double ring_ratio_max{25.0};
     bool enable_ring_ratio_check{true};
+    // Contract v2 object focus metric: per-object Laplacian variance. The gate
+    // is disabled by default and its thresholds are placeholders until V2-7
+    // calibration; enabling it never affects Contract-1 execution.
+    double laplacian_variance_min{0.0};
+    double laplacian_variance_max{0.0};
+    bool enable_laplacian_variance_check{false};
     bool require_single_inner_contour{true};
     int empty_frame_pixel_threshold{100};
     bool auto_background_enabled{false};
@@ -79,6 +86,10 @@ struct FilterResult {
     double area{0.0};
     double areaRatio{0.0};
     double ringRatio{0.0};
+    // Contract v2 per-object focus metric (variance of the Laplacian over the
+    // detected object). NaN when unusable or not computed. Replaces ring width
+    // as the v2 focus signal; ringRatio remains for Contract-1 compatibility.
+    double laplacianVariance{std::numeric_limits<double>::quiet_NaN()};
     double youngsModulus{0.0}; // Young's modulus (kPa) from LUT lookup
     BrightnessQuantiles brightness;
     bool isTargetGroup{false}; // True if valid AND matches target group criteria

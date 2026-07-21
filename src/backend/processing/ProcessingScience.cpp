@@ -141,6 +141,62 @@ double calculateRingRatio(const std::vector<cv::Point>& innerContour,
     return std::sqrt(outerArea - innerArea);
 }
 
+double calculateLaplacianVariance(const cv::Mat& originalImage,
+                                  const std::vector<cv::Point>& objectContour,
+                                  int laplacianKernelSize) {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    if (originalImage.empty() || objectContour.empty()) {
+        return nan;
+    }
+
+    // Operate on single-channel Gray8.
+    cv::Mat gray;
+    if (originalImage.channels() == 3) {
+        cv::cvtColor(originalImage, gray, cv::COLOR_BGR2GRAY);
+    } else {
+        gray = originalImage;
+    }
+    if (gray.type() != CV_8UC1) {
+        return nan;
+    }
+
+    int ksize = std::max(1, laplacianKernelSize);
+    if (ksize % 2 == 0) {
+        ++ksize; // cv::Laplacian requires an odd aperture
+    }
+    // Bounding box plus kernel context so the Laplacian over object pixels reads
+    // real neighbours instead of a padded crop border.
+    const int margin = ksize / 2 + 1;
+    const cv::Rect bbox = cv::boundingRect(objectContour);
+    cv::Rect crop(bbox.x - margin, bbox.y - margin, bbox.width + 2 * margin,
+                  bbox.height + 2 * margin);
+    crop &= cv::Rect(0, 0, gray.cols, gray.rows); // clip to image bounds
+    if (crop.width <= 0 || crop.height <= 0) {
+        return nan;
+    }
+
+    // Filled object mask in crop-local coordinates. Used only for the variance
+    // statistics, never applied to the image before convolution.
+    cv::Mat mask(crop.size(), CV_8UC1, cv::Scalar(0));
+    std::vector<cv::Point> shifted;
+    shifted.reserve(objectContour.size());
+    for (const cv::Point& p : objectContour) {
+        shifted.emplace_back(p.x - crop.x, p.y - crop.y);
+    }
+    const std::vector<std::vector<cv::Point>> polys{shifted};
+    cv::drawContours(mask, polys, 0, cv::Scalar(255), cv::FILLED);
+    if (cv::countNonZero(mask) == 0) {
+        return nan;
+    }
+
+    cv::Mat laplacian;
+    cv::Laplacian(gray(crop), laplacian, CV_64F, ksize);
+    cv::Scalar mean;
+    cv::Scalar stddev;
+    cv::meanStdDev(laplacian, mean, stddev, mask);
+    return stddev[0] * stddev[0]; // variance over the object's pixels
+}
+
 ContourAnalysis findContours(const cv::Mat& processedImage) {
     ContourAnalysis analysis;
     cv::findContours(processedImage, analysis.allContours, analysis.hierarchy, cv::RETR_TREE,
@@ -300,6 +356,12 @@ std::vector<InvalidReasonCode> classifyInvalidReasons(const FilterResult& result
     if (config.enable_area_ratio_check && result.areaRatio > config.area_ratio_threshold_max) {
         reasons.push_back(InvalidReasonCode::AreaRatio);
     }
+    if (config.enable_laplacian_variance_check &&
+        (!std::isfinite(result.laplacianVariance) ||
+         result.laplacianVariance < config.laplacian_variance_min ||
+         result.laplacianVariance > config.laplacian_variance_max)) {
+        reasons.push_back(InvalidReasonCode::Laplacian);
+    }
     return reasons;
 }
 
@@ -341,6 +403,9 @@ FilterResult evaluateInnerContourObject(
                             static_cast<int>(result.bboxWidth),
                             static_cast<int>(result.bboxHeight));
         result.brightness = calculateBrightnessQuantiles(originalImage, objectMask, bbox);
+        // Object focus metric uses the inner contour (the object), never the
+        // parent/halo contour. Computed for every emitted candidate.
+        result.laplacianVariance = calculateLaplacianVariance(originalImage, innerContour);
     }
 
     if (config.enable_border_check && contourTouchesRoiBorder(innerContour, roi)) {
@@ -380,8 +445,14 @@ FilterResult evaluateInnerContourObject(
                                        result.deformability <= config.deformability_threshold_max);
     const bool areaRatioInRange =
         !config.enable_area_ratio_check || (result.areaRatio <= config.area_ratio_threshold_max);
+    const bool laplacianInRange =
+        !config.enable_laplacian_variance_check ||
+        (std::isfinite(result.laplacianVariance) &&
+         result.laplacianVariance >= config.laplacian_variance_min &&
+         result.laplacianVariance <= config.laplacian_variance_max);
 
-    if (areaInRange && ringRatioInRange && deformabilityInRange && areaRatioInRange) {
+    if (areaInRange && ringRatioInRange && deformabilityInRange && areaRatioInRange &&
+        laplacianInRange) {
         result.inRange = true;
         result.isValid = true;
     }
@@ -430,6 +501,9 @@ FilterResult evaluateOuterContourObject(
                             static_cast<int>(result.bboxWidth),
                             static_cast<int>(result.bboxHeight));
         result.brightness = calculateBrightnessQuantiles(originalImage, objectMask, bbox);
+        // Object focus metric uses the selected top-level contour in outer-only
+        // mode. Computed for every emitted candidate.
+        result.laplacianVariance = calculateLaplacianVariance(originalImage, contour);
     }
 
     if (config.enable_border_check && contourTouchesRoiBorder(contour, roi)) {
@@ -462,8 +536,13 @@ FilterResult evaluateOuterContourObject(
                                        result.deformability <= config.deformability_threshold_max);
     const bool areaRatioInRange =
         !config.enable_area_ratio_check || (result.areaRatio <= config.area_ratio_threshold_max);
+    const bool laplacianInRange =
+        !config.enable_laplacian_variance_check ||
+        (std::isfinite(result.laplacianVariance) &&
+         result.laplacianVariance >= config.laplacian_variance_min &&
+         result.laplacianVariance <= config.laplacian_variance_max);
 
-    if (areaInRange && deformabilityInRange && areaRatioInRange) {
+    if (areaInRange && deformabilityInRange && areaRatioInRange && laplacianInRange) {
         result.inRange = true;
         result.isValid = true;
     }

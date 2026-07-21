@@ -45,6 +45,10 @@ inline ProcessingConfig configFromDict(const py::dict& d) {
     c.ring_ratio_min = dictGet(d, "ring_ratio_min", c.ring_ratio_min);
     c.ring_ratio_max = dictGet(d, "ring_ratio_max", c.ring_ratio_max);
     c.enable_ring_ratio_check = dictGet(d, "enable_ring_ratio_check", c.enable_ring_ratio_check);
+    c.laplacian_variance_min = dictGet(d, "laplacian_variance_min", c.laplacian_variance_min);
+    c.laplacian_variance_max = dictGet(d, "laplacian_variance_max", c.laplacian_variance_max);
+    c.enable_laplacian_variance_check =
+        dictGet(d, "enable_laplacian_variance_check", c.enable_laplacian_variance_check);
     c.require_single_inner_contour = dictGet(d, "require_single_inner_contour", c.require_single_inner_contour);
     c.empty_frame_pixel_threshold = dictGet(d, "empty_frame_pixel_threshold", c.empty_frame_pixel_threshold);
     c.auto_background_enabled = dictGet(d, "auto_background_enabled", c.auto_background_enabled);
@@ -81,6 +85,9 @@ inline py::dict configToDict(const ProcessingConfig& c) {
     d["ring_ratio_min"] = c.ring_ratio_min;
     d["ring_ratio_max"] = c.ring_ratio_max;
     d["enable_ring_ratio_check"] = c.enable_ring_ratio_check;
+    d["laplacian_variance_min"] = c.laplacian_variance_min;
+    d["laplacian_variance_max"] = c.laplacian_variance_max;
+    d["enable_laplacian_variance_check"] = c.enable_laplacian_variance_check;
     d["require_single_inner_contour"] = c.require_single_inner_contour;
     d["empty_frame_pixel_threshold"] = c.empty_frame_pixel_threshold;
     d["auto_background_enabled"] = c.auto_background_enabled;

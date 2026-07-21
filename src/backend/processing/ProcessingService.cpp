@@ -1626,7 +1626,7 @@ void ProcessingService::accumulateIdentificationCounters(
     const std::vector<FilterResult>& validations, const ProcessingConfig& config,
     double pixelToMicronFactor) {
     namespace science = backend::processing::science;
-    static_assert(science::kInvalidReasonCount == 6,
+    static_assert(science::kInvalidReasonCount == 7,
                   "idReasonCounts_ / IdentificationCounters.reasonCounts size must match "
                   "science::kInvalidReasonCount");
 

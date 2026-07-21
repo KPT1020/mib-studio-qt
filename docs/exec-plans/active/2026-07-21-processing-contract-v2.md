@@ -90,5 +90,20 @@ Branches are stacked in this order (`claude/pc2-v2-1-schema` → … ).
 - [ ] Real preprocessing stages fed from a v2 config/ABI (deferred to V2-5/V2-6;
       pipelines are identity until then).
 
-### V2-3…V2-7
+### V2-3 — abolish ring width; per-object Laplacian variance
+- [x] `science::calculateLaplacianVariance` (filled mask, bbox+kernel crop,
+      Laplacian on the unmasked crop, `meanStdDev` masked variance, `NaN` for
+      unusable). Computed once per emitted object from its own contour (inner
+      for nested, top-level for outer-only).
+- [x] `FilterResult::laplacianVariance` + config
+      `laplacian_variance_min/max` + `enable_laplacian_variance_check`
+      (AppConfigWatcher + Python bridge). `InvalidReasonCode::Laplacian`
+      (histogram 6→7).
+- [x] Gate disabled by default; Contract-1 output unchanged (golden/seam/
+      multi-object/identification-metrics green). Ring width retained for v1.
+- [x] Test `processing.laplacian_variance` + vault.
+- [ ] Removing ring from the v2 *surface* (HDF5/exports/UI) lands in V2-6; here
+      ring stays computed for v1 and the new field/gate are additive.
+
+### V2-4…V2-7
 - [ ] Not started (stacked branches created as each slice begins).

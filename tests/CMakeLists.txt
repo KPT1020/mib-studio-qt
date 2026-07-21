@@ -109,6 +109,10 @@ mib_add_backend_test_executable(image_filter_pipeline_test processing/image_filt
 add_test(NAME processing.image_filter_pipeline COMMAND $<TARGET_FILE:image_filter_pipeline_test>)
 set_tests_properties(processing.image_filter_pipeline PROPERTIES LABELS "processing;backend" TIMEOUT 30)
 
+mib_add_backend_test_executable(processing_laplacian_variance_test processing/processing_laplacian_variance_test.cpp)
+add_test(NAME processing.laplacian_variance COMMAND $<TARGET_FILE:processing_laplacian_variance_test>)
+set_tests_properties(processing.laplacian_variance PROPERTIES LABELS "processing;backend" TIMEOUT 30)
+
 mib_add_backend_test_executable(processing_science_golden_test processing/processing_science_golden_test.cpp)
 add_test(NAME processing.science_golden COMMAND $<TARGET_FILE:processing_science_golden_test>)
 set_tests_properties(processing.science_golden PROPERTIES LABELS "processing;backend" TIMEOUT 30)

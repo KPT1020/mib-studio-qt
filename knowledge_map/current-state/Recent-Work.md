@@ -5,6 +5,18 @@
 
 ## Features shipped
 
+- **Processing Contract v2 — per-object Laplacian variance** (2026-07-21,
+  issue #299, epic #296) — third slice (V2-3). Adds
+  `science::calculateLaplacianVariance` (filled object mask, crop to bbox+kernel
+  context, `cv::Laplacian` on the unmasked crop, variance via `meanStdDev` over
+  the mask so only object pixels contribute; `NaN` for unusable samples).
+  Computed once per emitted object from its own contour (inner for nested,
+  top-level for outer-only — never the parent/halo). New `laplacianVariance`
+  result field and `laplacian_variance_min/max` +
+  `enable_laplacian_variance_check` config (parsed by `AppConfigWatcher` +
+  Python bridge), plus `InvalidReasonCode::Laplacian` (histogram 6→7). Gate
+  **disabled by default**, so Contract-1 output is unchanged; ring width stays
+  for v1. Test: `processing.laplacian_variance`.
 - **Processing Contract v2 — preprocessing filters + shared absdiff path**
   (2026-07-21, issue #298, epic #296) — second slice (V2-2). Adds the Qt-free
   `ImageFilterPipeline` (identity/invert/linear_contrast/gamma/clahe, compiled

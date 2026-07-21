@@ -249,8 +249,8 @@ public:
         uint64_t unservedTargetGroupObjects{0}; // target-group objects beyond the frame's
                                                 // first — no pulse is dispatched for them
         // Invalid-reason histogram, indexed by science::InvalidReasonCode:
-        // {NoContour, Border, Area, Ring, Deform, AreaRatio}.
-        uint64_t reasonCounts[6]{};
+        // {NoContour, Border, Area, Ring, Deform, AreaRatio, Laplacian}.
+        uint64_t reasonCounts[7]{};
     };
     IdentificationCounters getIdentificationCounters() const;
     void resetIdentificationCounters();
@@ -623,7 +623,7 @@ private:
     std::atomic<uint64_t> idInvalidObjects_{0};
     std::atomic<uint64_t> idTargetGroupObjects_{0};
     std::atomic<uint64_t> idUnservedTargetGroupObjects_{0};
-    std::atomic<uint64_t> idReasonCounts_[6]{};
+    std::atomic<uint64_t> idReasonCounts_[7]{};
     
     // Pixel to micron conversion factor (default: 0.4886)
     std::atomic<double> pixelToMicronFactor_{0.4886};

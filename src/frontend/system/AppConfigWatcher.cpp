@@ -290,6 +290,10 @@ namespace frontend
 					pcfg.ring_ratio_min = ip.value("ring_ratio_min").toDouble(pcfg.ring_ratio_min);
 				if (ip.contains("ring_ratio_max"))
 					pcfg.ring_ratio_max = ip.value("ring_ratio_max").toDouble(pcfg.ring_ratio_max);
+				if (ip.contains("laplacian_variance_min"))
+					pcfg.laplacian_variance_min = ip.value("laplacian_variance_min").toDouble(pcfg.laplacian_variance_min);
+				if (ip.contains("laplacian_variance_max"))
+					pcfg.laplacian_variance_max = ip.value("laplacian_variance_max").toDouble(pcfg.laplacian_variance_max);
 				if (ip.contains("empty_frame_pixel_threshold"))
 					pcfg.empty_frame_pixel_threshold = ip.value("empty_frame_pixel_threshold").toInt(pcfg.empty_frame_pixel_threshold);
 				if (ip.contains("auto_background_enabled"))
@@ -311,6 +315,8 @@ namespace frontend
 						pcfg.enable_area_ratio_check = fl.value("enable_area_ratio_check").toBool(pcfg.enable_area_ratio_check);
 					if (fl.contains("enable_ring_ratio_check"))
 						pcfg.enable_ring_ratio_check = fl.value("enable_ring_ratio_check").toBool(pcfg.enable_ring_ratio_check);
+					if (fl.contains("enable_laplacian_variance_check"))
+						pcfg.enable_laplacian_variance_check = fl.value("enable_laplacian_variance_check").toBool(pcfg.enable_laplacian_variance_check);
 					if (fl.contains("require_single_inner_contour"))
 						pcfg.require_single_inner_contour = fl.value("require_single_inner_contour").toBool(pcfg.require_single_inner_contour);
 				}
