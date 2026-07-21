@@ -142,6 +142,23 @@ set_target_properties(processing_core_abi_c_test PROPERTIES
 add_test(NAME processing.core_abi_c COMMAND $<TARGET_FILE:processing_core_abi_c_test>)
 set_tests_properties(processing.core_abi_c PROPERTIES LABELS "processing;backend" TIMEOUT 30)
 
+add_executable(processing_core_abi_v2_c_test
+    ${PROJECT_SOURCE_DIR}/tests/processing/processing_core_abi_v2_c_test.c
+)
+target_include_directories(processing_core_abi_v2_c_test PRIVATE ${PROJECT_SOURCE_DIR}/include)
+set_target_properties(processing_core_abi_v2_c_test PROPERTIES
+    C_STANDARD 11
+    C_STANDARD_REQUIRED YES
+    C_EXTENSIONS NO
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+)
+add_test(NAME processing.core_abi_v2_c COMMAND $<TARGET_FILE:processing_core_abi_v2_c_test>)
+set_tests_properties(processing.core_abi_v2_c PROPERTIES LABELS "processing;backend" TIMEOUT 30)
+
+mib_add_backend_test_executable(processing_core_capabilities_test processing/processing_core_capabilities_test.cpp)
+add_test(NAME processing.core_capabilities COMMAND $<TARGET_FILE:processing_core_capabilities_test>)
+set_tests_properties(processing.core_capabilities PROPERTIES LABELS "processing;backend" TIMEOUT 30)
+
 mib_add_backend_test_executable(processing_core_loader_test processing/processing_core_loader_test.cpp)
 add_dependencies(processing_core_loader_test mib_processing_core)
 add_test(NAME processing.core_loader

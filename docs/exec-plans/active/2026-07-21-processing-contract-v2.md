@@ -115,5 +115,17 @@ Branches are stacked in this order (`claude/pc2-v2-1-schema` → … ).
 - [ ] `AutofocusService` `onFocusSample` feed + contract-gated controller
       selection + focus-score UI rename (rides V2-6's config/contract plumbing).
 
-### V2-5…V2-7
+### V2-5 — engine ABI v2 for filters and full per-object results
+- [x] Additive ABI v2 in `ProcessingCoreAbi.h` (v1 layout unchanged, pinned by
+      `core_abi_c`): POD filter-chain / v2-config / per-object-metrics structs,
+      host-owned object buffer with deterministic `BUFFER_TOO_SMALL`,
+      `mib_processing_api_v2` + `get_api_v2`.
+- [x] Capability flags + `ProcessingCoreCapabilities.h` host negotiation
+      (`coreSatisfiesContract2`, `abiV1ServesContract`, `engineAbiForContract`).
+- [x] Tests `processing.core_abi_v2_c`, `processing.core_capabilities`.
+- [ ] Native v2 plugin (`get_api_v2` export whose `process_objects` runs the
+      filter chain + science) + loader v2 activation/conformance + signing
+      (large; intersects packaging/hardware — follow-on within V2-5).
+
+### V2-6…V2-7
 - [ ] Not started (stacked branches created as each slice begins).

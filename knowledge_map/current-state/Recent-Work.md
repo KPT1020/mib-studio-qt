@@ -5,6 +5,16 @@
 
 ## Features shipped
 
+- **Processing Contract v2 — engine ABI v2 surface** (2026-07-21, issue #301,
+  epic #296) — fifth slice (V2-5). Adds engine ABI v2 to `ProcessingCoreAbi.h`
+  **additively** (v1 layout pinned unchanged): POD filter-chain / v2-config /
+  per-object-metrics structs (`laplacian_variance`, no ring), a host-owned
+  object buffer with deterministic `BUFFER_TOO_SMALL`, `mib_processing_api_v2`
+  with `process_objects`, and `get_api_v2` negotiation. Capability flags
+  (`MIB_PROCESSING_CAP_*`) plus `ProcessingCoreCapabilities.h` host negotiation
+  (`coreSatisfiesContract2`, `abiV1ServesContract`, `engineAbiForContract`).
+  Native v2 plugin + loader v2 activation are follow-on. Tests:
+  `processing.core_abi_v2_c`, `processing.core_capabilities`.
 - **Processing Contract v2 — focus-score autofocus controller** (2026-07-21,
   issue #300, epic #296) — fourth slice (V2-4). Adds the Qt-free
   `AutofocusFocusScore.h`: `FocusSample` (Laplacian variance/frame/timestamp/

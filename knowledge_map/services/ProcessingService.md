@@ -14,7 +14,8 @@
 `include/backend/processing/ProcessingService.h`,
 `include/backend/processing/ProcessingContract.h`,
 `include/backend/processing/ImageFilterPipeline.h`,
-`include/backend/processing/ProcessingCoreAbi.h`
+`include/backend/processing/ProcessingCoreAbi.h` (engine ABI v1 + v2),
+`include/backend/processing/ProcessingCoreCapabilities.h` (v2 negotiation)
 **Related:** [[CaptureService]], [[Hdf5Service]], [[AutofocusService]],
 [[TriggerService]], [[../architecture/Data-Flow]],
 [[../domain/Microscopy-Pipeline]]
@@ -218,6 +219,30 @@ Result field `FilterResult::laplacianVariance` (`laplacian_variance`); config
 The gate is **disabled by default** (thresholds calibrated in V2-7), so Contract
 1 is unaffected; `InvalidReasonCode::Laplacian` reports it when enabled. Ring
 width/ratio stays computed for Contract-1 compatibility.
+
+## Engine ABI v2 (v2)
+
+`ProcessingCoreAbi.h` now defines **engine ABI v2** additively — every ABI-v1
+type keeps its exact layout (pinned by `processing.core_abi_c`), so ABI-v1
+modules load unchanged. ABI v2 adds POD, size-versioned structs for the filter
+chain (`mib_processing_filter_stage` / `_filter_chain`), the v2 config
+(`mib_processing_kernel_config_v2`, canonical `difference_threshold`), and the
+full per-object result (`mib_processing_object_metrics` — carries
+`laplacian_variance`, no ring field) written into a host-owned
+`mib_processing_object_buffer` (a too-small buffer is a deterministic
+`BUFFER_TOO_SMALL`, allocation-free). `mib_processing_api_v2` adds
+`process_objects` (full pipeline) alongside the v1-compatible `process_mask` /
+`is_empty`, negotiated through `mib_processing_get_api_v2`.
+
+Capability flags (`MIB_PROCESSING_CAP_*`: full pipeline, absolute difference,
+filter chain, per-object Laplacian) are advertised in the descriptor.
+`ProcessingCoreCapabilities.h` holds the host negotiation:
+`coreSatisfiesContract2` (ABI ≥ 2, contract == 2, all required caps),
+`abiV1ServesContract` (ABI v1 → Contract 1 only), and `engineAbiForContract`.
+Tests: `processing.core_abi_v2_c`, `processing.core_capabilities`. The native
+v2 plugin implementation (a `get_api_v2` export whose `process_objects` runs the
+filter chain + science) and the loader's v2 activation path build on this
+surface and are tracked as follow-on within V2-5.
 
 ## Accumulation modes
 
