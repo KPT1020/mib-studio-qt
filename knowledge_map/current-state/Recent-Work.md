@@ -5,6 +5,20 @@
 
 ## Features shipped
 
+- **UX redesign: UX-3 — profile-aware hardware preflight checklist**
+  (2026-07-21, epic #304, issue #307) — New `desktop/src/preflight.ts`:
+  `derivePreflight(input, requirements)` turns the Preflight stage into an
+  explicit per-subsystem checklist (camera, processing-core/trust, capture,
+  autofocus, sample/sheath pumps, trigger, storage) with
+  Passed/Warning/Failed/Not-required status, requirement badges,
+  expected-vs-detected identity, cause + recovery, and a `criticalPassed` gate.
+  Device requirements will come from the profile (not bridged yet →
+  `DEFAULT_REQUIREMENTS`); storage stays informational pending a backend
+  contract. Shell polls camera/core/autofocus/pumps/trigger off the capture
+  loop while on the Preflight tab. 14 vitest cases (`preflight.test.ts`).
+  Stacked on UX-1 (#316). Details:
+  `knowledge_map/task/2026-07-21-ux3-hardware-preflight.md`.
+
 - **UX redesign: UX-1 — guided four-stage operator workflow** (2026-07-21,
   epic #304, issue #305) — New `desktop/src/workflow.ts`: a pure
   `deriveWorkflow(facts)` that layers authoritative stage state
