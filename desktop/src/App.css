@@ -708,6 +708,111 @@ body {
   font-style: italic;
 }
 
+/* ---- UX-7 integrated operations dashboard (issue #311) ---- */
+.ops-panel {
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+}
+
+.ops-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  background: var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.ops-metric {
+  flex: 1 1 110px;
+  min-width: 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 10px;
+  background: var(--panel);
+}
+
+.om-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.om-value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.om-sub {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ops-metric.freshness .om-value {
+  color: var(--ok);
+}
+.ops-metric.freshness.stale .om-value {
+  color: var(--warn);
+}
+
+.ops-quality {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ops-gate {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.ops-gate.pass {
+  color: var(--ok);
+}
+.ops-gate.warn {
+  color: var(--warn);
+}
+.ops-gate.fail {
+  color: var(--err);
+}
+.ops-gate.unknown {
+  color: var(--muted);
+}
+
+.ops-alerts {
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ops-noalert {
+  color: var(--ok);
+  font-size: 12px;
+}
+
+.ops-alert {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 3px;
+}
+.ops-alert.critical {
+  background: #fdecea;
+  color: var(--err);
+}
+.ops-alert.warning {
+  background: #fff3e0;
+  color: #7a4a12;
+}
+
 .camera-actions {
   display: flex;
   gap: 6px;

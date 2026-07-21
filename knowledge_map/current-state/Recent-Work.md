@@ -5,6 +5,16 @@
 
 ## Features shipped
 
+- **UX redesign: UX-7 (slice) — integrated Experiment operations dashboard**
+  (2026-07-21, epic #304, issue #311) — New `desktop/src/operations.ts`:
+  `deriveKeyMetrics` + `deriveAlerts` (critical-first) power a metrics + quality
+  + alerts panel shown beside the live image in the Experiment/Preview view, so
+  routine operation needs no Preview/Monitoring sub-tab switching. Metric
+  collection now runs throughout the Experiment stage and any active run;
+  freshness shows Live/Stale/Idle. 8 vitest cases (`operations.test.ts`). Run
+  header / quick-adjust / trend charts are follow-ups. Details:
+  `knowledge_map/task/2026-07-21-ux7-ops-dashboard.md`.
+
 - **UX redesign: UX-9 — Operator vs Service/Commissioning mode** (2026-07-21,
   epic #304, issue #313) — New `desktop/src/commissioning.ts`: `canActuate` and
   friends gate hardware-actuating trigger tests (service mode → not during a run

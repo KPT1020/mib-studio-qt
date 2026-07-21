@@ -22,6 +22,7 @@ import { BRIDGE_ABI_VERSION, EXPERIMENT_STATES, PUMP_IDS } from "./bridgeContrac
 import { deriveWorkflow, type StageTab, type WorkflowFacts } from "./workflow";
 import { CHECK_STATUS_LABEL, derivePreflight, type PreflightInput } from "./preflight";
 import { deriveQualityGates, GATE_STATUS_LABEL, type QualityInput } from "./quality";
+import { deriveAlerts, deriveKeyMetrics } from "./operations";
 import { deriveContextBar, SEG_STATUS_LABEL, type ContextBarFacts } from "./contextBar";
 import {
   canActuate,
@@ -221,6 +222,8 @@ export default function App() {
   const reviewCanvasRef = useRef<HTMLCanvasElement>(null);
   const loopRef = useRef<number | null>(null);
   const tabRef = useRef<MainTab>("connect");
+  // UX-7 metric freshness: last total event count and when it last changed.
+  const metricsRef = useRef({ lastTotal: -1, lastChangeMs: 0 });
   tabRef.current = tab;
 
   // Display-side measurements (frames actually drawn / bytes actually pulled
@@ -357,23 +360,36 @@ export default function App() {
 
   useEffect(() => () => stopLoop(), [stopLoop]);
 
-  // Monitoring is visibility-gated (BE-5): accumulation and its per-frame
-  // image clones run only while the Monitoring view is actually shown.
-  const monitoringVisible = tab === "experiment" && expTab === "monitoring";
+  // UX-7: bounded metric collection continues throughout the Experiment stage
+  // and any active run, so the integrated dashboard shows live numbers without
+  // a Monitoring sub-tab. Snapshot *polling* (rendering) runs while the
+  // Experiment tab is shown; detailed chart rendering may still pause offscreen.
+  const runActive =
+    expStatus?.valid === true &&
+    (expStatus.state === EXPERIMENT_STATES.Active || expStatus.state === EXPERIMENT_STATES.Stopping);
+  const monitoringActive = tab === "experiment" || runActive;
+  const monitoringPolling = tab === "experiment";
   useEffect(() => {
     if (!ready) return;
-    bridge.monitoringSetActive(monitoringVisible).catch(() => {});
-    if (!monitoringVisible) return;
+    bridge.monitoringSetActive(monitoringActive).catch(() => {});
+  }, [monitoringActive, ready]);
+  useEffect(() => {
+    if (!ready || !monitoringPolling) return;
     const id = window.setInterval(async () => {
       try {
-        setMonSnapshot(await bridge.fetchMonitoringSnapshot(200));
+        const snap = await bridge.fetchMonitoringSnapshot(200);
+        setMonSnapshot(snap);
         setTrigStatus(await bridge.fetchTriggerStatus());
+        const total = snap.valid_appended + snap.invalid_appended;
+        if (total !== metricsRef.current.lastTotal) {
+          metricsRef.current = { lastTotal: total, lastChangeMs: Date.now() };
+        }
       } catch {
         /* backend gone — next tick will surface it */
       }
     }, 500);
     return () => window.clearInterval(id);
-  }, [monitoringVisible, ready]);
+  }, [monitoringPolling, ready]);
 
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsed((c) => {
@@ -853,6 +869,32 @@ export default function App() {
     pixelToMicron: stats?.valid ? stats.pixel_to_micron : Number(pixelToMicron) || 0,
   };
   const quality = deriveQualityGates(qualityInput);
+
+  // ---- UX-7 integrated operations: key metrics + alerts (issue #311) ----
+  const keyMetrics = deriveKeyMetrics({
+    validAppended: monSnapshot?.valid_appended ?? 0,
+    invalidAppended: monSnapshot?.invalid_appended ?? 0,
+    validHeld: monSnapshot?.valid_held ?? 0,
+    invalidHeld: monSnapshot?.invalid_held ?? 0,
+    algoFps,
+  });
+  const metricsStale =
+    expActive && metricsRef.current.lastChangeMs > 0 && Date.now() - metricsRef.current.lastChangeMs > 3000;
+  const LOW_VALIDITY_PCT = 50;
+  const alerts = deriveAlerts({
+    experimentActive: expActive,
+    experimentFailed: expState === EXPERIMENT_STATES.Failed,
+    experimentFlushing: expStatus?.flushing ?? false,
+    bridgeError: false, // no explicit unresolved-error flag on the bridge yet
+    metricsStale,
+    totalEvents: keyMetrics.totalEvents,
+    validityRatePct: keyMetrics.validityRatePct,
+    lowValidityThresholdPct: LOW_VALIDITY_PCT,
+    droppedValid: expStatus?.dropped_valid ?? 0,
+    droppedInvalid: expStatus?.dropped_invalid ?? 0,
+    evicted: keyMetrics.evicted,
+    qualityFails: quality.fail,
+  });
 
   // ---- UX-8 persistent active-context bar (issue #312) ----
   // Warnings = unresolved attention items surfaced by preflight + quality.
@@ -1418,6 +1460,55 @@ export default function App() {
                       {!lastMeta && <span className="canvas-hint">No frame yet — configure a camera and press Start Camera</span>}
                       <canvas ref={previewCanvasRef} className={fitWindow ? "fit" : ""} />
                     </div>
+
+                    {/* ---- UX-7 integrated operations: metrics + quality + alerts ---- */}
+                    <div className="ops-panel" aria-label="Experiment operations">
+                      <div className="ops-metrics">
+                        <div className="ops-metric">
+                          <span className="om-label">Total events</span>
+                          <span className="om-value">{keyMetrics.totalEvents.toLocaleString()}</span>
+                        </div>
+                        <div className="ops-metric">
+                          <span className="om-label">Valid events</span>
+                          <span className="om-value">
+                            {keyMetrics.validEvents.toLocaleString()}{" "}
+                            <span className="om-sub">({keyMetrics.validityRatePct.toFixed(1)}%)</span>
+                          </span>
+                        </div>
+                        <div className="ops-metric">
+                          <span className="om-label">Throughput</span>
+                          <span className="om-value">{keyMetrics.throughputFps.toFixed(0)}/s</span>
+                        </div>
+                        <div className="ops-metric">
+                          <span className="om-label">Evicted</span>
+                          <span className="om-value">{keyMetrics.evicted.toLocaleString()}</span>
+                        </div>
+                        <div className={`ops-metric freshness ${metricsStale ? "stale" : ""}`}>
+                          <span className="om-label">Metrics</span>
+                          <span className="om-value">{metricsStale ? "Stale" : expActive ? "Live" : "Idle"}</span>
+                        </div>
+                      </div>
+                      <div className="ops-quality" aria-label="Quality gates">
+                        {quality.gates.map((g) => (
+                          <span key={g.id} className={`ops-gate ${g.status}`} title={g.detail}>
+                            <span className={`gate-dot ${g.status}`} aria-hidden="true" />
+                            {g.label}: {GATE_STATUS_LABEL[g.status]}
+                          </span>
+                        ))}
+                      </div>
+                      <div className="ops-alerts" role="status" aria-live="polite">
+                        {alerts.length === 0 ? (
+                          <span className="ops-noalert">✓ No active alerts</span>
+                        ) : (
+                          alerts.map((a) => (
+                            <div key={a.id} className={`ops-alert ${a.severity}`}>
+                              <strong>{a.severity === "critical" ? "⛔ Critical" : "⚠ Warning"}</strong> {a.message}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
                     <div className="toolbar" style={{ marginTop: 6 }}>
                       <button disabled title={PENDING.monitoring}>Overlay: Both</button>
                       <span className="legend">
