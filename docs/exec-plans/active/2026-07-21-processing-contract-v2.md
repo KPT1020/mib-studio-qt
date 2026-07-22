@@ -123,9 +123,16 @@ Branches are stacked in this order (`claude/pc2-v2-1-schema` → … ).
 - [x] Capability flags + `ProcessingCoreCapabilities.h` host negotiation
       (`coreSatisfiesContract2`, `abiV1ServesContract`, `engineAbiForContract`).
 - [x] Tests `processing.core_abi_v2_c`, `processing.core_capabilities`.
-- [ ] Native v2 plugin (`get_api_v2` export whose `process_objects` runs the
-      filter chain + science) + loader v2 activation/conformance + signing
-      (large; intersects packaging/hardware — follow-on within V2-5).
+- [x] Native v2 plugin: `mib_processing_core` exports `mib_processing_get_api_v2`
+      whose `process_objects` compiles the filter chain, builds the absolute
+      difference, runs the science, and returns full per-object metrics
+      (finite Laplacian variance) with deterministic `BUFFER_TOO_SMALL`. The v1
+      `get_api` export is unchanged. End-to-end dlopen test
+      `processing.core_v2_plugin`.
+- [ ] Loader v2 activation path (`DynamicProcessingKernel` v2 / negotiate
+      `get_api_v2` through the trust+lease machinery) + native signing — the ABI
+      and a working plugin now exist; wiring them through the signed loader and
+      packaging remains follow-on (intersects hardware/signing).
 
 ### V2-6 — migrate persisted/UI surfaces to Contract 2
 - [x] Contract-aware gold-standard metrics schema: `ring_ratio` optional

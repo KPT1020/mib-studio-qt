@@ -240,9 +240,13 @@ filter chain, per-object Laplacian) are advertised in the descriptor.
 `coreSatisfiesContract2` (ABI ≥ 2, contract == 2, all required caps),
 `abiV1ServesContract` (ABI v1 → Contract 1 only), and `engineAbiForContract`.
 Tests: `processing.core_abi_v2_c`, `processing.core_capabilities`. The native
-v2 plugin implementation (a `get_api_v2` export whose `process_objects` runs the
-filter chain + science) and the loader's v2 activation path build on this
-surface and are tracked as follow-on within V2-5.
+`mib_processing_core` module now also exports `mib_processing_get_api_v2` whose
+`process_objects` compiles the filter chain, builds the absolute difference,
+runs the science, and returns full per-object metrics (finite Laplacian
+variance) with deterministic `BUFFER_TOO_SMALL`; the v1 `get_api` export is
+unchanged. End-to-end dlopen test: `processing.core_v2_plugin`. The loader's v2
+activation path (negotiating `get_api_v2` through the trust/lease machinery) and
+native signing remain follow-on.
 
 ## Accumulation modes
 

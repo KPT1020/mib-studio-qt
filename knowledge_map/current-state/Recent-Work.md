@@ -5,6 +5,15 @@
 
 ## Features shipped
 
+- **Processing Contract v2 — native ABI-v2 plugin** (2026-07-21, issue #301
+  follow-on, epic #296) — `mib_processing_core` now exports
+  `mib_processing_get_api_v2` alongside the unchanged v1 `get_api`. Its
+  `process_objects` compiles the ABI filter chain, builds the absolute
+  difference, runs the science, and returns full per-object metrics (finite
+  `laplacian_variance`, no ring) into the host-owned buffer with deterministic
+  `BUFFER_TOO_SMALL`; the v2 descriptor advertises the Contract-2 capabilities
+  and passes a v2 self-test. End-to-end dlopen test: `processing.core_v2_plugin`.
+  The loader's v2 activation path + native signing remain follow-on.
 - **Processing Contract v2 — validation release gate (deterministic)**
   (2026-07-21, issue #303, epic #296) — seventh slice (V2-7). Adds
   `processing.contract2_conformance`, one deterministic synthetic gate tying the
