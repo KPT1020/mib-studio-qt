@@ -344,8 +344,14 @@ def export_metrics_to_csv(
     return valid_count, invalid_count
 
 
-def _frame_to_gold_standard_dict(row: "np.void", frame_type: str, pixel_to_micron: float) -> Dict[str, Any]:
-    """Map one metadata row to a gold-standard JSON frame object (schema v1)."""
+def _frame_to_gold_standard_dict(row: "np.void", frame_type: str, pixel_to_micron: float,
+                                 contract_version: int = 1) -> Dict[str, Any]:
+    """Map one metadata row to a gold-standard JSON frame object.
+
+    Contract-aware: a Contract-1 export carries ``ring_ratio``; a Contract-2
+    export (contract_version >= 2) omits ring width and carries the per-object
+    ``laplacian_variance`` focus metric instead.
+    """
     area = float(row['area'])
     document: Dict[str, Any] = {
         "frame_type": frame_type,
@@ -357,7 +363,6 @@ def _frame_to_gold_standard_dict(row: "np.void", frame_type: str, pixel_to_micro
         "area": area,
         "area_um2": area * pixel_to_micron * pixel_to_micron,
         "area_ratio": float(row['areaRatio']),
-        "ring_ratio": float(row['ringRatio']),
         "is_valid": bool(row['isValid']),
         "touches_border": bool(row['touchesBorder']),
         "has_single_inner_contour": bool(row['hasSingleInnerContour']),
@@ -368,6 +373,14 @@ def _frame_to_gold_standard_dict(row: "np.void", frame_type: str, pixel_to_micro
         "brightness_q3": float(row['brightness_q3']),
         "brightness_q4": float(row['brightness_q4']),
     }
+    # Contract-1 focus metric: ring width. Omitted for Contract-2 documents.
+    if contract_version < 2 and metadata_has(row, "ringRatio"):
+        document["ring_ratio"] = float(row['ringRatio'])
+    # Contract-2 focus metric: per-object Laplacian variance. Emit when present
+    # and finite (NaN -> omitted, mirroring youngs_modulus).
+    laplacian = float(metadata_value(row, 'laplacianVariance', float('nan')))
+    if laplacian == laplacian:  # not NaN
+        document["laplacian_variance"] = laplacian
     # youngsModulus is only present in HDF5 metadata written by newer builds;
     # omit (rather than emit non-JSON NaN) when absent or out of LUT coverage.
     youngs_modulus = float(metadata_value(row, 'youngsModulus', float('nan')))
@@ -390,6 +403,7 @@ def export_metrics_to_json(
     pixel_to_micron: float,
     frame_type: str,
     source_label: str,
+    contract_version: int = 1,
 ) -> Tuple[int, int]:
     """
     Export metrics to gold-standard JSON matching
@@ -412,17 +426,17 @@ def export_metrics_to_json(
 
     if metadata_valid is not None and frame_type in ("valid", "both"):
         for row in metadata_valid:
-            frames.append(_frame_to_gold_standard_dict(row, "valid", pixel_to_micron))
+            frames.append(_frame_to_gold_standard_dict(row, "valid", pixel_to_micron, contract_version))
             valid_count += 1
 
     if metadata_invalid is not None and frame_type in ("invalid", "both"):
         for row in metadata_invalid:
-            frames.append(_frame_to_gold_standard_dict(row, "invalid", pixel_to_micron))
+            frames.append(_frame_to_gold_standard_dict(row, "invalid", pixel_to_micron, contract_version))
             invalid_count += 1
 
     document = {
         "version": GOLD_STANDARD_SCHEMA_VERSION,
-        "contract_version": GOLD_STANDARD_SCHEMA_VERSION,
+        "contract_version": max(int(contract_version), GOLD_STANDARD_SCHEMA_VERSION),
         "pixel_to_micron": pixel_to_micron,
         "source": source_label,
         "frames": frames,
@@ -614,10 +628,23 @@ def export_hdf5(
     # Open HDF5 file
     try:
         with h5py.File(input_path, 'r') as h5_file:
+            # Contract-aware export: prefer the file's processing contract so a
+            # Contract-2 recording exports laplacian_variance and omits ring.
+            contract_version = 1
+            try:
+                if "processing_contract_version" in h5_file.attrs:
+                    contract_version = int(h5_file.attrs["processing_contract_version"])
+                elif "/experiment_info" in h5_file and \
+                        "processing_contract_version" in h5_file["/experiment_info"].attrs:
+                    contract_version = int(
+                        h5_file["/experiment_info"].attrs["processing_contract_version"])
+            except Exception:
+                contract_version = 1
+
             # Read metadata
             metadata_valid = None
             metadata_invalid = None
-            
+
             if frame_type in ("valid", "both"):
                 metadata_valid = read_hdf5_metadata(h5_file, "/valid_frames/metadata")
                 if metadata_valid is None:

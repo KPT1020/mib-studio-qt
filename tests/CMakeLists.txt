@@ -516,6 +516,15 @@ if(Python3_Interpreter_FOUND)
     )
 
     add_test(
+        NAME scripts.contract2_export_review
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/test_contract2_export_review.py
+    )
+    set_tests_properties(scripts.contract2_export_review PROPERTIES
+        LABELS "scripts;hdf5"
+        TIMEOUT 30
+    )
+
+    add_test(
         NAME scripts.publish_processing_core
         COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/test_publish_processing_core.py
     )

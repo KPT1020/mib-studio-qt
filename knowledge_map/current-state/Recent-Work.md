@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Processing Contract v2 — HDF5 focus metric + reviewable export** (2026-07-21,
+  issue #302 follow-on, epic #296) — closes the e2e generate→review loop.
+  `laplacianVariance` is appended to the HDF5 per-object compound (offsets
+  preserved; Contract-1 files read `NaN`), verified by
+  `recording.experiment_roundtrip`. `scripts/export_hdf5.py` is now
+  contract-aware (keyed off `processing_contract_version`): a Contract-2 export
+  emits `laplacian_variance` and omits `ring_ratio`; Contract 1 keeps ring.
+  e2e review test `scripts.contract2_export_review` generates compound-shaped
+  records, exports them, and validates a schema-valid v2 review document. So:
+  the C++ pipeline generates + persists the focus metric and the exporter makes
+  it reviewable.
 - **Processing Contract v2 — native ABI-v2 plugin** (2026-07-21, issue #301
   follow-on, epic #296) — `mib_processing_core` now exports
   `mib_processing_get_api_v2` alongside the unchanged v1 `get_api`. Its

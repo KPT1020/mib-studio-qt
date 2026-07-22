@@ -18,6 +18,7 @@
 #include <sstream>
 #include <filesystem>
 #include <algorithm>
+#include <limits>
 
 namespace backend::services
 {
@@ -141,6 +142,7 @@ namespace backend::services
             double brightness_q4;
             double youngsModulus;
             uint8_t isTargetGroup;
+            double laplacianVariance; // Contract-2 focus metric; appended to keep prior offsets
         };
 
         hid_t createProcessedFrameMetadataType(bool includeBaseFields = true,
@@ -156,6 +158,7 @@ namespace backend::services
                 H5Tinsert(compTypeId, "area", HOFFSET(ProcessedFrameMetadataRecord, area), H5T_NATIVE_DOUBLE);
                 H5Tinsert(compTypeId, "areaRatio", HOFFSET(ProcessedFrameMetadataRecord, areaRatio), H5T_NATIVE_DOUBLE);
                 H5Tinsert(compTypeId, "ringRatio", HOFFSET(ProcessedFrameMetadataRecord, ringRatio), H5T_NATIVE_DOUBLE);
+                H5Tinsert(compTypeId, "laplacianVariance", HOFFSET(ProcessedFrameMetadataRecord, laplacianVariance), H5T_NATIVE_DOUBLE);
                 H5Tinsert(compTypeId, "isValid", HOFFSET(ProcessedFrameMetadataRecord, isValid), H5T_NATIVE_UINT8);
                 H5Tinsert(compTypeId, "touchesBorder", HOFFSET(ProcessedFrameMetadataRecord, touchesBorder), H5T_NATIVE_UINT8);
                 H5Tinsert(compTypeId, "hasSingleInnerContour", HOFFSET(ProcessedFrameMetadataRecord, hasSingleInnerContour), H5T_NATIVE_UINT8);
@@ -210,6 +213,7 @@ namespace backend::services
             md.area = frame.validation.area;
             md.areaRatio = frame.validation.areaRatio;
             md.ringRatio = frame.validation.ringRatio;
+            md.laplacianVariance = frame.validation.laplacianVariance;
             md.isValid = frame.validation.isValid ? 1 : 0;
             md.touchesBorder = frame.validation.touchesBorder ? 1 : 0;
             md.hasSingleInnerContour = frame.validation.hasSingleInnerContour ? 1 : 0;
@@ -1811,6 +1815,9 @@ namespace backend::services
             md.bboxHeight = 0.0;
             md.centroidX = 0.0;
             md.centroidY = 0.0;
+            // Default to NaN so a Contract-1 file (no laplacianVariance member)
+            // reads as "not computed" rather than 0; a Contract-2 file overwrites it.
+            md.laplacianVariance = std::numeric_limits<double>::quiet_NaN();
         }
 
         hid_t baseMemTypeId = createProcessedFrameMetadataType(true, false, false);
@@ -1885,6 +1892,7 @@ namespace backend::services
             frame.validation.area = md.area;
             frame.validation.areaRatio = md.areaRatio;
             frame.validation.ringRatio = md.ringRatio;
+            frame.validation.laplacianVariance = md.laplacianVariance;
             frame.validation.isValid = (md.isValid != 0);
             frame.validation.touchesBorder = (md.touchesBorder != 0);
             frame.validation.hasSingleInnerContour = (md.hasSingleInnerContour != 0);

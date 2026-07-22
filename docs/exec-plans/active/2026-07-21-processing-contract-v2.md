@@ -141,11 +141,15 @@ Branches are stacked in this order (`claude/pc2-v2-1-schema` → … ).
       `additionalProperties:false`. No global `contract_version` bump.
 - [x] `gold_standard_metrics.md` updated. Test
       `scripts.gold_standard_schema_contract`.
-- [ ] HDF5 compound migration (write/read `laplacian_variance`, contract/ABI/
-      preprocessing metadata, reader selection) + round-trip tests — follow-on
-      (large Hdf5Service change).
-- [ ] Python/JSON/CSV exporters emit v2 focus field, no placeholder ring —
-      follow-on (rides the HDF5 compound).
+- [x] HDF5 compound round-trips `laplacianVariance` (appended member; a
+      Contract-1 file with no member reads as `NaN`). Round-trip test in
+      `recording.experiment_roundtrip`. (Contract already recorded via
+      `processing_contract_version`; preprocessing-config metadata + reader
+      selection remain follow-on.)
+- [x] Python JSON exporter is contract-aware: emits `laplacian_variance` and
+      omits `ring_ratio` for a Contract-2 file; keeps ring for Contract 1. e2e
+      test `scripts.contract2_export_review` (generate-shaped records → export →
+      schema-valid v2 review document). CSV exporter unchanged (follow-on).
 - [ ] Review/monitoring models, focus-score histograms, invalid reasons,
       config controls, legacy-labeling, mismatch warnings, screenshots/docs —
       follow-on (frontend, needs the running app).
