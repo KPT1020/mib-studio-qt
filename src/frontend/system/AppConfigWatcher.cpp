@@ -292,6 +292,8 @@ namespace frontend
 					pcfg.ring_ratio_max = ip.value("ring_ratio_max").toDouble(pcfg.ring_ratio_max);
 				if (ip.contains("empty_frame_pixel_threshold"))
 					pcfg.empty_frame_pixel_threshold = ip.value("empty_frame_pixel_threshold").toInt(pcfg.empty_frame_pixel_threshold);
+				if (ip.contains("empty_min_component_area"))
+					pcfg.empty_min_component_area = ip.value("empty_min_component_area").toInt(pcfg.empty_min_component_area);
 				if (ip.contains("auto_background_enabled"))
 					pcfg.auto_background_enabled = ip.value("auto_background_enabled").toBool(pcfg.auto_background_enabled);
 				if (ip.contains("auto_background_empty_frames"))
@@ -619,6 +621,7 @@ namespace frontend
 		ip.insert("ring_ratio_min", pcfg.ring_ratio_min);
 		ip.insert("ring_ratio_max", pcfg.ring_ratio_max);
 		ip.insert("empty_frame_pixel_threshold", pcfg.empty_frame_pixel_threshold);
+		ip.insert("empty_min_component_area", pcfg.empty_min_component_area);
 		ip.insert("auto_background_enabled", pcfg.auto_background_enabled);
 		ip.insert("auto_background_empty_frames", pcfg.auto_background_empty_frames);
 		ip.insert("auto_background_cooldown_frames", pcfg.auto_background_cooldown_frames);

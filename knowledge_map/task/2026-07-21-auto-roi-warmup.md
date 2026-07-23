@@ -61,6 +61,25 @@ Rejected alternative (documented for the record):
   NB: `cv2.phaseCorrelate` is nondeterministic in this OpenCV 5.0.0 build
   (uninitialized-buffer) — do not trust it for drift measurement.
 
+Empty-frame detection (follow-up, shipped same branch):
+- Finding: the empty verdict `countNonZero(threshold(frame-background)) < 100`
+  flips on 66/200 gavinlouuu/512x96stream frames depending on whether it's
+  measured full-frame (walls inflate the count -> 89/200 false non-empty) or
+  inside the wall-excluded ROI (23/200 ~ the ~26 real cell frames). So the ROI +
+  median background sharpen emptiness, not just detection.
+- `empty_min_component_area` (default 0 = off): a frame that cleared the pixel
+  count still counts empty unless its largest 8-connected blob reaches that area
+  (`largestComponentArea`, `EmptyFrameDetect.{h,cpp}`), reusing the loop's
+  thresholded `thresh` mask in all three realtime variants. Rejects scattered
+  speckle; real-data check: full-frame false non-empty 89 -> 65 at min_area=50,
+  ROI unchanged at 23 (no real cells dropped). Service-layer only; the signed
+  core's ABI `isEmpty` is untouched.
+- Two `diff` modes: background-subtract once a background exists; frame-to-frame
+  absdiff (motion) during the no-background bootstrap (resolves the
+  chicken-and-egg). Residual limit: a STATIONARY object has no frame-to-frame
+  motion -> can read empty and be baked into the background; a persistence check
+  before accepting a background is a future guard (not implemented).
+
 Follow-ups:
 - Surface `SuggestedRoiCallback` in the frontend (BackendFacade event +
   ProcessingSettingsDialog reflection) so the auto-chosen ROI shows in the UI.

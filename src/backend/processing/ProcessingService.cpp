@@ -1,6 +1,7 @@
 #include "backend/processing/ProcessingService.h"
 #include "backend/processing/BackgroundAggregate.h"
 #include "backend/processing/ChannelRoiDetect.h"
+#include "backend/processing/EmptyFrameDetect.h"
 #include "backend/processing/ProcessingScience.h"
 #include "backend/recording/Hdf5Service.h"
 #include "backend/diagnostics/CrashStateMirror.h"
@@ -2276,6 +2277,14 @@ void ProcessingService::realtimeInlineLoop() {
                     SPDLOG_ERROR("Realtime processing core empty check failed for frame {}: {}",
                                  idx, emptyError);
                 }
+                // Structure-aware refinement (opt-in): scattered noise pixels can
+                // clear the pixel-count test; require a connected blob of at least
+                // empty_min_component_area before treating the frame as non-empty.
+                if (!emptyFrame && config.empty_min_component_area > 0 &&
+                    backend::processing::largestComponentArea(thresh) <
+                        config.empty_min_component_area) {
+                    emptyFrame = true;
+                }
                 if (emptyFrame) {
                     SPDLOG_TRACE("Empty frame detected (idx={}, pixel_count={}, threshold={}), "
                                  "skipping further processing",
@@ -2713,6 +2722,14 @@ void ProcessingService::realtimeInlineLoop() {
                     SPDLOG_ERROR("Realtime processing core empty check failed for frame {}: {}",
                                  idx, emptyError);
                 }
+                // Structure-aware refinement (opt-in): scattered noise pixels can
+                // clear the pixel-count test; require a connected blob of at least
+                // empty_min_component_area before treating the frame as non-empty.
+                if (!emptyFrame && config.empty_min_component_area > 0 &&
+                    backend::processing::largestComponentArea(thresh) <
+                        config.empty_min_component_area) {
+                    emptyFrame = true;
+                }
                 if (emptyFrame) {
                     SPDLOG_TRACE("Empty frame detected (idx={}, pixel_count={}, threshold={}), "
                                  "skipping further processing",
@@ -3114,6 +3131,14 @@ void ProcessingService::realtimeInlineLoop() {
                         Roi{0, 0, roi.w, roi.h}, autoCaptureEmptyCheck, emptyFrame, &emptyError)) {
                     SPDLOG_ERROR("Realtime processing core empty check failed for frame {}: {}",
                                  idx, emptyError);
+                }
+                // Structure-aware refinement (opt-in): scattered noise pixels can
+                // clear the pixel-count test; require a connected blob of at least
+                // empty_min_component_area before treating the frame as non-empty.
+                if (!emptyFrame && config.empty_min_component_area > 0 &&
+                    backend::processing::largestComponentArea(thresh) <
+                        config.empty_min_component_area) {
+                    emptyFrame = true;
                 }
                 if (emptyFrame) {
                     SPDLOG_TRACE("Empty frame detected (idx={}, pixel_count={}, threshold={}), "

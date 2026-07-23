@@ -6,6 +6,7 @@
 
 #include "backend/processing/BackgroundAggregate.h"
 #include "backend/processing/ChannelRoiDetect.h"
+#include "backend/processing/EmptyFrameDetect.h"
 #include "backend/processing/ProcessingService.h"
 
 #include <opencv2/imgproc.hpp>
@@ -136,6 +137,29 @@ int main() {
         service.clearBackgroundSamples();
         check(service.aggregatedBackground(fallback, 5).at<unsigned char>(0, 0) == 200,
               "aggregate: cleared samples fall back until refilled");
+    }
+
+    // 9) Structure-aware empty: largest connected-component area distinguishes a
+    //    compact cell from the same number of scattered noise pixels.
+    {
+        using backend::processing::largestComponentArea;
+        check(largestComponentArea(cv::Mat(96, 512, CV_8UC1, cv::Scalar(0))) == 0,
+              "largestComponentArea: blank mask -> 0");
+
+        // One compact 200-px blob.
+        cv::Mat blob(96, 512, CV_8UC1, cv::Scalar(0));
+        cv::circle(blob, cv::Point(256, 48), 8, cv::Scalar(255), cv::FILLED);
+        const int blobArea = largestComponentArea(blob);
+        check(blobArea >= 150 && blobArea <= 260, "largestComponentArea: compact blob ~200 px");
+
+        // 200 scattered single pixels: high countNonZero, tiny largest component.
+        cv::Mat speckle(96, 512, CV_8UC1, cv::Scalar(0));
+        for (int i = 0; i < 200; ++i) {
+            speckle.at<unsigned char>((i * 7) % 96, (i * 37) % 512) = 255;
+        }
+        check(cv::countNonZero(speckle) >= 150, "speckle: many nonzero pixels (would pass count test)");
+        check(largestComponentArea(speckle) <= 2,
+              "largestComponentArea: scattered noise -> tiny component (refinement rejects it)");
     }
 
     if (failures == 0) {

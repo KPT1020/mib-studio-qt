@@ -38,6 +38,11 @@ struct ProcessingConfig {
     bool enable_ring_ratio_check{true};
     bool require_single_inner_contour{true};
     int empty_frame_pixel_threshold{100};
+    // Structure-aware empty refinement (0 = disabled). When > 0, a frame that
+    // passed the pixel-count test is still treated as empty unless its largest
+    // connected blob is at least this many pixels — rejects scattered noise
+    // that would otherwise read as content.
+    int empty_min_component_area{0};
     bool auto_background_enabled{false};
     int auto_background_empty_frames{30};
     int auto_background_cooldown_frames{1000};

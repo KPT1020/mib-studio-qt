@@ -5,6 +5,18 @@
 
 ## Features shipped
 
+- **Structure-aware empty-frame refinement** (2026-07-21, issue #295) —
+  `empty_min_component_area` (default 0 = off) makes a frame that cleared the
+  `empty_frame_pixel_threshold` pixel count still count as empty unless its
+  largest 8-connected blob reaches that area (`largestComponentArea`,
+  `EmptyFrameDetect.{h,cpp}`, reusing the realtime loop's thresholded mask).
+  Rejects scattered speckle that reads as content while still catching a compact
+  cell; service-layer only (does not touch the signed core's ABI `isEmpty`),
+  fixed-threshold so consistency-safe. Motivated by the finding that the empty
+  verdict flips on 66/200 `gavinlouuu/512x96stream` frames depending on whether
+  it's measured full-frame (walls inflate the count) or within the ROI. Guard:
+  `processing.channel_roi_detect` (extended). Threaded through `AppConfigWatcher`.
+
 - **Robust median background + run-consistency** (2026-07-21, issue #295) —
   `auto_background_median_frames` (default 1 = unchanged) makes auto-background
   store the **per-pixel median** over the last N captured empty frames

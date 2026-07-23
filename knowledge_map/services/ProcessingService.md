@@ -11,9 +11,11 @@
 `src/backend/processing/ProcessingCoreCache.cpp`,
 `src/backend/processing/ChannelRoiDetect.cpp`,
 `src/backend/processing/BackgroundAggregate.cpp`,
+`src/backend/processing/EmptyFrameDetect.cpp`,
 `include/backend/processing/ProcessingService.h`,
 `include/backend/processing/ChannelRoiDetect.h`,
 `include/backend/processing/BackgroundAggregate.h`,
+`include/backend/processing/EmptyFrameDetect.h`,
 `include/backend/processing/ProcessingCoreAbi.h`
 **Related:** [[CaptureService]], [[Hdf5Service]], [[AutofocusService]],
 [[TriggerService]], [[../architecture/Data-Flow]],
@@ -145,7 +147,9 @@ All gates in one struct. Notable fields:
 
 - `area_threshold_min/max` (μm²), `deformability_threshold_min/max`
 - `ring_ratio_min/max` + `enable_ring_ratio_check`
-- `empty_frame_pixel_threshold` — drives empty-frame skipping
+- `empty_frame_pixel_threshold` — drives empty-frame skipping;
+  `empty_min_component_area` (0 = off) adds a structure-aware refinement, see
+  [[#Empty-frame detection]]
 - `auto_background_enabled` + `auto_background_empty_frames`,
   `auto_background_cooldown_frames`, `auto_background_median_frames`
   (1 = single-frame capture; >1 = per-pixel median over recent empty frames,
@@ -230,6 +234,34 @@ keeps a **uniform** threshold across the measured region, so a cell measures the
 same at any position. A per-pixel (variance-scaled) threshold would make
 area/deformability depend on where the cell sits — so noise is controlled by the
 ROI/mask, not by varying the threshold inside the analysis region.
+
+## Empty-frame detection
+
+A frame is judged empty by a pixel count: `blur -> diff -> threshold -> empty
+if countNonZero(thresh) < empty_frame_pixel_threshold`, computed **within the
+ROI**. `diff` is background subtraction once a background exists, or a
+frame-to-frame `absdiff` (motion) during the no-background bootstrap that
+precedes the first auto-capture — this is what resolves the chicken-and-egg
+(emptiness needs a background; the background is captured from empty frames).
+
+The verdict is only as good as the region and background it runs on: measured
+over the full frame the channel walls keep the count near/above threshold
+(on `gavinlouuu/512x96stream`, 89/200 frames read non-empty vs ~26 real), while
+inside the wall-excluded ROI against the median background it separates cleanly
+(23/200). So run the empty check inside the frozen ROI against the frozen median
+background — both already established at warmup.
+
+`empty_min_component_area` (default 0 = off) adds a **structure-aware
+refinement**: a frame that passed the pixel count is still treated as empty
+unless its largest 8-connected blob (`largestComponentArea`,
+`EmptyFrameDetect.{h,cpp}`, reusing the loop's already-thresholded mask) reaches
+that area. This rejects scattered speckle (many isolated pixels clear the count
+test but form no real object) while still catching a compact cell. It only makes
+frames *more* likely empty and is a fixed threshold, so it is consistency-safe;
+it is a service-layer gate and does **not** change the signed core's
+ABI-stable `isEmpty`. Known residual limit: the motion bootstrap can still read
+a *stationary* object as empty (no frame-to-frame difference) — a persistence
+check before accepting a background is a future guard.
 
 ## Auto-fit ROI from background
 
