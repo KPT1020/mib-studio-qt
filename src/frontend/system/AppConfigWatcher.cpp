@@ -298,6 +298,8 @@ namespace frontend
 					pcfg.auto_background_empty_frames = ip.value("auto_background_empty_frames").toInt(pcfg.auto_background_empty_frames);
 				if (ip.contains("auto_background_cooldown_frames"))
 					pcfg.auto_background_cooldown_frames = ip.value("auto_background_cooldown_frames").toInt(pcfg.auto_background_cooldown_frames);
+				if (ip.contains("auto_background_median_frames"))
+					pcfg.auto_background_median_frames = ip.value("auto_background_median_frames").toInt(pcfg.auto_background_median_frames);
 				if (ip.contains("auto_roi_from_background"))
 					pcfg.auto_roi_from_background = ip.value("auto_roi_from_background").toBool(pcfg.auto_roi_from_background);
 				if (ip.contains("auto_roi_wall_gradient_ratio"))
@@ -620,6 +622,7 @@ namespace frontend
 		ip.insert("auto_background_enabled", pcfg.auto_background_enabled);
 		ip.insert("auto_background_empty_frames", pcfg.auto_background_empty_frames);
 		ip.insert("auto_background_cooldown_frames", pcfg.auto_background_cooldown_frames);
+		ip.insert("auto_background_median_frames", pcfg.auto_background_median_frames);
 		ip.insert("auto_roi_from_background", pcfg.auto_roi_from_background);
 		ip.insert("auto_roi_wall_gradient_ratio", pcfg.auto_roi_wall_gradient_ratio);
 		ip.insert("auto_roi_wall_margin", pcfg.auto_roi_wall_margin);

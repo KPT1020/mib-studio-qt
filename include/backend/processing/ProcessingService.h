@@ -367,6 +367,14 @@ public:
     // state (does not apply the result); exposed for reuse and testing.
     Roi computeAutoRoiFromBackground(const cv::Mat& backgroundGray) const;
 
+    // Robust background aggregation (auto_background_median_frames > 1). Empty
+    // frames are pushed via noteEmptyBackgroundSample; aggregatedBackground
+    // returns their per-pixel median, or `fallback` when median mode is off or
+    // too few samples have accumulated. Exposed for testing.
+    void noteEmptyBackgroundSample(const cv::Mat& fullGray, int keep);
+    cv::Mat aggregatedBackground(const cv::Mat& fallback, int keep) const;
+    void clearBackgroundSamples();
+
 private:
     struct DroppedFrameCounts {
         size_t valid{0};
@@ -587,6 +595,10 @@ private:
     std::atomic<uint64_t> lastAutoBackgroundFrame_{0};
     cv::Mat previousFrameForAutoCapture_; // Store previous frame for frame-to-frame diff when no background
     std::mutex previousFrameMutex_; // Protect previous frame access
+
+    // Recent empty full-gray frames for robust (median) background aggregation.
+    mutable std::mutex bgSamplesMutex_;
+    std::deque<cv::Mat> bgSamples_;
     
     // Realtime throughput metrics (published once per ~1s window)
     std::atomic<double> algoFps1s_{0.0};

@@ -5,6 +5,18 @@
 
 ## Features shipped
 
+- **Robust median background + run-consistency** (2026-07-21, issue #295) —
+  `auto_background_median_frames` (default 1 = unchanged) makes auto-background
+  store the **per-pixel median** over the last N captured empty frames
+  (`medianOfFrames`, `BackgroundAggregate.{h,cpp}`, Qt-free) instead of a single
+  frame — ~4.5× less subtraction residual on `gavinlouuu/512x96stream`. The
+  median is frozen for the experiment like any captured background (auto-capture
+  is already gated `&& !experimentActive_`), so it improves SNR without breaking
+  the "same cell measured identically across a run" requirement. Vault note
+  documents the calibrate-once-freeze principle and why noise is controlled by
+  the ROI (uniform threshold) rather than a per-pixel threshold. Guard:
+  `processing.channel_roi_detect` (extended). Threaded through `AppConfigWatcher`.
+
 - **Auto-fit processing ROI from background** (2026-07-21, issue #295) —
   new pure detector `detectChannelRoi` (`ChannelRoiDetect.{h,cpp}`, OpenCV-only,
   in the Qt-free `mib_processing` core) locates the microfluidic channel walls

@@ -41,6 +41,10 @@ struct ProcessingConfig {
     bool auto_background_enabled{false};
     int auto_background_empty_frames{30};
     int auto_background_cooldown_frames{1000};
+    // Robust background: median over the last N captured empty frames instead of
+    // a single frame (1 = current single-frame behavior). A frozen median gives
+    // a cleaner subtraction and keeps detection consistent across a run.
+    int auto_background_median_frames{1};
     // Auto-fit processing ROI: when enabled, derive a wall-avoiding rectangular
     // ROI from each captured background (detect the microfluidic channel walls
     // and exclude them) and apply it via setRealtimeRoi. Off by default so the

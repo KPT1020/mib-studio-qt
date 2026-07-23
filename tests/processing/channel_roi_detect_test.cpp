@@ -4,12 +4,14 @@
 // integration through ProcessingService::computeAutoRoiFromBackground, which is
 // gated on ProcessingConfig::auto_roi_from_background.
 
+#include "backend/processing/BackgroundAggregate.h"
 #include "backend/processing/ChannelRoiDetect.h"
 #include "backend/processing/ProcessingService.h"
 
 #include <opencv2/imgproc.hpp>
 
 #include <iostream>
+#include <vector>
 
 namespace {
 
@@ -98,6 +100,42 @@ int main() {
         check(roi.w == direct.w && roi.h == direct.h && roi.x == direct.x && roi.y == direct.y,
               "enabled auto-ROI matches the pure detector");
         check(roi.h > 0 && roi.h < bg.rows, "enabled auto-ROI excludes the walls");
+    }
+
+    // 7) Median background: per-pixel median rejects a stray bright outlier.
+    {
+        using backend::processing::medianOfFrames;
+        std::vector<cv::Mat> frames;
+        for (int i = 0; i < 5; ++i) {
+            frames.emplace_back(96, 512, CV_8UC1, cv::Scalar(140));
+        }
+        // One "empty" frame is actually contaminated by a bright cell blob.
+        cv::circle(frames[2], cv::Point(256, 48), 8, cv::Scalar(255), cv::FILLED);
+        const cv::Mat med = medianOfFrames(frames);
+        check(!med.empty() && med.type() == CV_8UC1, "median: valid CV_8UC1 output");
+        check(med.at<unsigned char>(48, 256) == 140, "median: rejects the contaminating blob");
+        // A single frame returns a copy; mismatched sizes return empty.
+        check(medianOfFrames({frames[0]}).at<unsigned char>(0, 0) == 140, "median: single frame passthrough");
+        std::vector<cv::Mat> bad{frames[0], cv::Mat(10, 10, CV_8UC1, cv::Scalar(0))};
+        check(medianOfFrames(bad).empty(), "median: mismatched sizes -> empty");
+    }
+
+    // 8) Service aggregation: disabled (keep<=1) returns the fallback frame;
+    //    enabled returns the median once enough samples accumulate.
+    {
+        backend::services::ProcessingService service;
+        cv::Mat fallback(96, 512, CV_8UC1, cv::Scalar(200));
+        check(service.aggregatedBackground(fallback, 1).at<unsigned char>(0, 0) == 200,
+              "aggregate: keep=1 returns fallback (single-frame behavior)");
+
+        for (int i = 0; i < 5; ++i) {
+            service.noteEmptyBackgroundSample(cv::Mat(96, 512, CV_8UC1, cv::Scalar(150)), 5);
+        }
+        const cv::Mat agg = service.aggregatedBackground(fallback, 5);
+        check(agg.at<unsigned char>(10, 10) == 150, "aggregate: keep>1 returns median of samples");
+        service.clearBackgroundSamples();
+        check(service.aggregatedBackground(fallback, 5).at<unsigned char>(0, 0) == 200,
+              "aggregate: cleared samples fall back until refilled");
     }
 
     if (failures == 0) {

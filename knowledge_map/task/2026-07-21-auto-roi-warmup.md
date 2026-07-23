@@ -39,9 +39,34 @@ Verification:
 Logging:
 - Uses spdlog exclusively (`SPDLOG_INFO` on ROI apply).
 
+Robust background (follow-up, shipped same branch):
+- `auto_background_median_frames` (default 1 = single-frame, unchanged). When >1,
+  auto-background stores the per-pixel median over the last N captured empty
+  frames (`medianOfFrames`, `BackgroundAggregate.{h,cpp}`). Empty frames pushed
+  via `noteEmptyBackgroundSample` in all three realtime loop variants;
+  `aggregatedBackground` returns the median at capture (fallback to single frame
+  until >=min(N,3) samples); buffer cleared on `startRealtime` and after each
+  capture. Real HF check: subtraction residual 3135 -> 703 nonzero px (~4.5x).
+- Consistency: auto-capture is already gated `&& !experimentActive_`, so the
+  (median) background and the ROI derived from it are frozen for the run. The
+  vault note records the calibrate-once-freeze principle and why noise is
+  controlled by the ROI (uniform threshold across the measured region) rather
+  than a per-pixel variance-scaled threshold (which would make area/deformability
+  position-dependent).
+
+Rejected alternative (documented for the record):
+- Image stabilization to remove drift: measured global rigid drift is ~0.01 px
+  (deterministic numpy phase correlation), so it's a no-op here; the wall
+  residual is non-rigid (flicker/sensor noise), outside stabilization's reach.
+  NB: `cv2.phaseCorrelate` is nondeterministic in this OpenCV 5.0.0 build
+  (uninitialized-buffer) — do not trust it for drift measurement.
+
 Follow-ups:
 - Surface `SuggestedRoiCallback` in the frontend (BackendFacade event +
   ProcessingSettingsDialog reflection) so the auto-chosen ROI shows in the UI.
   Backend applies the ROI directly today.
 - Optional: extend detection to vertical walls (columns) if a channel is ever
   oriented that way; current detector is horizontal-channel only.
+- Optional: global illumination normalization to the frozen warmup reference
+  (measured wall-noise -> 0 on full frame) as a further consistency-positive
+  de-noise; keep it a uniform per-frame gain to avoid biasing intensity metrics.

@@ -1,4 +1,5 @@
 #include "backend/processing/ProcessingService.h"
+#include "backend/processing/BackgroundAggregate.h"
 #include "backend/processing/ChannelRoiDetect.h"
 #include "backend/processing/ProcessingScience.h"
 #include "backend/recording/Hdf5Service.h"
@@ -183,6 +184,7 @@ void ProcessingService::startRealtime(std::shared_ptr<backend::playback::FrameSt
     rtRunning_.store(true);
     consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
     lastAutoBackgroundFrame_.store(0, std::memory_order_relaxed);
+    clearBackgroundSamples();
     {
         std::scoped_lock prevFrameLk(previousFrameMutex_);
         previousFrameForAutoCapture_.release();
@@ -1298,6 +1300,44 @@ ProcessingService::computeAutoRoiFromBackground(const cv::Mat& backgroundGray) c
     return Roi{detected.x, detected.y, detected.w, detected.h};
 }
 
+void ProcessingService::noteEmptyBackgroundSample(const cv::Mat& fullGray, int keep) {
+    if (keep <= 1 || fullGray.empty() || fullGray.type() != CV_8UC1) {
+        if (keep <= 1) {
+            std::scoped_lock lk(bgSamplesMutex_);
+            bgSamples_.clear(); // median mode off: don't retain stale samples
+        }
+        return;
+    }
+    std::scoped_lock lk(bgSamplesMutex_);
+    bgSamples_.push_back(fullGray.clone());
+    while (static_cast<int>(bgSamples_.size()) > keep) {
+        bgSamples_.pop_front();
+    }
+}
+
+cv::Mat ProcessingService::aggregatedBackground(const cv::Mat& fallback, int keep) const {
+    if (keep <= 1) {
+        return fallback;
+    }
+    std::vector<cv::Mat> frames;
+    {
+        std::scoped_lock lk(bgSamplesMutex_);
+        frames.assign(bgSamples_.begin(), bgSamples_.end());
+    }
+    // Require a few samples before trusting the median; otherwise fall back to
+    // the freshly captured single frame.
+    if (static_cast<int>(frames.size()) < std::min(keep, 3)) {
+        return fallback;
+    }
+    cv::Mat median = backend::processing::medianOfFrames(frames);
+    return median.empty() ? fallback : median;
+}
+
+void ProcessingService::clearBackgroundSamples() {
+    std::scoped_lock lk(bgSamplesMutex_);
+    bgSamples_.clear();
+}
+
 ProcessingService::DroppedFrameCounts
 ProcessingService::trimExperimentBuffersLocked(size_t maxBufferedFrames) {
     DroppedFrameCounts dropped{};
@@ -2247,6 +2287,10 @@ void ProcessingService::realtimeInlineLoop() {
                     if (config.auto_background_enabled && !experimentActive_.load()) {
                         uint64_t currentEmpty =
                             consecutiveEmptyFrames_.fetch_add(1, std::memory_order_relaxed) + 1;
+                        if (config.auto_background_median_frames > 1) {
+                            noteEmptyBackgroundSample(makeGrayCopy(f),
+                                                      config.auto_background_median_frames);
+                        }
                         uint64_t lastCapture =
                             lastAutoBackgroundFrame_.load(std::memory_order_relaxed);
                         uint64_t framesSinceCapture = (idx > lastCapture) ? (idx - lastCapture) : 0;
@@ -2261,7 +2305,13 @@ void ProcessingService::realtimeInlineLoop() {
                             // Capture full frame as background (not just ROI)
                             cv::Mat fullGray = makeGrayCopy(f);
                             if (!fullGray.empty()) {
-                                setRealtimeBackgroundGray(fullGray);
+                                // Robust background: per-pixel median over the recent empty
+                                // frames when enabled (auto_background_median_frames > 1),
+                                // otherwise this single frame. Frozen for the run.
+                                const cv::Mat bgToStore = aggregatedBackground(
+                                    fullGray, config.auto_background_median_frames);
+                                clearBackgroundSamples();
+                                setRealtimeBackgroundGray(bgToStore);
                                 lastAutoBackgroundFrame_.store(idx, std::memory_order_relaxed);
                                 consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
 
@@ -2278,7 +2328,7 @@ void ProcessingService::realtimeInlineLoop() {
                                 {
                                     std::scoped_lock callbackLk(backgroundCaptureCallbackMutex_);
                                     if (backgroundCaptureCallback_) {
-                                        backgroundCaptureCallback_(fullGray.clone(), idx);
+                                        backgroundCaptureCallback_(bgToStore.clone(), idx);
                                     }
                                 }
 
@@ -2674,6 +2724,10 @@ void ProcessingService::realtimeInlineLoop() {
                     if (config.auto_background_enabled && !experimentActive_.load()) {
                         uint64_t currentEmpty =
                             consecutiveEmptyFrames_.fetch_add(1, std::memory_order_relaxed) + 1;
+                        if (config.auto_background_median_frames > 1) {
+                            noteEmptyBackgroundSample(makeGrayCopy(f),
+                                                      config.auto_background_median_frames);
+                        }
                         uint64_t lastCapture =
                             lastAutoBackgroundFrame_.load(std::memory_order_relaxed);
                         uint64_t framesSinceCapture = (idx > lastCapture) ? (idx - lastCapture) : 0;
@@ -2688,7 +2742,13 @@ void ProcessingService::realtimeInlineLoop() {
                             // Capture full frame as background (not just ROI)
                             cv::Mat fullGray = makeGrayCopy(f);
                             if (!fullGray.empty()) {
-                                setRealtimeBackgroundGray(fullGray);
+                                // Robust background: per-pixel median over the recent empty
+                                // frames when enabled (auto_background_median_frames > 1),
+                                // otherwise this single frame. Frozen for the run.
+                                const cv::Mat bgToStore = aggregatedBackground(
+                                    fullGray, config.auto_background_median_frames);
+                                clearBackgroundSamples();
+                                setRealtimeBackgroundGray(bgToStore);
                                 lastAutoBackgroundFrame_.store(idx, std::memory_order_relaxed);
                                 consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
 
@@ -2705,7 +2765,7 @@ void ProcessingService::realtimeInlineLoop() {
                                 {
                                     std::scoped_lock callbackLk(backgroundCaptureCallbackMutex_);
                                     if (backgroundCaptureCallback_) {
-                                        backgroundCaptureCallback_(fullGray.clone(), idx);
+                                        backgroundCaptureCallback_(bgToStore.clone(), idx);
                                     }
                                 }
 
@@ -3066,6 +3126,10 @@ void ProcessingService::realtimeInlineLoop() {
                     if (config.auto_background_enabled && !experimentActive_.load()) {
                         uint64_t currentEmpty =
                             consecutiveEmptyFrames_.fetch_add(1, std::memory_order_relaxed) + 1;
+                        if (config.auto_background_median_frames > 1) {
+                            noteEmptyBackgroundSample(makeGrayCopy(f),
+                                                      config.auto_background_median_frames);
+                        }
                         uint64_t lastCapture =
                             lastAutoBackgroundFrame_.load(std::memory_order_relaxed);
                         uint64_t framesSinceCapture = (idx > lastCapture) ? (idx - lastCapture) : 0;
@@ -3080,7 +3144,13 @@ void ProcessingService::realtimeInlineLoop() {
                             // Capture full frame as background (not just ROI)
                             cv::Mat fullGray = makeGrayCopy(f);
                             if (!fullGray.empty()) {
-                                setRealtimeBackgroundGray(fullGray);
+                                // Robust background: per-pixel median over the recent empty
+                                // frames when enabled (auto_background_median_frames > 1),
+                                // otherwise this single frame. Frozen for the run.
+                                const cv::Mat bgToStore = aggregatedBackground(
+                                    fullGray, config.auto_background_median_frames);
+                                clearBackgroundSamples();
+                                setRealtimeBackgroundGray(bgToStore);
                                 lastAutoBackgroundFrame_.store(idx, std::memory_order_relaxed);
                                 consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
 
@@ -3097,7 +3167,7 @@ void ProcessingService::realtimeInlineLoop() {
                                 {
                                     std::scoped_lock callbackLk(backgroundCaptureCallbackMutex_);
                                     if (backgroundCaptureCallback_) {
-                                        backgroundCaptureCallback_(fullGray.clone(), idx);
+                                        backgroundCaptureCallback_(bgToStore.clone(), idx);
                                     }
                                 }
 

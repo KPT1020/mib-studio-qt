@@ -10,8 +10,10 @@
 `src/backend/processing/ProcessingCoreLoader.cpp`,
 `src/backend/processing/ProcessingCoreCache.cpp`,
 `src/backend/processing/ChannelRoiDetect.cpp`,
+`src/backend/processing/BackgroundAggregate.cpp`,
 `include/backend/processing/ProcessingService.h`,
 `include/backend/processing/ChannelRoiDetect.h`,
+`include/backend/processing/BackgroundAggregate.h`,
 `include/backend/processing/ProcessingCoreAbi.h`
 **Related:** [[CaptureService]], [[Hdf5Service]], [[AutofocusService]],
 [[TriggerService]], [[../architecture/Data-Flow]],
@@ -145,7 +147,9 @@ All gates in one struct. Notable fields:
 - `ring_ratio_min/max` + `enable_ring_ratio_check`
 - `empty_frame_pixel_threshold` — drives empty-frame skipping
 - `auto_background_enabled` + `auto_background_empty_frames`,
-  `auto_background_cooldown_frames`
+  `auto_background_cooldown_frames`, `auto_background_median_frames`
+  (1 = single-frame capture; >1 = per-pixel median over recent empty frames,
+  see [[#Robust background & run consistency]])
 - `auto_roi_from_background` (+ `auto_roi_wall_gradient_ratio`,
   `auto_roi_wall_margin`) — see [[#Auto-fit ROI from background]]
 - Target-group gate: `target_group_area_*`, `target_group_deformability_*`,
@@ -196,6 +200,36 @@ read path. Snapshot is immutable; readers are safe without extra locking.
 `configVersion_` is also bumped by `setRealtimeBackgroundGray` (in addition to
 `setProcessingConfig` / `setRealtimeRoi`), so the realtime loop's hoisted-config
 cache refreshes when the background changes.
+
+## Robust background & run consistency
+
+For quantitative deformability cytometry the **same cell must be detected and
+measured identically across a run** — so the detection model (background, ROI,
+threshold) is calibrated in live view and then **frozen for the experiment**.
+The architecture already enforces this: every auto-background capture site is
+gated `&& !experimentActive_`, so the background (and, transitively, the
+auto-fit ROI derived from it) never changes mid-experiment. Corollary: adaptive
+*during* a run (running/EMA background, per-frame adaptive thresholds) is a
+consistency anti-pattern — establish the model at warmup, then hold it fixed.
+
+A single captured empty frame carries that frame's sensor noise and momentary
+illumination flicker straight into the subtraction residual.
+`auto_background_median_frames > 1` instead stores the **per-pixel median** over
+the last N captured empty frames (`medianOfFrames`, `BackgroundAggregate.{h,cpp}`,
+Qt-free): empty frames are pushed via `noteEmptyBackgroundSample` in the realtime
+loop and `aggregatedBackground` returns their median at capture (falling back to
+the single frame until enough samples accumulate; buffer cleared on
+`startRealtime` and after each capture). On the real `gavinlouuu/512x96stream`
+this cut subtraction residual ~4.5× vs a single-frame background. The median is
+frozen for the run like any other captured background, so it improves SNR
+without breaking consistency. Default `1` preserves the current single-frame
+behavior.
+
+Note on ROI vs per-pixel threshold: excluding the noisy wall band via the ROI
+keeps a **uniform** threshold across the measured region, so a cell measures the
+same at any position. A per-pixel (variance-scaled) threshold would make
+area/deformability depend on where the cell sits — so noise is controlled by the
+ROI/mask, not by varying the threshold inside the analysis region.
 
 ## Auto-fit ROI from background
 
