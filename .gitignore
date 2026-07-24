@@ -42,3 +42,6 @@ mcu/
 
 # MkDocs user-guide site build output (docs-site.yml / mkdocs build)
 site/
+
+# Claude Code worktrees (transient; created under .claude/worktrees/)
+.claude/worktrees/
