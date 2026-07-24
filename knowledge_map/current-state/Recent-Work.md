@@ -5,6 +5,18 @@
 
 ## Features shipped
 
+- **Guided four-stage operator workflow, stage 1 of the UX redesign**
+  (2026-07-24, issue #305 / epic #304) — new
+  [[../services/WorkflowStateService]] (Qt-free, owned by value in
+  [[../architecture/AppBackend]]) derives authoritative
+  Preflight → Alignment → Experiment → Review stage state from backend
+  facts plus explicit operator confirmation; new
+  [[../frontend/WorkflowStageBar]] above the main tabs renders status
+  text, blocking reasons, a recommended next action, and confirm
+  actions. Camera detection alone no longer reads as "ready"; a
+  confirmed stage that loses a prerequisite (device loss, stopped
+  camera, failed save) drops to Needs attention until it recovers.
+  Test: `backend.workflow_state`.
 - **Latency & target-identification-loss metrics** (2026-07-21, issue #292) —
   quantifies pipeline latency and lost sort targets. New counted losses:
   [[../services/TriggerService]] no-camera / set-failed pulse drops

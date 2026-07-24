@@ -17,6 +17,10 @@
 - [[NanopositionerTab]] — [[../services/AutofocusService]] UI
 - [[SyringePumpTab]] — [[../services/SyringePumpService]] UI
 
+## Workflow
+- [[WorkflowStageBar]] — guided four-stage workflow bar above the tabs
+  (UX-1); renders [[../services/WorkflowStateService]] snapshots
+
 ## Support
 - [[Dialogs]] — settings dialogs (Mock, Processing, Monitoring, Buffer save,
   Conversion factor, Frame viewer, Syringe pump)

@@ -39,7 +39,19 @@
 ## Composition
 
 - `connectTab_`, `overviewTab_`, `experimentTabs_` (QTabWidget with child
-  tabs), `playbackPanel_`, `sidebarWidget_`, `updater_`, `initManager_`.
+  tabs), `hdfReviewTab_`, `playbackPanel_`, `sidebarWidget_`, `updater_`,
+  `initManager_`, `workflowBar_` ([[WorkflowStageBar]]).
+- **Guided workflow (UX-1):** a [[WorkflowStageBar]] sits above the tabs.
+  `refreshWorkflowState()` collects backend facts (camera configured,
+  discovery failed, core pin, capture running, ROI valid, experiment
+  active/completed/save-ok, review file loaded), evaluates them through
+  `backend.workflow()` ([[../services/WorkflowStateService]]), and
+  re-renders the bar. Driven by a 500 ms `workflowTimer_` plus immediate
+  refreshes from the capture/experiment slots. `onStopExperiment` records
+  `experimentCompleted_` / `lastExperimentSaveOk_` (from the
+  metadata/provenance write) for the Experiment/Review stage state.
+  Visiting a tab only syncs the bar highlight — completion comes from
+  facts + the bar's explicit confirm actions.
 - `QFutureWatcher<size_t> flushWatcher_` — used to await the final HDF5
   flush on experiment stop without blocking the UI thread.
 - The nested Experiment pages wire Monitoring apply into

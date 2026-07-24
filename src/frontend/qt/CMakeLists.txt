@@ -18,6 +18,8 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/include/frontend/tabs/ExperimentMonitoringTab.h
     ${PROJECT_SOURCE_DIR}/src/frontend/widgets/ZoomableChartView.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/widgets/ZoomableChartView.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/widgets/WorkflowStageBar.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/widgets/WorkflowStageBar.h
     ${PROJECT_SOURCE_DIR}/resources/ui/ExperimentMonitoringTab.ui
     ${PROJECT_SOURCE_DIR}/src/frontend/tabs/HdfReviewTab.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/tabs/HdfReviewTab.h

@@ -52,6 +52,7 @@
 #include "frontend/system/DeviceInitManager.h"
 #include "frontend/utils/SidebarWidget.h"
 #include "frontend/utils/StatisticsPanel.h"
+#include "frontend/widgets/WorkflowStageBar.h"
 #include <spdlog/spdlog.h>
 #include <opencv2/core.hpp>
 #include <chrono>
@@ -424,14 +425,41 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     
     setupCornerWidgets();
     
-    auto *hdfReviewTab = new frontend::HdfReviewTab(backend_, ui->tabs);
+    hdfReviewTab_ = new frontend::HdfReviewTab(backend_, ui->tabs);
     ui->tabs->addTab(connectTab_, tr("Connect"));
     ui->tabs->addTab(overviewTab_, tr("Overview"));
     ui->tabs->addTab(experimentTabs_, tr("Experiment"));
-    ui->tabs->addTab(hdfReviewTab, tr("Review"));
+    ui->tabs->addTab(hdfReviewTab_, tr("Review"));
+
+    // Guided workflow stage bar (UX-1): authoritative stage state above the
+    // tabs. Stage index matches tab index; state comes from backend facts and
+    // explicit operator confirmation, never from visiting a tab.
+    workflowBar_ = new frontend::WorkflowStageBar(ui->centralwidget);
+    ui->verticalLayout->insertWidget(0, workflowBar_);
+    connect(workflowBar_, &frontend::WorkflowStageBar::stageSelected, this, [this](int stage) {
+        if (ui->tabs) {
+            ui->tabs->setCurrentIndex(stage);
+        }
+    });
+    connect(workflowBar_, &frontend::WorkflowStageBar::confirmRequested, this, [this](int stage) {
+        if (stage == 0) {
+            backend_.workflow().setPreflightConfirmed(true);
+            SPDLOG_INFO("Workflow: operator confirmed hardware preflight");
+        } else if (stage == 1) {
+            backend_.workflow().setAlignmentConfirmed(true);
+            SPDLOG_INFO("Workflow: operator confirmed camera alignment & ROI");
+        }
+        refreshWorkflowState();
+    });
+    workflowTimer_ = new QTimer(this);
+    workflowTimer_->setInterval(500);
+    connect(workflowTimer_, &QTimer::timeout, this, &MainWindow::refreshWorkflowState);
+    workflowTimer_->start();
 
     connect(connectTab_, &frontend::ConnectTab::connected, this, [this]()
             {
+        noCamerasFound_ = false;
+        refreshWorkflowState();
         // On connection, switch to Overview and enable ROI overlay by default.
         if (overviewTab_) {
             overviewTab_->setRoiOverlayVisible(true);
@@ -492,6 +520,11 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     
     // Initialize tab states (all tabs enabled initially since no experiment is active)
     updateTabStates();
+
+    // Startup lands on the earliest incomplete stage: tab 0 (Connect /
+    // Hardware Preflight) is the QTabWidget default; render the initial state.
+    workflowBar_->setCurrentStage(ui->tabs->currentIndex());
+    refreshWorkflowState();
 
     // Auto-connect on startup (camera at 400 ms, then nanopositioner after camera completes)
     initManager_->start();
@@ -685,6 +718,7 @@ void MainWindow::onStartCapture()
                              tr("Failed to start camera. Please check camera connection and try again."));
         statusLabel_->setText("Camera start failed");
     }
+    refreshWorkflowState();
 }
 
 void MainWindow::onStopCapture()
@@ -711,6 +745,7 @@ void MainWindow::onStopCapture()
     statsTimer_->stop();
     backend_.processing().resetRealtimeMetrics();
     statusLabel_->setText("Camera stopped");
+    refreshWorkflowState();
 }
 
 void MainWindow::onStartExperiment()
@@ -816,6 +851,7 @@ void MainWindow::onStartExperiment()
     experimentActive_ = true;
     statusLabel_->setText("Experiment started");
     updateExperimentButtonStates(); // This will also call updateTabStates() to disable Overview and Review tabs
+    refreshWorkflowState();
 }
 
 void MainWindow::onStopExperiment()
@@ -932,6 +968,8 @@ void MainWindow::onStopExperiment()
                 processingConfig, roi, bg.empty() ? nullptr : &bg, &processingCore);
             SPDLOG_INFO("stop-lag: writeExperimentInfo took {:.3f} ms", sinceMs(t0));
         }
+        experimentCompleted_ = true;
+        lastExperimentSaveOk_ = metadataOk;
         if (!metadataOk) {
             SPDLOG_ERROR("Experiment metadata/provenance write failed");
             QMessageBox::critical(
@@ -967,6 +1005,8 @@ void MainWindow::onStopExperiment()
     else
     {
         statusLabel_->setText("Experiment stopped (HDF5 file not open)");
+        experimentCompleted_ = true;
+        lastExperimentSaveOk_ = false;
     }
 
     experimentActive_ = false;
@@ -986,6 +1026,7 @@ void MainWindow::onStopExperiment()
                         : "inline");
     }
     updateExperimentButtonStates(); // This will also call updateTabStates() to enable Overview and Review tabs
+    refreshWorkflowState();
 
     const auto cfgAtStop = processing.getProcessingConfig();
     const double stopTotalMs = sinceMs(tStopBegin);
@@ -1155,6 +1196,33 @@ void MainWindow::onUpdateStats()
     statusLabel_->setText(status);
 }
 
+void MainWindow::refreshWorkflowState()
+{
+    if (!workflowBar_)
+        return;
+
+    backend::services::WorkflowFacts facts;
+    facts.cameraConfigured = backend_.isCameraConfigured();
+    facts.cameraDiscoveryFailed = noCamerasFound_;
+    facts.processingCoreReady = backend_.processing().isProcessingCorePinSatisfied();
+    facts.captureRunning = backend_.capture().isRunning();
+    facts.roiValid = overviewTab_ && overviewTab_->roiWidth() > 0 &&
+                     overviewTab_->roiHeight() > 0;
+    facts.experimentActive = experimentActive_;
+    facts.flushInProgress = flushInProgress_;
+    facts.experimentCompleted = experimentCompleted_;
+    facts.lastExperimentSaveOk = lastExperimentSaveOk_;
+    facts.reviewFileLoaded = hdfReviewTab_ && hdfReviewTab_->hasLoadedFile();
+
+    // Mirror the tab locking applied by updateTabStates() so a locked stage
+    // explains itself before updateSnapshot() renders the tooltips.
+    const QString lockReason = tr("Locked while an experiment is active. Stop the experiment first.");
+    workflowBar_->setStageNavigationEnabled(1, !experimentActive_, lockReason);
+    workflowBar_->setStageNavigationEnabled(3, !experimentActive_, lockReason);
+
+    workflowBar_->updateSnapshot(backend_.workflow().evaluate(facts));
+}
+
 void MainWindow::startExperimentServices()
 {
     if (experimentServicesActive_) {
@@ -1187,6 +1255,8 @@ void MainWindow::stopExperimentServices()
 
 void MainWindow::onNoCamerasFound()
 {
+    noCamerasFound_ = true;
+    refreshWorkflowState();
     if (ui->tabs)
     {
         ui->tabs->setCurrentIndex(0); // Connect tab
@@ -1215,6 +1285,12 @@ void MainWindow::onNoCamerasFound()
 
 void MainWindow::onTabChanged(int index)
 {
+    // Keep the workflow stage bar highlight in sync with the visible tab.
+    // Visiting a tab never changes stage completion state.
+    if (workflowBar_) {
+        workflowBar_->setCurrentStage(index);
+    }
+
     // Guard: Once experiment started, overview is disabled until end of experiment
     if (index == 1 && experimentActive_) {
         QMessageBox::warning(this, tr("Overview Tab"),

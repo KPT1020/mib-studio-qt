@@ -24,6 +24,10 @@ mib_add_backend_test_executable(emodulus_lut_degenerate_test backend/emodulus_lu
 add_test(NAME backend.emodulus_lut_degenerate COMMAND $<TARGET_FILE:emodulus_lut_degenerate_test>)
 set_tests_properties(backend.emodulus_lut_degenerate PROPERTIES LABELS "backend;processing")
 
+mib_add_backend_test_executable(workflow_state_test backend/workflow_state_test.cpp)
+add_test(NAME backend.workflow_state COMMAND $<TARGET_FILE:workflow_state_test>)
+set_tests_properties(backend.workflow_state PROPERTIES LABELS "backend" TIMEOUT 30)
+
 mib_add_backend_test_executable(backend_lifecycle_smoke_test backend/backend_lifecycle_smoke_test.cpp)
 add_test(NAME backend.lifecycle_smoke COMMAND $<TARGET_FILE:backend_lifecycle_smoke_test>)
 set_tests_properties(backend.lifecycle_smoke PROPERTIES LABELS "backend")

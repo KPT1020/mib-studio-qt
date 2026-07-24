@@ -65,6 +65,9 @@ namespace frontend
         explicit HdfReviewTab(backend::AppBackend &backend, QWidget *parent = nullptr);
         ~HdfReviewTab() override;
 
+        // True while a recording is open for review (workflow stage state, UX-1).
+        bool hasLoadedFile() const { return !loadedHdfFilePath_.isEmpty(); }
+
     private slots:
         void onSelectFile();
         void onCloseFile();

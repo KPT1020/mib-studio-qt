@@ -17,8 +17,14 @@ sqliteService_, hdf5Service_,
 captureService_, processingService_, playbackService_,
 cameraControlService_, autofocusService_,
 triggerService_, yoloService_, syringePumpService_
+workflowStateService_  // by value — see below
 frameStore_  // shared_ptr<FrameStore>(5000)
 ```
+
+[[../services/WorkflowStateService]] is a **value member** (`workflow()`
+accessor): it has no service dependencies and must be valid before
+`initialize()` and after `shutdown()` so the UI can always evaluate the
+guided-workflow stage state.
 
 ## `initialize(dataDir)` — what it wires
 

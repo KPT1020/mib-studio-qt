@@ -8,6 +8,7 @@
 #include <thread>
 
 #include "backend/app/BackgroundFrame.h"
+#include "backend/services/WorkflowStateService.h"
 
 namespace backend::services
 {
@@ -61,7 +62,12 @@ namespace backend
         services::TriggerService &trigger();
         services::YoloService &yolo();
         services::SyringePumpService &syringePump();
-        
+
+        // Operator workflow stage state (UX-1). Value member with no service
+        // dependencies: valid before initialize() and after shutdown().
+        services::WorkflowStateService &workflow() { return workflowStateService_; }
+
+
         // Get frame store for service lifecycle management
         std::shared_ptr<playback::FrameStore> getFrameStore() const { return frameStore_; }
 
@@ -141,6 +147,7 @@ namespace backend
         std::unique_ptr<services::TriggerService> triggerService_;
         std::unique_ptr<services::YoloService> yoloService_;
         std::unique_ptr<services::SyringePumpService> syringePumpService_;
+        services::WorkflowStateService workflowStateService_;
         std::shared_ptr<playback::FrameStore> frameStore_;
 
         // Last selected hardware device (for script apply)

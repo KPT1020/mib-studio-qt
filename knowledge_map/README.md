@@ -22,6 +22,8 @@ following `[[WikiLinks]]`. If you are a new agent, start here:
   [[services/TriggerService]], [[services/SyringePumpService]]
 - Optional: [[services/YoloService]], [[services/RecorderService]],
   [[services/BatchMaskSources]]
+- Workflow state: [[services/WorkflowStateService]] (+ its UI,
+  [[frontend/WorkflowStageBar]])
 
 ### Frontend (`src/frontend/`)
 - [[frontend/_MOC|Frontend MOC]]

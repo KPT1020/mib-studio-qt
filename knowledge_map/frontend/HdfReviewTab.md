@@ -10,7 +10,9 @@
 
 ## Responsibility
 
-- Open HDF5 file via `Hdf5Service::loadFile`.
+- Open HDF5 file via `Hdf5Service::loadFile`. Exposes
+  `hasLoadedFile()` so [[MainWindow]] can feed the Review stage of the
+  guided workflow ([[WorkflowStageBar]]).
 - Lazily read metadata (not images) with
   `readValidMetadata` / `readInvalidMetadata`.
 - On scroll/selection, fetch image payloads by index using

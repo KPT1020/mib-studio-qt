@@ -24,6 +24,10 @@
 - [[BatchMaskSources]] — adapters for offline mask regeneration
   (`processBatch` inputs/outputs)
 
+## Workflow / UI state
+- [[WorkflowStateService]] — authoritative four-stage operator workflow
+  state (UX-1); pure evaluator + confirmation holder, no threads
+
 ## Diagnostics
 - [[CrashReporter]] — process-level crash handler + Sentry forwarder;
   pairs with [[../diagnostics/CrashStateMirror]]

@@ -19,6 +19,8 @@ namespace frontend { class ConnectTab; }
 namespace frontend { class AutoUpdater; }
 namespace frontend { class SidebarWidget; }
 namespace frontend { class DeviceInitManager; }
+namespace frontend { class WorkflowStageBar; }
+namespace frontend { class HdfReviewTab; }
 namespace Ui { class MainWindow; }
 
 class MainWindow : public QMainWindow {
@@ -42,6 +44,9 @@ private slots:
 private:
     void updateExperimentButtonStates();
     void updateTabStates();
+    // Collect authoritative backend facts and re-render the workflow stage
+    // bar (UX-1). Called on the workflow timer and after state-changing slots.
+    void refreshWorkflowState();
     void startExperimentServices();
     void stopExperimentServices();
     void setupCornerWidgets();
@@ -56,6 +61,9 @@ private:
     QTabWidget* experimentTabs_ = nullptr;
     frontend::ConnectTab* connectTab_ = nullptr;
     frontend::OverviewTab* overviewTab_ = nullptr;
+    frontend::HdfReviewTab* hdfReviewTab_ = nullptr;
+    frontend::WorkflowStageBar* workflowBar_ = nullptr;
+    QTimer* workflowTimer_ = nullptr;
     frontend::AutoUpdater* updater_ = nullptr;
     frontend::SidebarWidget* sidebarWidget_ = nullptr;
     frontend::DeviceInitManager* initManager_ = nullptr;
@@ -63,6 +71,9 @@ private:
     uint64_t experimentStartTimeNs_{0};
     bool experimentActive_{false};
     bool experimentServicesActive_{false};
+    bool noCamerasFound_{false};
+    bool experimentCompleted_{false};
+    bool lastExperimentSaveOk_{true};
     bool flushInProgress_{false};
     bool restoreRealtimeModeAfterExperiment_{false};
     int realtimeModeBeforeExperiment_{0};
