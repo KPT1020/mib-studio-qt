@@ -71,6 +71,14 @@ mib_add_backend_test_executable(mindvision_config_test backend/mindvision_config
 add_test(NAME backend.mindvision_config COMMAND $<TARGET_FILE:mindvision_config_test>)
 set_tests_properties(backend.mindvision_config PROPERTIES LABELS "backend;camera" TIMEOUT 30)
 
+mib_add_backend_test_executable(mindvision_config_apply_test backend/mindvision_config_apply_test.cpp)
+add_test(NAME backend.mindvision_config_apply COMMAND $<TARGET_FILE:mindvision_config_apply_test>)
+set_tests_properties(backend.mindvision_config_apply PROPERTIES LABELS "backend;camera" TIMEOUT 30)
+
+mib_add_backend_test_executable(windowed_rate_test backend/windowed_rate_test.cpp)
+add_test(NAME backend.windowed_rate COMMAND $<TARGET_FILE:windowed_rate_test>)
+set_tests_properties(backend.windowed_rate PROPERTIES LABELS "backend;camera" TIMEOUT 30)
+
 mib_add_backend_test_executable(camera_script_apply_test backend/camera_script_apply_test.cpp)
 add_test(NAME backend.camera_script_apply COMMAND $<TARGET_FILE:camera_script_apply_test>)
 set_tests_properties(backend.camera_script_apply PROPERTIES LABELS "backend;camera" TIMEOUT 30)
@@ -332,6 +340,10 @@ set_tests_properties(hardware.camera PROPERTIES LABELS "hardware" SKIP_RETURN_CO
 mib_add_backend_test_executable(hw_egrabber_script_test hardware/hw_egrabber_script_test.cpp)
 add_test(NAME hardware.egrabber_script COMMAND $<TARGET_FILE:hw_egrabber_script_test>)
 set_tests_properties(hardware.egrabber_script PROPERTIES LABELS "hardware;camera" SKIP_RETURN_CODE 77 TIMEOUT 60)
+
+mib_add_backend_test_executable(hw_mindvision_apply_test hardware/hw_mindvision_apply_test.cpp)
+add_test(NAME hardware.mindvision_apply COMMAND $<TARGET_FILE:hw_mindvision_apply_test>)
+set_tests_properties(hardware.mindvision_apply PROPERTIES LABELS "hardware;camera" SKIP_RETURN_CODE 77 TIMEOUT 60)
 
 add_executable(json_flatten_roundtrip_test
     ${PROJECT_SOURCE_DIR}/tests/frontend/json_flatten_roundtrip_test.cpp

@@ -36,6 +36,7 @@ namespace frontend
         };
 
         QString currentJsPath() const;
+        QString currentMindVisionJsonPath() const;
 
         // Controls whether the ROI overlay is shown on the canvas.
         void setRoiOverlayVisible(bool visible);

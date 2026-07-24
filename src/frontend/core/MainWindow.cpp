@@ -1290,8 +1290,54 @@ void MainWindow::onTabChanged(int index)
         return;
     }
 
+    // MindVision cameras use a per-tab JSON config instead of the EGrabber JS
+    // script; apply it through the same auto-apply-and-restart flow.
     if (backend_.isMindVisionCameraSelected()) {
-        SPDLOG_DEBUG("MainWindow::onTabChanged: Skipping EGrabber script application for MindVision camera");
+        const bool wasRunning = backend_.capture().isRunning();
+
+        QString jsonPath;
+        if (index == 1) {
+            if (!overviewTab_) {
+                SPDLOG_WARN("MainWindow::onTabChanged: overviewTab_ is null");
+                return;
+            }
+            jsonPath = overviewTab_->currentMindVisionJsonPath();
+        } else if (index == 2) {
+            auto* previewPage = experimentTabs_
+                ? qobject_cast<frontend::PreviewPage*>(experimentTabs_->widget(0))
+                : nullptr;
+            auto* configTabs = previewPage ? previewPage->getConfigTabs() : nullptr;
+            if (!configTabs) {
+                SPDLOG_WARN("MainWindow::onTabChanged: ConfigTabs is null");
+                return;
+            }
+            jsonPath = configTabs->currentMindVisionJsonPath();
+        }
+
+        if (jsonPath.isEmpty() || !QFileInfo::exists(jsonPath)) {
+            SPDLOG_DEBUG("MainWindow::onTabChanged: No MindVision config file at {}; skipping apply",
+                         jsonPath.toStdString());
+            return;
+        }
+
+        SPDLOG_INFO("MainWindow::onTabChanged: Auto-applying MindVision config from {}",
+                    jsonPath.toStdString());
+        std::string backendErr;
+        if (!backend_.applyMindVisionConfigFromFile(jsonPath.toStdString(), &backendErr)) {
+            SPDLOG_ERROR("MainWindow::onTabChanged: Failed to apply MindVision config: {}", backendErr);
+            return;
+        }
+
+        if (wasRunning) {
+            SPDLOG_INFO("MainWindow::onTabChanged: Restarting camera after MindVision config application");
+            if (!backend_.capture().start()) {
+                SPDLOG_ERROR("MainWindow::onTabChanged: Failed to restart camera after MindVision config application");
+                statusLabel_->setText("MindVision config applied, but restart failed");
+            } else {
+                statsTimer_->start();
+                statusLabel_->setText("Camera running");
+            }
+        }
         return;
     }
 

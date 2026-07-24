@@ -42,6 +42,35 @@ int main()
         return 5;
     }
 
+    // Runtime config apply must fail cleanly (error set, false returned) when
+    // no MindVision camera is selected...
+    std::string applyErr;
+    if (app.applyMindVisionConfigFromFile("/nonexistent/mindvision.json", &applyErr))
+    {
+        SPDLOG_ERROR("applyMindVisionConfigFromFile succeeded with no MindVision selection");
+        return 6;
+    }
+    if (applyErr.empty())
+    {
+        SPDLOG_ERROR("applyMindVisionConfigFromFile did not report an error without a selection");
+        return 7;
+    }
+
+    // ...and with a selection but no usable SDK/config file (stub builds report
+    // the SDK as disabled; SDK builds fail on the missing file/device).
+    app.setMindVisionCameraSelection(0, "MindVision camera 0");
+    applyErr.clear();
+    if (app.applyMindVisionConfigFromFile("/nonexistent/mindvision.json", &applyErr))
+    {
+        SPDLOG_ERROR("applyMindVisionConfigFromFile succeeded against a nonexistent config");
+        return 8;
+    }
+    if (applyErr.empty())
+    {
+        SPDLOG_ERROR("applyMindVisionConfigFromFile did not report an error for a failed apply");
+        return 9;
+    }
+
     SPDLOG_INFO("MindVision selection state test passed");
     return 0;
 }

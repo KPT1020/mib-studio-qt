@@ -156,6 +156,23 @@ namespace frontend
         return defaultJsPath();
     }
 
+    QString OverviewTab::currentMindVisionJsonPath() const
+    {
+        // Overview has no MindVision editor of its own; an overview-specific
+        // override is honored if set, otherwise the shared config selected in
+        // the Experiment tab's ConfigTabs applies on both tabs.
+        QSettings s;
+        const QString overviewExt =
+            s.value("Config/ExternalOverviewMindVisionConfigPath").toString().trimmed();
+        if (!overviewExt.isEmpty())
+            return overviewExt;
+        const QString sharedExt =
+            s.value("Config/ExternalMindVisionConfigPath").toString().trimmed();
+        if (!sharedExt.isEmpty())
+            return sharedExt;
+        return appDirIncludePath("mindvisionConfig.json");
+    }
+
     bool OverviewTab::loadFileToEditor(const QString &path, QPlainTextEdit *editor, QString *err)
     {
         bool result = FileIOUtils::loadFileToEditor(path, editor, err);

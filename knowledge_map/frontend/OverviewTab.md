@@ -45,6 +45,11 @@ position. ROI drag events emit `roiPositionChanged(QPointF)`, which
 ## Gotchas
 
 - `scratchFrame_` persists between ticks; do not move from it.
+- `currentMindVisionJsonPath()` (used by `MainWindow::onTabChanged` when a
+  MindVision camera is selected) has no editor here: it honors an
+  overview-specific `Config/ExternalOverviewMindVisionConfigPath` override,
+  else falls back to the shared path chosen in [[ConfigTabs]]'s MindVision
+  tab, else the default `mindvisionConfig.json`.
 - `frameImage_.detach()` is required after the in-place `memcpy` —
   without it Qt's implicit sharing will not change the cacheKey, and
   `SimpleImageCanvas` will not rescale even though the pixels changed.

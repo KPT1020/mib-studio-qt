@@ -1,8 +1,9 @@
 # ConfigTabs
 
 > Docked panel with multiple sub-tabs for tuning: processing config, JSON
-> table viewer, camera JS script loader, ROI and monitoring settings. Also
-> owns the profile selector/actions for local and R2-backed profile catalogs.
+> table viewer, camera JS script loader, MindVision JSON config editor, ROI
+> and monitoring settings. Also owns the profile selector/actions for local
+> and R2-backed profile catalogs.
 
 **Source:** `src/frontend/tabs/ConfigTabs.cpp`,
 `include/frontend/tabs/ConfigTabs.h`
@@ -18,6 +19,13 @@
   [[../services/CameraControlService]]`::applyScriptToDevice` (through
   `AppBackend::applyCameraScriptFromFile`).
 - Parse EGrabber scripts using `utils/EgrabberConfigParser.cpp`.
+- MindVision parity: a "MindVision config (JSON)" tab edits/saves/applies the
+  JSON config through `AppBackend::applyMindVisionConfigFromFile` (path
+  persisted as `Config/ExternalMindVisionConfigPath`; the default
+  `mindvisionConfig.json` is seeded with parser defaults on first load).
+  `MainWindow::onTabChanged` auto-applies the per-tab MindVision JSON —
+  symmetric to the EGrabber JS flow — using this tab's path and
+  [[OverviewTab]]`::currentMindVisionJsonPath()`.
 - Render/edit JSON config using `models/JsonTableModel.cpp` and
   `utils/JsonFlatten.cpp`.
 - Persist config via `utils/ConfigPathManager.cpp` and

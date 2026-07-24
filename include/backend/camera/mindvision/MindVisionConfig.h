@@ -16,6 +16,8 @@ namespace backend::camera::mindvision {
 
 // All fields default to the same values the inline parsers used, so a missing
 // key behaves exactly as before. Values are bounds-checked in parseConfig.
+// When adding a field: bump kConfigFieldCount below — MindVisionConfigApply.cpp
+// static_asserts on it so the SDK apply sequence cannot silently miss a field.
 struct Config {
     int width{512};
     int height{96};
@@ -36,7 +38,10 @@ struct Config {
     int strobePulseUs{500};
     int strobeDelayUs{0};
     int strobePolarity{1};
+    int triggerOutputIndex{1}; // GPIO output used for the sort trigger pulse
 };
+
+inline constexpr int kConfigFieldCount = 20;
 
 struct ParseResult {
     bool ok{false};
@@ -118,6 +123,7 @@ inline ParseResult parseConfig(const QByteArray& jsonBytes)
     c.strobePulseUs = detail::clampInt(obj.value("strobe_pulse_width_us").toInt(c.strobePulseUs), 0, 1000000, "strobe_pulse_width_us", w);
     c.strobeDelayUs = detail::clampInt(obj.value("strobe_delay_us").toInt(c.strobeDelayUs), 0, 1000000, "strobe_delay_us", w);
     c.strobePolarity = detail::clampInt(obj.value("strobe_polarity").toInt(c.strobePolarity), 0, 1, "strobe_polarity", w);
+    c.triggerOutputIndex = detail::clampInt(obj.value("trigger_output_index").toInt(c.triggerOutputIndex), 0, 2, "trigger_output_index", w);
 
     r.config = c;
     r.ok = true;

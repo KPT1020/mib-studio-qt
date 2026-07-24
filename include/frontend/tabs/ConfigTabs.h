@@ -40,6 +40,7 @@ signals:
 
 public:
     QString currentJsPath() const;
+    QString currentMindVisionJsonPath() const;
 
 public slots:
     // Called when config file changes externally (e.g., when ROI is saved)
@@ -59,6 +60,11 @@ private slots:
     void onClearJs();
     void onApplyJs();
     void onResetCamera();
+    void onReloadMvJson();
+    void onSaveMvJson();
+    void onBrowseMvJson();
+    void onClearMvJson();
+    void onApplyMvJson();
 	// Profiles
 	void onProfileSelectionChanged(int index);
 	void onSaveProfile();
@@ -74,6 +80,7 @@ private:
     QString appDirIncludePath(const QString& fileName) const;
     QString defaultJsonPath() const { return appDirIncludePath("config.json"); }
     QString defaultJsPath() const { return appDirIncludePath("egrabberConfig.js"); }
+    QString defaultMindVisionJsonPath() const { return appDirIncludePath("mindvisionConfig.json"); }
     QString currentJsonPath() const;
     void clearJsonSyncIndicators();
     bool loadFileToEditor(const QString& path, QPlainTextEdit* editor, QString* err);
@@ -144,6 +151,16 @@ private:
     QLabel* jsPathLabel_ = nullptr;
 	QLabel* jsUnsavedLabel_ = nullptr;
 	QCheckBox* profilesIncludeJsCheck_ = nullptr;
+
+    // MindVision JSON tab
+    QPlainTextEdit* mvJsonEdit_ = nullptr;
+    QPushButton* mvJsonReloadBtn_ = nullptr;
+    QPushButton* mvJsonSaveBtn_ = nullptr;
+    QPushButton* mvJsonApplyBtn_ = nullptr;
+    QPushButton* mvJsonBrowseBtn_ = nullptr;
+    QPushButton* mvJsonClearBtn_ = nullptr;
+    QLabel* mvJsonPathLabel_ = nullptr;
+    QLabel* mvJsonUnsavedLabel_ = nullptr;
 };
 
 } // namespace frontend

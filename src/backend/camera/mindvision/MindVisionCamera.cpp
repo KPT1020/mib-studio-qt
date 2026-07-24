@@ -23,11 +23,7 @@
 #error "MindVision CameraApiLoad.h not found"
 #endif
 
-#include "backend/camera/mindvision/MindVisionConfig.h"
-
-#include <QFile>
-#include <QJsonDocument>
-#include <QJsonObject>
+#include "backend/camera/mindvision/MindVisionConfigApply.h"
 
 #include <spdlog/spdlog.h>
 
@@ -57,6 +53,11 @@ void MindVisionCamera::applyConfig(const CameraConfig &config)
 {
     std::lock_guard<std::mutex> lock(stateMutex_);
     config_ = config;
+    // bufferPartCount/numBuffers are EGrabber DMA-tuning knobs; the MVSDK owns
+    // its internal buffer queue and exposes no equivalent, so they are
+    // intentionally not applied here.
+    SPDLOG_DEBUG("MindVisionCamera: CameraConfig buffer settings (parts={}, buffers={}) not applicable to MVSDK",
+                 config.bufferPartCount, config.numBuffers);
 }
 
 bool MindVisionCamera::applyJsonConfig(int hCamera)
@@ -66,156 +67,18 @@ bool MindVisionCamera::applyJsonConfig(int hCamera)
         return true;
     }
 
-    QFile file(QString::fromStdString(configPath_));
-    if (!file.open(QIODevice::ReadOnly))
+    const auto result = backend::camera::mindvision::applyJsonFileToCamera(hCamera, configPath_);
+    for (const auto &warning : result.warnings)
     {
-        SPDLOG_WARN("MindVisionCamera: cannot open config file {}", configPath_);
+        SPDLOG_WARN("MindVisionCamera: {} (in {})", warning, configPath_);
+    }
+    if (!result.ok)
+    {
+        SPDLOG_WARN("MindVisionCamera: {}", result.error);
         return false;
     }
 
-    const QByteArray bytes = file.readAll();
-    file.close();
-
-    const auto parsed = backend::camera::mindvision::parseConfig(bytes);
-    if (!parsed.ok)
-    {
-        SPDLOG_WARN("MindVisionCamera: {} in {}", parsed.error, configPath_);
-        return false;
-    }
-    for (const auto& warning : parsed.warnings)
-    {
-        SPDLOG_WARN("{} (in {})", warning, configPath_);
-    }
-
-    const auto& cfg = parsed.config;
-    const int width = cfg.width;
-    const int height = cfg.height;
-    const int offsetX = cfg.offsetX;
-    const int offsetY = cfg.offsetY;
-    const double exposureUs = cfg.exposureUs;
-    const int triggerMode = cfg.triggerMode;
-    const int analogGain = cfg.analogGain;
-    const bool aeEnabled = cfg.aeEnabled;
-    const int aeTarget = cfg.aeTarget;
-    const int gamma = cfg.gamma;
-    const int contrast = cfg.contrast;
-    const int sharpness = cfg.sharpness;
-    const int frameSpeed = cfg.frameSpeed;
-    const bool flipHorizontal = cfg.flipHorizontal;
-    const bool flipVertical = cfg.flipVertical;
-    const int strobeMode = cfg.strobeMode;
-    const int strobePulseUs = cfg.strobePulseUs;
-    const int strobeDelayUs = cfg.strobeDelayUs;
-    const int strobePolarity = cfg.strobePolarity;
-
-    SPDLOG_INFO("MindVisionCamera: applying config w={} h={} ox={} oy={} exp={} trig={} gain={}",
-                width, height, offsetX, offsetY, exposureUs, triggerMode, analogGain);
-
-    tSdkImageResolution res{};
-    res.iIndex = 0xFF;
-    res.iHOffsetFOV = offsetX;
-    res.iVOffsetFOV = offsetY;
-    res.iWidthFOV = width;
-    res.iHeightFOV = height;
-    res.iWidth = width;
-    res.iHeight = height;
-
-    CameraSdkStatus status = CameraSetImageResolution(hCamera, &res);
-    if (status != CAMERA_STATUS_SUCCESS)
-    {
-        SPDLOG_WARN("MindVisionCamera: CameraSetImageResolution returned {}", status);
-    }
-
-    status = CameraSetExposureTime(hCamera, exposureUs);
-    if (status != CAMERA_STATUS_SUCCESS)
-    {
-        SPDLOG_WARN("MindVisionCamera: CameraSetExposureTime returned {}", status);
-    }
-
-    status = CameraSetTriggerMode(hCamera, triggerMode);
-    if (status != CAMERA_STATUS_SUCCESS)
-    {
-        SPDLOG_WARN("MindVisionCamera: CameraSetTriggerMode returned {}", status);
-    }
-
-    status = CameraSetAnalogGain(hCamera, analogGain);
-    if (status != CAMERA_STATUS_SUCCESS)
-    {
-        SPDLOG_WARN("MindVisionCamera: CameraSetAnalogGain returned {}", status);
-    }
-
-    status = CameraSetAeState(hCamera, aeEnabled ? TRUE : FALSE);
-    if (status != CAMERA_STATUS_SUCCESS)
-    {
-        SPDLOG_WARN("MindVisionCamera: CameraSetAeState returned {}", status);
-    }
-
-    status = CameraSetAeTarget(hCamera, aeTarget);
-    if (status != CAMERA_STATUS_SUCCESS)
-    {
-        SPDLOG_WARN("MindVisionCamera: CameraSetAeTarget returned {}", status);
-    }
-
-    status = CameraSetGamma(hCamera, gamma);
-    if (status != CAMERA_STATUS_SUCCESS)
-    {
-        SPDLOG_WARN("MindVisionCamera: CameraSetGamma returned {}", status);
-    }
-
-    status = CameraSetContrast(hCamera, contrast);
-    if (status != CAMERA_STATUS_SUCCESS)
-    {
-        SPDLOG_WARN("MindVisionCamera: CameraSetContrast returned {}", status);
-    }
-
-    status = CameraSetSharpness(hCamera, sharpness);
-    if (status != CAMERA_STATUS_SUCCESS)
-    {
-        SPDLOG_WARN("MindVisionCamera: CameraSetSharpness returned {}", status);
-    }
-
-    status = CameraSetFrameSpeed(hCamera, frameSpeed);
-    if (status != CAMERA_STATUS_SUCCESS)
-    {
-        SPDLOG_WARN("MindVisionCamera: CameraSetFrameSpeed returned {}", status);
-    }
-
-    status = CameraSetMirror(hCamera, 0, flipHorizontal ? TRUE : FALSE);
-    if (status != CAMERA_STATUS_SUCCESS)
-    {
-        SPDLOG_WARN("MindVisionCamera: CameraSetMirror(H) returned {}", status);
-    }
-
-    status = CameraSetMirror(hCamera, 1, flipVertical ? TRUE : FALSE);
-    if (status != CAMERA_STATUS_SUCCESS)
-    {
-        SPDLOG_WARN("MindVisionCamera: CameraSetMirror(V) returned {}", status);
-    }
-
-    status = CameraSetStrobeMode(hCamera, strobeMode);
-    if (status != CAMERA_STATUS_SUCCESS)
-    {
-        SPDLOG_WARN("MindVisionCamera: CameraSetStrobeMode returned {}", status);
-    }
-
-    status = CameraSetStrobePulseWidth(hCamera, static_cast<UINT>(strobePulseUs));
-    if (status != CAMERA_STATUS_SUCCESS)
-    {
-        SPDLOG_WARN("MindVisionCamera: CameraSetStrobePulseWidth returned {}", status);
-    }
-
-    status = CameraSetStrobeDelayTime(hCamera, static_cast<UINT>(strobeDelayUs));
-    if (status != CAMERA_STATUS_SUCCESS)
-    {
-        SPDLOG_WARN("MindVisionCamera: CameraSetStrobeDelayTime returned {}", status);
-    }
-
-    status = CameraSetStrobePolarity(hCamera, strobePolarity);
-    if (status != CAMERA_STATUS_SUCCESS)
-    {
-        SPDLOG_WARN("MindVisionCamera: CameraSetStrobePolarity returned {}", status);
-    }
-
+    requestedTriggerOutputIndex_ = result.config.triggerOutputIndex;
     return true;
 }
 
@@ -325,7 +188,12 @@ bool MindVisionCamera::start()
 
     frameCount_ = 0;
     startTime_ = std::chrono::steady_clock::now();
-    running_ = true;
+    frameRate_.reset();
+    {
+        std::lock_guard<std::mutex> triggerLock(triggerMutex_);
+        triggerCameraHandle_ = hCamera_;
+    }
+    running_.store(true, std::memory_order_release);
     SPDLOG_INFO("MindVisionCamera: started (index={}, {}x{}, mono={})",
                 cameraIndex_, bufferWidth_, bufferHeight_, static_cast<int>(cap.sIspCapacity.bMonoSensor));
     return true;
@@ -334,11 +202,18 @@ bool MindVisionCamera::start()
 void MindVisionCamera::stop()
 {
     std::lock_guard<std::mutex> lock(stateMutex_);
-    if (!running_)
+    if (!running_.load(std::memory_order_acquire))
     {
         return;
     }
-    running_ = false;
+    running_.store(false, std::memory_order_release);
+
+    // Invalidate the handle for the trigger path before tearing it down so an
+    // in-flight pulse can never race CameraUnInit.
+    {
+        std::lock_guard<std::mutex> triggerLock(triggerMutex_);
+        triggerCameraHandle_ = -1;
+    }
 
     if (hCamera_ >= 0)
     {
@@ -429,14 +304,13 @@ bool MindVisionCamera::pollStats(CameraStats &out) const
         return false;
     }
 
-    const auto now = std::chrono::steady_clock::now();
-    const double elapsed = std::chrono::duration<double>(now - startTime_).count();
-    if (elapsed > 0.0)
-    {
-        lastStats_.frameRate = static_cast<std::uint64_t>(static_cast<double>(frameCount_) / elapsed);
-        const std::uint64_t bytesPerFrame = static_cast<std::uint64_t>(bufferWidth_) * static_cast<std::uint64_t>(bufferHeight_);
-        lastStats_.dataRateMBps = (lastStats_.frameRate * bytesPerFrame) / (1024ULL * 1024ULL);
-    }
+    // Host-computed rate over the window since the previous poll (EGrabber
+    // reports device-side instantaneous rates; a cumulative since-start
+    // average here would go stale and dilute to nothing in trigger mode).
+    const double rate = frameRate_.sample(frameCount_, std::chrono::steady_clock::now());
+    lastStats_.frameRate = static_cast<std::uint64_t>(rate);
+    const std::uint64_t bytesPerFrame = static_cast<std::uint64_t>(bufferWidth_) * static_cast<std::uint64_t>(bufferHeight_);
+    lastStats_.dataRateMBps = static_cast<std::uint64_t>(rate * static_cast<double>(bytesPerFrame)) / (1024ULL * 1024ULL);
     out = lastStats_;
     return true;
 }
@@ -449,56 +323,62 @@ bool MindVisionCamera::checkDeviceHealth() const
         return false;
     }
 
-    tSdkFrameHead frameHead{};
-    BYTE *pBuffer = nullptr;
-    const CameraSdkStatus status = CameraGetImageBuffer(hCamera_, &frameHead, &pBuffer, 100);
-    if (status == CAMERA_STATUS_SUCCESS)
-    {
-        CameraReleaseImageBuffer(hCamera_, pBuffer);
-        return true;
-    }
-
-    return status == CAMERA_STATUS_TIME_OUT;
+    // Must never grab from the image queue here: the health check runs on the
+    // capture thread every few seconds, and a probe grab consumes (and
+    // discards) a real frame — in trigger mode possibly a triggered target
+    // frame — while stalling grabFrame for the probe timeout.
+    tSdkFrameStatistic stat{};
+    const CameraSdkStatus status = CameraGetFrameStatistic(hCamera_, &stat);
+    return status == CAMERA_STATUS_SUCCESS;
 }
 
 void MindVisionCamera::configureTriggerOutput(const std::string &lineSelector)
 {
+    // lineSelector carries a Euresys GenICam line name that has no MVSDK
+    // equivalent; the output line comes from the JSON config's
+    // trigger_output_index (default 1 = OUT2) instead.
     (void)lineSelector;
-    constexpr int kSortOutputIndex = 1;
 
-    std::lock_guard<std::mutex> lock(stateMutex_);
-    if (hCamera_ < 0)
+    // triggerMutex_ (not stateMutex_) so the trigger path never queues behind
+    // grabFrame's image processing or stop()'s teardown.
+    std::lock_guard<std::mutex> triggerLock(triggerMutex_);
+    const int outputIndex = requestedTriggerOutputIndex_.load(std::memory_order_acquire);
+    if (triggerCameraHandle_ < 0)
     {
-        triggerOutputIndex_ = kSortOutputIndex;
+        triggerOutputIndex_ = outputIndex;
         SPDLOG_WARN("MindVisionCamera: configureTriggerOutput called before camera open");
         return;
     }
 
-    CameraSdkStatus status = CameraSetOutPutIOMode(hCamera_, kSortOutputIndex, IOMODE_GP_OUTPUT);
+    CameraSdkStatus status = CameraSetOutPutIOMode(triggerCameraHandle_, outputIndex, IOMODE_GP_OUTPUT);
     if (status != CAMERA_STATUS_SUCCESS)
     {
-        SPDLOG_WARN("MindVisionCamera: CameraSetOutPutIOMode(OUT2, GP_OUTPUT) returned {}", status);
+        SPDLOG_WARN("MindVisionCamera: CameraSetOutPutIOMode({}, GP_OUTPUT) returned {}", outputIndex, status);
     }
 
-    status = CameraSetIOStateEx(hCamera_, kSortOutputIndex, 0);
+    status = CameraSetIOStateEx(triggerCameraHandle_, outputIndex, 0);
     if (status != CAMERA_STATUS_SUCCESS)
     {
-        SPDLOG_WARN("MindVisionCamera: CameraSetIOStateEx(OUT2, LOW) returned {}", status);
+        SPDLOG_WARN("MindVisionCamera: CameraSetIOStateEx({}, LOW) returned {}", outputIndex, status);
     }
 
-    triggerOutputIndex_ = kSortOutputIndex;
-    SPDLOG_INFO("MindVisionCamera: trigger output configured on OUT2 (index {})", kSortOutputIndex);
+    triggerOutputIndex_ = outputIndex;
+    SPDLOG_INFO("MindVisionCamera: trigger output configured on GPIO index {}", outputIndex);
 }
 
 bool MindVisionCamera::setTriggerOutput(bool high)
 {
-    std::lock_guard<std::mutex> lock(stateMutex_);
-    if (triggerOutputIndex_ < 0 || !running_ || hCamera_ < 0)
+    // triggerMutex_ pins the handle alive for the duration of the SDK call;
+    // stop() invalidates triggerCameraHandle_ under the same mutex before
+    // CameraUnInit, so this can never touch a dead handle.
+    std::lock_guard<std::mutex> triggerLock(triggerMutex_);
+    if (triggerOutputIndex_ < 0 || triggerCameraHandle_ < 0 ||
+        !running_.load(std::memory_order_acquire))
     {
         return false;
     }
 
-    const CameraSdkStatus status = CameraSetIOStateEx(hCamera_, triggerOutputIndex_, high ? 1 : 0);
+    const CameraSdkStatus status = CameraSetIOStateEx(triggerCameraHandle_, triggerOutputIndex_, high ? 1 : 0);
     if (status != CAMERA_STATUS_SUCCESS)
     {
         SPDLOG_WARN("MindVisionCamera: CameraSetIOStateEx({}, {}) returned {}",

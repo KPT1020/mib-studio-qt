@@ -4,7 +4,10 @@
 > hardware vs mock differences so [[../services/CaptureService]] doesn't
 > care.
 
-**Source:** `include/camera/common/ICamera.h`, `include/camera/common/Frame.h`
+**Source:** `include/backend/camera/common/ICamera.h`,
+`include/backend/camera/common/Frame.h`,
+`include/backend/camera/common/WindowedRate.h` (host-side rate estimator for
+SDKs without device-side stats)
 
 ## Types
 
@@ -43,3 +46,9 @@ virtual bool setTriggerOutput(bool high) { return false; }
 - `pixelFormat` uses Euresys PFNC codes (see [[../domain/Glossary]]).
 - `linePitch` may exceed `width` (stride padding) — always honor it when
   iterating frame data.
+- `configureTriggerOutput`'s `lineSelector` is vendor-interpreted: EGrabber
+  treats it as a GenICam line name (e.g. `"TTLIO12"`); [[MindVisionCamera]]
+  ignores it and uses `trigger_output_index` from its JSON config.
+- `Frame.timestamp` is a per-vendor opaque device clock; use
+  `hostTimestampUs` (stamped by [[../services/CaptureService]]) for
+  cross-vendor latency math.

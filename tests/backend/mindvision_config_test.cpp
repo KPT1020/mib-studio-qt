@@ -120,6 +120,20 @@ int main()
                    "oversize ROI clamped to upper bound");
     }
 
+    // 10) trigger_output_index: defaults to 1 (OUT2), honored in range, clamped
+    //     outside [0,2].
+    {
+        const auto d = parse("{}");
+        MIB_EXPECT(d.ok && d.config.triggerOutputIndex == 1, "trigger output defaults to 1");
+
+        const auto r = parse(R"({"trigger_output_index": 0})");
+        MIB_EXPECT(r.ok && r.config.triggerOutputIndex == 0, "trigger output honored");
+
+        const auto hi = parse(R"({"trigger_output_index": 7})");
+        MIB_EXPECT(hi.ok && hi.config.triggerOutputIndex == 2, "trigger output clamped to max");
+        MIB_EXPECT(!hi.warnings.empty(), "trigger output clamp warns");
+    }
+
     if (mib::test::exitCode() == 0) {
         std::printf("MindVision config parse/bounds validation verified\n");
     }

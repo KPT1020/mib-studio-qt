@@ -124,9 +124,12 @@ the realtime thread live).
 - `configureMockCamera(options)` — choose mock folder instead
 - `applyCameraScriptFromFile(path)` — push a GenICam JS config to the selected
   device (stops capture first, does not restart)
-- `resetSelectedHardwareCamera()` — issue GenICam `DeviceReset`
+- `resetSelectedHardwareCamera()` — issue GenICam `DeviceReset` (EGrabber
+  only; with a MindVision camera selected it reports "Device reset is only
+  supported for EGrabber cameras")
 - `applyMindVisionConfigFromFile(path)` — apply the selected MindVision JSON
-  config and refresh the capture factory path
+  config and refresh the capture factory path (stops capture first, does not
+  restart; applies the full field set via `MindVisionConfigApply`)
 
 ### Platform behavior
 
@@ -140,6 +143,10 @@ the realtime thread live).
   selected hardware indices, and keeps `mockCameraConfigured_ = true`.
 - `setMindVisionCameraSelection()` preserves the selected camera state even
   when the SDK is unavailable so the UI/backend selection remains explicit.
+- Known cosmetic asymmetries vs EGrabber: `MIB_CAMERA_MODE=egrabber` sets no
+  `selectedLabel_` (device indices come from `DeviceInitManager`
+  auto-connect), and `CrashStateMirror` mirrors EGrabber if/dev indices but
+  only the label for MindVision — crash dumps still identify the camera.
 
 ## Frame recording mode
 

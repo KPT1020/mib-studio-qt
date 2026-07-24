@@ -34,12 +34,7 @@ using namespace Euresys;
 #error "MindVision CameraApiLoad.h not found"
 #endif
 
-#include "backend/camera/mindvision/MindVisionConfig.h"
-
-#include <QFile>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QString>
+#include "backend/camera/mindvision/MindVisionConfigApply.h"
 #endif
 
 namespace backend::services
@@ -86,84 +81,6 @@ namespace backend::services
             return oss.str();
         }
 
-        bool applyMindVisionJsonToCamera(CameraHandle hCamera,
-                                         const std::string &jsonPath,
-                                         std::string *errorOut)
-        {
-            auto setErr = [&](const std::string &message)
-            {
-                if (errorOut && errorOut->empty())
-                {
-                    *errorOut = message;
-                }
-            };
-
-            QFile file(QString::fromStdString(jsonPath));
-            if (!file.open(QIODevice::ReadOnly))
-            {
-                setErr("Failed to open MindVision config file: " + jsonPath);
-                return false;
-            }
-
-            const QByteArray bytes = file.readAll();
-            file.close();
-
-            const auto parsed = backend::camera::mindvision::parseConfig(bytes);
-            if (!parsed.ok)
-            {
-                setErr(parsed.error);
-                return false;
-            }
-            for (const auto& warning : parsed.warnings)
-            {
-                SPDLOG_WARN("{}", warning);
-            }
-
-            const auto& cfg = parsed.config;
-            const int width = cfg.width;
-            const int height = cfg.height;
-            const int offsetX = cfg.offsetX;
-            const int offsetY = cfg.offsetY;
-            const double exposureUs = cfg.exposureUs;
-            const int triggerMode = cfg.triggerMode;
-            const int analogGain = cfg.analogGain;
-
-            tSdkImageResolution res{};
-            res.iIndex = 0xFF;
-            res.iHOffsetFOV = offsetX;
-            res.iVOffsetFOV = offsetY;
-            res.iWidthFOV = width;
-            res.iHeightFOV = height;
-            res.iWidth = width;
-            res.iHeight = height;
-
-            CameraSdkStatus status = CameraSetImageResolution(hCamera, &res);
-            if (status != CAMERA_STATUS_SUCCESS)
-            {
-                SPDLOG_WARN("MindVision config: CameraSetImageResolution returned {}", status);
-                setErr("CameraSetImageResolution failed (status=" + std::to_string(status) + ")");
-            }
-
-            status = CameraSetExposureTime(hCamera, exposureUs);
-            if (status != CAMERA_STATUS_SUCCESS)
-            {
-                SPDLOG_WARN("MindVision config: CameraSetExposureTime returned {}", status);
-            }
-
-            status = CameraSetTriggerMode(hCamera, triggerMode);
-            if (status != CAMERA_STATUS_SUCCESS)
-            {
-                SPDLOG_WARN("MindVision config: CameraSetTriggerMode returned {}", status);
-            }
-
-            status = CameraSetAnalogGain(hCamera, analogGain);
-            if (status != CAMERA_STATUS_SUCCESS)
-            {
-                SPDLOG_WARN("MindVision config: CameraSetAnalogGain returned {}", status);
-            }
-
-            return true;
-        }
 #endif
     } // namespace
 
@@ -524,8 +441,18 @@ namespace backend::services
                 return false;
             }
 
-            const bool ok = applyMindVisionJsonToCamera(hCamera, jsonPath, errorOut);
+            const auto result = ::backend::camera::mindvision::applyJsonFileToCamera(hCamera, jsonPath);
             CameraUnInit(hCamera);
+            if (!result.ok)
+            {
+                setErr(result.error);
+            }
+            for (const auto &warning : result.warnings)
+            {
+                SPDLOG_WARN("CameraControlService: {}", warning);
+                setErr(warning);
+            }
+            const bool ok = result.ok;
             if (ok)
             {
                 SPDLOG_INFO("CameraControlService: MindVision config applied to camera index {} from {}", cameraIndex, jsonPath);

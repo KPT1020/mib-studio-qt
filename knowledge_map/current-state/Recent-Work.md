@@ -5,6 +5,26 @@
 
 ## Features shipped
 
+- **EGrabber ↔ MindVision functional parity sweep** (2026-07-24) — the
+  MindVision path is now feature-equivalent to EGrabber for the app's
+  camera-facing flows. (1) Config apply unified: both
+  `MindVisionCamera::start()` and the runtime apply route through the shared
+  `applyJsonFileToCamera` (`MindVisionConfigApply.{h,cpp}`), killing the
+  drifted 7-field subset in [[../services/CameraControlService]]; new
+  `trigger_output_index` config field selects the sort-pulse GPIO. (2)
+  `checkDeviceHealth` no longer steals frames (probe grab →
+  `CameraGetFrameStatistic`). (3) A "MindVision config (JSON)" editor tab in
+  [[../frontend/ConfigTabs]] plus a `MainWindow::onTabChanged` branch gives
+  MindVision the same edit/apply/auto-apply-per-tab flow the EGrabber JS
+  script has. (4) `pollStats` reports windowed rates via the new
+  `WindowedRate` helper instead of a since-start average. (5) Trigger pulses
+  use a dedicated `triggerMutex_` (mirroring [[../camera/EGrabberCamera]]) so
+  they never queue behind image processing or stop() teardown. Tests:
+  `backend.mindvision_config_apply`, `backend.windowed_rate`, extended
+  `backend.mindvision_config` / `backend.mindvision_selection_state`,
+  hardware-rig `hardware.mindvision_apply`. See [[../camera/MindVisionCamera]]
+  for the full gotcha list (buffer knobs, timestamp units, no DeviceReset).
+
 - **Latency & target-identification-loss metrics** (2026-07-21, issue #292) —
   quantifies pipeline latency and lost sort targets. New counted losses:
   [[../services/TriggerService]] no-camera / set-failed pulse drops

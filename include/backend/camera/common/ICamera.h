@@ -50,6 +50,9 @@ namespace camera::common
         /**
          * Configure a digital output line for trigger output.
          * No-op for cameras that don't support hardware trigger.
+         * lineSelector is vendor-interpreted: EGrabber treats it as a GenICam
+         * line name (e.g. "TTLIO12"); MindVision ignores it and uses the GPIO
+         * index from its JSON config (trigger_output_index).
          */
         virtual void configureTriggerOutput(const std::string& lineSelector) { (void)lineSelector; }
 

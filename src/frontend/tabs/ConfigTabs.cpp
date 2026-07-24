@@ -280,10 +280,52 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         connect(profilesIncludeJsCheck_, &QCheckBox::toggled, this, &ConfigTabs::onIncludeJsToggled);
     }
 
+    // MindVision JSON config tab — parity with the EGrabber script tab: edit,
+    // save, and apply the JSON to a selected MindVision camera at runtime.
+    {
+        auto* page = new QWidget(this);
+        auto* v = new QVBoxLayout(page);
+        mvJsonEdit_ = new QPlainTextEdit(page);
+        mvJsonEdit_->setWordWrapMode(QTextOption::NoWrap);
+        auto* row = new QHBoxLayout();
+        mvJsonReloadBtn_ = new QPushButton(tr("Reset"), page);
+        mvJsonSaveBtn_ = new QPushButton(tr("Save"), page);
+        mvJsonApplyBtn_ = new QPushButton(tr("Apply to Camera"), page);
+        mvJsonBrowseBtn_ = new QPushButton(tr("Browse..."), page);
+        mvJsonClearBtn_ = new QPushButton(tr("Clear"), page);
+        mvJsonPathLabel_ = new QLabel(page);
+        mvJsonUnsavedLabel_ = new QLabel(page);
+        mvJsonUnsavedLabel_->setText(tr("Unsaved changes – click Save to apply."));
+        mvJsonUnsavedLabel_->setVisible(false);
+        mvJsonUnsavedLabel_->setStyleSheet("color: #d17a00;");
+        row->addWidget(mvJsonReloadBtn_);
+        row->addWidget(mvJsonSaveBtn_);
+        row->addWidget(mvJsonApplyBtn_);
+        row->addWidget(mvJsonBrowseBtn_);
+        row->addWidget(mvJsonClearBtn_);
+        row->addStretch(1);
+        row->addWidget(mvJsonPathLabel_);
+        row->addSpacing(8);
+        row->addWidget(mvJsonUnsavedLabel_);
+        v->addLayout(row);
+        v->addWidget(mvJsonEdit_, 1);
+        page->setLayout(v);
+        tabs_->addTab(page, tr("MindVision config (JSON)"));
+        connect(mvJsonReloadBtn_, &QPushButton::clicked, this, &ConfigTabs::onReloadMvJson);
+        connect(mvJsonSaveBtn_, &QPushButton::clicked, this, &ConfigTabs::onSaveMvJson);
+        connect(mvJsonApplyBtn_, &QPushButton::clicked, this, &ConfigTabs::onApplyMvJson);
+        connect(mvJsonBrowseBtn_, &QPushButton::clicked, this, &ConfigTabs::onBrowseMvJson);
+        connect(mvJsonClearBtn_, &QPushButton::clicked, this, &ConfigTabs::onClearMvJson);
+        connect(mvJsonEdit_, &QPlainTextEdit::textChanged, this, [this]() {
+            if (mvJsonUnsavedLabel_) mvJsonUnsavedLabel_->setVisible(true);
+        });
+    }
+
     layout->addWidget(tabs_, 1);
 
     onReloadJson();
     onReloadJs();
+    onReloadMvJson();
 
     // Profiles: populate and wire
     refreshProfilesList();
@@ -316,6 +358,13 @@ QString ConfigTabs::currentJsPath() const {
     const QString ext = s.value("Config/ExternalCameraScriptPath").toString().trimmed();
     if (!ext.isEmpty()) return ext;
     return defaultJsPath();
+}
+
+QString ConfigTabs::currentMindVisionJsonPath() const {
+    QSettings s;
+    const QString ext = s.value("Config/ExternalMindVisionConfigPath").toString().trimmed();
+    if (!ext.isEmpty()) return ext;
+    return defaultMindVisionJsonPath();
 }
 
 void ConfigTabs::clearJsonSyncIndicators()
@@ -508,6 +557,115 @@ void ConfigTabs::onApplyJs() {
         return;
     }
     QMessageBox::information(this, tr("Apply Camera Script"), tr("Applied to camera. Capture remains stopped."));
+}
+
+void ConfigTabs::onReloadMvJson() {
+    const QString path = currentMindVisionJsonPath();
+    // No packaged default resource exists for the MindVision JSON; seed the
+    // default file with the parser's defaults so the editor starts editable.
+    if (path == defaultMindVisionJsonPath() && !QFileInfo::exists(path)) {
+        static const char* kTemplate = R"({
+    "width": 512,
+    "height": 96,
+    "offset_x": 0,
+    "offset_y": 0,
+    "exposure_time_us": 3000.0,
+    "trigger_mode": 0,
+    "analog_gain": 1,
+    "auto_exposure_enabled": false,
+    "ae_target_brightness": 100,
+    "gamma": 100,
+    "contrast": 100,
+    "sharpness": 0,
+    "frame_speed": 2,
+    "flip_horizontal": false,
+    "flip_vertical": false,
+    "strobe_mode": 0,
+    "strobe_pulse_width_us": 500,
+    "strobe_delay_us": 0,
+    "strobe_polarity": 1,
+    "trigger_output_index": 1
+}
+)";
+        QString err;
+        if (!writeTextFile(path, QString::fromUtf8(kTemplate), &err)) {
+            SPDLOG_WARN("Failed to seed default mindvisionConfig.json at {}: {}",
+                        path.toStdString(), err.toStdString());
+        }
+    }
+    QString err;
+    if (!loadFileToEditor(path, mvJsonEdit_, &err)) {
+        SPDLOG_WARN("Failed to load MindVision config from {}: {}", path.toStdString(), err.toStdString());
+        QMessageBox::warning(this, tr("Reset MindVision config"), tr("Failed to load: %1").arg(err));
+        return;
+    }
+    mvJsonPathLabel_->setText(path);
+    if (mvJsonUnsavedLabel_) mvJsonUnsavedLabel_->setVisible(false);
+}
+
+void ConfigTabs::onSaveMvJson() {
+    const QString path = currentMindVisionJsonPath();
+    QString err;
+    if (!saveEditorToFile(mvJsonEdit_, path, &err)) {
+        SPDLOG_ERROR("Failed to save MindVision config to {}: {}", path.toStdString(), err.toStdString());
+        QMessageBox::warning(this, tr("Save MindVision config"), tr("Failed to save: %1").arg(err));
+        return;
+    }
+    QMessageBox::information(this, tr("Save MindVision config"), tr("Saved."));
+    if (mvJsonUnsavedLabel_) mvJsonUnsavedLabel_->setVisible(false);
+}
+
+void ConfigTabs::onApplyMvJson() {
+    const QString path = currentMindVisionJsonPath();
+    // Always save first so the latest editor content is applied.
+    {
+        QString saveErr;
+        if (!saveEditorToFile(mvJsonEdit_, path, &saveErr)) {
+            QMessageBox::warning(this, tr("Apply MindVision Config"),
+                                 tr("Failed to save config: %1").arg(saveErr));
+            return;
+        }
+        if (mvJsonUnsavedLabel_) mvJsonUnsavedLabel_->setVisible(false);
+    }
+
+    std::string backendErr;
+    if (!backend_.applyMindVisionConfigFromFile(path.toStdString(), &backendErr)) {
+        QMessageBox::warning(this,
+                             tr("Apply MindVision Config"),
+                             tr("Failed to apply config: %1").arg(QString::fromStdString(backendErr)));
+        return;
+    }
+    QMessageBox::information(this, tr("Apply MindVision Config"),
+                             tr("Applied to camera. Capture remains stopped."));
+}
+
+void ConfigTabs::onBrowseMvJson() {
+    const QString current = currentMindVisionJsonPath();
+    const QString initialDir = QFileInfo(current).absolutePath();
+    const QString selected = QFileDialog::getOpenFileName(this,
+                                                          tr("Select MindVision config (JSON)"),
+                                                          initialDir,
+                                                          tr("JSON files (*.json);;All Files (*.*)"));
+    if (selected.isEmpty()) return;
+    {
+        QSettings s;
+        s.setValue("Config/ExternalMindVisionConfigPath", selected);
+    }
+    SPDLOG_INFO("External MindVision config set to {}", selected.toStdString());
+    QString err;
+    if (!loadFileToEditor(selected, mvJsonEdit_, &err)) {
+        SPDLOG_WARN("Failed to load MindVision config from {}: {}", selected.toStdString(), err.toStdString());
+        QMessageBox::warning(this, tr("MindVision config"), tr("Failed to load: %1").arg(err));
+        return;
+    }
+    mvJsonPathLabel_->setText(selected);
+    if (mvJsonUnsavedLabel_) mvJsonUnsavedLabel_->setVisible(false);
+}
+
+void ConfigTabs::onClearMvJson() {
+    QSettings s;
+    s.remove("Config/ExternalMindVisionConfigPath");
+    onReloadMvJson();
 }
 
 void ConfigTabs::onBrowseJson() {

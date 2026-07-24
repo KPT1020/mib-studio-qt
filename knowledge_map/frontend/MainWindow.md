@@ -33,8 +33,11 @@
   [[ProcessingCoreDialog]] before capture begins. A restore/pin failure is
   visible in the status bar and experiment start remains blocked.
 
-- EGrabber JavaScript camera scripts are skipped during `onTabChanged` when
-  a MindVision camera is selected.
+- `onTabChanged` applies the per-tab camera config for whichever vendor is
+  selected: the EGrabber JS script ([[OverviewTab]]/[[ConfigTabs]]
+  `currentJsPath()`), or — when a MindVision camera is selected — the per-tab
+  MindVision JSON (`currentMindVisionJsonPath()`), each followed by a capture
+  restart if it was running.
 
 ## Composition
 

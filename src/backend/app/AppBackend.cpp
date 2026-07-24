@@ -844,7 +844,13 @@ namespace backend
         if (selectedIfIndex_ < 0 || selectedDevIndex_ < 0)
         {
             if (errorOut)
-                *errorOut = "No hardware camera selected";
+            {
+                // The MVSDK has no DeviceReset equivalent; recovery is
+                // reselecting the camera in the Connect tab.
+                *errorOut = selectedMvCameraIndex_ >= 0
+                    ? "Device reset is only supported for EGrabber cameras"
+                    : "No hardware camera selected";
+            }
             return false;
         }
         // Ensure capture thread is stopped
