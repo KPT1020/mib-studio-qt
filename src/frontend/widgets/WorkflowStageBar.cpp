@@ -41,6 +41,10 @@ const char* statusColor(WorkflowStageStatus status)
 WorkflowStageBar::WorkflowStageBar(QWidget* parent)
     : QWidget(parent)
 {
+    // The bar is a fixed-height strip: without this it shares vertical space
+    // equally with the tab area when inserted into the central layout.
+    setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+
     auto* layout = new QHBoxLayout(this);
     layout->setContentsMargins(6, 4, 6, 4);
     layout->setSpacing(4);
@@ -52,7 +56,7 @@ WorkflowStageBar::WorkflowStageBar(QWidget* parent)
         auto* button = new QToolButton(this);
         button->setCheckable(true);
         button->setToolButtonStyle(Qt::ToolButtonTextOnly);
-        button->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+        button->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
         button->setFocusPolicy(Qt::StrongFocus);
         button->setText(stageTitle(i));
         stageButtons_[static_cast<size_t>(i)] = button;
