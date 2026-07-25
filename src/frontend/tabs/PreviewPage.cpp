@@ -65,6 +65,13 @@ namespace frontend
         delete ui;
     }
 
+    void PreviewPage::setDashboardWidget(QWidget* widget) {
+        if (!widget) {
+            return;
+        }
+        ui->verticalLayout->insertWidget(0, widget);
+    }
+
     void PreviewPage::setupOverlayWidget() {
         // Top: Playback panel with centered Play/Stop overlay
         auto *stacked = new QStackedLayout(ui->overlayContainer);

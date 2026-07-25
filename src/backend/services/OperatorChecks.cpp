@@ -136,6 +136,90 @@ bool preflightPassed(const std::vector<CheckItem> &items)
     return true;
 }
 
+std::vector<CheckItem> evaluateAlignmentQuality(const AlignmentFacts &facts)
+{
+    std::vector<CheckItem> items;
+
+    if (facts.captureRunning && facts.cameraFps > 0.0)
+    {
+        std::ostringstream detail;
+        detail.precision(0);
+        detail << std::fixed << "Streaming at " << facts.cameraFps << " fps.";
+        items.push_back(makeItem("stream", "Live image", CheckStatus::Passed,
+                                 detail.str(), {}));
+    }
+    else if (facts.captureRunning)
+    {
+        items.push_back(makeItem("stream", "Live image", CheckStatus::Warning,
+                                 "Capture is running but no frames are arriving.",
+                                 "Check the camera connection and transport."));
+    }
+    else
+    {
+        items.push_back(makeItem("stream", "Live image", CheckStatus::Failed,
+                                 "The camera is not running.",
+                                 "Start the camera to view the live image."));
+    }
+
+    if (facts.roiValid)
+    {
+        std::ostringstream detail;
+        detail << facts.roiW << " x " << facts.roiH << " px.";
+        items.push_back(makeItem("roi", "ROI", CheckStatus::Passed, detail.str(), {}));
+    }
+    else
+    {
+        items.push_back(makeItem("roi", "ROI", CheckStatus::Failed,
+                                 "The ROI is empty or invalid.",
+                                 "Drag a valid ROI on the live image."));
+    }
+
+    items.push_back(facts.backgroundReady
+                        ? makeItem("background", "Background reference",
+                                   CheckStatus::Passed, "Background image captured.", {})
+                        : makeItem("background", "Background reference",
+                                   CheckStatus::Warning,
+                                   "No background reference captured yet.",
+                                   "Capture or set a background in the Preview page.",
+                                   true));
+
+    if (!facts.autofocusAvailable)
+    {
+        items.push_back(makeItem("focus", "Focus", CheckStatus::NotRequired,
+                                 "Autofocus service not available in this session.", {}));
+    }
+    else if (facts.focusRingRatio <= 0.0)
+    {
+        items.push_back(makeItem("focus", "Focus", CheckStatus::Warning,
+                                 "No focus measurement yet.",
+                                 "Start the camera with cells in view, or run Auto Focus."));
+    }
+    else if (facts.focusAgeMs > 5000.0)
+    {
+        items.push_back(makeItem("focus", "Focus", CheckStatus::Warning,
+                                 "Focus measurement is stale.",
+                                 "Verify the live image before trusting the focus score."));
+    }
+    else
+    {
+        std::ostringstream detail;
+        detail.precision(3);
+        detail << std::fixed << "Ring width " << facts.focusRingRatio << ".";
+        items.push_back(makeItem("focus", "Focus", CheckStatus::Passed, detail.str(), {}));
+    }
+
+    items.push_back(facts.pixelToMicron > 0.0
+                        ? makeItem("calibration", "Pixel-to-micron calibration",
+                                   CheckStatus::Passed, "Factor set.", {})
+                        : makeItem("calibration", "Pixel-to-micron calibration",
+                                   CheckStatus::Warning,
+                                   "No calibration factor configured.",
+                                   "Set it in Settings > Pixel to Micron Conversion.",
+                                   true));
+
+    return items;
+}
+
 ReadinessSnapshot evaluateReadiness(const ReadinessFacts &facts)
 {
     ReadinessSnapshot snapshot;

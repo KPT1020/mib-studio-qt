@@ -1,7 +1,9 @@
 # PreviewPage
 
 > Central workspace widget: live preview canvas on the left, playback scrub
-> and overlays below, [[ConfigTabs]] docked on the right.
+> and overlays in the top splitter pane, [[ConfigTabs]] in the bottom
+> pane, and the [[RunDashboardStrip]] (UX-7) installed above the image
+> via `setDashboardWidget()`.
 
 **Source:** `src/frontend/tabs/PreviewPage.cpp`,
 `include/frontend/tabs/PreviewPage.h`

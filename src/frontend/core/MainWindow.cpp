@@ -54,8 +54,11 @@
 #include "frontend/utils/StatisticsPanel.h"
 #include "frontend/widgets/WorkflowStageBar.h"
 #include "frontend/widgets/ChecklistPanel.h"
+#include "frontend/widgets/ContextBar.h"
+#include "frontend/widgets/RunDashboardStrip.h"
 #include "frontend/dialogs/ReadinessDialog.h"
 #include "backend/services/OperatorChecks.h"
+#include <QInputDialog>
 #include <QGroupBox>
 #include <QStorageInfo>
 #include <spdlog/spdlog.h>
@@ -457,6 +460,12 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         }
         refreshWorkflowState();
     });
+    // Persistent active-context bar (UX-8) directly under the stage bar.
+    contextBar_ = new frontend::ContextBar(ui->centralwidget);
+    ui->verticalLayout->insertWidget(1, contextBar_);
+    connect(contextBar_, &frontend::ContextBar::segmentActivated,
+            this, &MainWindow::handleContextSegment);
+
     workflowTimer_ = new QTimer(this);
     workflowTimer_->setInterval(500);
     connect(workflowTimer_, &QTimer::timeout, this, &MainWindow::refreshWorkflowState);
@@ -514,6 +523,34 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
             }
             profileApplied_ = false;
             profileVerified_ = false;
+        });
+    }
+
+    // Integrated dashboard strip (UX-7) above the live image on Preview.
+    dashboardStrip_ = new frontend::RunDashboardStrip(previewPage);
+    previewPage->setDashboardWidget(dashboardStrip_);
+
+    // Alignment quality signals (UX-4) on the Overview tab.
+    if (overviewTab_ && overviewTab_->layout()) {
+        auto* alignmentBox = new QGroupBox(tr("Alignment quality"), overviewTab_);
+        auto* alignmentLayout = new QVBoxLayout(alignmentBox);
+        alignmentPanel_ = new frontend::ChecklistPanel(alignmentBox);
+        alignmentLayout->addWidget(alignmentPanel_);
+        overviewTab_->layout()->addWidget(alignmentBox);
+        connect(alignmentPanel_, &frontend::ChecklistPanel::recoveryRequested,
+                this, [this](const QString& id) {
+            if (id == QLatin1String("calibration")) {
+                ui->conversionFactorAct->trigger();
+            } else if (id == QLatin1String("stream")) {
+                onStartCapture();
+            } else if (id == QLatin1String("background")) {
+                // Background capture lives on the Preview page.
+                if (ui->tabs && experimentTabs_) {
+                    ui->tabs->setCurrentWidget(experimentTabs_);
+                    experimentTabs_->setCurrentIndex(0);
+                }
+            }
+            refreshWorkflowState();
         });
     }
 
@@ -1366,12 +1403,130 @@ void MainWindow::refreshWorkflowState()
     workflowBar_->setStageNavigationEnabled(1, !experimentActive_, lockReason);
     workflowBar_->setStageNavigationEnabled(3, !experimentActive_, lockReason);
 
-    workflowBar_->updateSnapshot(backend_.workflow().evaluate(facts));
+    const auto snapshot = backend_.workflow().evaluate(facts);
+    workflowBar_->updateSnapshot(snapshot);
+    lastRecommendedStage_ = static_cast<int>(snapshot.recommendedStage);
 
     // Preflight checklist (UX-3) shares the same facts.
     if (preflightPanel_) {
         preflightPanel_->setItems(
             backend::services::checks::evaluatePreflight(collectPreflightFacts()));
+    }
+
+    // Alignment quality signals (UX-4).
+    if (alignmentPanel_) {
+        backend::services::checks::AlignmentFacts alignment;
+        alignment.captureRunning = facts.captureRunning;
+        alignment.cameraFps =
+            static_cast<double>(backend_.capture().stats().lastFrameRate.load());
+        alignment.roiValid = facts.roiValid;
+        if (overviewTab_) {
+            alignment.roiW = overviewTab_->roiWidth();
+            alignment.roiH = overviewTab_->roiHeight();
+        }
+        alignment.backgroundReady =
+            !backend_.processing().getRealtimeBackgroundGray().empty();
+        alignment.autofocusAvailable = !isServiceDisabledAtBoot(QStringLiteral("autofocus"));
+        alignment.focusRingRatio = backend_.autofocus().getMedianRingRatio();
+        alignment.focusAgeMs =
+            (backend::Tools::getTimestamp() -
+             backend_.autofocus().getLastRingRatioUpdateUs()) / 1000.0;
+        alignment.pixelToMicron = backend_.processing().getPixelToMicronFactor();
+        alignmentPanel_->setItems(
+            backend::services::checks::evaluateAlignmentQuality(alignment));
+    }
+
+    // Persistent context bar (UX-8).
+    if (contextBar_) {
+        frontend::ContextBar::Data context;
+        context.profileName = profileName_;
+        context.profileSelected = profileSelected_;
+        context.profileDirty = profileDirty_;
+        context.profileIncompatible = profileIncompatible_;
+        context.profileApplied = profileApplied_;
+        context.profileVerified = profileVerified_;
+        context.cameraLabel = QString::fromStdString(backend_.selectedCameraLabel());
+        context.cameraConfigured = facts.cameraConfigured;
+        context.mockCamera = qgetenv("MIB_CAMERA_MODE") == QByteArrayLiteral("mock");
+        context.captureRunning = facts.captureRunning;
+        context.pixelToMicron = backend_.processing().getPixelToMicronFactor();
+        context.operatorName =
+            QSettings().value(QStringLiteral("Operator/Name")).toString();
+        context.storageWritable = !storageKnown_ || storageWritable_;
+        context.storageFreeGb = storageFreeGb_;
+        context.experimentActive = experimentActive_;
+        const auto& recommended =
+            backend::services::stageState(snapshot, snapshot.recommendedStage);
+        context.blocked =
+            recommended.status == backend::services::WorkflowStageStatus::NeedsAttention;
+        int warnings = 0;
+        for (const auto& stage : snapshot.stages) {
+            if (stage.status == backend::services::WorkflowStageStatus::NeedsAttention) {
+                ++warnings;
+            }
+        }
+        context.warningCount = warnings;
+        context.statusText = QString::fromStdString(snapshot.recommendedAction);
+        contextBar_->updateData(context);
+    }
+
+    // Integrated dashboard strip (UX-7).
+    if (dashboardStrip_) {
+        frontend::RunDashboardStrip::Data dash;
+        dash.experimentActive = experimentActive_;
+        dash.flushInProgress = flushInProgress_;
+        dash.saveFailed = !lastExperimentSaveOk_;
+        dash.captureRunning = facts.captureRunning;
+        if (experimentActive_ && experimentStartTimeNs_ > 0) {
+            const uint64_t nowNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                       std::chrono::system_clock::now().time_since_epoch())
+                                       .count();
+            dash.elapsedSeconds = static_cast<double>(nowNs - experimentStartTimeNs_) / 1e9;
+        }
+        dash.cameraFps =
+            static_cast<double>(backend_.capture().stats().lastFrameRate.load());
+        dash.validFps = backend_.processing().getValidFps1s();
+        dash.invalidFps = backend_.processing().getInvalidFps1s();
+        dash.totalValidFlushed = backend_.processing().getTotalValidFlushed();
+        const auto buffered = backend_.processing().getBufferedFrameCounts();
+        dash.validBuffered = buffered.valid;
+        dash.invalidBuffered = buffered.invalid;
+        dash.metricAgeMs = (backend::Tools::getTimestamp() -
+                            backend_.processing().getAlgoAvgUs1sUpdatedUs()) / 1000.0;
+        dash.storageFreeGb = storageFreeGb_;
+        dash.storageWritable = !storageKnown_ || storageWritable_;
+        dashboardStrip_->updateData(dash);
+    }
+}
+
+void MainWindow::handleContextSegment(const QString& segmentId)
+{
+    if (segmentId == QLatin1String("profile")) {
+        ui->profilesAct->trigger();
+    } else if (segmentId == QLatin1String("camera")) {
+        if (ui->tabs) ui->tabs->setCurrentIndex(0);
+    } else if (segmentId == QLatin1String("calibration")) {
+        ui->conversionFactorAct->trigger();
+    } else if (segmentId == QLatin1String("operator")) {
+        bool ok = false;
+        const QString current =
+            QSettings().value(QStringLiteral("Operator/Name")).toString();
+        const QString name = QInputDialog::getText(
+            this, tr("Operator"), tr("Operator name (recorded in run provenance):"),
+            QLineEdit::Normal, current, &ok);
+        if (ok) {
+            QSettings().setValue(QStringLiteral("Operator/Name"), name.trimmed());
+            refreshWorkflowState();
+        }
+    } else if (segmentId == QLatin1String("storage")) {
+        ui->openDataFolderAct->trigger();
+    } else if (segmentId == QLatin1String("status")) {
+        // Jump to the recommended stage (stage index == tab index).
+        if (ui->tabs && lastRecommendedStage_ >= 0 &&
+            lastRecommendedStage_ < ui->tabs->count() &&
+            ui->tabs->isTabEnabled(lastRecommendedStage_)) {
+            ui->tabs->setCurrentIndex(lastRecommendedStage_);
+        }
     }
 }
 

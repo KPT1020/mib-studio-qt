@@ -22,6 +22,10 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/include/frontend/widgets/WorkflowStageBar.h
     ${PROJECT_SOURCE_DIR}/src/frontend/widgets/ChecklistPanel.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/widgets/ChecklistPanel.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/widgets/ContextBar.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/widgets/ContextBar.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/widgets/RunDashboardStrip.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/widgets/RunDashboardStrip.h
     ${PROJECT_SOURCE_DIR}/resources/ui/ExperimentMonitoringTab.ui
     ${PROJECT_SOURCE_DIR}/src/frontend/tabs/HdfReviewTab.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/tabs/HdfReviewTab.h

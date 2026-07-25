@@ -67,6 +67,15 @@
   routes Fix… buttons (camera → auto-connect, core → Processing Core
   dialog, storage → open data folder, profile → Profiles surface).
   Profile status (UX-2) is cached from `ConfigTabs::profileStatusChanged`.
+- **Alignment quality (UX-4):** a second [[ChecklistPanel]] ("Alignment
+  quality") appended to the Overview tab, fed from
+  `checks::evaluateAlignmentQuality` (live-image fps, ROI, background,
+  focus ring width + staleness, calibration).
+- **Context bar (UX-8):** [[ContextBar]] inserted under the stage bar;
+  `handleContextSegment(id)` routes segment clicks.
+- **Dashboard strip (UX-7):** [[RunDashboardStrip]] installed on
+  [[PreviewPage]]; updated with the other surfaces in
+  `refreshWorkflowState()`.
 - `QFutureWatcher<size_t> flushWatcher_` — used to await the final HDF5
   flush on experiment stop without blocking the UI thread.
 - The nested Experiment pages wire Monitoring apply into

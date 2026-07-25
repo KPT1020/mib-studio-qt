@@ -28,6 +28,10 @@ public:
     ConfigTabs* getConfigTabs() const { return configTabs_; }
     AppConfigWatcher* getConfigWatcher() const { return configWatcher_; }
 
+    // Integrated Experiment dashboard (UX-7): MainWindow installs the run
+    // header/metrics strip above the live image.
+    void setDashboardWidget(QWidget* widget);
+
 private slots:
     void onPlay();
     void onStop();

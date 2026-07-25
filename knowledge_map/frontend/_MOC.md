@@ -20,8 +20,12 @@
 ## Workflow
 - [[WorkflowStageBar]] — guided four-stage workflow bar above the tabs
   (UX-1); renders [[../services/WorkflowStateService]] snapshots
-- [[ChecklistPanel]] — check-item renderer for preflight and the
-  readiness gate ([[../services/OperatorChecks]])
+- [[ChecklistPanel]] — check-item renderer for preflight, alignment
+  quality, and the readiness gate ([[../services/OperatorChecks]])
+- [[ContextBar]] — persistent profile/camera/calibration/operator/
+  storage/status context (UX-8)
+- [[RunDashboardStrip]] — run header + key metrics + alerts above the
+  live image (UX-7)
 
 ## Support
 - [[Dialogs]] — settings dialogs (Mock, Processing, Monitoring, Buffer save,

@@ -116,6 +116,51 @@ int main()
                    "template is labeled unvalidated");
     }
 
+    // --- Alignment quality (UX-4) ------------------------------------------
+    {
+        AlignmentFacts facts;
+        facts.captureRunning = true;
+        facts.cameraFps = 30.0;
+        facts.roiValid = true;
+        facts.roiW = 512;
+        facts.roiH = 96;
+        facts.backgroundReady = true;
+        facts.autofocusAvailable = true;
+        facts.focusRingRatio = 0.42;
+        facts.focusAgeMs = 100.0;
+        facts.pixelToMicron = 0.4886;
+        const auto items = evaluateAlignmentQuality(facts);
+        for (const auto &item : items)
+        {
+            MIB_EXPECT(item.status == CheckStatus::Passed,
+                       "healthy alignment passes every signal (" + item.id + ")");
+        }
+
+        AlignmentFacts stale = facts;
+        stale.focusAgeMs = 60000.0;
+        MIB_EXPECT(find(evaluateAlignmentQuality(stale), "focus")->status ==
+                       CheckStatus::Warning,
+                   "stale focus measurement warns instead of staying green");
+
+        AlignmentFacts noAf = facts;
+        noAf.autofocusAvailable = false;
+        MIB_EXPECT(find(evaluateAlignmentQuality(noAf), "focus")->status ==
+                       CheckStatus::NotRequired,
+                   "missing autofocus reports Not required, not a failure");
+
+        AlignmentFacts stopped = facts;
+        stopped.captureRunning = false;
+        MIB_EXPECT(find(evaluateAlignmentQuality(stopped), "stream")->status ==
+                       CheckStatus::Failed,
+                   "stopped camera fails the live-image signal");
+
+        AlignmentFacts silent = facts;
+        silent.cameraFps = 0.0;
+        MIB_EXPECT(find(evaluateAlignmentQuality(silent), "stream")->status ==
+                       CheckStatus::Warning,
+                   "running capture with no frames warns");
+    }
+
     // --- Readiness: healthy facts produce no blocks -----------------------
     {
         const auto snapshot = evaluateReadiness(healthyReadiness());

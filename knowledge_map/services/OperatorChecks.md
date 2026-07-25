@@ -16,6 +16,10 @@
   checks as `Passed / Warning / Failed / NotRequired`, each with a
   human-readable detail and recovery action. `preflightPassed()` = no
   `Failed` items (warnings allowed).
+- `evaluateAlignmentQuality(AlignmentFacts)` — UX-4 signals for the
+  Camera & Alignment stage: live-image stream health, ROI, background
+  reference, focus ring width (Not required when autofocus is absent;
+  Warning when the measurement is missing or stale), calibration.
 - `evaluateReadiness(ReadinessFacts)` — the authoritative pre-start
   checklist: preflight facts plus capture running, ROI, operator
   confirmations, background, calibration, profile dirty/applied/verified,

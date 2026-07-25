@@ -27,6 +27,8 @@ namespace frontend { class WorkflowStageBar; }
 namespace frontend { class HdfReviewTab; }
 namespace frontend { class ChecklistPanel; }
 namespace frontend { class ConfigTabs; }
+namespace frontend { class ContextBar; }
+namespace frontend { class RunDashboardStrip; }
 namespace Ui { class MainWindow; }
 
 class MainWindow : public QMainWindow {
@@ -59,6 +61,7 @@ private:
     void handlePreflightRecovery(const QString& checkId);
     // Shared fact collection for the preflight checklist and readiness gate.
     backend::services::checks::PreflightFacts collectPreflightFacts() const;
+    void handleContextSegment(const QString& segmentId);
     void startExperimentServices();
     void stopExperimentServices();
     void setupCornerWidgets();
@@ -76,6 +79,9 @@ private:
     frontend::HdfReviewTab* hdfReviewTab_ = nullptr;
     frontend::WorkflowStageBar* workflowBar_ = nullptr;
     frontend::ChecklistPanel* preflightPanel_ = nullptr;
+    frontend::ChecklistPanel* alignmentPanel_ = nullptr;
+    frontend::ContextBar* contextBar_ = nullptr;
+    frontend::RunDashboardStrip* dashboardStrip_ = nullptr;
     frontend::ConfigTabs* configTabs_ = nullptr;
     QTimer* workflowTimer_ = nullptr;
     QAction* processingCoreAct_ = nullptr;
@@ -107,6 +113,7 @@ private:
     bool storageWritable_{true};
     double storageFreeGb_{0.0};
     int storageProbeTick_{0};
+    int lastRecommendedStage_{0};
     bool flushInProgress_{false};
     bool restoreRealtimeModeAfterExperiment_{false};
     int realtimeModeBeforeExperiment_{0};

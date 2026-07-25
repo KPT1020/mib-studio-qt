@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Alignment quality, integrated dashboard strip, persistent context bar
+  (UX-4/UX-7/UX-8)** (2026-07-25, issues #308/#311/#312, epic #304) —
+  Overview gains an "Alignment quality" [[../frontend/ChecklistPanel]]
+  (`evaluateAlignmentQuality`: stream health, ROI, background, focus ring
+  width with staleness, calibration). [[../frontend/PreviewPage]] hosts
+  the new [[../frontend/RunDashboardStrip]] (state chip, elapsed, rates,
+  saved/buffered, `[metrics stale]` marking, persistent alerts) so
+  routine runs need no Monitoring sub-tab switch. The new
+  [[../frontend/ContextBar]] under the stage bar keeps profile, camera,
+  calibration, operator, storage, and readiness status visible on every
+  stage with click-through navigation.
 - **Apply & Verify profile transaction + experiment readiness gate
   (UX-5/UX-6)** (2026-07-25, issues #309/#310, epic #304) —
   [[../frontend/ConfigTabs]] gains `Apply && Verify` (one-transaction

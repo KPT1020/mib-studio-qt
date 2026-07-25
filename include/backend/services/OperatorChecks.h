@@ -59,6 +59,30 @@ namespace backend::services::checks
     bool preflightPassed(const std::vector<CheckItem> &items);
 
     // ------------------------------------------------------------------
+    // Camera & Alignment quality signals (UX-4, issue #308)
+    // ------------------------------------------------------------------
+
+    struct AlignmentFacts
+    {
+        bool captureRunning = false;
+        double cameraFps = 0.0;
+
+        bool roiValid = false;
+        int roiW = 0;
+        int roiH = 0;
+
+        bool backgroundReady = false;
+
+        bool autofocusAvailable = false; // service present/enabled
+        double focusRingRatio = 0.0;     // 0 = no measurement yet
+        double focusAgeMs = 0.0;         // staleness of the measurement
+
+        double pixelToMicron = 0.0;
+    };
+
+    std::vector<CheckItem> evaluateAlignmentQuality(const AlignmentFacts &facts);
+
+    // ------------------------------------------------------------------
     // Experiment readiness gate (issue #310)
     // ------------------------------------------------------------------
 
