@@ -91,6 +91,14 @@ private slots:
     void onSortTrigger();
     void onPeriodicTriggerToggled(bool checked);
 
+public:
+    // UX-9 (#313): trigger test controls are commissioning-only. Operator
+    // mode (the default) hides them; leaving commissioning mode also stops
+    // a running periodic test.
+    void setCommissioningControlsVisible(bool visible);
+
+private:
+
 protected:
     void showEvent(QShowEvent* event) override;
     void hideEvent(QHideEvent* event) override;

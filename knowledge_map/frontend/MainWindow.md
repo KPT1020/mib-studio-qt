@@ -76,6 +76,14 @@
 - **Dashboard strip (UX-7):** [[RunDashboardStrip]] installed on
   [[PreviewPage]]; updated with the other surfaces in
   `refreshWorkflowState()`.
+- **Commissioning mode (UX-9):** `setCommissioningMode(enabled,
+  confirmed)` (public, `Q_INVOKABLE` for the screenshot tour). Checkable
+  Settings action with a confirmation prompt; a persistent amber banner
+  (with "Exit to Operator mode") tops the window while active; the
+  [[ExperimentMonitoringTab]] trigger controls follow the mode. Entering
+  is refused during an active experiment and starting an experiment
+  forces Operator mode. Not persisted — every session starts in Operator
+  mode.
 - `QFutureWatcher<size_t> flushWatcher_` — used to await the final HDF5
   flush on experiment stop without blocking the UI thread.
 - The nested Experiment pages wire Monitoring apply into

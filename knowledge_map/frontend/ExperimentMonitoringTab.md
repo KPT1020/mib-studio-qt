@@ -23,7 +23,11 @@
   `setMonitoringActive(false)`. Monitoring rings only fill while this tab is
   visible — when hidden, the realtime loop skips the per-object frame copies
   entirely (see [[../services/ProcessingService]] "Monitoring rings").
-- **Top-row trigger controls:**
+- **Top-row trigger controls** — commissioning-only since UX-9 (#313):
+  hidden by default (`setCommissioningControlsVisible(false)` in the
+  constructor); [[MainWindow]] shows them only in Service/Commissioning
+  mode. Leaving the mode unchecks a running periodic test, and the manual
+  pulse now asks for confirmation (target + pulse duration) before firing.
   - `sortTriggerBtn` — single manual pulse; calls
     `backend_.trigger().onTargetGroupResult(services::TargetGroupSignal{.isTargetGroup=true})`.
   - `triggerDurationSpin` — pulse width in µs

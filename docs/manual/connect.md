@@ -6,6 +6,14 @@ Connecting *selects* a camera — frames only start streaming when you press
 
 ![Connect tab with the device list, Refresh/Connect buttons, and mock camera option](images/connect-tab.png)
 
+The **Hardware preflight** checklist at the bottom of the tab reports
+camera, processing core, data storage (writability and free space), and
+Experiment Profile state as *Passed / Warning / Failed*, each with a
+recovery action (`Fix…`). Connecting a camera alone does not complete the
+Preflight stage — confirm it in the workflow bar once the checks pass.
+Mock cameras are always labeled as simulation so a training session cannot
+be mistaken for hardware.
+
 ## Automatic connection on startup
 
 A few hundred milliseconds after launch the app enumerates cameras in the

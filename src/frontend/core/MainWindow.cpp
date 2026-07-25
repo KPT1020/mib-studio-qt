@@ -218,6 +218,16 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
                                .arg(v.isEmpty() ? tr("(unknown)") : v));
     });
 
+    // UX-9 (#313): explicit Service/Commissioning mode. Every session starts
+    // in Operator mode; the checkable action requires confirmation to enter.
+    commissioningAct_ = new QAction(tr("Service/Commissioning Mode"), this);
+    commissioningAct_->setCheckable(true);
+    ui->settingsMenu->addSeparator();
+    ui->settingsMenu->addAction(commissioningAct_);
+    connect(commissioningAct_, &QAction::triggered, this, [this](bool checked) {
+        setCommissioningMode(checked, /*confirmed=*/false);
+    });
+
     auto *bootServicesAct = new QAction(tr("Boot Service Toggles..."), this);
     ui->settingsMenu->addSeparator();
     ui->settingsMenu->addAction(bootServicesAct);
@@ -406,6 +416,7 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     experimentTabs_ = new QTabWidget(this);
     auto *previewPage = new frontend::PreviewPage(backend_, experimentTabs_);
     auto *monitoringTab = new frontend::ExperimentMonitoringTab(backend_, experimentTabs_);
+    monitoringTab_ = monitoringTab;
     experimentTabs_->addTab(previewPage, tr("Preview"));
     experimentTabs_->addTab(monitoringTab, tr("Monitoring"));
     
@@ -460,6 +471,28 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         }
         refreshWorkflowState();
     });
+    // Commissioning banner (UX-9): persistent while the mode is active.
+    {
+        commissioningBanner_ = new QWidget(ui->centralwidget);
+        auto* bannerLayout = new QHBoxLayout(commissioningBanner_);
+        bannerLayout->setContentsMargins(8, 2, 8, 2);
+        auto* bannerLabel = new QLabel(
+            tr("SERVICE / COMMISSIONING MODE - engineering and hardware test controls "
+               "are enabled. Not for routine operation."),
+            commissioningBanner_);
+        bannerLabel->setStyleSheet(QStringLiteral("color: white; font-weight: bold;"));
+        auto* exitBtn = new QPushButton(tr("Exit to Operator mode"), commissioningBanner_);
+        bannerLayout->addWidget(bannerLabel, 1);
+        bannerLayout->addWidget(exitBtn);
+        commissioningBanner_->setStyleSheet(
+            QStringLiteral("background-color: #b58900;"));
+        commissioningBanner_->setVisible(false);
+        ui->verticalLayout->insertWidget(0, commissioningBanner_);
+        connect(exitBtn, &QPushButton::clicked, this, [this]() {
+            setCommissioningMode(false, /*confirmed=*/true);
+        });
+    }
+
     // Persistent active-context bar (UX-8) directly under the stage bar.
     contextBar_ = new frontend::ContextBar(ui->centralwidget);
     ui->verticalLayout->insertWidget(1, contextBar_);
@@ -986,6 +1019,13 @@ void MainWindow::onStartExperiment()
                                  std::chrono::system_clock::now().time_since_epoch())
                                  .count();
 
+    // An active experiment is incompatible with commissioning controls;
+    // force Operator mode (logged) before the run begins.
+    if (commissioningMode_) {
+        SPDLOG_WARN("Experiment start forces exit from commissioning mode");
+        setCommissioningMode(false, /*confirmed=*/true);
+    }
+
     experimentActive_ = true;
     statusLabel_->setText("Experiment started");
     updateExperimentButtonStates(); // This will also call updateTabStates() to disable Overview and Review tabs
@@ -1497,6 +1537,42 @@ void MainWindow::refreshWorkflowState()
         dash.storageWritable = !storageKnown_ || storageWritable_;
         dashboardStrip_->updateData(dash);
     }
+}
+
+void MainWindow::setCommissioningMode(bool enabled, bool confirmed)
+{
+    if (enabled == commissioningMode_) {
+        if (commissioningAct_) commissioningAct_->setChecked(commissioningMode_);
+        return;
+    }
+    if (enabled) {
+        if (experimentActive_) {
+            QMessageBox::warning(this, tr("Service/Commissioning Mode"),
+                                 tr("Commissioning mode cannot be entered while an "
+                                    "experiment is active."));
+            if (commissioningAct_) commissioningAct_->setChecked(false);
+            return;
+        }
+        if (!confirmed) {
+            const auto reply = QMessageBox::question(
+                this, tr("Service/Commissioning Mode"),
+                tr("Enter Service/Commissioning mode?\n\nThis enables engineering "
+                   "controls that can actuate hardware (manual and periodic trigger "
+                   "test pulses). All actions are logged.\n\nThe mode resets to "
+                   "Operator on every new session."),
+                QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+            if (reply != QMessageBox::Yes) {
+                if (commissioningAct_) commissioningAct_->setChecked(false);
+                return;
+            }
+        }
+    }
+    commissioningMode_ = enabled;
+    if (commissioningAct_) commissioningAct_->setChecked(enabled);
+    if (commissioningBanner_) commissioningBanner_->setVisible(enabled);
+    if (monitoringTab_) monitoringTab_->setCommissioningControlsVisible(enabled);
+    SPDLOG_WARN("Mode change: {} mode active",
+                enabled ? "SERVICE/COMMISSIONING" : "Operator");
 }
 
 void MainWindow::handleContextSegment(const QString& segmentId)

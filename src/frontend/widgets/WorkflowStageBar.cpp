@@ -109,8 +109,11 @@ void WorkflowStageBar::updateSnapshot(const backend::services::WorkflowSnapshot&
         QToolButton* button = stageButtons_[static_cast<size_t>(i)];
 
         const QString statusText = QString::fromStdString(stage.statusText);
+        // QToolButton treats '&' as a mnemonic marker — escape dynamic text.
+        QString escapedStatus = statusText;
+        escapedStatus.replace(QLatin1Char('&'), QStringLiteral("&&"));
         button->setText(QStringLiteral("%1\n%2 %3")
-                            .arg(stageTitle(i), statusGlyph(stage.status), statusText));
+                            .arg(stageTitle(i), statusGlyph(stage.status), escapedStatus));
         button->setStyleSheet(
             QStringLiteral("QToolButton { color: %1; }").arg(statusColor(stage.status)));
 

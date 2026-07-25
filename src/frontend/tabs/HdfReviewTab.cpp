@@ -22,6 +22,11 @@
 #include <QScrollBar>
 #include <QEventLoop>
 #include <QComboBox>
+#include <QGroupBox>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QDateTime>
 #include <QChartView>
 #include <QLineSeries>
 #include <QCoreApplication>
@@ -356,6 +361,22 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
     QSettings settings;
     lastExportDir_ = settings.value(kLastExportDirSetting, QDir::homePath()).toString();
 
+    // Run context / provenance summary (UX-10, #314): inserted between the
+    // file row and the frame tabs; collapsed to a single line until a file
+    // with provenance is loaded.
+    runContextBox_ = new QGroupBox(tr("Run context"), this);
+    {
+        auto* boxLayout = new QVBoxLayout(runContextBox_);
+        boxLayout->setContentsMargins(8, 4, 8, 4);
+        runContextLabel_ = new QLabel(runContextBox_);
+        runContextLabel_->setTextFormat(Qt::PlainText);
+        runContextLabel_->setWordWrap(true);
+        runContextLabel_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        boxLayout->addWidget(runContextLabel_);
+    }
+    ui->verticalLayout->insertWidget(1, runContextBox_);
+    clearRunContext();
+
     // Configure thumbnail cache (store up to ~2048 thumbnails)
     thumbnailCache_.setMaxCost(2048);
     SPDLOG_INFO("HdfReviewTab: thumbnail cache size set to {}", 2048);
@@ -513,6 +534,7 @@ void HdfReviewTab::onCloseFile() {
     clearDisplay();
     hdfReader_.reset();
     loadedHdfFilePath_.clear();
+    clearRunContext();
     ui->filePathLabel->setText(tr("No file selected"));
     ui->statusLabel->setText(tr("Ready"));
     ui->closeFileBtn->setEnabled(false);
@@ -689,8 +711,110 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
                               .arg(static_cast<qulonglong>(shownInvalid)));
     }
 
-    SPDLOG_INFO("Loaded HDF file: {} valid frames, {} invalid frames", 
+    SPDLOG_INFO("Loaded HDF file: {} valid frames, {} invalid frames",
                validFrames_.size(), invalidFrames_.size());
+
+    updateRunContext();
+}
+
+void HdfReviewTab::clearRunContext() {
+    if (runContextLabel_) {
+        runContextLabel_->setText(tr("No file loaded."));
+    }
+}
+
+void HdfReviewTab::updateRunContext() {
+    if (!runContextLabel_ || !hdfReader_) {
+        clearRunContext();
+        return;
+    }
+    if (isRecordingMode_) {
+        runContextLabel_->setText(
+            tr("Recording-mode file: raw frames only, no experiment provenance."));
+        return;
+    }
+
+    const QString notRecorded = tr("not recorded");
+    QStringList lines;
+
+    // Timing and counts -------------------------------------------------
+    uint64_t startNs = 0, endNs = 0;
+    size_t totalValid = 0, totalInvalid = 0;
+    backend::services::ProcessingService::Roi roi{0, 0, 0, 0};
+    if (hdfReader_->readExperimentInfo(startNs, endNs, totalValid, totalInvalid, &roi)) {
+        const QDateTime start = QDateTime::fromMSecsSinceEpoch(
+            static_cast<qint64>(startNs / 1000000ULL));
+        const double durationS = endNs > startNs
+            ? static_cast<double>(endNs - startNs) / 1e9 : 0.0;
+        lines << tr("Started: %1   Duration: %2 s   Frames: %3 valid / %4 invalid")
+                     .arg(start.toString(QStringLiteral("yyyy-MM-dd hh:mm:ss")),
+                          QString::number(durationS, 'f', 1),
+                          QString::number(static_cast<qulonglong>(totalValid)),
+                          QString::number(static_cast<qulonglong>(totalInvalid)));
+        lines << tr("ROI: %1 x %2 @ (%3, %4)").arg(roi.w).arg(roi.h).arg(roi.x).arg(roi.y);
+    } else {
+        lines << tr("Timing/counts: %1").arg(notRecorded);
+    }
+
+    // Processing core -----------------------------------------------------
+    backend::processing::ProcessingCoreIdentity core;
+    if (hdfReader_->readProcessingCoreIdentity(core)) {
+        lines << tr("Processing core: %1 (contract %2, source %3)")
+                     .arg(QString::fromStdString(core.version))
+                     .arg(core.contractVersion)
+                     .arg(QString::fromStdString(core.source));
+    } else {
+        lines << tr("Processing core: %1 (legacy file)").arg(notRecorded);
+    }
+
+    // Config JSON (calibration etc.) --------------------------------------
+    std::string configJson;
+    if (hdfReader_->readConfigJson(configJson)) {
+        const auto doc = QJsonDocument::fromJson(QByteArray::fromStdString(configJson));
+        const double factor = doc.object()
+                                  .value(QStringLiteral("pixel_to_micron_factor"))
+                                  .toDouble(0.0);
+        lines << (factor > 0.0
+                      ? tr("Calibration: %1 um/px (from saved config)")
+                            .arg(QString::number(factor, 'f', 4))
+                      : tr("Calibration: %1").arg(notRecorded));
+    } else {
+        lines << tr("Saved config: %1 (legacy file)").arg(notRecorded);
+    }
+
+    // Readiness / operator / overrides (UX-6 provenance) -------------------
+    std::string readinessJson;
+    if (hdfReader_->readReadinessJson(readinessJson)) {
+        const auto root =
+            QJsonDocument::fromJson(QByteArray::fromStdString(readinessJson)).object();
+        const QString op = root.value(QStringLiteral("operator")).toString();
+        const QString profile = root.value(QStringLiteral("profile")).toString();
+        lines << tr("Operator: %1   Experiment profile: %2")
+                     .arg(op.isEmpty() ? notRecorded : op,
+                          profile.isEmpty() ? tr("none (temporary/template session)")
+                                            : profile);
+        if (root.contains(QStringLiteral("override"))) {
+            const auto override = root.value(QStringLiteral("override")).toObject();
+            QStringList ids;
+            for (const auto& v :
+                 override.value(QStringLiteral("overridden_checks")).toArray()) {
+                ids << v.toString();
+            }
+            lines << tr("OVERRIDES at start: %1 - reason: %2")
+                         .arg(ids.join(QStringLiteral(", ")),
+                              override.value(QStringLiteral("reason")).toString());
+        } else {
+            const bool warnings =
+                root.value(QStringLiteral("has_warnings")).toBool(false);
+            lines << (warnings ? tr("Readiness at start: passed with warnings")
+                               : tr("Readiness at start: all checks passed"));
+        }
+    } else {
+        lines << tr("Readiness/operator provenance: %1 (recorded from this version on)")
+                     .arg(notRecorded);
+    }
+
+    runContextLabel_->setText(lines.join(QStringLiteral("\n")));
 }
 
 void HdfReviewTab::populateFrames(const std::vector<backend::services::ProcessedFrame>& frames, bool isValid) {

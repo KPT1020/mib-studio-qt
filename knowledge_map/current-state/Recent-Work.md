@@ -5,6 +5,19 @@
 
 ## Features shipped
 
+- **Commissioning mode, Review run context, deterministic UX screenshots
+  (UX-9/UX-10/UX-11)** (2026-07-25, issues #313/#314/#315, epic #304) —
+  trigger test controls are now commissioning-only:
+  [[../frontend/ExperimentMonitoringTab]] hides them in Operator mode,
+  `MainWindow::setCommissioningMode` gates entry behind confirmation with
+  a persistent amber banner, forced exit on experiment start, logged
+  actuations, and a confirm-before-fire prompt on manual pulses.
+  [[../frontend/HdfReviewTab]] gains a Run context panel (times, counts,
+  ROI, core identity, calibration, operator/profile/override provenance;
+  "not recorded" for legacy fields). The screenshot tour gains three
+  deterministic workflow states (`workflow-preflight-confirmed`,
+  `dialog-experiment-readiness`, `commissioning-mode`) embedded in the
+  user manual ([[../frontend/Screenshot-Tour]]).
 - **Alignment quality, integrated dashboard strip, persistent context bar
   (UX-4/UX-7/UX-8)** (2026-07-25, issues #308/#311/#312, epic #304) —
   Overview gains an "Alignment quality" [[../frontend/ChecklistPanel]]

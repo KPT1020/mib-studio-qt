@@ -4,6 +4,30 @@ The acquisition workflow: start the camera, frame the region of interest,
 tune processing while watching the preview and monitoring charts, then
 record an experiment to HDF5.
 
+## Guided operator workflow
+
+The bar above the tabs tracks the four operator stages — **Hardware
+Preflight → Camera & Alignment → Experiment → Review** — with an
+authoritative status per stage (Not started / Needs attention / Ready /
+Running / Complete). Visiting a tab never completes a stage: Preflight and
+Camera & Alignment complete only when their checks pass **and** you press
+the confirm button on the right of the bar. The context row beneath shows
+the active profile, camera, calibration, operator, storage, and overall
+status at all times; click a segment to jump to the matching surface.
+
+![Guided workflow after the operator confirms Hardware Preflight](images/workflow-preflight-confirmed.png)
+
+## Readiness gate at Start Experiment
+
+**Start Experiment** first shows the readiness checklist. Failed checks
+that are safety-critical (camera stream, processing core, ROI) block the
+start outright; other failures can be expert-overridden — each override
+requires an operator name and a reason, and the full checklist plus the
+override record is saved into the experiment file (`readiness_json`) for
+review later.
+
+![Experiment readiness gate shown at Start Experiment](images/dialog-experiment-readiness.png)
+
 ## Start the camera
 
 Click **Start Camera** (main tab-bar corner). Frames start streaming from
@@ -53,8 +77,20 @@ come alive. **Stop Camera** halts acquisition; statistics reset to zero.
 - Live totals: valid count, invalid count, algorithm FPS, valid FPS.
 - Charts accumulate only while the tab is visible, and they are a live
   preview — they are not saved with the experiment.
-- The top row also carries trigger bring-up controls (single and periodic
-  test pulses) for commissioning a sorter.
+- Trigger bring-up controls (single and periodic test pulses) are hidden
+  in normal operation — see Service/Commissioning mode below.
+
+## Service/Commissioning mode
+
+Engineering controls that can actuate hardware live behind
+**Settings ▸ Service/Commissioning Mode**. Entering requires confirmation,
+shows a persistent amber banner, and reveals the trigger test controls on
+the Monitoring page; single pulses ask for confirmation (target + pulse
+duration) before firing, and every actuation is logged. The mode resets to
+Operator on every new session, exits automatically when an experiment
+starts, and leaving it always stops a running periodic test.
+
+![Service/Commissioning mode with the banner and trigger test controls](images/commissioning-mode.png)
 
 ## Settings dialogs
 

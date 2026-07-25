@@ -58,6 +58,12 @@ constexpr Shot kShots[] = {
     {"dialog-processing-settings", "Settings > Processing Settings dialog"},
     {"dialog-monitoring-settings", "Settings > Monitoring Settings dialog"},
     {"dialog-pixel-to-micron", "Settings > Pixel to Micron Conversion dialog"},
+    {"workflow-preflight-confirmed",
+     "Guided workflow after the operator confirms Hardware Preflight"},
+    {"dialog-experiment-readiness",
+     "Experiment readiness gate shown at Start Experiment"},
+    {"commissioning-mode",
+     "Service/Commissioning mode with the banner and trigger test controls"},
 };
 // SCREENSHOT_REGISTRY_END
 
@@ -374,6 +380,40 @@ int main(int argc, char* argv[])
             action->trigger();
         });
     }
+
+    // --- Guided-workflow states (UX epic #304) ---------------------------
+
+    // Confirm preflight through the authoritative backend state, then show
+    // the stage bar with stage 1 Complete and stage 2 recommended.
+    tour.addStep(400, [&]() {
+        backend.workflow().setPreflightConfirmed(true);
+        tabs->setCurrentIndex(1); // Camera & Alignment stage
+    });
+    tour.addStep(1200, [&]() { // > one workflow refresh tick
+        sink.save(QStringLiteral("workflow-preflight-confirmed"), window.grab());
+    });
+
+    // Readiness gate: onStartExperiment shows the modal checklist; grabbing
+    // and closing it rejects the dialog, so no file dialog follows.
+    tour.addStep(400, [&]() {
+        tabs->setCurrentIndex(2);
+        sink.scheduleModalShot(QStringLiteral("dialog-experiment-readiness"),
+                               kModalSettleMs);
+        QMetaObject::invokeMethod(&window, "onStartExperiment", Qt::DirectConnection);
+    });
+
+    // Commissioning mode: banner + trigger test controls on Monitoring.
+    tour.addStep(400, [&]() {
+        QMetaObject::invokeMethod(&window, "setCommissioningMode", Qt::DirectConnection,
+                                  Q_ARG(bool, true), Q_ARG(bool, true));
+        tabs->setCurrentIndex(2);
+        if (experimentTabs) experimentTabs->setCurrentIndex(1);
+    });
+    tour.addStep(kSettleMs, [&]() {
+        sink.save(QStringLiteral("commissioning-mode"), window.grab());
+        QMetaObject::invokeMethod(&window, "setCommissioningMode", Qt::DirectConnection,
+                                  Q_ARG(bool, false), Q_ARG(bool, true));
+    });
 
     tour.addStep(300, [&]() {
         QMetaObject::invokeMethod(&window, "onStopCapture", Qt::DirectConnection);

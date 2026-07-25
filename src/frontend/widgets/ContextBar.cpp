@@ -41,6 +41,15 @@ QToolButton* ContextBar::segment(int index) const
     return segments_[static_cast<size_t>(index)];
 }
 
+namespace {
+// QToolButton treats '&' as a mnemonic marker — escape dynamic text.
+QString escapeAmp(QString text)
+{
+    text.replace(QLatin1Char('&'), QStringLiteral("&&"));
+    return text;
+}
+} // namespace
+
 void ContextBar::updateData(const Data& data)
 {
     // Profile ----------------------------------------------------------
@@ -64,7 +73,7 @@ void ContextBar::updateData(const Data& data)
             text = tr("Profile: %1 [%2]").arg(data.profileName, tags.join(QStringLiteral(", ")));
             tip = tr("Active Experiment Profile. Click to open the profile surface.");
         }
-        segment(0)->setText(text);
+        segment(0)->setText(escapeAmp(text));
         segment(0)->setToolTip(tip);
         segment(0)->setAccessibleName(text);
     }
@@ -83,7 +92,7 @@ void ContextBar::updateData(const Data& data)
             text = tr("Camera: %1 (%2)")
                        .arg(label, data.captureRunning ? tr("streaming") : tr("stopped"));
         }
-        segment(1)->setText(text);
+        segment(1)->setText(escapeAmp(text));
         segment(1)->setToolTip(tr("Connected camera identity. Click to open Connect."));
         segment(1)->setAccessibleName(text);
     }
@@ -93,7 +102,7 @@ void ContextBar::updateData(const Data& data)
         const QString text = data.pixelToMicron > 0.0
             ? tr("Calibration: %1 um/px").arg(QString::number(data.pixelToMicron, 'f', 4))
             : tr("Calibration: not set");
-        segment(2)->setText(text);
+        segment(2)->setText(escapeAmp(text));
         segment(2)->setToolTip(
             tr("Pixel-to-micron conversion factor. Click to edit."));
         segment(2)->setAccessibleName(text);
@@ -104,7 +113,7 @@ void ContextBar::updateData(const Data& data)
         const QString text = data.operatorName.isEmpty()
             ? tr("Operator: not set")
             : tr("Operator: %1").arg(data.operatorName);
-        segment(3)->setText(text);
+        segment(3)->setText(escapeAmp(text));
         segment(3)->setToolTip(tr("Operator identity recorded in run provenance. "
                                   "Click to change."));
         segment(3)->setAccessibleName(text);
@@ -115,7 +124,7 @@ void ContextBar::updateData(const Data& data)
         const QString text = !data.storageWritable
             ? tr("Storage: NOT WRITABLE")
             : tr("Storage: %1 GB free").arg(QString::number(data.storageFreeGb, 'f', 1));
-        segment(4)->setText(text);
+        segment(4)->setText(escapeAmp(text));
         segment(4)->setToolTip(tr("Experiment data folder. Click to open."));
         segment(4)->setAccessibleName(text);
     }
@@ -132,7 +141,7 @@ void ContextBar::updateData(const Data& data)
         } else {
             text = tr("Status: %1").arg(data.statusText);
         }
-        segment(5)->setText(text);
+        segment(5)->setText(escapeAmp(text));
         segment(5)->setToolTip(tr("System readiness. Click to jump to the recommended stage."));
         segment(5)->setAccessibleName(text);
         segment(5)->setStyleSheet(

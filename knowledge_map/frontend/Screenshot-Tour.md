@@ -59,3 +59,10 @@ target defined in `src/frontend/qt/CMakeLists.txt`
 - Adding a shot means three edits in the same PR: `kShots[]`, the tour step
   that captures it, and a manual page that embeds `images/<id>.png` —
   otherwise `check_screenshots.py` fails.
+- The UX-epic states (`workflow-preflight-confirmed`,
+  `dialog-experiment-readiness`, `commissioning-mode`) drive the app
+  through real state: `backend.workflow().setPreflightConfirmed(true)`,
+  invoking `onStartExperiment` (the modal grab closes/rejects the
+  readiness gate so no file dialog follows), and the `Q_INVOKABLE`
+  `MainWindow::setCommissioningMode(true, true)`. The
+  workflow-state shot waits >1 s so the 500 ms workflow refresh runs.

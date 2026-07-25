@@ -36,6 +36,7 @@ class QVBoxLayout;
 class QHBoxLayout;
 class QCheckBox;
 class QSpacerItem;
+class QGroupBox;
 class QChartView;
 class QChart;
 class QScatterSeries;
@@ -67,6 +68,14 @@ namespace frontend
 
         // True while a recording is open for review (workflow stage state, UX-1).
         bool hasLoadedFile() const { return !loadedHdfFilePath_.isEmpty(); }
+
+    private:
+        // UX-10 (#314): render the run-context/provenance summary for the
+        // loaded experiment file; missing fields display "not recorded".
+        void updateRunContext();
+        void clearRunContext();
+
+    public:
 
     private slots:
         void onSelectFile();
@@ -125,6 +134,8 @@ namespace frontend
         void rememberExportAllRootDir(const QString& dirPath);
 
         Ui::HdfReviewTab* ui;
+        QGroupBox* runContextBox_ = nullptr;
+        QLabel* runContextLabel_ = nullptr;
         backend::AppBackend &backend_;
         std::unique_ptr<backend::services::Hdf5Service> hdfReader_;
 

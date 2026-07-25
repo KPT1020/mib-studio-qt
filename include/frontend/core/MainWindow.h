@@ -29,6 +29,7 @@ namespace frontend { class ChecklistPanel; }
 namespace frontend { class ConfigTabs; }
 namespace frontend { class ContextBar; }
 namespace frontend { class RunDashboardStrip; }
+namespace frontend { class ExperimentMonitoringTab; }
 namespace Ui { class MainWindow; }
 
 class MainWindow : public QMainWindow {
@@ -36,6 +37,12 @@ class MainWindow : public QMainWindow {
 public:
     explicit MainWindow(backend::AppBackend& backend, QWidget* parent = nullptr);
     ~MainWindow();
+
+    // UX-9: Service/Commissioning mode. Operator mode is the default every
+    // session; entering interactively requires confirmation, an active
+    // experiment forces Operator mode, and the banner stays visible while
+    // enabled. Q_INVOKABLE so the screenshot tour can drive the state.
+    Q_INVOKABLE void setCommissioningMode(bool enabled, bool confirmed);
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -83,6 +90,10 @@ private:
     frontend::ContextBar* contextBar_ = nullptr;
     frontend::RunDashboardStrip* dashboardStrip_ = nullptr;
     frontend::ConfigTabs* configTabs_ = nullptr;
+    frontend::ExperimentMonitoringTab* monitoringTab_ = nullptr;
+    QWidget* commissioningBanner_ = nullptr;
+    QAction* commissioningAct_ = nullptr;
+    bool commissioningMode_{false};
     QTimer* workflowTimer_ = nullptr;
     QAction* processingCoreAct_ = nullptr;
     frontend::AutoUpdater* updater_ = nullptr;

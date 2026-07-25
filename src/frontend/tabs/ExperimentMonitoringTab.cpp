@@ -160,6 +160,11 @@ namespace frontend
         connect(ui->validOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
         connect(ui->invalidOverlayCheck, &QCheckBox::toggled, this, &ExperimentMonitoringTab::onToggleOverlay);
 
+        // UX-9 (#313): trigger tests are commissioning controls. Every new
+        // session starts in Operator mode with them hidden; MainWindow shows
+        // them only in Service/Commissioning mode.
+        setCommissioningControlsVisible(false);
+
         // Set column stretch to make panels equal size
         ui->gridLayout->setColumnStretch(0, 1);
         ui->gridLayout->setColumnStretch(1, 1);
@@ -1024,12 +1029,37 @@ namespace frontend
         }
     }
 
+    void ExperimentMonitoringTab::setCommissioningControlsVisible(bool visible)
+    {
+        // Leaving commissioning mode must never leave a periodic test armed.
+        if (!visible && ui->periodicTriggerBtn->isChecked())
+        {
+            ui->periodicTriggerBtn->setChecked(false); // toggled() stops the timer
+        }
+        ui->sortTriggerBtn->setVisible(visible);
+        ui->triggerDurationSpin->setVisible(visible);
+        ui->periodicTriggerBtn->setVisible(visible);
+        ui->periodicTriggerIntervalSpin->setVisible(visible);
+    }
+
     void ExperimentMonitoringTab::onSortTrigger()
     {
+        // Arming confirmation (UX-9): show target and parameters before any
+        // hardware actuation.
+        const int durationUs = ui->triggerDurationSpin->value();
+        const auto reply = QMessageBox::question(
+            this, tr("Fire Sort Trigger"),
+            tr("Fire one sort trigger test pulse?\n\nTarget: camera trigger output\n"
+               "Pulse duration: %1 us").arg(durationUs),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (reply != QMessageBox::Yes)
+        {
+            return;
+        }
         backend::services::TargetGroupSignal signal;
         signal.isTargetGroup = true;
         backend_.trigger().onTargetGroupResult(signal);
-        SPDLOG_INFO("Manual sort trigger fired");
+        SPDLOG_INFO("Commissioning: manual sort trigger fired (duration={} us)", durationUs);
     }
 
     void ExperimentMonitoringTab::onPeriodicTriggerToggled(bool checked)

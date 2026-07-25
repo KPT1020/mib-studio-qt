@@ -4,6 +4,13 @@
 
 ![Review tab with thumbnails, the metrics table, and export actions](images/review-tab.png)
 
+The **Run context** panel under the file row explains how the dataset was
+produced: start time and duration, frame counts, ROI, processing-core
+identity, saved calibration, operator, experiment profile, and — when the
+run was started through the readiness gate — whether checks passed or which
+ones were overridden and why. Fields a file does not carry (older files)
+are shown explicitly as *not recorded*, never silently omitted.
+
 Open a recorded `.h5` / `.hdf5` file to inspect it without leaving the app.
 Files larger than 2 GB are fine — frames load lazily as you browse.
 

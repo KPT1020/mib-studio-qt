@@ -13,6 +13,13 @@
 - Open HDF5 file via `Hdf5Service::loadFile`. Exposes
   `hasLoadedFile()` so [[MainWindow]] can feed the Review stage of the
   guided workflow ([[WorkflowStageBar]]).
+- **Run context panel (UX-10, #314):** `updateRunContext()` renders a
+  provenance summary between the file row and the frame tabs — start
+  time/duration/counts, ROI, processing-core identity, calibration from
+  `config_json`, and operator/profile/override records from
+  `readiness_json` ([[../data-model/HDF5-Storage]]). Missing fields say
+  "not recorded" explicitly; recording-mode files state they carry no
+  experiment provenance.
 - Lazily read metadata (not images) with
   `readValidMetadata` / `readInvalidMetadata`.
 - On scroll/selection, fetch image payloads by index using
