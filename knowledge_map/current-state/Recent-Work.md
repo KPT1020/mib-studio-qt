@@ -5,6 +5,22 @@
 
 ## Features shipped
 
+- **Apply & Verify profile transaction + experiment readiness gate
+  (UX-5/UX-6)** (2026-07-25, issues #309/#310, epic #304) —
+  [[../frontend/ConfigTabs]] gains `Apply && Verify` (one-transaction
+  processing-config + camera-script apply with per-component
+  Applied/Verified/Warning/Failed/Not-applicable results, honest
+  "Applied, not externally verified" for scripts without readback, and
+  invalidation on selection/config/reconnect).
+  [[../frontend/MainWindow]] `onStartExperiment` now shows the
+  `ReadinessDialog` ([[Dialogs]]) rendering the
+  [[../services/OperatorChecks]] readiness snapshot: non-overridable
+  failures (camera stream, core pin, ROI, double-start) hard-block;
+  overridable ones need an explicit checkbox + operator + reason; the
+  snapshot and override record are persisted as `readiness_json` on
+  `/experiment_info` ([[../data-model/HDF5-Storage]], new
+  `writeReadinessJson`/`readConfigJson`/`readReadinessJson`). Test:
+  `backend.hdf_provenance_roundtrip`.
 - **Profile-first setup + hardware preflight checklist (UX-2/UX-3)**
   (2026-07-25, issues #306/#307, epic #304) — new
   [[../services/OperatorChecks]] (Qt-free preflight + readiness

@@ -50,6 +50,9 @@ public:
 signals:
 	void appConfigPathChanged(const QString& path);
     void profileStatusChanged(const frontend::ProfileStatus& status);
+    // UX-5 (#309): result of the Apply & Verify Profile transaction, and
+    // invalidation when the profile/selection/config changes afterwards.
+    void profileApplyStateChanged(bool applied, bool verified);
 
 public:
     QString currentJsPath() const;
@@ -75,6 +78,7 @@ private slots:
     void onResetCamera();
 	// Profiles
 	void onProfileSelectionChanged(int index);
+    void onApplyAndVerifyProfile();
 	void onSaveProfile();
 	void onDeleteProfile();
 	void onRenameProfile();
@@ -144,6 +148,7 @@ private:
 	QPushButton* updateSelectedBtn_ = nullptr;
 	QPushButton* showDiffBtn_ = nullptr;
 	QPushButton* duplicateAsLocalBtn_ = nullptr;
+    QPushButton* applyAndVerifyBtn_ = nullptr;
 	QLabel* profileStatusLabel_ = nullptr;
     QTimer* jsonDebounceTimer_ = nullptr;
 

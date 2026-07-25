@@ -66,6 +66,8 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/resources/ui/SyringePumpSettingsDialog.ui
     ${PROJECT_SOURCE_DIR}/src/frontend/dialogs/SoftwareUpdatesDialog.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/dialogs/SoftwareUpdatesDialog.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/dialogs/ReadinessDialog.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/dialogs/ReadinessDialog.h
     # Controllers
     ${PROJECT_SOURCE_DIR}/src/frontend/controllers/CameraController.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/controllers/CameraController.h

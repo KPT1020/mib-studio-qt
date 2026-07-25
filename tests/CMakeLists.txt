@@ -24,6 +24,10 @@ mib_add_backend_test_executable(emodulus_lut_degenerate_test backend/emodulus_lu
 add_test(NAME backend.emodulus_lut_degenerate COMMAND $<TARGET_FILE:emodulus_lut_degenerate_test>)
 set_tests_properties(backend.emodulus_lut_degenerate PROPERTIES LABELS "backend;processing")
 
+mib_add_backend_test_executable(hdf_provenance_roundtrip_test backend/hdf_provenance_roundtrip_test.cpp)
+add_test(NAME backend.hdf_provenance_roundtrip COMMAND $<TARGET_FILE:hdf_provenance_roundtrip_test>)
+set_tests_properties(backend.hdf_provenance_roundtrip PROPERTIES LABELS "backend;hdf5;recording" TIMEOUT 30)
+
 mib_add_backend_test_executable(operator_checks_test backend/operator_checks_test.cpp)
 add_test(NAME backend.operator_checks COMMAND $<TARGET_FILE:operator_checks_test>)
 set_tests_properties(backend.operator_checks PROPERTIES LABELS "backend" TIMEOUT 30)

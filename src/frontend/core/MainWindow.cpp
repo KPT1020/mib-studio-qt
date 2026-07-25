@@ -54,6 +54,7 @@
 #include "frontend/utils/StatisticsPanel.h"
 #include "frontend/widgets/WorkflowStageBar.h"
 #include "frontend/widgets/ChecklistPanel.h"
+#include "frontend/dialogs/ReadinessDialog.h"
 #include "backend/services/OperatorChecks.h"
 #include <QGroupBox>
 #include <QStorageInfo>
@@ -464,6 +465,9 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     connect(connectTab_, &frontend::ConnectTab::connected, this, [this]()
             {
         noCamerasFound_ = false;
+        // A (re)connected device invalidates any verified profile application.
+        profileApplied_ = false;
+        profileVerified_ = false;
         refreshWorkflowState();
         // On connection, switch to Overview and enable ROI overlay by default.
         if (overviewTab_) {
@@ -490,6 +494,27 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         profileDirty_ = initialStatus.dirty;
         profileIncompatible_ = initialStatus.incompatible;
         profileName_ = initialStatus.name;
+
+        // Apply & Verify transaction result (UX-5); ConfigTabs invalidates it
+        // on selection change, and we invalidate on config-file change and
+        // camera reconnect below.
+        connect(configTabs_, &frontend::ConfigTabs::profileApplyStateChanged, this,
+                [this](bool applied, bool verified) {
+            profileApplied_ = applied;
+            profileVerified_ = verified;
+            refreshWorkflowState();
+        });
+    }
+    if (previewPage->getConfigWatcher()) {
+        connect(previewPage->getConfigWatcher(), &frontend::AppConfigWatcher::configFileChanged,
+                this, [this](const QString&) {
+            // Any config edit after an apply invalidates the verified state.
+            if (profileApplied_ || profileVerified_) {
+                SPDLOG_INFO("Workflow: config changed - profile apply/verify state invalidated");
+            }
+            profileApplied_ = false;
+            profileVerified_ = false;
+        });
     }
 
     // Hardware preflight checklist (UX-3) at the bottom of the Connect tab.
@@ -813,6 +838,47 @@ void MainWindow::onStartExperiment()
         return;
     }
 
+    // Readiness gate (UX-6, #310): authoritative checklist at the point of
+    // Start. Blocking failures keep Start disabled unless each one is
+    // overridable and explicitly overridden with an operator and reason; the
+    // snapshot + override record become run provenance (written at stop).
+    {
+        backend::services::checks::ReadinessFacts readiness;
+        readiness.preflight = collectPreflightFacts();
+        readiness.preflightConfirmed = backend_.workflow().preflightConfirmed();
+        readiness.alignmentConfirmed = backend_.workflow().alignmentConfirmed();
+        readiness.captureRunning = backend_.capture().isRunning();
+        {
+            const auto roi = backend_.processing().getRealtimeRoi();
+            readiness.roiValid = roi.w > 0 && roi.h > 0;
+        }
+        readiness.backgroundReady = !backend_.processing().getRealtimeBackgroundGray().empty();
+        readiness.pixelToMicron = backend_.processing().getPixelToMicronFactor();
+        readiness.profileDirty = profileDirty_;
+        readiness.profileApplied = profileApplied_;
+        readiness.profileVerified = profileVerified_;
+        readiness.lastExperimentSaveOk = lastExperimentSaveOk_;
+        readiness.experimentActive = experimentActive_;
+
+        const auto snapshot = backend::services::checks::evaluateReadiness(readiness);
+        frontend::ReadinessDialog gate(snapshot, this);
+        if (gate.exec() != QDialog::Accepted)
+        {
+            statusLabel_->setText(tr("Experiment start cancelled at readiness check"));
+            return;
+        }
+        const auto overridden = gate.overriddenIds();
+        pendingReadinessJson_ = backend::services::checks::readinessToJson(
+            snapshot, gate.operatorName().toStdString(), profileName_.toStdString(),
+            overridden, gate.overrideReason().toStdString());
+        for (const auto& id : overridden)
+        {
+            SPDLOG_WARN("Readiness override accepted: check '{}' (operator '{}', reason '{}')",
+                        id, gate.operatorName().toStdString(),
+                        gate.overrideReason().toStdString());
+        }
+    }
+
     // Show file dialog to select HDF5 save location
     QString filePath = QFileDialog::getSaveFileName(
         this,
@@ -1020,6 +1086,13 @@ void MainWindow::onStopExperiment()
             hdf5.writeConfigJson(configJson);
             SPDLOG_INFO("stop-lag: writeConfigJson took {:.3f} ms (bytes={})",
                         sinceMs(t0), configJson.size());
+        }
+
+        // Save the pre-start readiness/override provenance (UX-6).
+        if (metadataOk && !pendingReadinessJson_.empty()) {
+            if (!hdf5.writeReadinessJson(pendingReadinessJson_)) {
+                SPDLOG_WARN("Failed to persist readiness provenance to HDF5");
+            }
         }
 
         // Note: Chart snapshots are no longer saved during experiment stop.
@@ -1297,22 +1370,28 @@ void MainWindow::refreshWorkflowState()
 
     // Preflight checklist (UX-3) shares the same facts.
     if (preflightPanel_) {
-        backend::services::checks::PreflightFacts preflight;
-        preflight.cameraConfigured = facts.cameraConfigured;
-        preflight.cameraDiscoveryFailed = facts.cameraDiscoveryFailed;
-        preflight.mockCamera = qgetenv("MIB_CAMERA_MODE") == QByteArrayLiteral("mock");
-        preflight.cameraLabel = backend_.selectedCameraLabel();
-        preflight.processingCoreReady = facts.processingCoreReady;
-        preflight.processingCoreVersion =
-            backend_.processing().activeProcessingCoreIdentity().version;
-        preflight.storagePathKnown = storageKnown_;
-        preflight.storageWritable = storageWritable_;
-        preflight.storageFreeGb = storageFreeGb_;
-        preflight.profileSelected = profileSelected_;
-        preflight.profileIncompatible = profileIncompatible_;
-        preflight.profileName = profileName_.toStdString();
-        preflightPanel_->setItems(backend::services::checks::evaluatePreflight(preflight));
+        preflightPanel_->setItems(
+            backend::services::checks::evaluatePreflight(collectPreflightFacts()));
     }
+}
+
+backend::services::checks::PreflightFacts MainWindow::collectPreflightFacts() const
+{
+    backend::services::checks::PreflightFacts preflight;
+    preflight.cameraConfigured = backend_.isCameraConfigured();
+    preflight.cameraDiscoveryFailed = noCamerasFound_;
+    preflight.mockCamera = qgetenv("MIB_CAMERA_MODE") == QByteArrayLiteral("mock");
+    preflight.cameraLabel = backend_.selectedCameraLabel();
+    preflight.processingCoreReady = backend_.processing().isProcessingCorePinSatisfied();
+    preflight.processingCoreVersion =
+        backend_.processing().activeProcessingCoreIdentity().version;
+    preflight.storagePathKnown = storageKnown_;
+    preflight.storageWritable = storageWritable_;
+    preflight.storageFreeGb = storageFreeGb_;
+    preflight.profileSelected = profileSelected_;
+    preflight.profileIncompatible = profileIncompatible_;
+    preflight.profileName = profileName_.toStdString();
+    return preflight;
 }
 
 void MainWindow::startExperimentServices()

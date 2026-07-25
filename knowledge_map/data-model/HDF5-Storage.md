@@ -12,7 +12,10 @@
 - `/experiment_info` — root attributes:
   `startTimeNs`, `endTimeNs`, `totalValidFrames`, `totalInvalidFrames`,
   serialized `ProcessingConfig`, ROI, optional `background` image,
-  `config_json` (raw JSON string), plus processing-core provenance:
+  `config_json` (raw JSON string), `readiness_json` (UX-6 pre-start
+  readiness snapshot + override record; absent on legacy files —
+  `readConfigJson`/`readReadinessJson` return false rather than erroring),
+  plus processing-core provenance:
   `processing_core_version`, `processing_contract_version`,
   `processing_engine_abi_version`, `processing_core_sha256`,
   `processing_manifest_sha256`, `processing_release_tag`,

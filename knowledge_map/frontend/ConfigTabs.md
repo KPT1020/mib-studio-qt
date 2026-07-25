@@ -37,6 +37,15 @@
   the workflow facts and readiness gate — consumers cache the snapshot
   and must not call `currentProfileStatus()` on a timer (it re-scans
   profiles from disk).
+- **Apply & Verify (UX-5, #309):** `onApplyAndVerifyProfile()` applies the
+  selected profile as one transaction — processing config (byte-verified
+  against `AppBackend::getLastConfigJson`) then camera script (EGrabber
+  hardware only; mock/MindVision report Not applicable; no readback ⇒
+  reported "Applied, not externally verified"). Pre-application parse or
+  compatibility failures change nothing; partial failures never yield an
+  overall verified state. Emits `profileApplyStateChanged(applied,
+  verified)`; selection change, config-file change, and camera reconnect
+  invalidate it ([[MainWindow]] listens).
 
 ## Gotchas
 

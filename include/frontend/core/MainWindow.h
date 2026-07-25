@@ -2,6 +2,10 @@
 
 #include <QMainWindow>
 
+#include <string>
+
+namespace backend::services::checks { struct PreflightFacts; }
+
 class QLabel;
 class QTimer;
 class PlaybackPanel;
@@ -53,6 +57,8 @@ private:
     // cadence; feeds the preflight checklist and workflow facts (UX-3).
     void probeStorage();
     void handlePreflightRecovery(const QString& checkId);
+    // Shared fact collection for the preflight checklist and readiness gate.
+    backend::services::checks::PreflightFacts collectPreflightFacts() const;
     void startExperimentServices();
     void stopExperimentServices();
     void setupCornerWidgets();
@@ -89,6 +95,13 @@ private:
     bool profileDirty_{false};
     bool profileIncompatible_{false};
     QString profileName_;
+    // Apply & Verify transaction state (UX-5), invalidated on profile
+    // change, config change, or camera reconnect.
+    bool profileApplied_{false};
+    bool profileVerified_{false};
+    // Readiness/override provenance captured at start, written to the HDF5
+    // file at stop (UX-6).
+    std::string pendingReadinessJson_;
     // Cached storage probe (UX-3)
     bool storageKnown_{false};
     bool storageWritable_{true};

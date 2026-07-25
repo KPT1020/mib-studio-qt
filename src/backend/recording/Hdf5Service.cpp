@@ -1592,6 +1592,27 @@ namespace backend::services
 
     bool Hdf5Service::writeConfigJson(const std::string& jsonContent)
     {
+        return writeExperimentInfoStringAttr("config_json", jsonContent);
+    }
+
+    bool Hdf5Service::writeReadinessJson(const std::string& jsonContent)
+    {
+        return writeExperimentInfoStringAttr("readiness_json", jsonContent);
+    }
+
+    bool Hdf5Service::readConfigJson(std::string& out) const
+    {
+        return readExperimentInfoStringAttr("config_json", out);
+    }
+
+    bool Hdf5Service::readReadinessJson(std::string& out) const
+    {
+        return readExperimentInfoStringAttr("readiness_json", out);
+    }
+
+    bool Hdf5Service::writeExperimentInfoStringAttr(const char* attrName,
+                                                    const std::string& value)
+    {
         if (!isFileOpen())
         {
             SPDLOG_ERROR("HDF5 file is not open");
@@ -1602,14 +1623,14 @@ namespace backend::services
         htri_t exists = H5Lexists(impl_->fileId_, "/experiment_info", H5P_DEFAULT);
         if (exists <= 0)
         {
-            SPDLOG_WARN("Cannot write config JSON: /experiment_info group does not exist");
+            SPDLOG_WARN("Cannot write '{}': /experiment_info group does not exist", attrName);
             return false;
         }
 
         hid_t groupId = H5Gopen2(impl_->fileId_, "/experiment_info", H5P_DEFAULT);
         if (groupId < 0)
         {
-            SPDLOG_ERROR("Failed to open /experiment_info group for config JSON");
+            SPDLOG_ERROR("Failed to open /experiment_info group for '{}'", attrName);
             return false;
         }
 
@@ -1619,16 +1640,14 @@ namespace backend::services
         H5Tset_cset(strType, H5T_CSET_UTF8);
 
         hid_t scalarSpace = H5Screate(H5S_SCALAR);
-        hid_t attr = H5Aopen(groupId, "config_json", H5P_DEFAULT);
-        if (attr < 0)
-        {
-            attr = H5Acreate2(groupId, "config_json", strType, scalarSpace,
-                              H5P_DEFAULT, H5P_DEFAULT);
-        }
+        hid_t attr = (H5Aexists(groupId, attrName) > 0)
+                         ? H5Aopen(groupId, attrName, H5P_DEFAULT)
+                         : H5Acreate2(groupId, attrName, strType, scalarSpace,
+                                      H5P_DEFAULT, H5P_DEFAULT);
         bool ok = false;
         if (attr >= 0)
         {
-            const char* ptr = jsonContent.c_str();
+            const char* ptr = value.c_str();
             ok = (H5Awrite(attr, strType, &ptr) >= 0);
             H5Aclose(attr);
         }
@@ -1641,14 +1660,58 @@ namespace backend::services
         {
             if (!flush())
             {
-                SPDLOG_WARN("writeConfigJson: post-write flush failed");
+                SPDLOG_WARN("writeExperimentInfoStringAttr({}): post-write flush failed", attrName);
             }
-            SPDLOG_DEBUG("Wrote config JSON ({} bytes) to HDF5 metadata", jsonContent.size());
+            SPDLOG_DEBUG("Wrote '{}' ({} bytes) to HDF5 metadata", attrName, value.size());
         }
         else
         {
-            SPDLOG_WARN("Failed to write config JSON attribute");
+            SPDLOG_WARN("Failed to write '{}' attribute", attrName);
         }
+        return ok;
+    }
+
+    bool Hdf5Service::readExperimentInfoStringAttr(const char* attrName,
+                                                   std::string& out) const
+    {
+        if (!impl_->isOpen_)
+        {
+            return false;
+        }
+        htri_t exists = H5Lexists(impl_->fileId_, "/experiment_info", H5P_DEFAULT);
+        if (exists <= 0)
+        {
+            return false;
+        }
+        hid_t groupId = H5Gopen2(impl_->fileId_, "/experiment_info", H5P_DEFAULT);
+        if (groupId < 0)
+        {
+            return false;
+        }
+        bool ok = false;
+        if (H5Aexists(groupId, attrName) > 0)
+        {
+            hid_t attr = H5Aopen(groupId, attrName, H5P_DEFAULT);
+            if (attr >= 0)
+            {
+                hid_t strType = H5Tcopy(H5T_C_S1);
+                H5Tset_size(strType, H5T_VARIABLE);
+                H5Tset_cset(strType, H5T_CSET_UTF8);
+                char* value = nullptr;
+                if (H5Aread(attr, strType, &value) >= 0 && value)
+                {
+                    out.assign(value);
+                    ok = true;
+                    // Reclaim the variable-length buffer allocated by HDF5.
+                    hid_t space = H5Aget_space(attr);
+                    H5Dvlen_reclaim(strType, space, H5P_DEFAULT, &value);
+                    H5Sclose(space);
+                }
+                H5Tclose(strType);
+                H5Aclose(attr);
+            }
+        }
+        H5Gclose(groupId);
         return ok;
     }
 

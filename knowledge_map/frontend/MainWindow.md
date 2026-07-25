@@ -14,6 +14,13 @@
 
 - `onStartCapture` / `onStopCapture` — start/stop camera acquisition via
   [[Controllers]] `CameraController`.
+- `onStartExperiment` now runs the **readiness gate** (UX-6): it collects
+  `ReadinessFacts` (preflight facts, workflow confirmations, ROI,
+  background, calibration, profile dirty/applied/verified, last-save
+  health) and shows `ReadinessDialog`; a cancelled gate aborts the start.
+  The accepted snapshot + overrides serialize via
+  `checks::readinessToJson` into `pendingReadinessJson_`, written to the
+  HDF5 file as `readiness_json` right after `writeConfigJson` at stop.
 - `onStartExperiment` / `onStopExperiment` — drive
   [[Controllers]] `ExperimentController`. Stop path now issues an explicit
   `Hdf5Service::flush()` immediately before `writeExperimentInfo()` to reduce

@@ -79,6 +79,16 @@ public:
     // Precondition: writeExperimentInfo() must have been called first.
     bool writeConfigJson(const std::string& jsonContent);
 
+    // Save the pre-start readiness/override provenance record (UX-6, #310)
+    // as the "readiness_json" string attribute on /experiment_info. Same
+    // precondition as writeConfigJson.
+    bool writeReadinessJson(const std::string& jsonContent);
+
+    // Read the raw config / readiness provenance saved with the run. Returns
+    // false (out untouched) for legacy files without the attribute.
+    bool readConfigJson(std::string& out) const;
+    bool readReadinessJson(std::string& out) const;
+
     // Read background image saved for the run (if present). Returns false if not open, dataset missing, or read fails.
     bool readBackgroundImage(cv::Mat& out) const;
 
@@ -161,6 +171,11 @@ private:
     // default 5 s). Used by append hot paths so the recorder thread avoids
     // synchronous I/O on every batch; closeFile() still does a final flush.
     bool maybeIntervalFlush();
+
+    // Shared plumbing for variable-length UTF-8 string attributes on
+    // /experiment_info (config_json, readiness_json).
+    bool writeExperimentInfoStringAttr(const char* attrName, const std::string& value);
+    bool readExperimentInfoStringAttr(const char* attrName, std::string& out) const;
 
     struct Impl;
     std::unique_ptr<Impl> impl_;

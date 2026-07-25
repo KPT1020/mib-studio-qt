@@ -47,6 +47,7 @@
 
 #include "backend/app/AppBackend.h"
 #include "backend/processing/ProcessingService.h"
+#include "backend/services/CaptureService.h"
 #include "frontend/system/ProfileManager.h"
 #include "frontend/models/JsonTableModel.h"
 #include "frontend/utils/JsonFlatten.h"
@@ -127,6 +128,10 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         updateSelectedBtn_ = new QPushButton(tr("Update Selected"), page);
         showDiffBtn_ = new QPushButton(tr("Show Diff"), page);
         duplicateAsLocalBtn_ = new QPushButton(tr("Duplicate as Local"), page);
+        applyAndVerifyBtn_ = new QPushButton(tr("Apply && Verify"), page);
+        applyAndVerifyBtn_->setToolTip(
+            tr("Apply the complete profile (processing config + camera script) to the "
+               "instrument as one transaction and verify the result (UX-5)."));
         profileStatusLabel_ = new QLabel(page);
         profileStatusLabel_->setText(tr("No profile selected"));
         profileStatusLabel_->setTextFormat(Qt::PlainText);
@@ -152,6 +157,7 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         row->addWidget(updateSelectedBtn_);
         row->addWidget(showDiffBtn_);
         row->addWidget(duplicateAsLocalBtn_);
+        row->addWidget(applyAndVerifyBtn_);
         row->addWidget(profileStatusLabel_);
 		row->addWidget(jsonTableToggle_);
         v->addLayout(row);
@@ -296,6 +302,7 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
     connect(updateSelectedBtn_, &QPushButton::clicked, this, &ConfigTabs::onUpdateSelectedProfile);
     connect(showDiffBtn_, &QPushButton::clicked, this, &ConfigTabs::onShowProfileDiff);
     connect(duplicateAsLocalBtn_, &QPushButton::clicked, this, &ConfigTabs::onDuplicateProfileAsLocal);
+    connect(applyAndVerifyBtn_, &QPushButton::clicked, this, &ConfigTabs::onApplyAndVerifyProfile);
     refreshProfileStatusLabel();
 }
 
@@ -1104,8 +1111,145 @@ void ConfigTabs::loadSelectedProfileInternal(const QString& profileName) {
 }
 
 // ===== Profiles slots =====
+void ConfigTabs::onApplyAndVerifyProfile() {
+    // UX-5 (#309): apply the complete Experiment Profile as one transaction
+    // and report per-component results. Pre-application failures make no
+    // hardware changes; partial failures never yield an overall verified state.
+    struct Component {
+        QString name;
+        QString status; // Applied / Verified / Warning / Failed / Not applicable
+        QString detail;
+    };
+    QVector<Component> results;
+    bool anyFailed = false;
+    bool allVerified = true;
+
+    const auto summary = selectedProfileSummary();
+    if (!summary.has_value()) {
+        QMessageBox::warning(this, tr("Apply && Verify Profile"),
+                             tr("No experiment profile is selected. The built-in template "
+                                "cannot be applied as a validated method."));
+        emit profileApplyStateChanged(false, false);
+        return;
+    }
+    if (summary->incompatible) {
+        QMessageBox::critical(this, tr("Apply && Verify Profile"),
+                              tr("Profile '%1' is incompatible with this application or "
+                                 "processing core. Nothing was applied.")
+                                  .arg(summary->profileName));
+        emit profileApplyStateChanged(false, false);
+        return;
+    }
+
+    // --- Component 1: processing configuration -------------------------
+    const QString configPath = profileJsonPath(summary->profileName);
+    QString parseErr;
+    const auto doc = profileManager_.loadJsonDocument(configPath, &parseErr);
+    if (!doc.has_value()) {
+        // Pre-application validation failure: abort before touching anything.
+        QMessageBox::critical(this, tr("Apply && Verify Profile"),
+                              tr("Profile config could not be parsed: %1\n\nNothing was "
+                                 "applied.").arg(parseErr));
+        emit profileApplyStateChanged(false, false);
+        return;
+    }
+    {
+        QSettings s;
+        s.setValue("Config/ExternalAppConfigPath", configPath);
+    }
+    emit appConfigPathChanged(configPath); // AppConfigWatcher loads + pushes to backend
+    // Verify: the watcher stores the exact JSON it pushed into the backend.
+    QString fileContent;
+    QString readErr;
+    readTextFile(configPath, &fileContent, &readErr);
+    const QString effective = QString::fromStdString(backend_.getLastConfigJson());
+    if (!fileContent.isEmpty() && effective == fileContent) {
+        results.push_back({tr("Processing configuration"), tr("Verified"),
+                           tr("Backend confirms the exact profile config is active.")});
+    } else if (!effective.isEmpty()) {
+        results.push_back({tr("Processing configuration"), tr("Warning"),
+                           tr("Applied, but the effective config could not be byte-verified "
+                              "against the profile file.")});
+        allVerified = false;
+    } else {
+        results.push_back({tr("Processing configuration"), tr("Failed"),
+                           tr("The backend did not accept the profile configuration.")});
+        anyFailed = true;
+        allVerified = false;
+    }
+
+    // --- Component 2: camera script -------------------------------------
+    const QString jsPath = profileJsPath(summary->profileName);
+    const bool hasScript = QFileInfo::exists(jsPath);
+    const bool mockCamera = qgetenv("MIB_CAMERA_MODE") == QByteArrayLiteral("mock");
+    if (!hasScript) {
+        results.push_back({tr("Camera script"), tr("Not applicable"),
+                           tr("The profile does not include a camera script.")});
+    } else if (mockCamera) {
+        results.push_back({tr("Camera script"), tr("Not applicable"),
+                           tr("Mock camera session; GenICam scripts are not applied.")});
+    } else if (backend_.isMindVisionCameraSelected()) {
+        results.push_back({tr("Camera script"), tr("Not applicable"),
+                           tr("MindVision cameras use JSON configs, not EGrabber scripts.")});
+    } else if (!backend_.isCameraConfigured()) {
+        results.push_back({tr("Camera script"), tr("Failed"),
+                           tr("No camera is connected to receive the script.")});
+        anyFailed = true;
+        allVerified = false;
+    } else {
+        const bool wasRunning = backend_.capture().isRunning();
+        std::string backendErr;
+        if (backend_.applyCameraScriptFromFile(jsPath.toStdString(), &backendErr)) {
+            {
+                QSettings s;
+                s.setValue("Config/ExternalCameraScriptPath", jsPath);
+            }
+            // GenICam apply has no readback contract here: report honestly.
+            results.push_back({tr("Camera script"), tr("Applied"),
+                               tr("Applied, not externally verified (no readback "
+                                  "support).")});
+            if (wasRunning && !backend_.capture().start()) {
+                results.push_back({tr("Camera restart"), tr("Warning"),
+                                   tr("The camera did not restart after the script; start "
+                                      "it manually.")});
+                allVerified = false;
+            }
+        } else {
+            results.push_back({tr("Camera script"), tr("Failed"),
+                               QString::fromStdString(backendErr)});
+            anyFailed = true;
+            allVerified = false;
+        }
+    }
+
+    const bool applied = !anyFailed;
+    const bool verified = applied && allVerified;
+    emit profileApplyStateChanged(applied, verified);
+
+    QStringList lines;
+    for (const auto& component : results) {
+        lines << QStringLiteral("%1: %2\n    %3")
+                     .arg(component.name, component.status, component.detail);
+    }
+    const QString title = tr("Apply && Verify Profile");
+    const QString headline =
+        anyFailed ? tr("FAILED - the profile is NOT fully applied.")
+                  : (verified ? tr("Profile applied and verified.")
+                              : tr("Profile applied with warnings (not fully verified)."));
+    QMessageBox box(anyFailed ? QMessageBox::Critical
+                              : (verified ? QMessageBox::Information : QMessageBox::Warning),
+                    title, headline + QStringLiteral("\n\n") + lines.join(QStringLiteral("\n")),
+                    QMessageBox::Ok, this);
+    box.exec();
+    SPDLOG_INFO("ApplyAndVerifyProfile: profile='{}' applied={} verified={}",
+                summary->profileName.toStdString(), applied, verified);
+}
+
 void ConfigTabs::onProfileSelectionChanged(int index) {
     if (!profileSelect_) return;
+    // Changing the selection invalidates any previous apply/verify result
+    // (UX-5): the effective hardware state no longer matches a verified apply.
+    emit profileApplyStateChanged(false, false);
     const QString profileName = profileSelect_->itemData(index).toString();
     if (profileName.isEmpty()) {
         // Switch back to default include path (no active profile)
