@@ -52,6 +52,14 @@
   metadata/provenance write) for the Experiment/Review stage state.
   Visiting a tab only syncs the bar highlight — completion comes from
   facts + the bar's explicit confirm actions.
+- **Preflight checklist (UX-3):** a [[ChecklistPanel]] in a "Hardware
+  preflight" group box appended to the Connect tab, fed from the same
+  refresh with [[../services/OperatorChecks]] `evaluatePreflight`.
+  `probeStorage()` checks the Documents/MIB_Studio_Qt folder
+  (writability + free GB) every ~5 s. `handlePreflightRecovery(id)`
+  routes Fix… buttons (camera → auto-connect, core → Processing Core
+  dialog, storage → open data folder, profile → Profiles surface).
+  Profile status (UX-2) is cached from `ConfigTabs::profileStatusChanged`.
 - `QFutureWatcher<size_t> flushWatcher_` — used to await the final HDF5
   flush on experiment stop without blocking the UI thread.
 - The nested Experiment pages wire Monitoring apply into

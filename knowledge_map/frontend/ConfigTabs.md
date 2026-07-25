@@ -29,6 +29,14 @@
   `publish-profiles.py` to
   `https://updates.yofo.bio/profiles/<channel>/catalog.json`; see
   `docs/howto/auto-update-r2.md`.
+- **Profile-first UX (UX-2, #306):** the no-profile combo entry is labeled
+  `Template: built-in defaults (unvalidated)` and the status label warns
+  when the template is active. `currentProfileStatus()` /
+  `profileStatusChanged(ProfileStatus)` publish
+  name/selected/dirty/incompatible/update/remote to [[MainWindow]] for
+  the workflow facts and readiness gate — consumers cache the snapshot
+  and must not call `currentProfileStatus()` on a timer (it re-scans
+  profiles from disk).
 
 ## Gotchas
 

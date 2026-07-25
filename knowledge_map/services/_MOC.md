@@ -27,6 +27,8 @@
 ## Workflow / UI state
 - [[WorkflowStateService]] — authoritative four-stage operator workflow
   state (UX-1); pure evaluator + confirmation holder, no threads
+- [[OperatorChecks]] — preflight + experiment-readiness checklist rules
+  (UX-3/UX-6); pure classification, JSON provenance serializer
 
 ## Diagnostics
 - [[CrashReporter]] — process-level crash handler + Sentry forwarder;

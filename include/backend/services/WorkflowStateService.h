@@ -39,6 +39,11 @@ namespace backend::services
         bool cameraConfigured = false;      // hardware or mock selection applied
         bool cameraDiscoveryFailed = false; // last discovery reported no cameras
         bool processingCoreReady = false;   // pinned processing core active
+        bool storageOk = true;              // data folder writable (UX-3)
+
+        // Experiment Profile (UX-2)
+        bool profileSelected = false;     // explicit profile, not the template
+        bool profileIncompatible = false; // selected but incompatible
 
         // Camera & Alignment
         bool captureRunning = false;

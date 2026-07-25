@@ -866,7 +866,9 @@ void ConfigTabs::refreshProfilesList() {
     }
     const bool blocked = profileSelect_->blockSignals(true);
     profileSelect_->clear();
-    profileSelect_->addItem(tr("<no profile>"), "");
+    // UX-2 (#306): the built-in defaults are an unvalidated template, not a
+    // validated method — label them as such instead of a neutral "<no profile>".
+    profileSelect_->addItem(tr("Template: built-in defaults (unvalidated)"), "");
     for (const auto& summary : summaries) {
         profileSelect_->addItem(profileLabelForSummary(summary), summary.profileName);
     }
@@ -984,10 +986,17 @@ void ConfigTabs::refreshProfileStatusLabel() {
     }
     const auto summary = selectedProfileSummary();
     if (!summary.has_value()) {
-        profileStatusLabel_->setText(tr("No profile selected"));
-        profileStatusLabel_->setToolTip(QString());
+        profileStatusLabel_->setText(
+            tr("Template/unvalidated - select or create a profile for normal runs"));
+        profileStatusLabel_->setStyleSheet(QStringLiteral("color: #b58900;"));
+        profileStatusLabel_->setToolTip(
+            tr("The built-in defaults have no profile identity, validation state, or "
+               "revision tracking. Duplicate them into a local profile before a normal "
+               "experiment."));
+        emit profileStatusChanged(currentProfileStatus());
         return;
     }
+    profileStatusLabel_->setStyleSheet(QString());
 
     QStringList details;
     details << (summary->remoteEntry.has_value() ? tr("remote") : tr("local-only"));
@@ -1015,6 +1024,23 @@ void ConfigTabs::refreshProfileStatusLabel() {
                                         .arg(backend_.processing()
                                                  .activeProcessingCoreIdentity()
                                                  .contractVersion));
+    emit profileStatusChanged(currentProfileStatus());
+}
+
+frontend::ProfileStatus ConfigTabs::currentProfileStatus() const {
+    frontend::ProfileStatus status;
+    const auto summary = selectedProfileSummary();
+    if (!summary.has_value()) {
+        return status; // template/defaults active
+    }
+    status.selected = true;
+    status.name = summary->displayName.trimmed().isEmpty() ? summary->profileName
+                                                           : summary->displayName.trimmed();
+    status.dirty = summary->dirty;
+    status.incompatible = summary->incompatible;
+    status.updateAvailable = summary->updateAvailable;
+    status.remoteManaged = summary->remoteEntry.has_value();
+    return status;
 }
 
 void ConfigTabs::showDiffDialog(const QString& title, const QVector<frontend::ProfileManager::DiffRow>& rows) {

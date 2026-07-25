@@ -22,6 +22,11 @@ WorkflowStageState evaluatePreflight(const WorkflowFacts &facts, bool confirmed)
         state.blockingReasons.push_back(
             "Required processing core is not active. Select it in Settings > Processing Core.");
     }
+    if (!facts.storageOk)
+    {
+        state.blockingReasons.push_back(
+            "The data folder is not writable. Fix permissions or choose another location.");
+    }
 
     if (state.blockingReasons.empty())
     {
@@ -44,7 +49,8 @@ WorkflowStageState evaluatePreflight(const WorkflowFacts &facts, bool confirmed)
     // failed check, a lost prerequisite after confirmation, or a failed
     // discovery is Needs attention.
     const bool attention = confirmed || facts.cameraDiscoveryFailed ||
-                           (facts.cameraConfigured || !facts.processingCoreReady);
+                           facts.cameraConfigured || !facts.processingCoreReady ||
+                           !facts.storageOk;
     state.status = attention ? WorkflowStageStatus::NeedsAttention
                              : WorkflowStageStatus::NotStarted;
     state.statusText = attention ? "Needs attention" : "Not started";
@@ -129,6 +135,16 @@ WorkflowStageState evaluateExperiment(const WorkflowFacts &facts,
     {
         state.blockingReasons.push_back(
             "Required processing core is not active. Select it in Settings > Processing Core.");
+    }
+    if (!facts.profileSelected)
+    {
+        state.blockingReasons.push_back(
+            "Select an experiment profile (built-in defaults are an unvalidated template).");
+    }
+    else if (facts.profileIncompatible)
+    {
+        state.blockingReasons.push_back(
+            "The selected experiment profile is incompatible with this app/core.");
     }
     if (!facts.lastExperimentSaveOk)
     {

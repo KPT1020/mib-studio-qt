@@ -53,6 +53,10 @@
 #include "frontend/utils/SidebarWidget.h"
 #include "frontend/utils/StatisticsPanel.h"
 #include "frontend/widgets/WorkflowStageBar.h"
+#include "frontend/widgets/ChecklistPanel.h"
+#include "backend/services/OperatorChecks.h"
+#include <QGroupBox>
+#include <QStorageInfo>
 #include <spdlog/spdlog.h>
 #include <opencv2/core.hpp>
 #include <chrono>
@@ -184,7 +188,8 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         SyringePumpSettingsDialog dlg(backend_, this);
         dlg.exec(); });
 
-    auto* processingCoreAct = new QAction(tr("Processing Core..."), this);
+    processingCoreAct_ = new QAction(tr("Processing Core..."), this);
+    auto* processingCoreAct = processingCoreAct_;
     ui->settingsMenu->addAction(processingCoreAct);
     connect(processingCoreAct, &QAction::triggered, this, [this]() {
         SPDLOG_INFO("Opening Processing Core dialog");
@@ -467,6 +472,36 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         if (ui->tabs) {
             ui->tabs->setCurrentIndex(1); // Overview tab
         } });
+
+    // Experiment Profile status (UX-2): cache the ConfigTabs snapshot so the
+    // 2 Hz workflow refresh never re-scans profiles from disk.
+    configTabs_ = previewPage->getConfigTabs();
+    if (configTabs_) {
+        connect(configTabs_, &frontend::ConfigTabs::profileStatusChanged, this,
+                [this](const frontend::ProfileStatus& status) {
+            profileSelected_ = status.selected;
+            profileDirty_ = status.dirty;
+            profileIncompatible_ = status.incompatible;
+            profileName_ = status.name;
+            refreshWorkflowState();
+        });
+        const auto initialStatus = configTabs_->currentProfileStatus();
+        profileSelected_ = initialStatus.selected;
+        profileDirty_ = initialStatus.dirty;
+        profileIncompatible_ = initialStatus.incompatible;
+        profileName_ = initialStatus.name;
+    }
+
+    // Hardware preflight checklist (UX-3) at the bottom of the Connect tab.
+    if (connectTab_ && connectTab_->layout()) {
+        auto* preflightBox = new QGroupBox(tr("Hardware preflight"), connectTab_);
+        auto* boxLayout = new QVBoxLayout(preflightBox);
+        preflightPanel_ = new frontend::ChecklistPanel(preflightBox);
+        boxLayout->addWidget(preflightPanel_);
+        connectTab_->layout()->addWidget(preflightBox);
+        connect(preflightPanel_, &frontend::ChecklistPanel::recoveryRequested,
+                this, &MainWindow::handlePreflightRecovery);
+    }
 
     // Sync tune panel <-> config table bidirectionally
     connect(monitoringTab, &frontend::ExperimentMonitoringTab::processingConfigApplied,
@@ -1196,15 +1231,53 @@ void MainWindow::onUpdateStats()
     statusLabel_->setText(status);
 }
 
+void MainWindow::probeStorage()
+{
+    const QString dataDir =
+        QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation))
+            .absoluteFilePath(QStringLiteral("MIB_Studio_Qt"));
+    QDir().mkpath(dataDir);
+    const QFileInfo info(dataDir);
+    QStorageInfo storage(dataDir);
+    storageKnown_ = info.exists() && storage.isValid();
+    storageWritable_ = storageKnown_ && info.isWritable() && !storage.isReadOnly();
+    storageFreeGb_ = storageKnown_
+        ? static_cast<double>(storage.bytesAvailable()) / (1024.0 * 1024.0 * 1024.0)
+        : 0.0;
+}
+
+void MainWindow::handlePreflightRecovery(const QString& checkId)
+{
+    if (checkId == QLatin1String("camera")) {
+        if (ui->tabs) ui->tabs->setCurrentIndex(0);
+        if (connectTab_) connectTab_->tryAutoConnect();
+    } else if (checkId == QLatin1String("core")) {
+        if (processingCoreAct_) processingCoreAct_->trigger();
+    } else if (checkId == QLatin1String("storage")) {
+        ui->openDataFolderAct->trigger();
+    } else if (checkId == QLatin1String("profile")) {
+        ui->profilesAct->trigger();
+    }
+    refreshWorkflowState();
+}
+
 void MainWindow::refreshWorkflowState()
 {
     if (!workflowBar_)
         return;
 
+    // Storage probe every ~5 s on the 500 ms timer (cheap but filesystem-touching).
+    if (storageProbeTick_++ % 10 == 0) {
+        probeStorage();
+    }
+
     backend::services::WorkflowFacts facts;
     facts.cameraConfigured = backend_.isCameraConfigured();
     facts.cameraDiscoveryFailed = noCamerasFound_;
     facts.processingCoreReady = backend_.processing().isProcessingCorePinSatisfied();
+    facts.storageOk = !storageKnown_ || storageWritable_;
+    facts.profileSelected = profileSelected_;
+    facts.profileIncompatible = profileIncompatible_;
     facts.captureRunning = backend_.capture().isRunning();
     facts.roiValid = overviewTab_ && overviewTab_->roiWidth() > 0 &&
                      overviewTab_->roiHeight() > 0;
@@ -1221,6 +1294,25 @@ void MainWindow::refreshWorkflowState()
     workflowBar_->setStageNavigationEnabled(3, !experimentActive_, lockReason);
 
     workflowBar_->updateSnapshot(backend_.workflow().evaluate(facts));
+
+    // Preflight checklist (UX-3) shares the same facts.
+    if (preflightPanel_) {
+        backend::services::checks::PreflightFacts preflight;
+        preflight.cameraConfigured = facts.cameraConfigured;
+        preflight.cameraDiscoveryFailed = facts.cameraDiscoveryFailed;
+        preflight.mockCamera = qgetenv("MIB_CAMERA_MODE") == QByteArrayLiteral("mock");
+        preflight.cameraLabel = backend_.selectedCameraLabel();
+        preflight.processingCoreReady = facts.processingCoreReady;
+        preflight.processingCoreVersion =
+            backend_.processing().activeProcessingCoreIdentity().version;
+        preflight.storagePathKnown = storageKnown_;
+        preflight.storageWritable = storageWritable_;
+        preflight.storageFreeGb = storageFreeGb_;
+        preflight.profileSelected = profileSelected_;
+        preflight.profileIncompatible = profileIncompatible_;
+        preflight.profileName = profileName_.toStdString();
+        preflightPanel_->setItems(backend::services::checks::evaluatePreflight(preflight));
+    }
 }
 
 void MainWindow::startExperimentServices()

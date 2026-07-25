@@ -27,14 +27,16 @@
 
 `NotStarted · NeedsAttention · Ready · Complete · Running` per stage:
 
-- **Preflight** — camera configured + processing core pinned ⇒ `Ready`;
+- **Preflight** — camera configured + processing core pinned + storage
+  writable ⇒ `Ready`;
   `Complete` only after explicit operator confirmation. Camera detection
   alone never completes the stage. Failed discovery or a missing pinned
   core ⇒ `NeedsAttention` with recovery text.
 - **Camera & Alignment** — gated on Preflight `Complete`; needs capture
   running + valid ROI; `Complete` only on explicit confirmation.
 - **Experiment** — `Running` while active (text notes flush-in-progress);
-  `Ready` when alignment complete + capture running + core pinned;
+  `Ready` when alignment complete + capture running + core pinned + an
+  explicit compatible Experiment Profile selected (UX-2);
   `Complete` after a run whose metadata/provenance save succeeded; a
   failed save ⇒ `NeedsAttention`.
 - **Review** — locked (`NeedsAttention`) during an active experiment;

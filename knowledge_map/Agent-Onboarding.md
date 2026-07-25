@@ -31,6 +31,7 @@ Jump to the notes that match your task:
 | Syringe pumps | [[services/SyringePumpService]] + [[frontend/SyringePumpTab]] |
 | Crashes / observability | [[services/CrashReporter]] + [[diagnostics/CrashStateMirror]] |
 | Guided operator workflow / stage state | [[services/WorkflowStateService]] + [[frontend/WorkflowStageBar]] |
+| Preflight / readiness checklists | [[services/OperatorChecks]] + [[frontend/ChecklistPanel]] |
 | Pipeline / trigger latency diagnosis | [[diagnostics/PipelineTimingRecorder]] + `docs/howto/pipeline-latency-diagnosis.md` |
 | Build / deploy | [[build-and-run/Build]], [[build-and-run/Run-Modes]] |
 | User manual / generated screenshots | [[frontend/Screenshot-Tour]] + `docs/manual/README.md` |

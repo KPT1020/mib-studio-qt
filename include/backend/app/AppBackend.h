@@ -97,6 +97,9 @@ namespace backend
         // Check if a camera is configured (either hardware or mock)
         bool isCameraConfigured() const;
 
+        // Human-readable label of the selected camera ("" when none/mock).
+        std::string selectedCameraLabel() const { return selectedLabel_; }
+
         // Frame recording mode: record non-empty frames directly to HDF5 (images + metadata only, no contour processing)
         // Returns false if recording cannot start (e.g., capture not running, file error)
         bool startFrameRecording(const std::string& hdf5FilePath);

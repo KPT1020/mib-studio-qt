@@ -5,6 +5,18 @@
 
 ## Features shipped
 
+- **Profile-first setup + hardware preflight checklist (UX-2/UX-3)**
+  (2026-07-25, issues #306/#307, epic #304) — new
+  [[../services/OperatorChecks]] (Qt-free preflight + readiness
+  classification with recovery actions and provenance JSON) rendered by
+  the new [[../frontend/ChecklistPanel]] in a "Hardware preflight" box on
+  [[../frontend/ConnectTab]]. [[../frontend/ConfigTabs]] now labels the
+  built-in defaults "Template: built-in defaults (unvalidated)" and emits
+  `profileStatusChanged` (name/dirty/incompatible/update/remote) which
+  [[../frontend/MainWindow]] caches for the workflow facts — an
+  experiment stage can no longer read Ready without an explicit profile.
+  Storage writability/free-space is probed and fed into preflight. Tests:
+  `backend.operator_checks`, extended `backend.workflow_state`.
 - **Guided four-stage operator workflow, stage 1 of the UX redesign**
   (2026-07-24, issue #305 / epic #304) — new
   [[../services/WorkflowStateService]] (Qt-free, owned by value in

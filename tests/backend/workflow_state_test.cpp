@@ -23,6 +23,7 @@ WorkflowFacts healthyIdleFacts()
     WorkflowFacts facts;
     facts.cameraConfigured = true;
     facts.processingCoreReady = true;
+    facts.profileSelected = true;
     facts.captureRunning = true;
     facts.roiValid = true;
     return facts;
@@ -231,6 +232,43 @@ int main()
                 }
             }
         }
+    }
+
+    // --- UX-2: template-only session cannot present a Ready experiment -------
+    {
+        WorkflowFacts facts = healthyIdleFacts();
+        facts.profileSelected = false;
+        const auto snap = evaluateWorkflow(facts, true, true);
+        const auto &experiment = stageState(snap, WorkflowStage::Experiment);
+        MIB_EXPECT(experiment.status != WorkflowStageStatus::Ready,
+                   "no explicit profile keeps the experiment stage gated");
+        bool mentionsProfile = false;
+        for (const auto &reason : experiment.blockingReasons)
+        {
+            mentionsProfile = mentionsProfile ||
+                              reason.find("profile") != std::string::npos;
+        }
+        MIB_EXPECT(mentionsProfile, "the gate names the missing profile");
+    }
+
+    // --- UX-2: incompatible profile blocks with attention --------------------
+    {
+        WorkflowFacts facts = healthyIdleFacts();
+        facts.profileIncompatible = true;
+        const auto snap = evaluateWorkflow(facts, true, true);
+        MIB_EXPECT(stageState(snap, WorkflowStage::Experiment).status ==
+                       WorkflowStageStatus::NeedsAttention,
+                   "incompatible profile downgrades the experiment stage");
+    }
+
+    // --- UX-3: unwritable storage blocks preflight ---------------------------
+    {
+        WorkflowFacts facts = healthyIdleFacts();
+        facts.storageOk = false;
+        const auto snap = evaluateWorkflow(facts, true, true);
+        MIB_EXPECT(stageState(snap, WorkflowStage::HardwarePreflight).status ==
+                       WorkflowStageStatus::NeedsAttention,
+                   "unwritable storage invalidates confirmed preflight");
     }
 
     // --- Service holder: confirmations are authoritative and resettable ------

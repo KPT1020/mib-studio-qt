@@ -21,6 +21,8 @@ namespace frontend { class SidebarWidget; }
 namespace frontend { class DeviceInitManager; }
 namespace frontend { class WorkflowStageBar; }
 namespace frontend { class HdfReviewTab; }
+namespace frontend { class ChecklistPanel; }
+namespace frontend { class ConfigTabs; }
 namespace Ui { class MainWindow; }
 
 class MainWindow : public QMainWindow {
@@ -47,6 +49,10 @@ private:
     // Collect authoritative backend facts and re-render the workflow stage
     // bar (UX-1). Called on the workflow timer and after state-changing slots.
     void refreshWorkflowState();
+    // Probe the experiment data folder (writability + free space) at a low
+    // cadence; feeds the preflight checklist and workflow facts (UX-3).
+    void probeStorage();
+    void handlePreflightRecovery(const QString& checkId);
     void startExperimentServices();
     void stopExperimentServices();
     void setupCornerWidgets();
@@ -63,7 +69,10 @@ private:
     frontend::OverviewTab* overviewTab_ = nullptr;
     frontend::HdfReviewTab* hdfReviewTab_ = nullptr;
     frontend::WorkflowStageBar* workflowBar_ = nullptr;
+    frontend::ChecklistPanel* preflightPanel_ = nullptr;
+    frontend::ConfigTabs* configTabs_ = nullptr;
     QTimer* workflowTimer_ = nullptr;
+    QAction* processingCoreAct_ = nullptr;
     frontend::AutoUpdater* updater_ = nullptr;
     frontend::SidebarWidget* sidebarWidget_ = nullptr;
     frontend::DeviceInitManager* initManager_ = nullptr;
@@ -74,6 +83,17 @@ private:
     bool noCamerasFound_{false};
     bool experimentCompleted_{false};
     bool lastExperimentSaveOk_{true};
+    // Cached Experiment Profile status (UX-2), refreshed via
+    // ConfigTabs::profileStatusChanged — never re-scanned on the UI timer.
+    bool profileSelected_{false};
+    bool profileDirty_{false};
+    bool profileIncompatible_{false};
+    QString profileName_;
+    // Cached storage probe (UX-3)
+    bool storageKnown_{false};
+    bool storageWritable_{true};
+    double storageFreeGb_{0.0};
+    int storageProbeTick_{0};
     bool flushInProgress_{false};
     bool restoreRealtimeModeAfterExperiment_{false};
     int realtimeModeBeforeExperiment_{0};

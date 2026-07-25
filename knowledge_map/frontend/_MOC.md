@@ -20,6 +20,8 @@
 ## Workflow
 - [[WorkflowStageBar]] — guided four-stage workflow bar above the tabs
   (UX-1); renders [[../services/WorkflowStateService]] snapshots
+- [[ChecklistPanel]] — check-item renderer for preflight and the
+  readiness gate ([[../services/OperatorChecks]])
 
 ## Support
 - [[Dialogs]] — settings dialogs (Mock, Processing, Monitoring, Buffer save,

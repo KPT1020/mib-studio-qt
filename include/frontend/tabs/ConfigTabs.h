@@ -30,6 +30,18 @@ namespace frontend { class JsonTableModel; }
 
 namespace frontend {
 
+// Lightweight snapshot of the active Experiment Profile selection (UX-2,
+// issue #306). Emitted by ConfigTabs so the workflow bar, context bar, and
+// readiness gate can reflect profile state without re-scanning profiles.
+struct ProfileStatus {
+    QString name;                // empty when the template/defaults are active
+    bool selected = false;       // an explicit profile (not the template)
+    bool dirty = false;
+    bool incompatible = false;
+    bool updateAvailable = false;
+    bool remoteManaged = false;
+};
+
 class ConfigTabs : public QWidget {
     Q_OBJECT
 public:
@@ -37,9 +49,11 @@ public:
 
 signals:
 	void appConfigPathChanged(const QString& path);
+    void profileStatusChanged(const frontend::ProfileStatus& status);
 
 public:
     QString currentJsPath() const;
+    frontend::ProfileStatus currentProfileStatus() const;
 
 public slots:
     // Called when config file changes externally (e.g., when ROI is saved)
