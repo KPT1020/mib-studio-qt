@@ -16,10 +16,12 @@ public:
     // Windows: registry HKLM\HARDWARE\DEVICEMAP\SERIALCOMM; other platforms: empty.
     static std::vector<int> availableComPortNumbers();
 
-    // Process memory usage (MB). Windows-first; returns 0 on unsupported platforms.
+    // Process memory usage (MB). Windows PrivateUsage / Linux VmRSS; returns
+    // 0 on unsupported platforms.
     static double getProcessMemoryMB();
 
-    // Peak process memory usage (MB). Windows-first; returns 0 on unsupported platforms.
+    // Peak process memory usage (MB). Windows PeakWorkingSetSize / Linux
+    // VmHWM; returns 0 on unsupported platforms.
     static double getPeakProcessMemoryMB();
 
     // Available system RAM in bytes. Windows-first; returns 0 on unsupported platforms.

@@ -14,6 +14,8 @@
 #pragma comment(lib, "Kernel32.lib")
 #pragma comment(lib, "Advapi32.lib")
 #else
+#include <fstream>
+#include <string>
 #include <time.h>
 #endif
 
@@ -45,6 +47,19 @@ void Tools::log(const std::string& msg) {
 static inline double bytesToMB(SIZE_T bytes) {
     return static_cast<double>(bytes) / (1024.0 * 1024.0);
 }
+#else
+// /proc/self/status "VmRSS:  123456 kB"-style field, in MB; 0 if absent.
+static double procStatusFieldMB(const char* field) {
+    std::ifstream status("/proc/self/status");
+    std::string line;
+    const std::string prefix(field);
+    while (std::getline(status, line)) {
+        if (line.rfind(prefix, 0) == 0) {
+            return std::strtod(line.c_str() + prefix.size(), nullptr) / 1024.0;
+        }
+    }
+    return 0.0;
+}
 #endif
 
 double Tools::getProcessMemoryMB() {
@@ -59,7 +74,7 @@ double Tools::getProcessMemoryMB() {
     }
     return 0.0;
 #else
-    return 0.0;
+    return procStatusFieldMB("VmRSS:");
 #endif
 }
 
@@ -72,7 +87,7 @@ double Tools::getPeakProcessMemoryMB() {
     }
     return 0.0;
 #else
-    return 0.0;
+    return procStatusFieldMB("VmHWM:");
 #endif
 }
 
