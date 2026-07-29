@@ -10,6 +10,9 @@
 - [[PipelineTimingRecorder]] — lock-free per-frame latency recorder
   (acquisition → algorithm → trigger stamps + skip accounting) behind the
   pipeline-delay diagnosis workflow.
+- [[PipelineTrendSampler]] — 1 Hz time-series consumer of the recorder
+  (per-stage percentiles, queue depths, backlog, RSS into
+  `pipeline_trend.csv`) for latency-growth-over-minutes investigations.
 
 ## Related services / conventions
 

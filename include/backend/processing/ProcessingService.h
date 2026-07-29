@@ -220,6 +220,18 @@ public:
     void setPixelToMicronFactor(double factor);
     double getPixelToMicronFactor() const;
     
+    // Realtime consumer cursor: absolute FrameStore write index of the last
+    // frame the realtime loop consumed. Subtracting it from the store's
+    // latestAvailableIndex() gives the live consumer backlog (the latency
+    // accumulator when drop-frames is off) — sampled at 1 Hz by
+    // PipelineTrendSampler. Only meaningful while realtime is running.
+    uint64_t getRealtimeLastProcessedIndex() const {
+        return rtLastProcessed_.load(std::memory_order_relaxed);
+    }
+    bool isExperimentActive() const {
+        return experimentActive_.load(std::memory_order_relaxed);
+    }
+
     // Realtime throughput metrics (1-second window)
     double getAlgoFps1s() const { return algoFps1s_.load(std::memory_order_relaxed); }
     double getValidFps1s() const { return validFps1s_.load(std::memory_order_relaxed); }

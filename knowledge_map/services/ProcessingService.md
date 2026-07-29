@@ -198,7 +198,11 @@ cache refreshes when the background changes.
 1-second rolling window: `getAlgoFps1s`, `getValidFps1s`, `getInvalidFps1s`,
 `getAlgoAvgUs1s`. Plus `getBufferedFrameCounts()` for cheap UI/status polling,
 `getTotalValidFlushed` for experiment totals, and dropped-frame counters for
-the bounded experiment backlog.
+the bounded experiment backlog. `getRealtimeLastProcessedIndex()` /
+`isExperimentActive()` (relaxed atomic reads) expose the realtime consumer
+cursor and every-frame gating so [[../diagnostics/PipelineTrendSampler]] can
+derive the live consumer backlog (`FrameStore::latestAvailableIndex() −
+rtLastProcessed_`) at 1 Hz.
 
 **Identification funnel + loss** (`getIdentificationCounters` →
 `IdentificationCounters`, monotonic, always-on, reset by `resetRealtimeMetrics`

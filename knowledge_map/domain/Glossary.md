@@ -89,3 +89,17 @@
   themselves never decrease.
 - **FrameStore filter mode** — frame filter that returns `true` to SKIP
   (used by recording mode to drop empty frames).
+- **Realtime backlog** — `FrameStore::latestAvailableIndex()` minus
+  `ProcessingService::getRealtimeLastProcessedIndex()`: how many frames the
+  realtime consumer is behind the write head. The latency accumulator when
+  drop-frames is off (an experiment forces every-frame mode); sampled at
+  1 Hz by [[../diagnostics/PipelineTrendSampler]].
+- **Steady-state ratio** — last-minute-window vs first-minute-window median
+  of a latency/depth metric over a long run; the repo convention for
+  judging performance growth (ratios, never absolute milliseconds).
+  Computed by the trend section of `scripts/analyze_pipeline_timing.py`;
+  growth is flagged above 1.3× plus a 2σ noise guard.
+- **Trend sampling** — the 1 Hz `pipeline_trend.csv` time series written by
+  [[../diagnostics/PipelineTrendSampler]] (`MIB_PIPELINE_TREND=1`); the
+  long-session complement to the ~2-minute
+  [[../diagnostics/PipelineTimingRecorder]] rings.

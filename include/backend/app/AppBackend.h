@@ -29,6 +29,10 @@ namespace backend
     {
         class FrameStore;
     }
+    namespace diagnostics
+    {
+        class PipelineTrendSampler;
+    }
 }
 namespace camera::mock
 {
@@ -124,6 +128,14 @@ namespace backend
         bool dumpPipelineTiming(const std::string& directory = {},
                                 std::string* errorOut = nullptr);
 
+        // 1 Hz latency trend time series (PipelineTrendSampler). The recorder
+        // rings above hold only ~2 minutes of frames at 500 fps, so growth
+        // over a long session needs this periodic sampler. Enabled at startup
+        // via MIB_PIPELINE_TREND=1 (rows go to pipeline_trend.csv in the
+        // pipeline-timing dump directory) or at runtime through this method.
+        bool setPipelineTrendSampling(bool enabled, const std::string& directory = {});
+        bool isPipelineTrendSampling() const;
+
     private:
         void reportFatalSaveError(const std::string& msg);
         // Best-effort auto-dump used at capture stop/shutdown; logs on failure.
@@ -153,6 +165,9 @@ namespace backend
 
         // Where pipeline-timing CSVs are dumped (set in initialize()).
         std::string pipelineTimingDir_;
+
+        // 1 Hz latency trend sampler (see setPipelineTrendSampling).
+        std::unique_ptr<diagnostics::PipelineTrendSampler> trendSampler_;
 
         // Frame recording state
         std::unique_ptr<std::thread> frameRecordingThread_;

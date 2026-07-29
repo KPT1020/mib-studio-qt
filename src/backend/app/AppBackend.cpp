@@ -4,6 +4,7 @@
 #include "backend/services/CrashReporter.h"
 #include "backend/diagnostics/CrashStateMirror.h"
 #include "backend/diagnostics/PipelineTimingRecorder.h"
+#include "backend/diagnostics/PipelineTrendSampler.h"
 #include "backend/database/SqliteService.h"
 #include "backend/recording/Hdf5Service.h"
 #include "backend/recording/HdfWriteQueue.h"
@@ -145,6 +146,11 @@ namespace backend
         // die before processingService_ — a still-running realtime loop would
         // invoke its callbacks on freed services. Every call below is
         // idempotent, so shutdown() may run more than once.
+        // The trend sampler's provider reads the services below, so it stops
+        // first.
+        if (trendSampler_) {
+            trendSampler_->stop();
+        }
         if (captureService_) {
             captureService_->stop();
         }
@@ -665,6 +671,19 @@ namespace backend
                 "AppBackend initialized");
         }
 
+        // Long-session latency trend sampling: opt in via environment, like
+        // MIB_PIPELINE_TIMING above. Started here (after every provider
+        // dependency exists); rows land in pipeline_trend.csv next to the
+        // timing CSVs.
+        if (const char *trendEnv = std::getenv("MIB_PIPELINE_TREND"))
+        {
+            const std::string value(trendEnv);
+            if (value == "1" || value == "true" || value == "on")
+            {
+                setPipelineTrendSampling(true);
+            }
+        }
+
         SPDLOG_INFO("Backend initialized.");
         return true;
     }
@@ -1154,6 +1173,48 @@ namespace backend
         SPDLOG_INFO("AppBackend: pipeline timing dumped to {} (frames={}, triggers={})", dir,
                     recorder.frameRecordCount(), recorder.triggerRecordCount());
         return true;
+    }
+
+    bool AppBackend::setPipelineTrendSampling(bool enabled, const std::string& directory) {
+        if (!enabled) {
+            if (trendSampler_) trendSampler_->stop();
+            return true;
+        }
+        if (!processingService_ || !captureService_ || !frameStore_) {
+            SPDLOG_ERROR("AppBackend: trend sampling requested before initialize()");
+            return false;
+        }
+        if (trendSampler_ && trendSampler_->isRunning()) return true;
+        if (!trendSampler_) {
+            trendSampler_ = std::make_unique<diagnostics::PipelineTrendSampler>();
+        }
+        const std::string dir = directory.empty() ? pipelineTimingDir_ : directory;
+        // The provider reads only atomics/thread-safe getters; the sampler is
+        // stopped in shutdown() before any of these services is torn down.
+        auto provider = [this]() {
+            diagnostics::PipelineTrendProviderSample s;
+            if (frameStore_->totalWritten() > 0) {
+                s.latestAvailableIndex = frameStore_->latestAvailableIndex();
+            }
+            s.rtLastProcessed = processingService_->getRealtimeLastProcessedIndex();
+            s.captureFps = captureService_->stats().lastFrameRate.load();
+            s.algoFps = processingService_->getAlgoFps1s();
+            const auto batch = processingService_->getBatchPipelineStats();
+            s.batchQueueDepth = batch.currentQueueDepth;
+            s.batchMaxQueueDepth = batch.maxQueueDepth;
+            s.batchAccepted = batch.framesAccepted;
+            s.batchDropped = batch.framesDropped;
+            s.batchProcessed = batch.framesProcessed;
+            s.realtimeMode = static_cast<int>(processingService_->getRealtimeProcessingMode());
+            s.dropFrames = processingService_->getRealtimeDropFrames();
+            s.experimentActive = processingService_->isExperimentActive();
+            return s;
+        };
+        return trendSampler_->start(dir, std::move(provider));
+    }
+
+    bool AppBackend::isPipelineTrendSampling() const {
+        return trendSampler_ && trendSampler_->isRunning();
     }
 
     void AppBackend::dumpPipelineTimingIfEnabled() {

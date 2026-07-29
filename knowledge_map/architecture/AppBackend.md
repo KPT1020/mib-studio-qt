@@ -101,6 +101,15 @@ is joined), and `shutdown()` dumps again as a final snapshot. Runtime API:
 `TargetGroupSignal` so [[../services/TriggerService]] can correlate pulses
 with source frames. See `docs/howto/pipeline-latency-diagnosis.md`.
 
+For long sessions, `MIB_PIPELINE_TREND` (`1`/`true`/`on`) additionally
+starts a [[../diagnostics/PipelineTrendSampler]] at the end of
+`initialize` — a 1 Hz `pipeline_trend.csv` in the same dump directory whose
+provider lambda reads the FrameStore write head, the realtime consumer
+cursor, capture/algo fps, batch-pipeline stats, and mode flags (atomics /
+thread-safe getters only). Runtime API: `setPipelineTrendSampling(bool,
+dir)` / `isPipelineTrendSampling()`. `shutdown()` stops the sampler first,
+before any service the provider reads is torn down.
+
 ## Shutdown
 
 `shutdown()` stops every service-owned thread in dependency order — capture

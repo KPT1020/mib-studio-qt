@@ -42,6 +42,38 @@ Programmatic control (e.g. from a debug hook):
 `AppBackend::setPipelineTimingEnabled(bool)` and
 `AppBackend::dumpPipelineTiming(dir)`.
 
+## 1b. Long sessions: latency *growth* needs the trend sampler
+
+At 500 fps the rings above hold only ~2 minutes, so a stop-time dump cannot
+answer "does latency grow after N minutes?" — enable the 1 Hz trend time
+series as well
+([`PipelineTrendSampler`](../../knowledge_map/diagnostics/PipelineTrendSampler.md)):
+
+```
+MIB_PIPELINE_TIMING=1            # detailed recorder (feeds the sampler)
+MIB_PIPELINE_TREND=1             # 1 Hz pipeline_trend.csv in the same dir
+```
+
+Each row holds windowed per-stage percentiles (`summarize(4096)`), the
+realtime consumer backlog (`latestAvailableIndex − rtLastProcessed`), the
+async-batch queue depth, cumulative skip counters, host-vs-device
+inter-frame gaps, the always-on target-latency gauges, and process RSS.
+Runtime control: `AppBackend::setPipelineTrendSampling(bool, dir)`. The
+analyzer (step 2) detects the file and appends a trend section: per-minute
+first/last-window medians, steady-state ratios (growth flagged at >1.3×
+plus a 2σ noise guard — ratios, never absolute ms), and a decision-tree
+verdict:
+
+| Growth signature | Verdict |
+| --- | --- |
+| batch mode and `batch_queue_depth` ramps toward its cap | async-batch bufferbloat — standing latency = depth / fps (drop-newest overflow preserves the backlog, so depth, not drops, is the signal) |
+| inline and `backlog_frames` ramps (sawtooth + `ring_behind` at the FrameStore window) | consumer backlog — only possible with drop-frames off or an experiment active |
+| `frame_age` flat but `algo_p95` ramps with `objects_per_frame_mean` | contour growth (scene/background degradation) |
+| `algo_p95` ramps with `mem_mb` at flat object counts | heap growth — confirm time- vs load-proportionality at a lower fps and with an LSan build |
+| `host_grab_gap` ramps, `device_tick_gap` flat | acquisition-side (SDK) buffering |
+| `request_to_fire_p95` ramps | trigger-thread scheduling degradation |
+| nothing grows headless but the app shows the symptom | GUI-side suspects: the 60 Hz overlay kernel on the GUI thread (contends on the kernel mutex), OverviewTab's 50 Hz tick (never stops on tab hide) — A/B the PlaybackPanel visible/hidden in an app run |
+
 ## 2. Analyze
 
 ```
@@ -92,7 +124,10 @@ python3 scripts/analyze_pipeline_timing.py /tmp/timing_run/pipeline_timing
 ```
 
 Options: `--roi x,y,w,h`, `--background <image>`, `--drop-frames` (default is
-every-frame mode), `--fps`, `--duration`.
+every-frame mode), `--fps`, `--duration`, `--mode inline|batch` (async-batch
+realtime path). The harness always writes `pipeline_trend.csv` (§1b), so a
+long `--duration` (e.g. 720) plus the analyzer's trend section is the
+standard reproduction for latency-growth reports.
 
 Reference numbers from 20 s / 500 fps runs of `gavinlouuu/512x96stream`
 (1000 frames, Linux container, every-frame mode), zero drops and accounting

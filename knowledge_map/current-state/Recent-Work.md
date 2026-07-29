@@ -5,6 +5,21 @@
 
 ## Features shipped
 
+- **Latency-growth trend instrumentation** (2026-07-29) — measurement plan
+  for the "real-time latency increases after ~5 minutes" report
+  ([[../task/2026-07-29-latency-growth-investigation]]). New
+  [[../diagnostics/PipelineTrendSampler]] writes a 1 Hz
+  `pipeline_trend.csv` (per-stage percentiles, realtime consumer backlog
+  via the new `ProcessingService::getRealtimeLastProcessedIndex()`,
+  async-batch queue depth, skip counters, host/device inter-frame gaps,
+  RSS) — the long-session complement to the ~2-minute recorder rings.
+  Enabled via `MIB_PIPELINE_TREND=1` or
+  `AppBackend::setPipelineTrendSampling`. The mock timing harness gained
+  `--mode inline|batch` and always-on trend sampling;
+  `analyze_pipeline_timing.py` gained per-minute steady-state ratios and a
+  decision-tree verdict (bufferbloat / consumer backlog / SDK buffering /
+  heap growth / contour growth). Runbook §1b in
+  `docs/howto/pipeline-latency-diagnosis.md`.
 - **Latency & target-identification-loss metrics** (2026-07-21, issue #292) —
   quantifies pipeline latency and lost sort targets. New counted losses:
   [[../services/TriggerService]] no-camera / set-failed pulse drops

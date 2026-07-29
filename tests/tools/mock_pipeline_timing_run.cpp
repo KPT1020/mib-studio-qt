@@ -16,7 +16,12 @@
 // Usage:
 //   mock_pipeline_timing_run --frames <dir> [--fps 200] [--duration 20]
 //       [--out <dump dir>] [--data-dir <dir>] [--roi x,y,w,h]
-//       [--background <image>] [--drop-frames]
+//       [--background <image>] [--drop-frames] [--mode inline|batch]
+//
+// A 1 Hz latency trend time series (pipeline_trend.csv, PipelineTrendSampler)
+// is always written next to the timing CSVs — the recorder rings hold only
+// ~2 minutes of frames at 500 fps, so long --duration soaks need the trend
+// file to show latency growth.
 //
 // This is a manual diagnosis tool, not a CTest (it needs a frames folder).
 
@@ -55,6 +60,7 @@ struct Options {
     double fps{200.0};
     double durationSec{20.0};
     bool dropFrames{false};
+    bool batchMode{false};
     int roi[4]{-1, -1, -1, -1}; // x,y,w,h; -1 = derive right third
 };
 
@@ -94,6 +100,16 @@ bool parseArgs(int argc, char** argv, Options& opt) {
             opt.durationSec = std::atof(v);
         } else if (arg == "--drop-frames") {
             opt.dropFrames = true;
+        } else if (arg == "--mode") {
+            const char* v = next("--mode");
+            if (!v) return false;
+            const std::string mode = v;
+            if (mode == "batch") {
+                opt.batchMode = true;
+            } else if (mode != "inline") {
+                std::cerr << "--mode expects inline or batch\n";
+                return false;
+            }
         } else if (arg == "--roi") {
             const char* v = next("--roi");
             if (!v) return false;
@@ -110,7 +126,7 @@ bool parseArgs(int argc, char** argv, Options& opt) {
     if (opt.framesDir.empty()) {
         std::cerr << "usage: mock_pipeline_timing_run --frames <dir> [--fps N] "
                      "[--duration Sec] [--out dir] [--roi x,y,w,h] [--background img] "
-                     "[--drop-frames]\n";
+                     "[--drop-frames] [--mode inline|batch]\n";
         return false;
     }
     return true;
@@ -218,9 +234,11 @@ int main(int argc, char** argv) {
     // the dump directory and auto-dumps on capture stop.
 #ifdef _WIN32
     _putenv_s("MIB_PIPELINE_TIMING", "1");
+    _putenv_s("MIB_PIPELINE_TREND", "1");
     _putenv_s("MIB_PIPELINE_TIMING_DIR", opt.outDir.c_str());
 #else
     setenv("MIB_PIPELINE_TIMING", "1", 1);
+    setenv("MIB_PIPELINE_TREND", "1", 1);
     setenv("MIB_PIPELINE_TIMING_DIR", opt.outDir.c_str(), 1);
 #endif
 
@@ -261,7 +279,8 @@ int main(int argc, char** argv) {
     auto& proc = backendApp.processing();
     proc.setProcessingConfig(cfg);
     proc.setRealtimeProcessingMode(
-        backend::services::ProcessingService::RealtimeProcessingMode::Inline);
+        opt.batchMode ? backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch
+                      : backend::services::ProcessingService::RealtimeProcessingMode::Inline);
     proc.setRealtimeDropFrames(opt.dropFrames);
     proc.setRealtimeRoi({opt.roi[0], opt.roi[1], opt.roi[2], opt.roi[3]});
     proc.setRealtimeBackgroundGray(background);
@@ -271,6 +290,7 @@ int main(int argc, char** argv) {
               << " fps=" << opt.fps << " duration=" << opt.durationSec << "s"
               << " roi=" << opt.roi[0] << "," << opt.roi[1] << "," << opt.roi[2] << ","
               << opt.roi[3] << " drop_frames=" << (opt.dropFrames ? "on" : "off")
+              << " mode=" << (opt.batchMode ? "batch" : "inline")
               << "\ndump dir: " << opt.outDir << "\n";
 
     proc.startRealtime(backendApp.getFrameStore());
@@ -287,14 +307,20 @@ int main(int argc, char** argv) {
            opt.durationSec) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
         const uint64_t triggers = backendApp.trigger().getTriggerCount();
+        const auto store = backendApp.getFrameStore();
+        const uint64_t latest =
+            store->totalWritten() > 0 ? store->latestAvailableIndex() : 0;
+        const uint64_t lastProcessed = proc.getRealtimeLastProcessedIndex();
+        const uint64_t backlog = latest > lastProcessed ? latest - lastProcessed : 0;
         std::cout
             << "  t="
             << static_cast<int>(
                    std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count())
             << "s capture_fps=" << backendApp.capture().stats().lastFrameRate.load()
             << " algo_fps=" << proc.getAlgoFps1s() << " valid_fps=" << proc.getValidFps1s()
-            << " algo_avg_us=" << proc.getAlgoAvgUs1s() << " triggers=" << triggers << " (+"
-            << (triggers - lastTriggerCount) << "/s)"
+            << " algo_avg_us=" << proc.getAlgoAvgUs1s() << " backlog=" << backlog
+            << " queue=" << proc.getBatchPipelineStats().currentQueueDepth << " triggers="
+            << triggers << " (+" << (triggers - lastTriggerCount) << "/s)"
             << " frame_records=" << recorder.frameRecordCount() << "\n";
         lastTriggerCount = triggers;
     }

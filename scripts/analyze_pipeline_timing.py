@@ -19,6 +19,14 @@ Prints per-stage latency percentiles (all in milliseconds):
 plus inter-frame gap statistics and the frame-accounting summary
 (records + skips vs. what the capture pushed), which shows where frames
 were dropped and why. Stdlib only; no third-party dependencies.
+
+When the dump directory also contains pipeline_trend.csv (the 1 Hz time
+series written by PipelineTrendSampler — enable with MIB_PIPELINE_TREND=1),
+a trend section is printed as well: per-minute windows of each latency/depth
+metric, the steady-state ratio (last window vs first window — the repo
+convention is to judge growth on ratios, never absolute milliseconds), and a
+decision-tree verdict mapping which parameter rose to the most likely cause
+of latency growth over a long session.
 """
 
 import csv
@@ -54,6 +62,190 @@ def read_csv(path):
         return []
     with path.open(newline="") as f:
         return [{k: int(v) for k, v in row.items()} for row in csv.DictReader(f)]
+
+
+# --- long-session trend analysis (pipeline_trend.csv) -----------------------
+
+# Growth is flagged on the steady-state ratio between the last and first
+# per-minute windows, plus a noise guard: the last window must also exceed
+# the first window's spread. Ratio-based per repo convention.
+GROWTH_RATIO = 1.3
+
+
+def read_trend_csv(path):
+    if not path.exists():
+        return []
+    with path.open(newline="") as f:
+        rows = []
+        for row in csv.DictReader(f):
+            parsed = {}
+            for k, v in row.items():
+                if k == "wall_clock":
+                    parsed[k] = v
+                else:
+                    try:
+                        parsed[k] = float(v)
+                    except ValueError:
+                        parsed[k] = 0.0
+            rows.append(parsed)
+        return rows
+
+
+def window_series(rows, key, cumulative=False):
+    """Per-minute windows of a trend column: list of (minute, values).
+
+    For gauges, values are the positive samples in that minute (zero samples
+    mean 'no data this tick' — e.g. algo stages in async-batch mode — and are
+    excluded). For cumulative counters, values are per-minute increments.
+    """
+    windows = {}
+    prev = None
+    for row in rows:
+        minute = int(row["t_s"] // 60)
+        value = row[key]
+        if cumulative:
+            delta = value - prev if prev is not None else 0.0
+            prev = value
+            windows.setdefault(minute, []).append(max(0.0, delta))
+        elif value > 0:
+            windows.setdefault(minute, []).append(value)
+    return sorted(windows.items())
+
+
+def median(values):
+    vals = sorted(values)
+    return vals[len(vals) // 2] if vals else 0.0
+
+
+def stddev(values):
+    if len(values) < 2:
+        return 0.0
+    mean = sum(values) / len(values)
+    return (sum((v - mean) ** 2 for v in values) / (len(values) - 1)) ** 0.5
+
+
+class TrendMetric:
+    """Steady-state growth judgement for one trend column."""
+
+    def __init__(self, rows, key, cumulative=False):
+        self.key = key
+        windows = window_series(rows, key, cumulative)
+        # Need two windows with data; ignore leading/trailing empty ones.
+        self.ok = len(windows) >= 2
+        if not self.ok:
+            self.first = self.last = self.ratio = self.peak = 0.0
+            self.grew = False
+            return
+        first_minute, first_vals = windows[0]
+        last_minute, last_vals = windows[-1]
+        self.first = median(first_vals)
+        self.last = median(last_vals)
+        self.peak = max(max(vals) for _, vals in windows)
+        self.ratio = self.last / self.first if self.first > 0 else float("inf") if self.last > 0 else 1.0
+        noise_floor = self.first + 2.0 * stddev(first_vals)
+        self.grew = self.ratio > GROWTH_RATIO and self.last > noise_floor
+
+    def describe(self):
+        if not self.ok:
+            return f"  {self.key:<28} (insufficient data)"
+        ratio = f"{self.ratio:6.2f}x" if self.ratio != float("inf") else "  inf "
+        flag = "  << GROWTH" if self.grew else ""
+        return (
+            f"  {self.key:<28} first={self.first:12.1f}  last={self.last:12.1f}  "
+            f"ratio={ratio}  peak={self.peak:12.1f}{flag}"
+        )
+
+
+def analyze_trend(dump_dir):
+    rows = read_trend_csv(dump_dir / "pipeline_trend.csv")
+    if not rows:
+        return
+    duration = rows[-1]["t_s"] - rows[0]["t_s"]
+    print(f"\n== Latency trend analysis ({len(rows)} samples, {duration:.0f}s) ==")
+    if duration < 120:
+        print("  (session under 2 minutes — trend windows need at least 2 full minutes)")
+        return
+
+    gauges = [
+        "e2e_frame_p95_us", "e2e_target_p95_us", "frame_age_p95_us", "algo_p95_us",
+        "request_to_fire_p95_us", "backlog_frames", "batch_queue_depth",
+        "host_grab_gap_mean_us", "device_tick_gap_mean", "objects_per_frame_mean",
+        "mem_mb",
+    ]
+    counters = ["ring_behind", "dropped_to_latest", "batch_queue_rejected"]
+    m = {key: TrendMetric(rows, key) for key in gauges}
+    for key in counters:
+        m[key] = TrendMetric(rows, key, cumulative=True)
+
+    print("\n-- Per-minute steady-state ratios (first window vs last window) --")
+    for key in gauges:
+        print(m[key].describe())
+    print("-- Cumulative counters (per-minute increments) --")
+    for key in counters:
+        print(m[key].describe())
+
+    # --- decision tree: which hypothesis does the measured growth confirm? ---
+    batch_mode = rows[-1]["realtime_mode"] == 1
+    drop_frames = rows[-1]["drop_frames"] == 1
+    experiment = any(r["experiment_active"] == 1 for r in rows)
+    verdicts = []
+    e2e_grew = m["e2e_frame_p95_us"].grew or m["e2e_target_p95_us"].grew
+    if e2e_grew:
+        if batch_mode and m["batch_queue_depth"].grew:
+            verdicts.append(
+                "H1 batch-queue bufferbloat: async-batch queue depth is ramping "
+                f"(peak {m['batch_queue_depth'].peak:.0f}); standing latency = depth / fps. "
+                "Drop-newest overflow preserves the backlog, so depth (not drops) is the signal.")
+        if not batch_mode and m["backlog_frames"].grew:
+            saw = m["ring_behind"].last > 0
+            verdicts.append(
+                "H2 inline consumer backlog: latestAvailableIndex - rtLastProcessed is ramping "
+                f"(peak {m['backlog_frames'].peak:.0f})"
+                + (" with ring_behind evictions (sawtooth at the FrameStore window)" if saw else "")
+                + f" — drop_frames={'on' if drop_frames else 'off'}, "
+                f"experiment_active={'yes' if experiment else 'no'}; "
+                "backlog can only accumulate when drops are off or an experiment is active.")
+        if m["frame_age_p95_us"].ok and not m["frame_age_p95_us"].grew and m["algo_p95_us"].grew:
+            if m["objects_per_frame_mean"].grew:
+                verdicts.append(
+                    "H6 contour growth: algorithm time ramps in proportion to detected objects "
+                    f"per frame ({m['objects_per_frame_mean'].first:.1f} -> "
+                    f"{m['objects_per_frame_mean'].last:.1f}) — scene/background degradation, "
+                    "not a pipeline defect.")
+            elif m["mem_mb"].grew:
+                verdicts.append(
+                    "H4 heap growth: algorithm time ramps with RSS "
+                    f"({m['mem_mb'].first:.0f} -> {m['mem_mb'].last:.0f} MB) at flat object "
+                    "counts — repeat the run at a lower fps (time- vs load-proportional) and "
+                    "under -DMIB_SANITIZER=address (LSan) to confirm a leak.")
+        if m["request_to_fire_p95_us"].grew:
+            verdicts.append(
+                "Trigger-thread degradation: request->fire p95 is ramping — scheduling/priority "
+                "issue on the trigger thread, not the processing pipeline (new hypothesis; "
+                "escalate).")
+    if m["host_grab_gap_mean_us"].grew and m["device_tick_gap_mean"].ok \
+            and not m["device_tick_gap_mean"].grew:
+        verdicts.append(
+            "H3 acquisition-side buffering: host grab gap grows while the device tick gap stays "
+            "flat — frames queue inside the camera/SDK before grabFrame returns.")
+    if m["mem_mb"].grew and not any(v.startswith("H4") for v in verdicts):
+        verdicts.append(
+            f"RSS ramp ({m['mem_mb'].first:.0f} -> {m['mem_mb'].last:.0f} MB) without a matching "
+            "latency signal — possible slow leak (H4); confirm with an LSan run before acting.")
+
+    print("\n-- Verdict --")
+    if verdicts:
+        for v in verdicts:
+            print(f"  * {v}")
+    elif e2e_grew:
+        print("  * End-to-end latency grew but no instrumented stage explains it — inspect the "
+              "per-stage columns manually and consider the GUI-contention hypothesis (H5): "
+              "re-run with the PlaybackPanel hidden vs visible (A/B).")
+    else:
+        print("  * No latency growth in the instrumented path over this session.")
+        print("    If the symptom reproduces only in the full app, suspect GUI-side causes "
+              "(H5: 60 Hz overlay kernel contention) or acquisition-side buffering (H3) — "
+              "both need an app run with MIB_PIPELINE_TREND=1 to discriminate.")
 
 
 def main():
@@ -172,6 +364,8 @@ def main():
         if lost:
             detail = ", ".join(f"{k}={v}" for k, v in loss.items() if v)
             print(f"  frames lost pre-algo:   {lost}  ({detail})")
+
+    analyze_trend(dump_dir)
     return 0
 
 
