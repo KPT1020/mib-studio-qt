@@ -173,6 +173,14 @@ load-vs-time question is answered directly by the churn/heap columns now).
    `algo_p95` stepping with visibility → H5.
 3. Collect `pipeline_trend.csv`, the stop-time CSVs, and `app.log`; run the
    analyzer.
+4. Upload for durable storage + AI review:
+   `python3 scripts/upload_pipeline_diagnostics.py <dump_dir> --tag site=...`
+   → MLflow run (params + per-minute metric series + all CSVs and the
+   analyzer report as artifacts) on the repo's convention server; agents
+   pull it via the MLflow REST API. Offline fallback: `--offline` produces
+   a zip to attach to a GitHub issue. Sentry is deliberately not used for
+   this — it samples events and cannot carry CSV dumps or per-minute
+   series (runbook §1c).
 
 ## Follow-up (after a verdict)
 

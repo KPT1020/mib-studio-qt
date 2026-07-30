@@ -101,6 +101,44 @@ verdict:
 | `request_to_fire_p95` ramps | trigger-thread scheduling degradation |
 | nothing grows headless but the app shows the symptom | GUI-side suspects: the 60 Hz overlay kernel on the GUI thread (contends on the kernel mutex), OverviewTab's 50 Hz tick (never stops on tab hide) — A/B the PlaybackPanel visible/hidden in an app run |
 
+## 1c. Site runs: saving the metrics and getting them reviewed by AI agents
+
+A site session's evidence is the dump directory (trend CSV + timing CSVs +
+`app.log`). It is written locally and crash-safe (the trend file flushes
+every row), but it is only reviewable if it leaves the site machine. After
+stopping capture, upload it:
+
+```
+pip install mlflow            # once, on the site machine
+set MLFLOW_TRACKING_USERNAME=...   # never hardcode; ask ops for credentials
+set MLFLOW_TRACKING_PASSWORD=...
+python3 scripts/upload_pipeline_diagnostics.py <dump_dir> --tag site=<name> --tag ticket=<id>
+```
+
+This creates one MLflow run (experiment `pipeline-latency-diagnostics` on
+`mlflow.yofo.bio`, the same server AGENTS.md sends test metrics to) holding
+the run's context as params (mode, drop-frames, experiment-active, host),
+per-minute medians of the key columns as step metrics (browsable as charts
+in the MLflow UI), final steady-state ratios, and **every CSV plus the full
+analyzer report as artifacts** — a reviewer needs nothing from the site
+machine afterwards.
+
+**AI review loop:** point an agent session (e.g. Claude Code on this repo)
+at the run and ask it to review — with `MLFLOW_TRACKING_*` in the agent's
+environment it can pull the artifacts over the MLflow REST API, re-run
+`scripts/analyze_pipeline_timing.py` locally, and apply the decision tree in
+this document. No MLflow access from the agent? Use the fallback: the
+uploader's `--offline` mode produces `<dump>_diagnostics.zip`; attach it to
+a GitHub issue on the repo (drag & drop) and an agent session can download,
+unzip, and analyze it directly.
+
+Why not Sentry for this: Sentry is an error/event store — transactions are
+sampled (the playback one is throttled to one per 60 s), there is no
+artifact storage for CSV dumps and no queryable per-minute series, so a
+latency *trend* cannot round-trip through it. Sentry stays what it is good
+at (crashes, breadcrumbs, release health); the measurement evidence goes to
+MLflow.
+
 ## 2. Analyze
 
 ```
