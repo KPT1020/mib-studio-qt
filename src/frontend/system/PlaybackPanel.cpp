@@ -35,6 +35,7 @@
 #include "backend/playback/PlaybackService.h"
 #include "backend/processing/ProcessingService.h"
 #include "backend/playback/FrameStore.h"
+#include "backend/diagnostics/PipelineTimingRecorder.h"
 #include "backend/app/Tools.h"
 #include "frontend/dialogs/BufferSaveDialog.h"
 
@@ -1091,6 +1092,10 @@ void PlaybackPanel::computeProcessedOverlay()
     // Record timing
     const uint64_t t1us = backend::Tools::getTimestamp();
     lastOverlayComputeMs_ = static_cast<double>(t1us - t0us) / 1000.0;
+    // Always-on gauge: lets the latency trend analysis see when the live-view
+    // overlay was running and what each GUI-thread pass cost, so "does live
+    // view impact pipeline latency" is measured instead of guessed.
+    backend::diagnostics::PipelineTimingRecorder::instance().noteOverlayCompute(t1us - t0us);
 }
 
 void PlaybackPanel::setDisplayFps(int fps)

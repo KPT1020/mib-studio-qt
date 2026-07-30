@@ -122,7 +122,8 @@ PipelineTimingRecorder::LatencySummary PipelineTimingRecorder::summarize(size_t 
         }
     }
 
-    std::vector<uint64_t> endToEndTarget, requestToFire, endToEndFrame, frameAge, algo, dispatch;
+    std::vector<uint64_t> endToEndTarget, requestToFire, endToEndFrame, frameAge, fetchExtract,
+        algo, dispatch;
     for (const auto& t : triggers) {
         pushDiff(endToEndTarget, t.grabUs, t.fireUs);
         pushDiff(requestToFire, t.requestUs, t.fireUs);
@@ -130,6 +131,7 @@ PipelineTimingRecorder::LatencySummary PipelineTimingRecorder::summarize(size_t 
     for (const auto& f : frames) {
         pushDiff(endToEndFrame, f.grabUs, f.callbacksDoneUs);
         pushDiff(frameAge, f.grabUs, f.algoStartUs);
+        pushDiff(fetchExtract, f.fetchStartUs, f.algoStartUs);
         pushDiff(algo, f.algoStartUs, f.algoEndUs);
         pushDiff(dispatch, f.algoEndUs, f.triggerDispatchUs);
     }
@@ -139,6 +141,7 @@ PipelineTimingRecorder::LatencySummary PipelineTimingRecorder::summarize(size_t 
     out.requestToFire = reduceStage(requestToFire);
     out.endToEndFrame = reduceStage(endToEndFrame);
     out.frameAge = reduceStage(frameAge);
+    out.fetchExtract = reduceStage(fetchExtract);
     out.algo = reduceStage(algo);
     out.dispatch = reduceStage(dispatch);
     return out;
@@ -163,6 +166,31 @@ void PipelineTimingRecorder::resetLiveLatency() {
     liveTargetLatencyLastUs_.store(0, std::memory_order_relaxed);
     liveTargetLatencyEwmaUs_.store(0.0, std::memory_order_relaxed);
     liveTargetLatencyMaxUs_.store(0, std::memory_order_relaxed);
+}
+
+namespace {
+
+// Same smoothing as the live target-latency gauge (alpha = 1/16, seed on
+// the first sample). Relaxed load/store is fine: single logical writer per
+// gauge, readers tolerate a stale value.
+inline void ewmaUpdate(std::atomic<double>& gauge, uint64_t sampleUs) {
+    const double prev = gauge.load(std::memory_order_relaxed);
+    const double next = prev <= 0.0
+                            ? static_cast<double>(sampleUs)
+                            : prev + (static_cast<double>(sampleUs) - prev) / 16.0;
+    gauge.store(next, std::memory_order_relaxed);
+}
+
+} // namespace
+
+void PipelineTimingRecorder::noteEmptyFrameCost(uint64_t us) {
+    emptyCostCount_.fetch_add(1, std::memory_order_relaxed);
+    ewmaUpdate(emptyCostEwmaUs_, us);
+}
+
+void PipelineTimingRecorder::noteOverlayCompute(uint64_t us) {
+    overlayCount_.fetch_add(1, std::memory_order_relaxed);
+    ewmaUpdate(overlayEwmaUs_, us);
 }
 
 const char* pipelineSkipReasonName(PipelineSkipReason reason) {
@@ -200,14 +228,14 @@ bool PipelineTimingRecorder::dumpCsv(const std::string& directory, std::string* 
     {
         std::ofstream out(fs::path(directory) / "pipeline_frames.csv", std::ios::trunc);
         if (!out) return fail("pipeline_frames.csv");
-        out << "frame_index,device_timestamp,grab_us,algo_start_us,algo_end_us,"
+        out << "frame_index,device_timestamp,grab_us,fetch_start_us,algo_start_us,algo_end_us,"
                "trigger_dispatch_us,callbacks_done_us,valid_count,invalid_count,"
                "is_target_group\n";
         for (const auto& r : frameRecords()) {
             out << r.frameIndex << ',' << r.deviceTimestamp << ',' << r.grabUs << ','
-                << r.algoStartUs << ',' << r.algoEndUs << ',' << r.triggerDispatchUs << ','
-                << r.callbacksDoneUs << ',' << r.validCount << ',' << r.invalidCount << ','
-                << static_cast<unsigned>(r.isTargetGroup) << '\n';
+                << r.fetchStartUs << ',' << r.algoStartUs << ',' << r.algoEndUs << ','
+                << r.triggerDispatchUs << ',' << r.callbacksDoneUs << ',' << r.validCount << ','
+                << r.invalidCount << ',' << static_cast<unsigned>(r.isTargetGroup) << '\n';
         }
         if (!out.good()) return fail("pipeline_frames.csv");
     }

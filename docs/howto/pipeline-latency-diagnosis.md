@@ -54,10 +54,19 @@ MIB_PIPELINE_TIMING=1            # detailed recorder (feeds the sampler)
 MIB_PIPELINE_TREND=1             # 1 Hz pipeline_trend.csv in the same dir
 ```
 
-Each row holds windowed per-stage percentiles (`summarize(4096)`), the
-realtime consumer backlog (`latestAvailableIndex − rtLastProcessed`), the
-async-batch queue depth, cumulative skip counters, host-vs-device
-inter-frame gaps, the always-on target-latency gauges, and process RSS.
+Each row holds windowed per-stage percentiles (`summarize(4096)`, including
+the `fetch+extract` slice), the realtime consumer backlog
+(`latestAvailableIndex − rtLastProcessed`), the async-batch queue depth,
+cumulative skip counters, host-vs-device inter-frame gaps, the always-on
+target-latency gauges, process RSS, and two cost gauges: the average cost of
+empty-classified frames (which never get a frame record — blur/threshold/
+empty-check still run before classification, ~80 µs on 512x96 ROI frames)
+and the GUI overlay kernel (`overlay_avg_us`/`overlay_count`, fed from
+`PlaybackPanel::computeProcessedOverlay`). The overlay counter lets the
+analyzer answer "does live view impact pipeline latency" **measurably**: it
+compares end-to-end p95 between seconds where the overlay ran and seconds
+where it didn't (the site protocol's show/hide schedule produces both) and
+prints either an H5 verdict or a "no measurable live-view impact" line.
 Runtime control: `AppBackend::setPipelineTrendSampling(bool, dir)`. The
 analyzer (step 2) detects the file and appends a trend section: per-minute
 first/last-window medians, steady-state ratios (growth flagged at >1.3×
@@ -86,6 +95,7 @@ it:
 | Symptom in report | Meaning |
 | --- | --- |
 | large `grab -> algo start` | frames queue between capture and the realtime loop — processing can't keep up (check `algo duration`, worker load, drop-frames setting) |
+| large `fetch+extract` | the ring-slot copy + ROI/gray extraction itself is slow (frame size/memory bandwidth) — this slice sits inside `grab -> algo start` and was previously unstamped |
 | large `algo duration` | the algorithm itself is the bottleneck (ROI too big, config too heavy, core regression) |
 | large `request -> wake` | trigger thread starved by OS scheduling (CPU load; consider RT thread priority — tech-debt P9) |
 | large `wake -> fire` | `setTriggerOutput` (grabber I/O) is slow |

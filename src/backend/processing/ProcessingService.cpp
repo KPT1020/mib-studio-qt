@@ -1600,6 +1600,7 @@ void ProcessingService::publishRealtimeValidationCallbacks(
         record.frameIndex = timing.frameIndex;
         record.deviceTimestamp = timestampNs;
         record.grabUs = timing.grabUs;
+        record.fetchStartUs = timing.fetchStartUs;
         record.algoStartUs = timing.algoStartUs;
         record.algoEndUs = timing.algoEndUs;
         record.triggerDispatchUs = triggerDispatchUs;
@@ -2176,6 +2177,8 @@ void ProcessingService::realtimeInlineLoop() {
             // Get frame - use ROI access if ROI is specified, otherwise full frame
             backend::playback::Frame f{};
             bool useROI = (roi.w > 0 && roi.h > 0);
+            const uint64_t fetchStartUsRec =
+                rtTimingRecorder.isEnabled() ? rtTimingRecorder.nowUs() : 0;
             if (useROI) {
                 // Clamp ROI to reasonable bounds first
                 if (!rtStore_->getByWriteIndex(idx, f)) {
@@ -2284,6 +2287,10 @@ void ProcessingService::realtimeInlineLoop() {
                                  idx, pixelCount, config.empty_frame_pixel_threshold);
                     rtTimingRecorder.countSkipped(
                         backend::diagnostics::PipelineSkipReason::EmptyFrame);
+                    if (fetchStartUsRec != 0) {
+                        rtTimingRecorder.noteEmptyFrameCost(rtTimingRecorder.nowUs() -
+                                                            fetchStartUsRec);
+                    }
 
                     // Auto-capture logic (only when experiment is NOT running)
                     if (config.auto_background_enabled && !experimentActive_.load()) {
@@ -2406,7 +2413,7 @@ void ProcessingService::realtimeInlineLoop() {
 
                 publishRealtimeValidationCallbacks(
                     validations, f.timestamp,
-                    {true, idx, f.hostTimestampUs, algoStartUsRec, algoEndUsRec});
+                    {true, idx, f.hostTimestampUs, fetchStartUsRec, algoStartUsRec, algoEndUsRec});
 
                 // Off the trigger-critical path: update the identification
                 // funnel + invalid-reason histogram from this frame's objects.
@@ -2716,6 +2723,10 @@ void ProcessingService::realtimeInlineLoop() {
                                  idx, pixelCount, config.empty_frame_pixel_threshold);
                     rtTimingRecorder.countSkipped(
                         backend::diagnostics::PipelineSkipReason::EmptyFrame);
+                    if (fetchStartUsRec != 0) {
+                        rtTimingRecorder.noteEmptyFrameCost(rtTimingRecorder.nowUs() -
+                                                            fetchStartUsRec);
+                    }
 
                     // Auto-capture logic (only when experiment is NOT running)
                     if (config.auto_background_enabled && !experimentActive_.load()) {
@@ -2834,7 +2845,7 @@ void ProcessingService::realtimeInlineLoop() {
 
                 publishRealtimeValidationCallbacks(
                     validations, f.timestamp,
-                    {true, idx, f.hostTimestampUs, algoStartUsRec, algoEndUsRec});
+                    {true, idx, f.hostTimestampUs, fetchStartUsRec, algoStartUsRec, algoEndUsRec});
 
                 // Off the trigger-critical path: update the identification
                 // funnel + invalid-reason histogram from this frame's objects.
@@ -3001,6 +3012,8 @@ void ProcessingService::realtimeInlineLoop() {
                     continue;
                 }
                 backend::playback::Frame f{};
+                const uint64_t fetchStartUsRec =
+                    rtTimingRecorder.isEnabled() ? rtTimingRecorder.nowUs() : 0;
                 if (!rtStore_->getByWriteIndex(idx, f)) {
                     continue;
                 }
@@ -3113,6 +3126,10 @@ void ProcessingService::realtimeInlineLoop() {
                                  idx, pixelCount, config.empty_frame_pixel_threshold);
                     rtTimingRecorder.countSkipped(
                         backend::diagnostics::PipelineSkipReason::EmptyFrame);
+                    if (fetchStartUsRec != 0) {
+                        rtTimingRecorder.noteEmptyFrameCost(rtTimingRecorder.nowUs() -
+                                                            fetchStartUsRec);
+                    }
 
                     // Auto-capture logic (only when experiment is NOT running)
                     if (config.auto_background_enabled && !experimentActive_.load()) {
@@ -3265,7 +3282,7 @@ void ProcessingService::realtimeInlineLoop() {
 
                 publishRealtimeValidationCallbacks(
                     validations, f.timestamp,
-                    {true, idx, f.hostTimestampUs, algoStartUsRec, algoEndUsRec});
+                    {true, idx, f.hostTimestampUs, fetchStartUsRec, algoStartUsRec, algoEndUsRec});
 
                 // Off the trigger-critical path: update the identification
                 // funnel + invalid-reason histogram from this frame's objects.

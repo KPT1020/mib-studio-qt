@@ -63,7 +63,12 @@ SDK-side queueing vs heap growth vs contour growth).
 ## Gotchas
 
 - The percentile columns are a *rolling* ~4096-record window, not a
-  per-second window; the gap/object columns are per-tick windows.
+  per-second window; the gap/object columns are per-tick windows. Columns
+  include `fetch_extract_p50/p95` (slot copy + ROI/gray extraction), the
+  empty-frame cost gauge (`empty_frame_avg_us`/`count` — empty frames pay
+  blur/threshold/empty-check but never get a frame record), and the GUI
+  overlay gauge (`overlay_avg_us`/`count`), which powers the analyzer's
+  measured live-view-impact A/B (H5 verdict).
 - In async-batch mode `frame_age`/`algo` columns are empty (the recorder
   stores zero `algoStartUs`/`algoEndUs` there) — the H1 verdict rests on
   `batch_queue_depth` and end-to-end columns instead.

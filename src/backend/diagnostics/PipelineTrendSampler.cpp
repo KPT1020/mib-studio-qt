@@ -122,6 +122,7 @@ void PipelineTrendSampler::writeHeader() {
     out_ << "t_s,wall_clock,now_us,"
             "frame_records,trigger_records,"
             "frame_age_p50_us,frame_age_p95_us,"
+            "fetch_extract_p50_us,fetch_extract_p95_us,"
             "algo_p50_us,algo_p95_us,"
             "e2e_frame_p50_us,e2e_frame_p95_us,"
             "e2e_target_p50_us,e2e_target_p95_us,"
@@ -135,6 +136,7 @@ void PipelineTrendSampler::writeHeader() {
             "batch_processed,"
             "realtime_mode,drop_frames,experiment_active,"
             "live_target_latency_last_us,live_target_latency_avg_us,live_target_latency_max_us,"
+            "empty_frame_avg_us,empty_frame_count,overlay_avg_us,overlay_count,"
             "mem_mb,peak_mem_mb\n";
     out_.flush();
 }
@@ -184,6 +186,7 @@ void PipelineTrendSampler::writeRow() {
     out_ << tSec << ',' << wallClockIso() << ',' << PipelineTimingRecorder::nowUs() << ','
          << frameCount << ',' << rec.triggerRecordCount() << ','
          << summary.frameAge.p50Us << ',' << summary.frameAge.p95Us << ','
+         << summary.fetchExtract.p50Us << ',' << summary.fetchExtract.p95Us << ','
          << summary.algo.p50Us << ',' << summary.algo.p95Us << ','
          << summary.endToEndFrame.p50Us << ',' << summary.endToEndFrame.p95Us << ','
          << summary.endToEndTarget.p50Us << ',' << summary.endToEndTarget.p95Us << ','
@@ -203,6 +206,8 @@ void PipelineTrendSampler::writeRow() {
          << (p.experimentActive ? 1 : 0) << ','
          << rec.lastTargetLatencyUs() << ',' << rec.avgTargetLatencyUs() << ','
          << rec.maxTargetLatencyUs() << ','
+         << rec.avgEmptyFrameCostUs() << ',' << rec.emptyFrameCostCount() << ','
+         << rec.avgOverlayComputeUs() << ',' << rec.overlayComputeCount() << ','
          << backend::Tools::getProcessMemoryMB() << ','
          << backend::Tools::getPeakProcessMemoryMB() << '\n';
     out_.flush();

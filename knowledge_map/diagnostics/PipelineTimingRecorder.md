@@ -40,9 +40,11 @@ only for device-side spacing analysis.
 
 `FrameTimingRecord` (one per frame reaching the realtime callback stage):
 `frameIndex` (FrameStore write index), `deviceTimestamp`, `grabUs` (stamped
-in [[../services/CaptureService]] right after `grabFrame`), `algoStartUs`,
-`algoEndUs` (0 in async-batch mode), `triggerDispatchUs`, `callbacksDoneUs`,
-`validCount`, `invalidCount`, `isTargetGroup`.
+in [[../services/CaptureService]] right after `grabFrame`), `fetchStartUs`
+(realtime loop about to copy the ring slot; `fetchStart→algoStart` is the
+slot copy + ROI/gray extraction, previously unstamped), `algoStartUs`,
+`algoEndUs` (all three 0 in async-batch mode), `triggerDispatchUs`,
+`callbacksDoneUs`, `validCount`, `invalidCount`, `isTargetGroup`.
 
 `TriggerTimingRecord` (one per pulse actually driven): `frameIndex`,
 `grabUs` (echoed from the source frame through
@@ -97,6 +99,12 @@ Two additions expose latency without the CSV round-trip:
   driven pulse (acquisition→pulse onset). This is the headline "target seen →
   sorted" latency, visible in the status bar without `MIB_PIPELINE_TIMING`.
   `ProcessingService::startExperiment` calls `resetLiveLatency()`.
+- Auxiliary cost gauges (EWMA + count): `noteEmptyFrameCost(us)` — cost of
+  empty-classified frames, which never produce a frame record but still pay
+  fetch + extraction + blur/threshold/empty-check (fed by the realtime loop
+  when enabled); `noteOverlayCompute(us)` — always-on, fed from the GUI
+  thread by `PlaybackPanel::computeProcessedOverlay`, the measured basis for
+  the analyzer's live-view-impact A/B (H5).
 
 The identification funnel (valid/target-group/unserved) and invalid-reason
 histogram live on [[../services/ProcessingService]] (`getIdentificationCounters`);

@@ -96,6 +96,25 @@ windows.
    OverviewTab's never-stopped 50 Hz tick) — both discriminated by the
    user-site protocol below, plus the user's actual mode/drop-frames config.
 
+## Fine-grained timing follow-up
+
+Added after the matrix, to close the two measurement blind spots:
+
+- **`fetchStartUs` stamp** in all three inline-loop paths — the slot copy +
+  ROI/gray extraction slice (previously invisible inside `grab→algoStart`).
+  Measured: ~14 µs p50 / 29 µs p95 on 512x96 ROI frames — small.
+- **Empty-frame cost gauge** — empty-classified frames produce no frame
+  record but still pay fetch + extraction + blur/threshold/empty-check:
+  measured **~80 µs each**. With ~70 % of frames empty in the test stream,
+  the realtime thread spends real budget on frames that "don't count" —
+  worth knowing when sizing per-image cost (~220–360 µs for full frames).
+- **GUI overlay gauge** (`noteOverlayCompute`, always-on, fed by
+  `PlaybackPanel::computeProcessedOverlay`) — the analyzer now runs a
+  measured A/B within one session: e2e p95 in seconds where the overlay ran
+  vs seconds it didn't, printing an H5 verdict (ratio > 1.3×) or an
+  explicit "no measurable live-view impact" line. "Live view shouldn't
+  impact performance" is now a testable claim on any site recording.
+
 ## User-site protocol (covers H3/H5, needs the real app + camera)
 
 1. Launch with `MIB_PIPELINE_TIMING=1 MIB_PIPELINE_TREND=1`, matching the

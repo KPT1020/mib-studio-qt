@@ -17,6 +17,9 @@ struct FrameTimingRecord {
     uint64_t frameIndex{0};        // FrameStore absolute write index
     uint64_t deviceTimestamp{0};   // camera/grabber tick (unit depends on source)
     uint64_t grabUs{0};            // stamped in CaptureService right after grabFrame
+    uint64_t fetchStartUs{0};      // realtime loop about to copy the ring slot
+                                   // (fetchStart -> algoStart = slot copy + ROI/gray
+                                   // extraction, previously unstamped; 0 in async-batch)
     uint64_t algoStartUs{0};       // algorithm start (0 in async-batch mode)
     uint64_t algoEndUs{0};         // algorithm end (0 in async-batch mode)
     uint64_t triggerDispatchUs{0}; // target-group callback returned; 0 if no trigger
@@ -111,6 +114,7 @@ public:
         StageStats requestToFire;  // fireUs - requestUs    (trigger queue wait + wake)
         StageStats endToEndFrame;  // callbacksDoneUs - grabUs
         StageStats frameAge;       // algoStartUs - grabUs  (consumer lag)
+        StageStats fetchExtract;   // algoStartUs - fetchStartUs (slot copy + ROI/gray)
         StageStats algo;           // algoEndUs - algoStartUs
         StageStats dispatch;       // triggerDispatchUs - algoEndUs (trigger frames only)
     };
@@ -132,6 +136,30 @@ public:
     }
     // Clear the live gauges (leaves the detailed rings alone). Safe any time.
     void resetLiveLatency();
+
+    // ---- Auxiliary cost gauges (EWMA + count, relaxed atomics) ----
+    // Empty-classified frames never produce a FrameTimingRecord, so their
+    // per-frame cost (fetch + extraction + blur/threshold/empty check) is
+    // otherwise invisible. Fed by the realtime loop when the recorder is
+    // enabled (the duration needs the fetch stamp).
+    void noteEmptyFrameCost(uint64_t us);
+    uint64_t emptyFrameCostCount() const {
+        return emptyCostCount_.load(std::memory_order_relaxed);
+    }
+    double avgEmptyFrameCostUs() const {
+        return emptyCostEwmaUs_.load(std::memory_order_relaxed);
+    }
+    // Live-view overlay kernel runs (PlaybackPanel::computeProcessedOverlay on
+    // the GUI thread). Always-on: the count tells a trend analysis whether the
+    // live view was visible in a given window, the EWMA what each pass cost —
+    // the measured basis for "does live view impact pipeline latency".
+    void noteOverlayCompute(uint64_t us);
+    uint64_t overlayComputeCount() const {
+        return overlayCount_.load(std::memory_order_relaxed);
+    }
+    double avgOverlayComputeUs() const {
+        return overlayEwmaUs_.load(std::memory_order_relaxed);
+    }
 
     // Write pipeline_frames.csv, pipeline_triggers.csv and pipeline_skips.csv
     // into `directory` (created if missing; files overwritten). Analyse with
@@ -158,6 +186,12 @@ private:
     std::atomic<uint64_t> liveTargetLatencyLastUs_{0};
     std::atomic<double> liveTargetLatencyEwmaUs_{0.0};
     std::atomic<uint64_t> liveTargetLatencyMaxUs_{0};
+
+    // Auxiliary cost gauges (see noteEmptyFrameCost / noteOverlayCompute).
+    std::atomic<uint64_t> emptyCostCount_{0};
+    std::atomic<double> emptyCostEwmaUs_{0.0};
+    std::atomic<uint64_t> overlayCount_{0};
+    std::atomic<double> overlayEwmaUs_{0.0};
 };
 
 const char* pipelineSkipReasonName(PipelineSkipReason reason);

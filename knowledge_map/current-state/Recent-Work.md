@@ -19,7 +19,14 @@
   `analyze_pipeline_timing.py` gained per-minute steady-state ratios and a
   decision-tree verdict (bufferbloat / consumer backlog / SDK buffering /
   heap growth / contour growth). Runbook §1b in
-  `docs/howto/pipeline-latency-diagnosis.md`.
+  `docs/howto/pipeline-latency-diagnosis.md`. Follow-up: `fetchStartUs`
+  stamp (slot copy + ROI/gray extraction, previously unstamped), an
+  empty-frame cost gauge (~80 µs each — they pay blur/threshold before
+  classification), and an always-on GUI overlay gauge fed by
+  `PlaybackPanel::computeProcessedOverlay`, giving the analyzer a measured
+  overlay-on vs overlay-off A/B for live-view impact (H5). Headless soak
+  matrix R1–R6 (incl. `--experiment`/`--record`) found no growth; verdicts
+  in the task note.
 - **Latency & target-identification-loss metrics** (2026-07-21, issue #292) —
   quantifies pipeline latency and lost sort targets. New counted losses:
   [[../services/TriggerService]] no-camera / set-failed pulse drops

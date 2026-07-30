@@ -412,6 +412,7 @@ private:
         bool present{false};
         uint64_t frameIndex{0};
         uint64_t grabUs{0};
+        uint64_t fetchStartUs{0}; // before the ring-slot copy (0 when disabled)
         uint64_t algoStartUs{0};
         uint64_t algoEndUs{0};
     };

@@ -97,7 +97,10 @@ def window_series(rows, key, cumulative=False):
     For gauges, values are the positive samples in that minute (zero samples
     mean 'no data this tick' — e.g. algo stages in async-batch mode — and are
     excluded). For cumulative counters, values are per-minute increments.
+    A column absent from the CSV (older recordings) yields no windows.
     """
+    if rows and key not in rows[0]:
+        return []
     windows = {}
     prev = None
     for row in rows:
@@ -167,10 +170,11 @@ def analyze_trend(dump_dir):
         return
 
     gauges = [
-        "e2e_frame_p95_us", "e2e_target_p95_us", "frame_age_p95_us", "algo_p95_us",
+        "e2e_frame_p95_us", "e2e_target_p95_us", "frame_age_p95_us",
+        "fetch_extract_p95_us", "algo_p95_us",
         "request_to_fire_p95_us", "backlog_frames", "batch_queue_depth",
         "host_grab_gap_mean_us", "device_tick_gap_mean", "objects_per_frame_mean",
-        "mem_mb",
+        "empty_frame_avg_us", "overlay_avg_us", "mem_mb",
     ]
     counters = ["ring_behind", "dropped_to_latest", "batch_queue_rejected"]
     m = {key: TrendMetric(rows, key) for key in gauges}
@@ -233,6 +237,33 @@ def analyze_trend(dump_dir):
             f"RSS ramp ({m['mem_mb'].first:.0f} -> {m['mem_mb'].last:.0f} MB) without a matching "
             "latency signal — possible slow leak (H4); confirm with an LSan run before acting.")
 
+    # --- live-view impact A/B (H5), measured, not inferred ---
+    # overlay_count is cumulative: a positive per-tick delta marks a second in
+    # which the GUI overlay kernel actually ran. Compare pipeline latency
+    # between overlay-active and overlay-idle seconds of the SAME session (the
+    # site protocol's show/hide schedule produces both).
+    if rows and "overlay_count" in rows[0]:
+        on_vals, off_vals = [], []
+        prev = None
+        for row in rows:
+            cnt = row["overlay_count"]
+            active = prev is not None and cnt > prev
+            prev = cnt
+            v = row["e2e_frame_p95_us"]
+            if v > 0:
+                (on_vals if active else off_vals).append(v)
+        if len(on_vals) >= 60 and len(off_vals) >= 60:
+            on_med, off_med = median(on_vals), median(off_vals)
+            ratio = on_med / off_med if off_med > 0 else float("inf")
+            if ratio > GROWTH_RATIO:
+                verdicts.append(
+                    f"H5 live-view impact: e2e_frame p95 is {ratio:.2f}x higher in seconds where "
+                    f"the overlay kernel ran ({on_med:.0f} vs {off_med:.0f} us) — the GUI overlay "
+                    "pass measurably slows the pipeline (kernel/context contention).")
+            else:
+                print(f"\n  live-view A/B: e2e p95 with overlay {on_med:.0f} us vs without "
+                      f"{off_med:.0f} us ({ratio:.2f}x) — no measurable live-view impact.")
+
     print("\n-- Verdict --")
     if verdicts:
         for v in verdicts:
@@ -267,6 +298,12 @@ def main():
         for f in frames
         if f["grab_us"] and f["algo_start_us"]
     ]
+    # fetch_start_us is absent in dumps from before the fetch/extract stamp.
+    fetch_extract = [
+        f["algo_start_us"] - f["fetch_start_us"]
+        for f in frames
+        if f.get("fetch_start_us") and f["algo_start_us"]
+    ]
     algo = [
         f["algo_end_us"] - f["algo_start_us"]
         for f in frames
@@ -279,6 +316,7 @@ def main():
     ]
     print("\n-- Frame stage latencies (ms) --")
     print(stats_line("grab -> algo start", grab_to_algo))
+    print(stats_line("fetch+extract", fetch_extract))
     print(stats_line("algo duration", algo))
     print(stats_line("algo end -> tg dispatch", dispatch))
 
