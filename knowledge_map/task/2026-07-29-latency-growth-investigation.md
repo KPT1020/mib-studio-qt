@@ -139,6 +139,30 @@ Second follow-up: the trend row now profiles *why*, not just *when* —
   request→fire growth co-occurring with context-switch growth
   (scheduling pressure).
 
+## Profiled re-run of the matrix (second pass, all new columns live)
+
+R1/R2/R3/R5/R6 re-run at 540 s with the profiling layer (R4 dropped: its
+load-vs-time question is answered directly by the churn/heap columns now).
+**Same verdict — no latency growth anywhere — plus root-cause detail:**
+
+- **RSS-creep mystery closed:** in every run, allocator *in-use* fell
+  (~295 → 247 MB) while allocator-retained *free* memory grew (to 60–106
+  MB). The RSS ramp of the first matrix is glibc arena retention of freed
+  memory — benign, definitively not a leak and not fragmentation pressure.
+- **Massive headroom on this container:** realtime thread ≤ 11 % CPU in
+  every mode (2 % as batch enqueuer); trigger ~0 %; nonvoluntary context
+  switches only in the warm-up minute. The mock capture thread busy-paces
+  at ~100 % CPU (harness artifact — the real SDK blocks in grabFrame).
+- **Churn is high but stable-to-declining:** 14–27k Mat allocs/s
+  (~60–150 MB/s) with *declining* trend in every run as OpenCV buffer reuse
+  warms — the opposite of a degradation signature.
+- **HDF5 writer behaves:** experiment-flush batches 181 → 38 ms avg as the
+  page cache warms (writer CPU 17 → 4 %), ~30–54 MB/s sustained, zero
+  effect on pipeline latency; raw-recording writes ~4–5 ms each.
+- R6's host-gap "growth" flag is a record-density artifact: device tick gap
+  grew by the identical ratio (1.41×), so the analyzer correctly did not
+  claim H3 (which requires device-flat).
+
 ## User-site protocol (covers H3/H5, needs the real app + camera)
 
 1. Launch with `MIB_PIPELINE_TIMING=1 MIB_PIPELINE_TREND=1`, matching the
