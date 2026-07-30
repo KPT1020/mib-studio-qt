@@ -174,9 +174,13 @@ def analyze_trend(dump_dir):
         "fetch_extract_p95_us", "algo_p95_us",
         "request_to_fire_p95_us", "backlog_frames", "batch_queue_depth",
         "host_grab_gap_mean_us", "device_tick_gap_mean", "objects_per_frame_mean",
-        "empty_frame_avg_us", "overlay_avg_us", "mem_mb",
+        "empty_frame_avg_us", "overlay_avg_us",
+        "cpu_realtime_pct", "cpu_capture_pct", "cpu_hdf_writer_pct",
+        "hdf_write_avg_us", "heap_inuse_mb", "heap_free_mb", "mem_mb",
     ]
-    counters = ["ring_behind", "dropped_to_latest", "batch_queue_rejected"]
+    counters = ["ring_behind", "dropped_to_latest", "batch_queue_rejected",
+                "cs_nonvol_realtime", "cs_nonvol_trigger",
+                "mat_allocs", "mat_alloc_mb", "io_write_mb"]
     m = {key: TrendMetric(rows, key) for key in gauges}
     for key in counters:
         m[key] = TrendMetric(rows, key, cumulative=True)
@@ -236,6 +240,29 @@ def analyze_trend(dump_dir):
         verdicts.append(
             f"RSS ramp ({m['mem_mb'].first:.0f} -> {m['mem_mb'].last:.0f} MB) without a matching "
             "latency signal — possible slow leak (H4); confirm with an LSan run before acting.")
+
+    # --- profiling-layer rules (CPU saturation, fragmentation, churn) ---
+    if m["cpu_realtime_pct"].ok and m["cpu_realtime_pct"].last > 90:
+        verdicts.append(
+            f"Realtime thread near saturation ({m['cpu_realtime_pct'].last:.0f}% CPU in the last "
+            "window) — no headroom; any extra load (denser scene, larger ROI) tips it into "
+            "backlog. This is the leading indicator of H2 even before backlog appears.")
+    if m["mem_mb"].grew and m["heap_inuse_mb"].ok and not m["heap_inuse_mb"].grew:
+        verdicts.append(
+            "Heap fragmentation signature: RSS ramps while allocator in-use bytes stay flat "
+            f"(rss {m['mem_mb'].first:.0f} -> {m['mem_mb'].last:.0f} MB, in-use "
+            f"{m['heap_inuse_mb'].last:.0f} MB) — arenas grow but the app isn't holding more "
+            "memory. Points at allocation churn patterns, not a leak.")
+    if m["mat_allocs"].grew:
+        verdicts.append(
+            f"cv::Mat allocation rate is growing ({m['mat_allocs'].first:.0f} -> "
+            f"{m['mat_allocs'].last:.0f} allocs/s) at steady load — per-frame churn is "
+            "increasing over time; correlate with algo duration and heap columns.")
+    if m["request_to_fire_p95_us"].grew and m["cs_nonvol_trigger"].grew:
+        verdicts.append(
+            "Trigger latency growth co-occurs with rising nonvoluntary context switches on the "
+            "trigger thread — OS scheduling pressure (check RT priority / CPU load), not "
+            "pipeline structure.")
 
     # --- live-view impact A/B (H5), measured, not inferred ---
     # overlay_count is cumulative: a positive per-tick delta marks a second in

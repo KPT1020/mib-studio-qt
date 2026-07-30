@@ -1,15 +1,25 @@
 #include "backend/diagnostics/PipelineTrendSampler.h"
 
 #include "backend/app/Tools.h"
+#include "backend/diagnostics/MatAllocStats.h"
 #include "backend/diagnostics/PipelineTimingRecorder.h"
+#include "backend/diagnostics/ThreadRegistry.h"
 
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <ctime>
 #include <filesystem>
+#include <sstream>
 #include <vector>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace backend::diagnostics {
 
@@ -43,6 +53,66 @@ GapStats reduceGaps(const std::vector<uint64_t>& stamps) {
     g.p95Us = deltas[std::min(idx, deltas.size()) - 1];
     return g;
 }
+
+// Per-thread cumulative stats. cpuSeconds < 0 means the thread could not be
+// sampled (exited, or unsupported platform).
+struct ThreadSample {
+    double cpuSeconds{-1.0};
+    uint64_t nonvoluntaryCs{0};
+};
+
+#ifdef _WIN32
+ThreadSample sampleThread(uint64_t tid) {
+    ThreadSample s;
+    HANDLE h = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(tid));
+    if (!h) return s;
+    FILETIME create{}, exit_{}, kernel{}, user{};
+    if (GetThreadTimes(h, &create, &exit_, &kernel, &user)) {
+        auto toSec = [](const FILETIME& ft) {
+            const uint64_t t = (static_cast<uint64_t>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+            return static_cast<double>(t) * 100e-9; // 100 ns units
+        };
+        s.cpuSeconds = toSec(kernel) + toSec(user);
+    }
+    CloseHandle(h);
+    return s; // context switches not exposed per-thread on Windows: stays 0
+}
+#else
+ThreadSample sampleThread(uint64_t tid) {
+    ThreadSample s;
+    {
+        std::ifstream stat("/proc/self/task/" + std::to_string(tid) + "/stat");
+        std::string line;
+        if (std::getline(stat, line)) {
+            // Fields after the comm "(...)" — comm may contain spaces.
+            const auto close = line.rfind(')');
+            if (close != std::string::npos) {
+                std::istringstream rest(line.substr(close + 2));
+                std::string tok;
+                // Fields 3..13 skipped; 14 = utime, 15 = stime (clock ticks).
+                for (int field = 3; field <= 13 && rest >> tok; ++field) {
+                }
+                uint64_t utime = 0, stime = 0;
+                if (rest >> utime >> stime) {
+                    static const double tick = static_cast<double>(sysconf(_SC_CLK_TCK));
+                    s.cpuSeconds = static_cast<double>(utime + stime) / tick;
+                }
+            }
+        }
+    }
+    {
+        std::ifstream status("/proc/self/task/" + std::to_string(tid) + "/status");
+        std::string line;
+        while (std::getline(status, line)) {
+            if (line.rfind("nonvoluntary_ctxt_switches:", 0) == 0) {
+                s.nonvoluntaryCs = std::strtoull(line.c_str() + 27, nullptr, 10);
+                break;
+            }
+        }
+    }
+    return s;
+}
+#endif
 
 std::string wallClockIso() {
     const std::time_t now = std::time(nullptr);
@@ -137,6 +207,11 @@ void PipelineTrendSampler::writeHeader() {
             "realtime_mode,drop_frames,experiment_active,"
             "live_target_latency_last_us,live_target_latency_avg_us,live_target_latency_max_us,"
             "empty_frame_avg_us,empty_frame_count,overlay_avg_us,overlay_count,"
+            "cpu_capture_pct,cpu_realtime_pct,cpu_trigger_pct,cpu_batch_pct,cpu_hdf_writer_pct,"
+            "cs_nonvol_realtime,cs_nonvol_trigger,"
+            "heap_inuse_mb,heap_free_mb,io_write_mb,"
+            "mat_allocs,mat_alloc_mb,"
+            "hdf_write_avg_us,hdf_write_count,hdf_write_max_us,"
             "mem_mb,peak_mem_mb\n";
     out_.flush();
 }
@@ -174,6 +249,36 @@ void PipelineTrendSampler::writeRow() {
         objectsPerFrame = static_cast<double>(objects) / static_cast<double>(frames.size());
     }
 
+    // Per-pipeline-stage CPU%% over the interval since the previous row, and
+    // cumulative nonvoluntary context switches (scheduling-pressure signal)
+    // for the two latency-critical threads.
+    const auto rowNow = std::chrono::steady_clock::now();
+    const double dtSec =
+        lastRowTime_.time_since_epoch().count() == 0
+            ? 0.0
+            : std::chrono::duration<double>(rowNow - lastRowTime_).count();
+    lastRowTime_ = rowNow;
+    double cpuCapture = 0, cpuRealtime = 0, cpuTrigger = 0, cpuBatch = 0, cpuHdf = 0;
+    uint64_t csRealtime = 0, csTrigger = 0;
+    for (const auto& entry : ThreadRegistry::instance().snapshot()) {
+        const ThreadSample s = sampleThread(entry.tid);
+        if (s.cpuSeconds < 0.0) continue;
+        double pct = 0.0;
+        auto prev = threadCpuPrev_.find(entry.tid);
+        if (prev != threadCpuPrev_.end() && dtSec > 0.0) {
+            pct = std::max(0.0, (s.cpuSeconds - prev->second) / dtSec * 100.0);
+        }
+        threadCpuPrev_[entry.tid] = s.cpuSeconds;
+        if (entry.name == "capture") cpuCapture += pct;
+        else if (entry.name == "realtime") cpuRealtime += pct;
+        else if (entry.name == "trigger") cpuTrigger += pct;
+        else if (entry.name == "batch_worker") cpuBatch += pct;
+        else if (entry.name == "hdf_writer") cpuHdf += pct;
+        if (entry.name == "realtime") csRealtime += s.nonvoluntaryCs;
+        if (entry.name == "trigger") csTrigger += s.nonvoluntaryCs;
+    }
+    const auto heap = backend::Tools::getHeapStats();
+
     PipelineTrendProviderSample p;
     if (provider_) p = provider_();
     const uint64_t backlog = p.latestAvailableIndex > p.rtLastProcessed
@@ -208,6 +313,14 @@ void PipelineTrendSampler::writeRow() {
          << rec.maxTargetLatencyUs() << ','
          << rec.avgEmptyFrameCostUs() << ',' << rec.emptyFrameCostCount() << ','
          << rec.avgOverlayComputeUs() << ',' << rec.overlayComputeCount() << ','
+         << cpuCapture << ',' << cpuRealtime << ',' << cpuTrigger << ',' << cpuBatch << ','
+         << cpuHdf << ','
+         << csRealtime << ',' << csTrigger << ','
+         << heap.inUseMB << ',' << heap.freeMB << ','
+         << backend::Tools::getProcessIoWriteMB() << ','
+         << MatAllocStats::allocCount() << ','
+         << static_cast<double>(MatAllocStats::allocBytes()) / (1024.0 * 1024.0) << ','
+         << rec.avgHdfWriteUs() << ',' << rec.hdfWriteCount() << ',' << rec.maxHdfWriteUs() << ','
          << backend::Tools::getProcessMemoryMB() << ','
          << backend::Tools::getPeakProcessMemoryMB() << '\n';
     out_.flush();

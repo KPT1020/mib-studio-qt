@@ -69,6 +69,11 @@ SDK-side queueing vs heap growth vs contour growth).
   blur/threshold/empty-check but never get a frame record), and the GUI
   overlay gauge (`overlay_avg_us`/`count`), which powers the analyzer's
   measured live-view-impact A/B (H5 verdict).
+- Profiling layer beyond timestamps: per-stage CPU% and nonvoluntary
+  context switches via [[ThreadRegistry]], allocator heap stats
+  (`Tools::getHeapStats`, fragmentation vs leak), cv::Mat allocation churn
+  via [[MatAllocStats]], HDF5 batch-write cost (recorder `noteHdfWrite`,
+  fed by `HdfWriteQueue::run`), and cumulative process write I/O.
 - In async-batch mode `frame_age`/`algo` columns are empty (the recorder
   stores zero `algoStartUs`/`algoEndUs` there) — the H1 verdict rests on
   `batch_queue_depth` and end-to-end columns instead.

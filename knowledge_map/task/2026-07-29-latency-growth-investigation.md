@@ -115,6 +115,30 @@ Added after the matrix, to close the two measurement blind spots:
   explicit "no measurable live-view impact" line. "Live view shouldn't
   impact performance" is now a testable claim on any site recording.
 
+## Profiling layer (beyond timestamps)
+
+Second follow-up: the trend row now profiles *why*, not just *when* —
+
+- Per-stage CPU% + nonvoluntary context switches
+  ([[../diagnostics/ThreadRegistry]]: capture / realtime / batch_worker /
+  trigger / hdf_writer). First smoke: mock capture thread busy-paces at
+  ~100 % CPU (headless artifact — real SDK blocks in grabFrame); realtime
+  13 %, hdf_writer 36 % during experiment flush.
+- cv::Mat allocation churn ([[../diagnostics/MatAllocStats]] counting
+  allocator): **~25k allocs/s ≈ 134 MB/s** at 500 fps on 512x96 frames —
+  invisible to RSS, now measured; the churn behind the fragmentation
+  hypothesis.
+- Allocator heap stats (`Tools::getHeapStats`, glibc mallinfo2): RSS-ramp
+  with flat in-use = fragmentation, not leak. Smoke: in-use 310 MB vs RSS
+  407 MB.
+- HDF5 batch-write cost (`noteHdfWrite` from `HdfWriteQueue::run`): ~311 ms
+  avg / 444 ms max per batch during experiment flush, plus cumulative
+  process `io_write_mb`.
+- Analyzer rules: realtime CPU > 90 % (saturation = leading indicator of
+  H2), fragmentation signature, allocation-rate growth, and
+  request→fire growth co-occurring with context-switch growth
+  (scheduling pressure).
+
 ## User-site protocol (covers H3/H5, needs the real app + camera)
 
 1. Launch with `MIB_PIPELINE_TIMING=1 MIB_PIPELINE_TREND=1`, matching the

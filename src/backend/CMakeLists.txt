@@ -37,6 +37,8 @@ add_library(mib_processing STATIC
     ${PROJECT_SOURCE_DIR}/src/backend/diagnostics/CrashStateMirror.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/diagnostics/PipelineTimingRecorder.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/diagnostics/PipelineTrendSampler.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/diagnostics/ThreadRegistry.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/diagnostics/MatAllocStats.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/playback/FrameStore.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/app/Tools.cpp
 )

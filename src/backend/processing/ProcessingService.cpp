@@ -3,6 +3,7 @@
 #include "backend/recording/Hdf5Service.h"
 #include "backend/diagnostics/CrashStateMirror.h"
 #include "backend/diagnostics/PipelineTimingRecorder.h"
+#include "backend/diagnostics/ThreadRegistry.h"
 #include "backend/playback/FrameStore.h"
 #include "backend/app/Tools.h"
 
@@ -1131,6 +1132,7 @@ ProcessingService::BatchPipelineStats ProcessingService::getBatchPipelineStats()
 }
 
 void ProcessingService::batchWorkerLoop() {
+    backend::diagnostics::ThreadRegistry::instance().registerCurrentThread("batch_worker");
     auto operation = acquireProcessingCoreOperation();
     while (true) {
         std::vector<QueuedBatchFrame> inputs;
@@ -2023,6 +2025,7 @@ void ProcessingService::realtimeBatchLoop() {
 }
 
 void ProcessingService::realtimeLoop() {
+    backend::diagnostics::ThreadRegistry::instance().registerCurrentThread("realtime");
     auto operation = acquireProcessingCoreOperation();
     // An exception escaping a std::thread entry function is std::terminate —
     // the whole process dies on one bad frame. Catch, log, and restart the

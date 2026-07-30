@@ -11,8 +11,14 @@
   (acquisition → algorithm → trigger stamps + skip accounting) behind the
   pipeline-delay diagnosis workflow.
 - [[PipelineTrendSampler]] — 1 Hz time-series consumer of the recorder
-  (per-stage percentiles, queue depths, backlog, RSS into
-  `pipeline_trend.csv`) for latency-growth-over-minutes investigations.
+  (per-stage percentiles, queue depths, backlog, per-thread CPU, heap,
+  allocation churn, RSS into `pipeline_trend.csv`) for
+  latency-growth-over-minutes investigations.
+- [[ThreadRegistry]] — name → OS-thread-id map of the pipeline's
+  long-running threads, enabling per-stage CPU / context-switch
+  attribution in the trend sampler.
+- [[MatAllocStats]] — delegating cv::MatAllocator counting every Mat
+  allocation (count + bytes): the direct per-frame heap-churn measurement.
 
 ## Related services / conventions
 

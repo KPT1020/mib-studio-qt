@@ -3,6 +3,7 @@
 #include "backend/services/Logger.h"
 #include "backend/services/CrashReporter.h"
 #include "backend/diagnostics/CrashStateMirror.h"
+#include "backend/diagnostics/MatAllocStats.h"
 #include "backend/diagnostics/PipelineTimingRecorder.h"
 #include "backend/diagnostics/PipelineTrendSampler.h"
 #include "backend/database/SqliteService.h"
@@ -175,6 +176,11 @@ namespace backend
         // Use user-writable location for logs if dataDir is in Program Files
         std::string logPath = getLogPath(dataDir);
         backend::services::Logger::init(logPath);
+
+        // Count every cv::Mat allocation (two relaxed atomics per alloc) so
+        // the trend sampler can report allocation churn. Installed before any
+        // pipeline thread allocates.
+        diagnostics::MatAllocStats::install();
 
         // Pipeline latency instrumentation: opt in via environment so field
         // diagnosis needs no rebuild. CSVs land in pipelineTimingDir_ on

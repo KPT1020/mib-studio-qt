@@ -1,4 +1,5 @@
 #include "backend/services/CaptureService.h"
+#include "backend/diagnostics/ThreadRegistry.h"
 #include "backend/app/Tools.h"
 #include "backend/diagnostics/CrashStateMirror.h"
 #include "backend/playback/FrameStore.h"
@@ -75,6 +76,7 @@ void CaptureService::stop() {
 bool CaptureService::isRunning() const { return running_.load(); }
 
 void CaptureService::run() {
+    backend::diagnostics::ThreadRegistry::instance().registerCurrentThread("capture");
     std::unique_ptr<camera::common::ICamera> camera;
 
     auto releaseCamera = [&]() {

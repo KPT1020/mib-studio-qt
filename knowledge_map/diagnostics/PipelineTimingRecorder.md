@@ -104,7 +104,9 @@ Two additions expose latency without the CSV round-trip:
   fetch + extraction + blur/threshold/empty-check (fed by the realtime loop
   when enabled); `noteOverlayCompute(us)` — always-on, fed from the GUI
   thread by `PlaybackPanel::computeProcessedOverlay`, the measured basis for
-  the analyzer's live-view-impact A/B (H5).
+  the analyzer's live-view-impact A/B (H5); `noteHdfWrite(us)` (+ max) —
+  always-on, one sample per batch write on the `HdfWriteQueue` writer
+  thread, correlating disk stalls with pipeline latency spikes.
 
 The identification funnel (valid/target-group/unserved) and invalid-reason
 histogram live on [[../services/ProcessingService]] (`getIdentificationCounters`);

@@ -193,6 +193,15 @@ void PipelineTimingRecorder::noteOverlayCompute(uint64_t us) {
     ewmaUpdate(overlayEwmaUs_, us);
 }
 
+void PipelineTimingRecorder::noteHdfWrite(uint64_t us) {
+    hdfWriteCount_.fetch_add(1, std::memory_order_relaxed);
+    ewmaUpdate(hdfWriteEwmaUs_, us);
+    uint64_t curMax = hdfWriteMaxUs_.load(std::memory_order_relaxed);
+    while (us > curMax &&
+           !hdfWriteMaxUs_.compare_exchange_weak(curMax, us, std::memory_order_relaxed)) {
+    }
+}
+
 const char* pipelineSkipReasonName(PipelineSkipReason reason) {
     switch (reason) {
     case PipelineSkipReason::DroppedToLatest:

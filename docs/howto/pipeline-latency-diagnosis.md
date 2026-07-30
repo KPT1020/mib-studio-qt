@@ -67,6 +67,24 @@ analyzer answer "does live view impact pipeline latency" **measurably**: it
 compares end-to-end p95 between seconds where the overlay ran and seconds
 where it didn't (the site protocol's show/hide schedule produces both) and
 prints either an H5 verdict or a "no measurable live-view impact" line.
+
+The trend row also carries a profiling layer beyond timestamps:
+
+- **Per-stage CPU%** (`cpu_capture/realtime/trigger/batch/hdf_writer_pct`)
+  via `ThreadRegistry` — saturation headroom per thread; the analyzer warns
+  when the realtime thread exceeds 90 % (the leading indicator of backlog).
+- **Nonvoluntary context switches** (`cs_nonvol_realtime/trigger`,
+  Linux-only) — scheduling pressure; correlated with `request_to_fire`
+  growth in the verdict.
+- **Allocator-level heap** (`heap_inuse_mb`/`heap_free_mb`, glibc
+  mallinfo2) — RSS ramping while in-use stays flat is the fragmentation
+  signature, distinguished from a leak.
+- **cv::Mat allocation churn** (`mat_allocs`/`mat_alloc_mb`, cumulative)
+  via a counting default allocator — direct per-frame churn measurement
+  (~25k allocs/s at 500 fps on 512x96 frames).
+- **HDF5 write cost** (`hdf_write_avg_us`/`count`/`max_us`) from the
+  `HdfWriteQueue` writer thread, plus cumulative process `io_write_mb` —
+  correlates flush stalls with latency spikes.
 Runtime control: `AppBackend::setPipelineTrendSampling(bool, dir)`. The
 analyzer (step 2) detects the file and appends a trend section: per-minute
 first/last-window medians, steady-state ratios (growth flagged at >1.3×

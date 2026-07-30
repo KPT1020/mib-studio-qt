@@ -27,6 +27,19 @@ public:
     // Available system RAM in bytes. Windows-first; returns 0 on unsupported platforms.
     static uint64_t getAvailableSystemRAMBytes();
 
+    // Allocator-level heap stats (glibc mallinfo2; zeros elsewhere). The gap
+    // between process RSS and inUseMB is the fragmentation/arena signal a
+    // plain RSS reading cannot show.
+    struct HeapStats {
+        double inUseMB{0.0}; // bytes handed out to the application
+        double freeMB{0.0};  // bytes held by the allocator, not returned to the OS
+    };
+    static HeapStats getHeapStats();
+
+    // Cumulative bytes this process has written to storage
+    // (/proc/self/io write_bytes; 0 on unsupported platforms).
+    static double getProcessIoWriteMB();
+
     // String conversion utilities
     template <typename T>
     static std::string toString(const T& v) {

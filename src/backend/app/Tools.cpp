@@ -17,6 +17,9 @@
 #include <fstream>
 #include <string>
 #include <time.h>
+#if defined(__GLIBC__)
+#include <malloc.h>
+#endif
 #endif
 
 namespace backend {
@@ -88,6 +91,31 @@ double Tools::getPeakProcessMemoryMB() {
     return 0.0;
 #else
     return procStatusFieldMB("VmHWM:");
+#endif
+}
+
+Tools::HeapStats Tools::getHeapStats() {
+    HeapStats stats;
+#if !defined(_WIN32) && defined(__GLIBC__) && __GLIBC_PREREQ(2, 33)
+    const struct mallinfo2 mi = mallinfo2();
+    stats.inUseMB = static_cast<double>(mi.uordblks) / (1024.0 * 1024.0);
+    stats.freeMB = static_cast<double>(mi.fordblks) / (1024.0 * 1024.0);
+#endif
+    return stats;
+}
+
+double Tools::getProcessIoWriteMB() {
+#ifdef _WIN32
+    return 0.0;
+#else
+    std::ifstream io("/proc/self/io");
+    std::string line;
+    while (std::getline(io, line)) {
+        if (line.rfind("write_bytes:", 0) == 0) {
+            return std::strtod(line.c_str() + 12, nullptr) / (1024.0 * 1024.0);
+        }
+    }
+    return 0.0;
 #endif
 }
 

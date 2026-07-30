@@ -8,6 +8,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 
 namespace backend::diagnostics {
 
@@ -80,6 +81,10 @@ private:
     std::chrono::milliseconds interval_{1000};
     std::chrono::steady_clock::time_point startTime_{};
     uint64_t lastFrameCount_{0};
+    // Per-tid cumulative CPU seconds at the previous tick, for per-stage
+    // CPU%% columns (tids from ThreadRegistry).
+    std::unordered_map<uint64_t, double> threadCpuPrev_;
+    std::chrono::steady_clock::time_point lastRowTime_{};
 
     std::thread thread_;
     std::mutex mutex_;

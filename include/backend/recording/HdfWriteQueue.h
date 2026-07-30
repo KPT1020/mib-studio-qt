@@ -6,6 +6,9 @@
 // dependency, so it is unit-testable with a mock writeFn.
 #pragma once
 
+#include "backend/diagnostics/PipelineTimingRecorder.h"
+#include "backend/diagnostics/ThreadRegistry.h"
+
 #include <condition_variable>
 #include <deque>
 #include <functional>
@@ -79,6 +82,7 @@ public:
 
 private:
     void run() {
+        backend::diagnostics::ThreadRegistry::instance().registerCurrentThread("hdf_writer");
         for (;;) {
             Batch b;
             {
@@ -95,6 +99,7 @@ private:
 
             bool ok = false;
             std::string thrown;
+            const uint64_t writeStartUs = backend::diagnostics::PipelineTimingRecorder::nowUs();
             try {
                 ok = writeFn_(b);
             } catch (const std::exception& e) {
@@ -104,6 +109,8 @@ private:
                 ok = false;
                 thrown = "write threw unknown exception";
             }
+            backend::diagnostics::PipelineTimingRecorder::instance().noteHdfWrite(
+                backend::diagnostics::PipelineTimingRecorder::nowUs() - writeStartUs);
 
             if (!ok) {
                 std::string fireMsg;

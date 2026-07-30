@@ -26,7 +26,13 @@
   `PlaybackPanel::computeProcessedOverlay`, giving the analyzer a measured
   overlay-on vs overlay-off A/B for live-view impact (H5). Headless soak
   matrix R1–R6 (incl. `--experiment`/`--record`) found no growth; verdicts
-  in the task note.
+  in the task note. Profiling layer beyond timestamps:
+  [[../diagnostics/ThreadRegistry]] (per-stage CPU% + nonvoluntary context
+  switches), [[../diagnostics/MatAllocStats]] (cv::Mat allocation churn —
+  ~25k allocs/s at 500 fps), allocator heap stats (fragmentation vs leak),
+  HDF5 batch-write cost gauge, process write-I/O; analyzer rules for
+  realtime-thread saturation, fragmentation signature, churn growth, and
+  scheduling pressure.
 - **Latency & target-identification-loss metrics** (2026-07-21, issue #292) —
   quantifies pipeline latency and lost sort targets. New counted losses:
   [[../services/TriggerService]] no-camera / set-failed pulse drops

@@ -2,6 +2,7 @@
 #include "backend/camera/common/ICamera.h"
 #include "backend/diagnostics/CrashStateMirror.h"
 #include "backend/diagnostics/PipelineTimingRecorder.h"
+#include "backend/diagnostics/ThreadRegistry.h"
 #include <spdlog/spdlog.h>
 #include <chrono>
 
@@ -129,6 +130,7 @@ void TriggerService::onTargetGroupResult(const TargetGroupSignal& signal) {
 }
 
 void TriggerService::triggerLoop() {
+    backend::diagnostics::ThreadRegistry::instance().registerCurrentThread("trigger");
     raiseTriggerThreadPriority();
     auto& timingRecorder = backend::diagnostics::PipelineTimingRecorder::instance();
     while (running_.load()) {

@@ -160,6 +160,12 @@ public:
     double avgOverlayComputeUs() const {
         return overlayEwmaUs_.load(std::memory_order_relaxed);
     }
+    // One HDF5 batch write on the HdfWriteQueue writer thread. Always-on:
+    // correlates disk-write stalls with pipeline latency spikes.
+    void noteHdfWrite(uint64_t us);
+    uint64_t hdfWriteCount() const { return hdfWriteCount_.load(std::memory_order_relaxed); }
+    double avgHdfWriteUs() const { return hdfWriteEwmaUs_.load(std::memory_order_relaxed); }
+    uint64_t maxHdfWriteUs() const { return hdfWriteMaxUs_.load(std::memory_order_relaxed); }
 
     // Write pipeline_frames.csv, pipeline_triggers.csv and pipeline_skips.csv
     // into `directory` (created if missing; files overwritten). Analyse with
@@ -187,11 +193,15 @@ private:
     std::atomic<double> liveTargetLatencyEwmaUs_{0.0};
     std::atomic<uint64_t> liveTargetLatencyMaxUs_{0};
 
-    // Auxiliary cost gauges (see noteEmptyFrameCost / noteOverlayCompute).
+    // Auxiliary cost gauges (see noteEmptyFrameCost / noteOverlayCompute /
+    // noteHdfWrite).
     std::atomic<uint64_t> emptyCostCount_{0};
     std::atomic<double> emptyCostEwmaUs_{0.0};
     std::atomic<uint64_t> overlayCount_{0};
     std::atomic<double> overlayEwmaUs_{0.0};
+    std::atomic<uint64_t> hdfWriteCount_{0};
+    std::atomic<double> hdfWriteEwmaUs_{0.0};
+    std::atomic<uint64_t> hdfWriteMaxUs_{0};
 };
 
 const char* pipelineSkipReasonName(PipelineSkipReason reason);
