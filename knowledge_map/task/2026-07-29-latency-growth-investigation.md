@@ -62,6 +62,8 @@ windows.
 | R2 | inline | off | 500 | 0.89 → 0.76 ms (0.86×) | none — backlog peak 17 frames, 0 `ring_behind` |
 | R3 | batch | n/a | 500 | 13.8 → 13.9 ms (1.01×) | none — queue depth ~3, peak 8 |
 | R4 | inline | on | 200 | 1.22 → 0.74 ms (0.61×) | none |
+| R5 | inline | exp | 500 | 0.77 → 0.52 ms (0.67×) | none — full experiment: every-frame accumulation + ~30 MB/s HDF5 flush, 183k frames flushed, 0 dropped |
+| R6 | inline | on | 500 | 0.68 → 0.50 ms (0.74×) | none — raw frame recording: 81k frames written alongside realtime |
 
 ### Findings
 
@@ -82,7 +84,13 @@ windows.
 4. **Trigger-thread jitter**: R2 flagged `request_to_fire_p95` 1.36×
    (127 → 173 µs, peak 1 ms) — OS scheduling on a container without
    SCHED_FIFO; absolute magnitude too small to move end-to-end latency.
-5. Net: the growth-after-5-minutes symptom did **not** reproduce headlessly,
+5. **Experiment and recording paths also clean** (R5/R6, via the new
+   `--experiment` / `--record` harness flags): sustained flush I/O and the
+   frame-recording thread neither accumulate backlog nor drop frames over
+   9 minutes. The experiment flush writer does produce occasional multi-ms
+   `request_to_fire` scheduling outliers (peak 7.1 ms in R5) on a host
+   without RT thread priority — spikes, not a trend.
+6. Net: the growth-after-5-minutes symptom did **not** reproduce headlessly,
    which shifts suspicion to the paths the mock harness cannot exercise —
    **H3** (camera/SDK buffering) and **H5** (GUI overlay kernel contention,
    OverviewTab's never-stopped 50 Hz tick) — both discriminated by the
