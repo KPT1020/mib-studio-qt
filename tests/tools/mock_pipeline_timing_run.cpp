@@ -17,6 +17,15 @@
 //   mock_pipeline_timing_run --frames <dir> [--fps 200] [--duration 20]
 //       [--out <dump dir>] [--data-dir <dir>] [--roi x,y,w,h]
 //       [--background <image>] [--drop-frames] [--mode inline|batch]
+//       [--experiment | --record]
+//
+// --experiment runs the session as a real experiment: HDF5 file opened,
+// ProcessingService::startExperiment() (which forces every-frame mode and
+// experiment accumulation), a ~1 Hz flushBufferedFrames like the app's
+// periodic flush, and the full stop sequence (final flush, finishFlush,
+// endExperiment). --record runs raw frame recording
+// (AppBackend::startFrameRecording) instead. Mutually exclusive — both use
+// the single Hdf5Service file slot, as in the app.
 //
 // A 1 Hz latency trend time series (pipeline_trend.csv, PipelineTrendSampler)
 // is always written next to the timing CSVs — the recorder rings hold only
@@ -30,6 +39,7 @@
 #include "backend/diagnostics/PipelineTimingRecorder.h"
 #include "backend/playback/FrameStore.h"
 #include "backend/processing/ProcessingService.h"
+#include "backend/recording/Hdf5Service.h"
 #include "backend/services/CaptureService.h"
 #include "backend/services/TriggerService.h"
 
@@ -61,6 +71,8 @@ struct Options {
     double durationSec{20.0};
     bool dropFrames{false};
     bool batchMode{false};
+    bool experiment{false};
+    bool record{false};
     int roi[4]{-1, -1, -1, -1}; // x,y,w,h; -1 = derive right third
 };
 
@@ -100,6 +112,10 @@ bool parseArgs(int argc, char** argv, Options& opt) {
             opt.durationSec = std::atof(v);
         } else if (arg == "--drop-frames") {
             opt.dropFrames = true;
+        } else if (arg == "--experiment") {
+            opt.experiment = true;
+        } else if (arg == "--record") {
+            opt.record = true;
         } else if (arg == "--mode") {
             const char* v = next("--mode");
             if (!v) return false;
@@ -126,7 +142,11 @@ bool parseArgs(int argc, char** argv, Options& opt) {
     if (opt.framesDir.empty()) {
         std::cerr << "usage: mock_pipeline_timing_run --frames <dir> [--fps N] "
                      "[--duration Sec] [--out dir] [--roi x,y,w,h] [--background img] "
-                     "[--drop-frames] [--mode inline|batch]\n";
+                     "[--drop-frames] [--mode inline|batch] [--experiment | --record]\n";
+        return false;
+    }
+    if (opt.experiment && opt.record) {
+        std::cerr << "--experiment and --record are mutually exclusive (one Hdf5Service file)\n";
         return false;
     }
     return true;
@@ -291,6 +311,8 @@ int main(int argc, char** argv) {
               << " roi=" << opt.roi[0] << "," << opt.roi[1] << "," << opt.roi[2] << ","
               << opt.roi[3] << " drop_frames=" << (opt.dropFrames ? "on" : "off")
               << " mode=" << (opt.batchMode ? "batch" : "inline")
+              << " experiment=" << (opt.experiment ? "on" : "off")
+              << " record=" << (opt.record ? "on" : "off")
               << "\ndump dir: " << opt.outDir << "\n";
 
     proc.startRealtime(backendApp.getFrameStore());
@@ -298,6 +320,32 @@ int main(int argc, char** argv) {
     if (!backendApp.capture().start()) {
         std::cerr << "capture start failed\n";
         return 1;
+    }
+
+    // Experiment / recording paths, mirroring ExperimentController::startExperiment
+    // and the app's raw-recording flow. startExperiment() forces every-frame
+    // processing and experiment accumulation regardless of --drop-frames.
+    if (opt.experiment) {
+        auto& hdf5 = backendApp.hdf5();
+        const std::string h5Path = opt.dataDir + "/experiment_soak.h5";
+        if (!hdf5.openFile(h5Path)) {
+            std::cerr << "failed to open experiment HDF5 file " << h5Path << "\n";
+            return 1;
+        }
+        if (!hdf5.initializeDatasets()) {
+            std::cerr << "failed to initialize HDF5 datasets\n";
+            return 1;
+        }
+        proc.startExperiment();
+        std::cout << "experiment started -> " << h5Path << "\n";
+    }
+    if (opt.record) {
+        const std::string h5Path = opt.dataDir + "/recording_soak.h5";
+        if (!backendApp.startFrameRecording(h5Path)) {
+            std::cerr << "failed to start frame recording\n";
+            return 1;
+        }
+        std::cout << "frame recording started -> " << h5Path << "\n";
     }
 
     auto& recorder = PipelineTimingRecorder::instance();
@@ -321,8 +369,48 @@ int main(int argc, char** argv) {
             << " algo_avg_us=" << proc.getAlgoAvgUs1s() << " backlog=" << backlog
             << " queue=" << proc.getBatchPipelineStats().currentQueueDepth << " triggers="
             << triggers << " (+" << (triggers - lastTriggerCount) << "/s)"
-            << " frame_records=" << recorder.frameRecordCount() << "\n";
+            << " frame_records=" << recorder.frameRecordCount();
+        if (opt.experiment) {
+            // Periodic flush, standing in for the app's 500 ms async flush tick.
+            const size_t flushed = proc.flushBufferedFrames(backendApp.hdf5());
+            const auto buffered = proc.getBufferedFrameCounts();
+            std::cout << " exp_buffered=" << buffered.total() << " exp_flushed_now=" << flushed
+                      << " exp_flushed_total=" << proc.getTotalValidFlushed()
+                      << " exp_dropped=" << proc.getDroppedValidFrames() << "/"
+                      << proc.getDroppedInvalidFrames();
+        }
+        if (opt.record) {
+            std::cout << " rec_written=" << backendApp.frameRecordingCount()
+                      << " rec_filtered=" << backendApp.frameRecordingFiltered();
+        }
+        std::cout << "\n";
         lastTriggerCount = triggers;
+    }
+
+    // Stop order mirrors the app: experiment/recording end while capture is
+    // still running, then capture stops.
+    if (opt.experiment) {
+        auto& hdf5 = backendApp.hdf5();
+        const size_t flushed = proc.flushBufferedFrames(hdf5);
+        if (!proc.finishFlush()) {
+            std::cerr << "experiment flush queue reported a save error during final drain\n";
+        }
+        const auto remValid = proc.getValidFrames();
+        const auto remInvalid = proc.getInvalidFrames();
+        if (!remValid.empty() || !remInvalid.empty()) {
+            hdf5.appendFrames(remValid, remInvalid);
+        }
+        proc.endExperiment();
+        hdf5.closeFile();
+        std::cout << "experiment stopped: final_flush=" << flushed
+                  << " total_flushed=" << proc.getTotalValidFlushed()
+                  << " dropped=" << proc.getDroppedValidFrames() << "/"
+                  << proc.getDroppedInvalidFrames() << "\n";
+    }
+    if (opt.record) {
+        backendApp.stopFrameRecording();
+        std::cout << "frame recording stopped: written=" << backendApp.frameRecordingCount()
+                  << " filtered=" << backendApp.frameRecordingFiltered() << "\n";
     }
 
     backendApp.capture().stop(); // joins trigger thread, auto-dumps timing CSVs

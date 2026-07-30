@@ -125,9 +125,13 @@ python3 scripts/analyze_pipeline_timing.py /tmp/timing_run/pipeline_timing
 
 Options: `--roi x,y,w,h`, `--background <image>`, `--drop-frames` (default is
 every-frame mode), `--fps`, `--duration`, `--mode inline|batch` (async-batch
-realtime path). The harness always writes `pipeline_trend.csv` (§1b), so a
-long `--duration` (e.g. 720) plus the analyzer's trend section is the
-standard reproduction for latency-growth reports.
+realtime path), `--experiment` (real experiment lifecycle: HDF5 file +
+`startExperiment` forcing every-frame accumulation + ~1 Hz flush + full stop
+sequence — heavy disk I/O, roughly 30 MB/s at 500 fps on 512x96 frames), and
+`--record` (raw frame recording thread). The harness always writes
+`pipeline_trend.csv` (§1b), so a long `--duration` (e.g. 540+) plus the
+analyzer's trend section is the standard reproduction for latency-growth
+reports.
 
 Reference numbers from 20 s / 500 fps runs of `gavinlouuu/512x96stream`
 (1000 frames, Linux container, every-frame mode), zero drops and accounting

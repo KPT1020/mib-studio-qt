@@ -52,8 +52,10 @@ SDK-side queueing vs heap growth vs contour growth).
   (`MIB_PIPELINE_TIMING_DIR` / `<dataDir>/pipeline_timing`).
 - Runtime: `AppBackend::setPipelineTrendSampling(bool, dir)`.
 - `tests/tools/mock_pipeline_timing_run` always enables it (long `--duration`
-  soaks are its reason to exist) and grew a `--mode inline|batch` flag for
-  exercising the async-batch queue path.
+  soaks are its reason to exist) and grew `--mode inline|batch` (async-batch
+  queue path) plus `--experiment` / `--record` flags that run the real
+  experiment lifecycle (HDF5 flush I/O, every-frame accumulation) or the raw
+  frame-recording thread during the soak.
 - Analyse: `python3 scripts/analyze_pipeline_timing.py <dir>` — the trend
   section prints per-minute first/last window medians, steady-state ratios
   (growth flagged at ratio > 1.3 plus a 2σ noise guard), and the verdict.
