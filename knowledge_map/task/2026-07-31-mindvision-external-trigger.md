@@ -74,6 +74,58 @@ source.
   `CameraSetExtTrigJitterTime`, `CameraSetTriggerDelayTime`,
   `CameraSetTriggerCount`, `CameraSoftTrigger`.
 
+## Camera + bench parameters (from MV-XGC51GC/GM datasheet, edition A1)
+
+- Camera: MV-XGC51GM, **10GigE** (10GBase-T, ~1200 MB/s effective; backward
+  compatible 100M/1G/2.5G/5G), IMX426 1/1.7" mono, 816×624 @ 1594.75 fps full
+  frame, exposure range **0.8 µs – 838.86 ms**, max analog gain 125×, 1 GB
+  in-camera frame buffer, 24 V ±10% supply, <12 W.
+- GPIO: 2 opto inputs + 2 opto outputs + 1 non-isolated bidirectional IO.
+  Port A pinout: pins 3/4 = `GPI_1±/TRIG_IN±` (default trigger input — the
+  Zhongsheng pulse goes here), pins 9/10 = `GPO_1±/STRB_OUT±` (default strobe
+  output — drives the LED driver), pins 1/2 power.
+- Bench operating point (shipped `mindvisionConfig.json`): pulse generator at
+  **5000 Hz determines the frame rate** (camera in ext-trigger mode fires one
+  frame per pulse); ROI **512×96** (5000 fps is only achievable at this
+  reduced ROI); exposure 1 µs; strobe semi-auto (`strobe_mode: 1`) with
+  delay 10 µs, width 35 µs, polarity 1.
+
+## 5000 fps defensive audit (2026-07-31)
+
+Checked and OK as-is:
+- **Link bandwidth**: 512×96 mono8 × 5000 fps = 234 MB/s ≪ 1200 MB/s (10GigE).
+  Full-frame would be 774 MB/s — still fits. Requires the 10G NIC + CAT6A
+  path end-to-end; a 1GbE link caps out at ~2100 fps at this ROI.
+- **Timing budget**: frame period 200 µs ≥ strobe delay 10 + width 35 = 45 µs;
+  pulse-generator high time at 50 % duty = 100 µs. No overlap into the next
+  period.
+- **FrameStore**: 5000-slot ring × 49 152 B = 245 MB ≈ exactly 1.0 s of
+  buffer at 5000 fps — downstream (processing/recording) must keep up within
+  that window.
+- **Capture hot path**: `CaptureService::run` now reuses one `Frame` across
+  iterations (was per-iteration construction → 48 KB malloc every 200 µs);
+  FrameStore slots were already pre-reserved. `checkDeviceHealth` no longer
+  grabs frames in triggered modes.
+- **Zhongsheng module**: 5000 Hz is inside its 400 Hz–40 kHz range;
+  GUI default frequency set to 5000 Hz.
+- **Config clamps**: exposure 1.0 µs passes the `> 0` check (sensor min
+  0.8 µs); ROI 512×96 is the config default.
+
+Watch on the scope during bring-up (not code issues, but flagged):
+- **Strobe vs exposure overlap**: with `exposure_time_us: 1.0` and strobe
+  delay 10 µs, the LED pulse window (10–45 µs after trigger) starts after a
+  nominally 1 µs exposure would have closed — verify on the scope that the
+  sensor's actual exposure window (internal trigger-to-exposure latency)
+  overlaps the LED pulse, or tune `acq_trigger_delay_us`/`strobe_delay_us`
+  until it does. Illumination-limited imaging usually wants the exposure to
+  bracket the flash.
+- **Device timestamps**: `frameHead.uiTimeStamp` ticks at 0.1 ms — exactly 2
+  ticks per frame at 5000 fps, so device timestamps are coarse (use
+  `hostTimestampUs` for latency math, as the pipeline already does). Above
+  10 kfps device stamps would duplicate.
+- **Gain headroom**: 1 µs exposure is illumination-starved; the sensor allows
+  analog gain up to 125× (`analog_gain` clamp already spans it).
+
 ## Hardware bring-up checklist (#327)
 
 1. Wiring: module Y1/COM− → camera trigger input (check camera I/O voltage

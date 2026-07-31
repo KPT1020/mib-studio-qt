@@ -26,9 +26,9 @@
   `isMindVisionCameraSelected()`; stops capture, rebuilds factory), **Soft
   Trigger** → `AppBackend::softTriggerCamera` (acquisition trigger — distinct
   from the sort-pulse buttons in [[ExperimentMonitoringTab]]), and a pulse
-  generator group (COM/baud/addr connect, channel, frequency 400–40000 Hz,
-  duty %, Set/Start/Stop) driving
-  [[../services/PulseGeneratorService]] synchronously.
+  generator group (COM/baud/addr connect, channel, frequency 400–40000 Hz
+  defaulting to 5000 Hz = the 5000 fps bench trigger rate, duty %,
+  Set/Start/Stop) driving [[../services/PulseGeneratorService]] synchronously.
 - Render/edit JSON config using `models/JsonTableModel.cpp` and
   `utils/JsonFlatten.cpp`.
 - Persist config via `utils/ConfigPathManager.cpp` and

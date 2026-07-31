@@ -351,7 +351,9 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         pgFreqSpin_->setRange(backend::services::PulseGeneratorService::MIN_FREQUENCY_HZ,
                               backend::services::PulseGeneratorService::MAX_FREQUENCY_HZ);
         pgFreqSpin_->setDecimals(2);
-        pgFreqSpin_->setValue(1000.0);
+        // 5000 Hz = the bench default trigger rate (5000 fps at 512x96 ROI,
+        // 1 us exposure — see resources/defaults/mindvisionConfig.json).
+        pgFreqSpin_->setValue(5000.0);
         pgRow->addWidget(pgFreqSpin_);
         pgRow->addWidget(new QLabel(tr("Duty (%)"), pgGroup));
         pgDutySpin_ = new QDoubleSpinBox(pgGroup);

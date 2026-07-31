@@ -36,7 +36,9 @@ struct Config {
     int strobePulseUs{500};
     int strobeDelayUs{0};
     int strobePolarity{1};
-    int extTrigSignalType{0};  // 0=falling,1=rising,2=high-level,3=low-level,4=double-edge
+    int extTrigSignalType{0};  // MVSDK edge select: 0=leading(rising) edge,
+                               // 1=trailing(falling), 2=high level, 3=low level,
+                               // 4=double edge
     int extTrigJitterUs{0};    // de-glitch filter on the trigger input line
     int acqTriggerDelayUs{0};  // delay from external trigger edge to exposure start
     int triggerCount{1};       // frames captured per trigger (software + hardware)

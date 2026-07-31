@@ -88,10 +88,15 @@ contract). `MindVisionApply.cpp` includes the SDK header **without**
 `API_LOAD_MAIN`.
 
 A documented sample config ships at `resources/defaults/mindvisionConfig.json`
-(free-run defaults; the GUI seeds a user-writable copy). Ext-trigger variant:
-`"trigger_mode": 2, "ext_trig_signal_type": 1, "ext_trig_jitter_us": 10,
-"strobe_mode": 1, "strobe_pulse_width_us": 200`. Soft-trigger bench variant:
-`"trigger_mode": 1` with the same strobe settings.
+(the GUI seeds a user-writable copy). Its defaults ARE the bench setup for the
+MV-XGC51GM (10GigE, IMX426): **external trigger at 5000 fps** — the Zhongsheng
+pulse generator on TRIG_IN determines the frame rate — with 512×96 ROI (the
+5000 fps figure is only valid at this reduced ROI), `exposure_time_us: 1.0`
+(sensor minimum is 0.8 µs), and strobe in semi-auto/manual mode
+(`strobe_mode: 1`) with `strobe_delay_us: 10`, `strobe_pulse_width_us: 35`
+driving the LED driver from STRB_OUT. Soft-trigger bench variant: change
+`trigger_mode` to 1; free-run: 0 (code defaults for absent keys remain
+free-run/conservative — only the shipped file carries the bench values).
 
 ## Gotchas
 
