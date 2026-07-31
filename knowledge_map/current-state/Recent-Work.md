@@ -5,6 +5,21 @@
 
 ## Features shipped
 
+- **Silent-launch failure detection** (2026-07-31) — a Windows 10 install
+  that "doesn't open, silently, no error" was undiagnosable: the crash
+  handler suppresses the Windows error dialog by design, so a startup
+  crash leaves only artifacts nobody knows to look for. New
+  [[../diagnostics/StartupProbe]] (Qt-free, `backend/diagnostics`) writes a
+  stage-by-stage `startup.inprogress` marker during boot and removes it when
+  the main window shows; the next launch reports a stale marker in a dialog
+  naming the failed stage and the crash-artifact paths, and each stage is
+  mirrored to the Sentry tag `startup_stage`. Also fixed the installer's
+  VC++ runtime fallback check (`mib-studio-qt.iss`), which looked in
+  `{syswow64}` (32-bit System32) and ignored `vcruntime140_1.dll`, so
+  machines with only the x86 runtime skipped the redist and the app could
+  not start. New "Application will not open" runbook section in
+  `docs/howto/troubleshoot-crashes.md`. Guard: `backend.startup_probe`.
+
 - **Latency & target-identification-loss metrics** (2026-07-21, issue #292) —
   quantifies pipeline latency and lost sort targets. New counted losses:
   [[../services/TriggerService]] no-camera / set-failed pulse drops

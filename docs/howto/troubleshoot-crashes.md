@@ -2,6 +2,55 @@
 
 This guide explains how to trace and diagnose crashes in the installed MIB Studio Qt application.
 
+## Application will not open — no error, no window
+
+A double-click that does nothing (no window, no error dialog) is almost
+always one of two things, and each leaves evidence in a different place:
+
+**1. The process starts and crashes during startup.** The installed crash
+handler intentionally suppresses the Windows error dialog — it writes a
+minidump and exits, so the launch *looks* silent. Check, in order:
+
+```powershell
+# Stale startup marker = last launch died mid-boot; shows the stage it reached
+Get-Content "$env:LOCALAPPDATA\MIB_Studio_Qt\startup.inprogress"
+
+# Crash dumps + state sidecars from the crashed launches
+Get-ChildItem "$env:LOCALAPPDATA\MIB_Studio_Qt\crashes" | Sort-Object LastWriteTime
+
+# Early startup errors written before logging is available
+Get-Content "$env:LOCALAPPDATA\MIB_Studio_Qt\crash_log.txt"
+```
+
+Since the startup-probe change, simply launching the app again after a
+silent failure shows a dialog with the failed stage and these paths — ask
+the operator what stage it names. The stage tells you where to look:
+`backend-init` → `data\logs\app.log` and disk/permission issues;
+`main-window-create` → display/GPU drivers, Qt platform plugins;
+`crash-reporter-install` / `settings-migration` → the crash dumps above.
+
+**2. The process never starts (loader failure).** Nothing appears in the
+folders above because `main()` never ran. Run the exe from PowerShell —
+the loader error that Explorer sometimes swallows is printed or shown:
+
+```powershell
+& "C:\Program Files\MIB Studio Qt\mib_studio_qt.exe"
+$LASTEXITCODE   # -1073741511 (0xC0000139) / -1073741701 (0xC000007B) etc.
+```
+
+- Exit `0xC0000135` / dialog "VCRUNTIME140_1.dll was not found" → the
+  Visual C++ 2015-2022 **x64** redistributable is missing. Re-run the
+  installer and keep "Install Visual C++ Redistributable" ticked, or run
+  `vc_redist.x64.exe` manually. (Installer builds before the silent-launch
+  fix skipped this step when only the 32-bit runtime was present.)
+- "The application was unable to start correctly (0xc0000142)" → same
+  cause, or a corrupted DLL next to the exe; reinstall both.
+- Missing `Qt6*.dll` / `platforms\qwindows.dll` → incomplete install
+  (antivirus quarantine is the usual culprit); check the AV quarantine log
+  and reinstall.
+- Windows Event Viewer → Windows Logs → Application, source "Application
+  Error", records the faulting module for every variant (see below).
+
 ## Automatic crash capture (Sentry + local minidumps)
 
 Starting with the crash-monitoring change (branch

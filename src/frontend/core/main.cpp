@@ -9,6 +9,7 @@
 
 #include "backend/app/AppBackend.h"
 #include "backend/diagnostics/CrashStateMirror.h"
+#include "backend/diagnostics/StartupProbe.h"
 #include "backend/recording/Hdf5Service.h"
 #include "backend/services/CrashReporter.h"
 #include "frontend/core/MainWindow.h"
@@ -183,9 +184,50 @@ int main(int argc, char* argv[]) {
         // Initialize QApplication first
         QApplication app(argc, argv);
 
+        // Arm the startup lifeline before anything that can fail. If a
+        // previous launch died without ever showing UI (e.g. a crash the
+        // crash handler swallowed silently), tell the user now instead of
+        // letting this launch look like the first silent failure.
+        const QString probeExeDir = QCoreApplication::applicationDirPath();
+        const std::filesystem::path diagnosticsDir =
+            resolveCrashDir(probeExeDir).parent_path();
+        backend::diagnostics::StartupProbe startupProbe;
+        const auto previousAttempt =
+            startupProbe.begin(diagnosticsDir, MIB_STUDIO_QT_VERSION_FULL);
+        if (previousAttempt.found) {
+            const QString crashesDir = QDir::toNativeSeparators(
+                QString::fromStdString((diagnosticsDir / "crashes").string()));
+            const QString earlyLog = QDir::toNativeSeparators(
+                QString::fromStdString((diagnosticsDir / "crash_log.txt").string()));
+            const QString appLog = QDir::toNativeSeparators(
+                QDir(probeExeDir).filePath(QStringLiteral("data/logs/app.log")));
+            const QString message =
+                QStringLiteral(
+                    "The previous attempt to start MIB Studio stopped silently "
+                    "during startup (last stage reached: '%1').\n\n"
+                    "Where to look:\n"
+                    "- Crash dumps: %2\n"
+                    "- Early errors: %3\n"
+                    "- Application log: %4\n\n"
+                    "This launch will continue now. If the window never appears "
+                    "again, send those files to support.")
+                    .arg(QString::fromStdString(previousAttempt.stage),
+                         crashesDir, earlyLog, appLog);
+            writeEarlyError("Previous startup did not complete. Marker:\n" +
+                            previousAttempt.detail);
+#ifdef _WIN32
+            QMessageBox::warning(nullptr,
+                                 QStringLiteral("MIB Studio - Previous Startup Failed"),
+                                 message);
+#else
+            std::cerr << message.toStdString() << std::endl;
+#endif
+        }
+
         // Establish a complete, stable QSettings identity before any settings
         // are read. Older builds used Qt's "Unknown Organization" fallback;
         // initialize() migrates every legacy key without replacing newer ones.
+        startupProbe.stage("settings-migration");
         QString settingsMigrationError;
         if (!frontend::applicationsettings::initialize(&settingsMigrationError)) {
             const QString message =
@@ -217,7 +259,10 @@ int main(int argc, char* argv[]) {
         // during backend init are still captured. Logger init happens inside
         // AppBackend::initialize() and CrashReporter uses spdlog for its own
         // diagnostic messages once Logger comes online.
+        startupProbe.stage("crash-reporter-install");
         installCrashReporter(exeDir, dataDirStd);
+        backend::services::CrashReporter::setTag("startup_stage",
+                                                 startupProbe.currentStage());
 
         // Early diagnostic output
         std::cout << "MIB Studio Qt starting..." << std::endl;
@@ -225,6 +270,9 @@ int main(int argc, char* argv[]) {
         std::cout << "Data directory: " << dataDirStd << std::endl;
 
         // Initialize backend with proper path
+        startupProbe.stage("backend-init");
+        backend::services::CrashReporter::setTag("startup_stage",
+                                                 startupProbe.currentStage());
         backend::AppBackend backend;
         if (!backend.initialize(dataDirStd)) {
             // Determine log location (may be in user AppData if installed in Program Files)
@@ -252,10 +300,18 @@ int main(int argc, char* argv[]) {
         }
         
         // Create and show main window
+        startupProbe.stage("main-window-create");
+        backend::services::CrashReporter::setTag("startup_stage",
+                                                 startupProbe.currentStage());
         MainWindow w(backend);
         w.resize(960, 600);
         w.show();
-        
+
+        // Startup reached visible UI: disarm the lifeline. Anything that
+        // fails from here on is an in-session failure, not a silent launch.
+        startupProbe.complete();
+        backend::services::CrashReporter::setTag("startup_stage", "complete");
+
         std::cout << "Application started successfully." << std::endl;
 
         const int rc = app.exec();

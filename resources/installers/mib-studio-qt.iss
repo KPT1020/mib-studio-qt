@@ -168,8 +168,16 @@ begin
     end;
   end;
 
-  // Additional fallback: Check for presence of key runtime DLLs in System32
-  if FileExists(ExpandConstant('{syswow64}\msvcp140.dll')) and FileExists(ExpandConstant('{syswow64}\vcruntime140.dll')) then
+  // Additional fallback: check for the x64 runtime DLLs in the native
+  // System32 ({sys} in 64-bit install mode). The old check looked in
+  // {syswow64} — the 32-bit directory — so a machine that only had the x86
+  // runtime skipped the redist install and the app then failed to launch
+  // (0xc0000142). vcruntime140_1.dll ships only with the 2019+ redist and
+  // is required by x64 binaries built with VS2019/2022, so it must be
+  // present too.
+  if FileExists(ExpandConstant('{sys}\msvcp140.dll')) and
+     FileExists(ExpandConstant('{sys}\vcruntime140.dll')) and
+     FileExists(ExpandConstant('{sys}\vcruntime140_1.dll')) then
   begin
     Result := False; // Runtime DLLs found
     Exit;

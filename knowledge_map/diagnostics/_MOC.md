@@ -10,6 +10,9 @@
 - [[PipelineTimingRecorder]] — lock-free per-frame latency recorder
   (acquisition → algorithm → trigger stamps + skip accounting) behind the
   pipeline-delay diagnosis workflow.
+- [[StartupProbe]] — startup lifeline marker file; a launch that dies
+  before showing UI is reported (with its last boot stage) on the next
+  launch instead of failing silently.
 
 ## Related services / conventions
 
