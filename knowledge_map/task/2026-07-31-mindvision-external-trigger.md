@@ -54,6 +54,20 @@ source.
 
 - Linux stub build (backend + frontend): green; 44/44 backend tests pass;
   `scripts/check_docs.py` clean.
+- **Linux GUI e2e (2026-07-31, Xvfb + xdotool + screenshots)**: the
+  "MindVision config (mindvisionConfig.json)" tab renders in ConfigTabs with
+  the full button row; the editor auto-seeds from
+  `:/defaults/mindvisionConfig.json` (all trigger/strobe keys present); the
+  pulse-generator row is disabled until connected. Soft Trigger click was
+  traced under gdb through the intended chain
+  `ConfigTabs::onSoftTrigger → AppBackend::softTriggerCamera →
+  QMessageBox::warning` (capture stopped → error path). Pulse-generator
+  Connect click reached `PulseGeneratorService::connect`, which attempted
+  the serial open and failed cleanly ("failed to open COM1") as expected on
+  Linux. Caveat: modal QMessageBox windows do not map under bare
+  Xvfb/openbox in this container — this affects pre-existing dialogs (e.g.
+  Apply Camera Script) identically, so it is an environment artifact, not a
+  regression.
 - **Windows real-SDK build: NOT yet done** (CI never compiles it). Before
   merging: build with `-DMIB_ENABLE_MINDVISION=ON`, grep the installed
   `CameraApiLoad.h` for `CameraSetExtTrigSignalType`,
