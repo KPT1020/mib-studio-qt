@@ -74,6 +74,11 @@ void CaptureService::stop() {
 
 bool CaptureService::isRunning() const { return running_.load(); }
 
+bool CaptureService::softTriggerActiveCamera() {
+    std::scoped_lock lk(cameraMutex_);
+    return activeCamera_ && activeCamera_->softTrigger();
+}
+
 void CaptureService::run() {
     std::unique_ptr<camera::common::ICamera> camera;
 

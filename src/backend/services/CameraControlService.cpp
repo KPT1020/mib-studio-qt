@@ -34,6 +34,7 @@ using namespace Euresys;
 #error "MindVision CameraApiLoad.h not found"
 #endif
 
+#include "backend/camera/mindvision/MindVisionApply.h"
 #include "backend/camera/mindvision/MindVisionConfig.h"
 
 #include <QFile>
@@ -119,47 +120,14 @@ namespace backend::services
                 SPDLOG_WARN("{}", warning);
             }
 
-            const auto& cfg = parsed.config;
-            const int width = cfg.width;
-            const int height = cfg.height;
-            const int offsetX = cfg.offsetX;
-            const int offsetY = cfg.offsetY;
-            const double exposureUs = cfg.exposureUs;
-            const int triggerMode = cfg.triggerMode;
-            const int analogGain = cfg.analogGain;
-
-            tSdkImageResolution res{};
-            res.iIndex = 0xFF;
-            res.iHOffsetFOV = offsetX;
-            res.iVOffsetFOV = offsetY;
-            res.iWidthFOV = width;
-            res.iHeightFOV = height;
-            res.iWidth = width;
-            res.iHeight = height;
-
-            CameraSdkStatus status = CameraSetImageResolution(hCamera, &res);
-            if (status != CAMERA_STATUS_SUCCESS)
+            // Shared with MindVisionCamera::applyJsonConfig so the two apply
+            // paths stay in lockstep (this path historically applied only 7
+            // of the config's fields — no strobe, no trigger extras).
+            std::string applyError;
+            backend::camera::mindvision::applyConfigToHandle(hCamera, parsed.config, &applyError);
+            if (!applyError.empty())
             {
-                SPDLOG_WARN("MindVision config: CameraSetImageResolution returned {}", status);
-                setErr("CameraSetImageResolution failed (status=" + std::to_string(status) + ")");
-            }
-
-            status = CameraSetExposureTime(hCamera, exposureUs);
-            if (status != CAMERA_STATUS_SUCCESS)
-            {
-                SPDLOG_WARN("MindVision config: CameraSetExposureTime returned {}", status);
-            }
-
-            status = CameraSetTriggerMode(hCamera, triggerMode);
-            if (status != CAMERA_STATUS_SUCCESS)
-            {
-                SPDLOG_WARN("MindVision config: CameraSetTriggerMode returned {}", status);
-            }
-
-            status = CameraSetAnalogGain(hCamera, analogGain);
-            if (status != CAMERA_STATUS_SUCCESS)
-            {
-                SPDLOG_WARN("MindVision config: CameraSetAnalogGain returned {}", status);
+                setErr(applyError);
             }
 
             return true;

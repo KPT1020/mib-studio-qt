@@ -25,6 +25,8 @@ class QScrollArea;
 class QGridLayout;
 class QDialog;
 class QTableWidget;
+class QSpinBox;
+class QDoubleSpinBox;
 
 namespace frontend { class JsonTableModel; }
 
@@ -59,6 +61,17 @@ private slots:
     void onClearJs();
     void onApplyJs();
     void onResetCamera();
+    // MindVision config tab
+    void onReloadMv();
+    void onSaveMv();
+    void onBrowseMv();
+    void onClearMv();
+    void onApplyMvConfig();
+    void onSoftTrigger();
+    void onPulseGenConnectToggle();
+    void onPulseGenApplySettings();
+    void onPulseGenStart();
+    void onPulseGenStop();
 	// Profiles
 	void onProfileSelectionChanged(int index);
 	void onSaveProfile();
@@ -74,7 +87,10 @@ private:
     QString appDirIncludePath(const QString& fileName) const;
     QString defaultJsonPath() const { return appDirIncludePath("config.json"); }
     QString defaultJsPath() const { return appDirIncludePath("egrabberConfig.js"); }
+    QString defaultMvJsonPath() const { return appDirIncludePath("mindvisionConfig.json"); }
     QString currentJsonPath() const;
+    QString currentMvJsonPath() const;
+    void refreshPulseGenUi();
     void clearJsonSyncIndicators();
     bool loadFileToEditor(const QString& path, QPlainTextEdit* editor, QString* err);
     bool saveEditorToFile(QPlainTextEdit* editor, const QString& path, QString* err);
@@ -144,6 +160,29 @@ private:
     QLabel* jsPathLabel_ = nullptr;
 	QLabel* jsUnsavedLabel_ = nullptr;
 	QCheckBox* profilesIncludeJsCheck_ = nullptr;
+
+    // MindVision config tab (acquisition trigger + strobe; NOT the sort pulse)
+    QPlainTextEdit* mvEdit_ = nullptr;
+    QPushButton* mvReloadBtn_ = nullptr;
+    QPushButton* mvSaveBtn_ = nullptr;
+    QPushButton* mvApplyBtn_ = nullptr;
+    QPushButton* mvSoftTriggerBtn_ = nullptr;
+    QPushButton* mvBrowseBtn_ = nullptr;
+    QPushButton* mvClearBtn_ = nullptr;
+    QLabel* mvPathLabel_ = nullptr;
+    QLabel* mvUnsavedLabel_ = nullptr;
+    // Pulse generator (Zhongsheng module = external trigger source)
+    QSpinBox* pgComPortSpin_ = nullptr;
+    QComboBox* pgBaudCombo_ = nullptr;
+    QSpinBox* pgAddrSpin_ = nullptr;
+    QPushButton* pgConnectBtn_ = nullptr;
+    QSpinBox* pgChannelSpin_ = nullptr;
+    QDoubleSpinBox* pgFreqSpin_ = nullptr;
+    QDoubleSpinBox* pgDutySpin_ = nullptr;
+    QPushButton* pgApplyBtn_ = nullptr;
+    QPushButton* pgStartBtn_ = nullptr;
+    QPushButton* pgStopBtn_ = nullptr;
+    QLabel* pgStatusLabel_ = nullptr;
 };
 
 } // namespace frontend

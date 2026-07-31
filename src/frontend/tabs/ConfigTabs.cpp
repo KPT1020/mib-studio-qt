@@ -32,6 +32,8 @@
 #include <QScrollArea>
 #include <QGridLayout>
 #include <QGroupBox>
+#include <QSpinBox>
+#include <QDoubleSpinBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QTableWidget>
@@ -46,6 +48,7 @@
 #endif
 
 #include "backend/app/AppBackend.h"
+#include "backend/services/PulseGeneratorService.h"
 #include "backend/processing/ProcessingService.h"
 #include "frontend/system/ProfileManager.h"
 #include "frontend/models/JsonTableModel.h"
@@ -280,10 +283,118 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         connect(profilesIncludeJsCheck_, &QCheckBox::toggled, this, &ConfigTabs::onIncludeJsToggled);
     }
 
+    // MindVision config tab (acquisition trigger + strobe + pulse generator).
+    // "Trigger" here means the camera's acquisition trigger — the sort-output
+    // pulse lives in ExperimentMonitoringTab / TriggerService.
+    {
+        auto* page = new QWidget(this);
+        auto* v = new QVBoxLayout(page);
+        mvEdit_ = new QPlainTextEdit(page);
+        mvEdit_->setWordWrapMode(QTextOption::NoWrap);
+        auto* row = new QHBoxLayout();
+        mvReloadBtn_ = new QPushButton(tr("Reset"), page);
+        mvSaveBtn_ = new QPushButton(tr("Save"), page);
+        mvApplyBtn_ = new QPushButton(tr("Apply to Camera"), page);
+        mvApplyBtn_->setToolTip(tr("Requires a MindVision camera selected in the Connect tab. "
+                                   "Stops capture, applies the config, and rebuilds the capture factory."));
+        mvSoftTriggerBtn_ = new QPushButton(tr("Soft Trigger"), page);
+        mvSoftTriggerBtn_->setToolTip(tr("Fires one software acquisition trigger. Requires capture "
+                                         "running with trigger_mode 1 (software trigger)."));
+        mvBrowseBtn_ = new QPushButton(tr("Browse..."), page);
+        mvClearBtn_ = new QPushButton(tr("Clear"), page);
+        mvPathLabel_ = new QLabel(page);
+        mvUnsavedLabel_ = new QLabel(page);
+        mvUnsavedLabel_->setText(tr("Unsaved changes – click Save to apply."));
+        mvUnsavedLabel_->setVisible(false);
+        mvUnsavedLabel_->setStyleSheet("color: #d17a00;");
+        row->addWidget(mvReloadBtn_);
+        row->addWidget(mvSaveBtn_);
+        row->addWidget(mvApplyBtn_);
+        row->addWidget(mvSoftTriggerBtn_);
+        row->addWidget(mvBrowseBtn_);
+        row->addWidget(mvClearBtn_);
+        row->addStretch(1);
+        row->addWidget(mvPathLabel_);
+        row->addSpacing(8);
+        row->addWidget(mvUnsavedLabel_);
+        v->addLayout(row);
+        v->addWidget(mvEdit_, 1);
+
+        auto* pgGroup = new QGroupBox(tr("Pulse generator (external trigger source, RS485)"), page);
+        auto* pgRow = new QHBoxLayout(pgGroup);
+        pgRow->addWidget(new QLabel(tr("COM"), pgGroup));
+        pgComPortSpin_ = new QSpinBox(pgGroup);
+        pgComPortSpin_->setRange(1, 255);
+        pgComPortSpin_->setValue(1);
+        pgRow->addWidget(pgComPortSpin_);
+        pgRow->addWidget(new QLabel(tr("Baud"), pgGroup));
+        pgBaudCombo_ = new QComboBox(pgGroup);
+        for (int baud : {4800, 9600, 14400, 19200, 38400, 56000, 57600, 115200}) {
+            pgBaudCombo_->addItem(QString::number(baud), baud);
+        }
+        pgBaudCombo_->setCurrentText("9600"); // module factory default
+        pgRow->addWidget(pgBaudCombo_);
+        pgRow->addWidget(new QLabel(tr("Addr"), pgGroup));
+        pgAddrSpin_ = new QSpinBox(pgGroup);
+        pgAddrSpin_->setRange(1, 255);
+        pgAddrSpin_->setValue(1);
+        pgRow->addWidget(pgAddrSpin_);
+        pgConnectBtn_ = new QPushButton(tr("Connect"), pgGroup);
+        pgRow->addWidget(pgConnectBtn_);
+        pgRow->addSpacing(16);
+        pgRow->addWidget(new QLabel(tr("Ch"), pgGroup));
+        pgChannelSpin_ = new QSpinBox(pgGroup);
+        pgChannelSpin_->setRange(1, backend::services::PulseGeneratorService::CHANNEL_COUNT);
+        pgRow->addWidget(pgChannelSpin_);
+        pgRow->addWidget(new QLabel(tr("Freq (Hz)"), pgGroup));
+        pgFreqSpin_ = new QDoubleSpinBox(pgGroup);
+        pgFreqSpin_->setRange(backend::services::PulseGeneratorService::MIN_FREQUENCY_HZ,
+                              backend::services::PulseGeneratorService::MAX_FREQUENCY_HZ);
+        pgFreqSpin_->setDecimals(2);
+        pgFreqSpin_->setValue(1000.0);
+        pgRow->addWidget(pgFreqSpin_);
+        pgRow->addWidget(new QLabel(tr("Duty (%)"), pgGroup));
+        pgDutySpin_ = new QDoubleSpinBox(pgGroup);
+        pgDutySpin_->setRange(0.0, 100.0);
+        pgDutySpin_->setDecimals(2);
+        pgDutySpin_->setValue(50.0);
+        pgRow->addWidget(pgDutySpin_);
+        pgApplyBtn_ = new QPushButton(tr("Set"), pgGroup);
+        pgStartBtn_ = new QPushButton(tr("Start"), pgGroup);
+        pgStartBtn_->setToolTip(tr("Enable the pulse train (writes the configured duty)."));
+        pgStopBtn_ = new QPushButton(tr("Stop"), pgGroup);
+        pgStopBtn_->setToolTip(tr("Gate the pulse train off (writes duty 0%, line idles low)."));
+        pgRow->addWidget(pgApplyBtn_);
+        pgRow->addWidget(pgStartBtn_);
+        pgRow->addWidget(pgStopBtn_);
+        pgRow->addStretch(1);
+        pgStatusLabel_ = new QLabel(tr("Disconnected"), pgGroup);
+        pgRow->addWidget(pgStatusLabel_);
+        v->addWidget(pgGroup);
+
+        page->setLayout(v);
+        tabs_->addTab(page, tr("MindVision config (mindvisionConfig.json)"));
+        connect(mvReloadBtn_, &QPushButton::clicked, this, &ConfigTabs::onReloadMv);
+        connect(mvSaveBtn_, &QPushButton::clicked, this, &ConfigTabs::onSaveMv);
+        connect(mvApplyBtn_, &QPushButton::clicked, this, &ConfigTabs::onApplyMvConfig);
+        connect(mvSoftTriggerBtn_, &QPushButton::clicked, this, &ConfigTabs::onSoftTrigger);
+        connect(mvBrowseBtn_, &QPushButton::clicked, this, &ConfigTabs::onBrowseMv);
+        connect(mvClearBtn_, &QPushButton::clicked, this, &ConfigTabs::onClearMv);
+        connect(mvEdit_, &QPlainTextEdit::textChanged, this, [this]() {
+            if (mvUnsavedLabel_) mvUnsavedLabel_->setVisible(true);
+        });
+        connect(pgConnectBtn_, &QPushButton::clicked, this, &ConfigTabs::onPulseGenConnectToggle);
+        connect(pgApplyBtn_, &QPushButton::clicked, this, &ConfigTabs::onPulseGenApplySettings);
+        connect(pgStartBtn_, &QPushButton::clicked, this, &ConfigTabs::onPulseGenStart);
+        connect(pgStopBtn_, &QPushButton::clicked, this, &ConfigTabs::onPulseGenStop);
+        refreshPulseGenUi();
+    }
+
     layout->addWidget(tabs_, 1);
 
     onReloadJson();
     onReloadJs();
+    onReloadMv();
 
     // Profiles: populate and wire
     refreshProfilesList();
@@ -587,6 +698,190 @@ void ConfigTabs::onClearJs() {
     if (ret == QMessageBox::Yes) {
         onReloadJs();
     }
+}
+
+QString ConfigTabs::currentMvJsonPath() const {
+    QSettings s;
+    const QString ext = s.value("Config/ExternalMindVisionConfigPath").toString().trimmed();
+    if (!ext.isEmpty()) return ext;
+    return defaultMvJsonPath();
+}
+
+void ConfigTabs::onReloadMv() {
+    const QString path = currentMvJsonPath();
+    if (path == defaultMvJsonPath()) {
+        QString err;
+        if (!ensureDefaultsFile(path, ":/defaults/mindvisionConfig.json", &err)) {
+            SPDLOG_WARN("ensureDefaultsFile(mindvisionConfig.json) failed: {}", err.toStdString());
+        }
+    }
+    QString err;
+    if (!loadFileToEditor(path, mvEdit_, &err)) {
+        SPDLOG_WARN("Failed to load MindVision config from {}: {}", path.toStdString(), err.toStdString());
+        QMessageBox::warning(this, tr("Reset mindvisionConfig.json"), tr("Failed to load: %1").arg(err));
+        return;
+    }
+    mvPathLabel_->setText(path);
+    if (mvUnsavedLabel_) mvUnsavedLabel_->setVisible(false);
+}
+
+void ConfigTabs::onSaveMv() {
+    const QString path = currentMvJsonPath();
+    QString err;
+    if (!saveEditorToFile(mvEdit_, path, &err)) {
+        QMessageBox::warning(this, tr("Save mindvisionConfig.json"), tr("Failed to save: %1").arg(err));
+        return;
+    }
+    if (mvUnsavedLabel_) mvUnsavedLabel_->setVisible(false);
+    SPDLOG_INFO("MindVision config saved to {}", path.toStdString());
+}
+
+void ConfigTabs::onApplyMvConfig() {
+    if (!backend_.isMindVisionCameraSelected()) {
+        QMessageBox::warning(this, tr("Apply MindVision Config"),
+                             tr("Select a MindVision camera in the Connect tab first."));
+        return;
+    }
+    const QString path = currentMvJsonPath();
+    // Always save first so the applied file matches the editor
+    {
+        QString saveErr;
+        if (!saveEditorToFile(mvEdit_, path, &saveErr)) {
+            QMessageBox::warning(this, tr("Apply MindVision Config"),
+                                 tr("Failed to save config: %1").arg(saveErr));
+            return;
+        }
+        if (mvUnsavedLabel_) mvUnsavedLabel_->setVisible(false);
+    }
+
+    std::string backendErr;
+    if (!backend_.applyMindVisionConfigFromFile(path.toStdString(), &backendErr)) {
+        QMessageBox::warning(this, tr("Apply MindVision Config"),
+                             tr("Failed to apply: %1").arg(QString::fromStdString(backendErr)));
+        return;
+    }
+    QMessageBox::information(this, tr("Apply MindVision Config"),
+                             tr("Applied to camera. Capture remains stopped."));
+}
+
+void ConfigTabs::onSoftTrigger() {
+    std::string err;
+    if (!backend_.softTriggerCamera(&err)) {
+        QMessageBox::warning(this, tr("Soft Trigger"), QString::fromStdString(err));
+    }
+    // No success dialog — the button is pressed repeatedly during bench tests.
+}
+
+void ConfigTabs::onBrowseMv() {
+    const QString current = currentMvJsonPath();
+    const QString initialDir = QFileInfo(current).absolutePath();
+    const QString selected = QFileDialog::getOpenFileName(this,
+                                                          tr("Select MindVision config (mindvisionConfig.json)"),
+                                                          initialDir,
+                                                          tr("JSON files (*.json);;All Files (*.*)"));
+    if (selected.isEmpty()) return;
+    {
+        QSettings s;
+        s.setValue("Config/ExternalMindVisionConfigPath", selected);
+    }
+    SPDLOG_INFO("External MindVision config set to {}", selected.toStdString());
+    QString err;
+    if (!loadFileToEditor(selected, mvEdit_, &err)) {
+        SPDLOG_WARN("Failed to load external mindvisionConfig.json from {}: {}", selected.toStdString(), err.toStdString());
+        QMessageBox::warning(this, tr("Reset mindvisionConfig.json"), tr("Failed to load: %1").arg(err));
+        return;
+    }
+    mvPathLabel_->setText(selected);
+    if (mvUnsavedLabel_) mvUnsavedLabel_->setVisible(false);
+}
+
+void ConfigTabs::onClearMv() {
+    QSettings s;
+    s.remove("Config/ExternalMindVisionConfigPath");
+    SPDLOG_INFO("External MindVision config cleared; reverting to default include path");
+    const auto ret = QMessageBox::question(this,
+                                           tr("MindVision Config Path Cleared"),
+                                           tr("External MindVision config path cleared.\nReset from default include path now?\n\nNote: Save to apply any changes."),
+                                           QMessageBox::Yes | QMessageBox::No,
+                                           QMessageBox::Yes);
+    if (ret == QMessageBox::Yes) {
+        onReloadMv();
+    }
+}
+
+void ConfigTabs::refreshPulseGenUi() {
+    auto& gen = backend_.pulseGenerator();
+    const bool connected = gen.isConnected();
+    pgConnectBtn_->setText(connected ? tr("Disconnect") : tr("Connect"));
+    pgComPortSpin_->setEnabled(!connected);
+    pgBaudCombo_->setEnabled(!connected);
+    pgAddrSpin_->setEnabled(!connected);
+    pgApplyBtn_->setEnabled(connected);
+    pgStartBtn_->setEnabled(connected);
+    pgStopBtn_->setEnabled(connected);
+    if (!connected) {
+        pgStatusLabel_->setText(tr("Disconnected"));
+        return;
+    }
+    const auto status = gen.getStatus();
+    const int ch = pgChannelSpin_->value() - 1;
+    const auto& state = status.channels[static_cast<size_t>(ch)];
+    pgStatusLabel_->setText(tr("Ch%1: %2 Hz, %3%% duty, output %4")
+                                .arg(ch + 1)
+                                .arg(state.frequencyHz)
+                                .arg(state.dutyPercent)
+                                .arg(state.outputEnabled ? tr("ON") : tr("off")));
+}
+
+void ConfigTabs::onPulseGenConnectToggle() {
+    auto& gen = backend_.pulseGenerator();
+    if (gen.isConnected()) {
+        gen.disconnect();
+    } else {
+        const int comPort = pgComPortSpin_->value();
+        const int baud = pgBaudCombo_->currentData().toInt();
+        const auto addr = static_cast<uint8_t>(pgAddrSpin_->value());
+        if (!gen.connect(comPort, baud, addr)) {
+            QMessageBox::warning(this, tr("Pulse Generator"),
+                                 tr("Failed to connect on COM%1 (baud %2, addr %3). "
+                                    "Check wiring, port and Modbus address.")
+                                     .arg(comPort).arg(baud).arg(addr));
+        }
+    }
+    refreshPulseGenUi();
+}
+
+void ConfigTabs::onPulseGenApplySettings() {
+    auto& gen = backend_.pulseGenerator();
+    const int ch = pgChannelSpin_->value() - 1;
+    bool ok = gen.setFrequency(ch, pgFreqSpin_->value());
+    ok = gen.setDutyCycle(ch, pgDutySpin_->value()) && ok;
+    if (!ok) {
+        QMessageBox::warning(this, tr("Pulse Generator"), tr("Failed to write settings to the module."));
+    }
+    refreshPulseGenUi();
+}
+
+void ConfigTabs::onPulseGenStart() {
+    auto& gen = backend_.pulseGenerator();
+    const int ch = pgChannelSpin_->value() - 1;
+    // Push the current spinbox settings before enabling so Start alone is
+    // enough after connect.
+    if (!gen.setFrequency(ch, pgFreqSpin_->value()) ||
+        !gen.setDutyCycle(ch, pgDutySpin_->value()) ||
+        !gen.setOutputEnabled(ch, true)) {
+        QMessageBox::warning(this, tr("Pulse Generator"), tr("Failed to start the pulse train."));
+    }
+    refreshPulseGenUi();
+}
+
+void ConfigTabs::onPulseGenStop() {
+    auto& gen = backend_.pulseGenerator();
+    const int ch = pgChannelSpin_->value() - 1;
+    if (!gen.setOutputEnabled(ch, false)) {
+        QMessageBox::warning(this, tr("Pulse Generator"), tr("Failed to stop the pulse train."));
+    }
+    refreshPulseGenUi();
 }
 
 void ConfigTabs::onJsonTableToggled(bool checked) {

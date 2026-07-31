@@ -18,6 +18,17 @@
   [[../services/CameraControlService]]`::applyScriptToDevice` (through
   `AppBackend::applyCameraScriptFromFile`).
 - Parse EGrabber scripts using `utils/EgrabberConfigParser.cpp`.
+- MindVision tab ("MindVision config (mindvisionConfig.json)"): JSON editor
+  with Reset/Save/Browse/Clear (QSettings key
+  `Config/ExternalMindVisionConfigPath`, default seeded from
+  `:/defaults/mindvisionConfig.json`), **Apply to Camera** →
+  `AppBackend::applyMindVisionConfigFromFile` (guarded on
+  `isMindVisionCameraSelected()`; stops capture, rebuilds factory), **Soft
+  Trigger** → `AppBackend::softTriggerCamera` (acquisition trigger — distinct
+  from the sort-pulse buttons in [[ExperimentMonitoringTab]]), and a pulse
+  generator group (COM/baud/addr connect, channel, frequency 400–40000 Hz,
+  duty %, Set/Start/Stop) driving
+  [[../services/PulseGeneratorService]] synchronously.
 - Render/edit JSON config using `models/JsonTableModel.cpp` and
   `utils/JsonFlatten.cpp`.
 - Persist config via `utils/ConfigPathManager.cpp` and

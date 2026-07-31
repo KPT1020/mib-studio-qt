@@ -36,6 +36,10 @@ struct Config {
     int strobePulseUs{500};
     int strobeDelayUs{0};
     int strobePolarity{1};
+    int extTrigSignalType{0};  // 0=falling,1=rising,2=high-level,3=low-level,4=double-edge
+    int extTrigJitterUs{0};    // de-glitch filter on the trigger input line
+    int acqTriggerDelayUs{0};  // delay from external trigger edge to exposure start
+    int triggerCount{1};       // frames captured per trigger (software + hardware)
 };
 
 struct ParseResult {
@@ -112,12 +116,23 @@ inline ParseResult parseConfig(const QByteArray& jsonBytes)
     c.flipHorizontal = obj.value("flip_horizontal").toBool(c.flipHorizontal);
     c.flipVertical = obj.value("flip_vertical").toBool(c.flipVertical);
 
-    c.strobeMode = detail::clampInt(obj.value("strobe_mode").toInt(c.strobeMode), 0, 2, "strobe_mode", w);
+    // Strobe modes per MVSDK: 0 = auto sync with exposure, 1 = manual
+    // (delay + pulse width), 2 = always high, 3 = always low.
+    c.strobeMode = detail::clampInt(obj.value("strobe_mode").toInt(c.strobeMode), 0, 3, "strobe_mode", w);
     // Strobe pulse/delay are cast to unsigned for the SDK — a negative here
     // previously became a multi-second pulse. Clamp to >= 0.
     c.strobePulseUs = detail::clampInt(obj.value("strobe_pulse_width_us").toInt(c.strobePulseUs), 0, 1000000, "strobe_pulse_width_us", w);
     c.strobeDelayUs = detail::clampInt(obj.value("strobe_delay_us").toInt(c.strobeDelayUs), 0, 1000000, "strobe_delay_us", w);
     c.strobePolarity = detail::clampInt(obj.value("strobe_polarity").toInt(c.strobePolarity), 0, 1, "strobe_polarity", w);
+
+    // Acquisition-trigger extras (trigger_mode 1 = software, 2 = external).
+    // Jitter/delay share the strobe fields' 1s ceiling; trigger_count's floor
+    // of 1 prevents a config that silently captures zero frames per trigger
+    // (the 1000 ceiling is arbitrary — the SDK maximum is not documented).
+    c.extTrigSignalType = detail::clampInt(obj.value("ext_trig_signal_type").toInt(c.extTrigSignalType), 0, 4, "ext_trig_signal_type", w);
+    c.extTrigJitterUs = detail::clampInt(obj.value("ext_trig_jitter_us").toInt(c.extTrigJitterUs), 0, 1000000, "ext_trig_jitter_us", w);
+    c.acqTriggerDelayUs = detail::clampInt(obj.value("acq_trigger_delay_us").toInt(c.acqTriggerDelayUs), 0, 1000000, "acq_trigger_delay_us", w);
+    c.triggerCount = detail::clampInt(obj.value("trigger_count").toInt(c.triggerCount), 1, 1000, "trigger_count", w);
 
     r.config = c;
     r.ok = true;

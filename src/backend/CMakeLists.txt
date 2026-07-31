@@ -192,9 +192,11 @@ add_library(mib_backend STATIC
     ${PROJECT_SOURCE_DIR}/src/backend/recording/RecorderService.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/playback/PlaybackService.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/services/SyringePumpService.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/services/PulseGeneratorService.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/services/TriggerService.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/camera/egrabber/EGrabberCamera.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/camera/mindvision/MindVisionCamera.cpp
+    ${PROJECT_SOURCE_DIR}/src/backend/camera/mindvision/MindVisionApply.cpp
     ${PROJECT_SOURCE_DIR}/src/backend/camera/mock/MockCamera.cpp
 )
 
