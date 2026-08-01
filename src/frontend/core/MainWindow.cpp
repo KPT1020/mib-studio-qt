@@ -33,6 +33,7 @@
 #include <vector>
 
 #include "backend/app/AppBackend.h"
+#include "backend/camera/common/ICamera.h"
 #include "backend/services/CaptureService.h"
 #include "backend/services/CrashReporter.h"
 #include "backend/processing/ProcessingService.h"
@@ -371,6 +372,14 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
               .arg(startupCore.contractVersion)
         : tr("Core: unavailable (selection failed)"));
 
+    // Permanent acquisition-mode badge, visible across all tabs (#332).
+    deliveryModeLabel_ = new QLabel(this);
+    deliveryModeLabel_->setToolTip(
+        tr("Every Frame preserves the complete acquisition sequence, at the cost of growing latency when the consumer falls behind.\n"
+           "Latest Frame minimizes latency by intentionally discarding stale frames, so recorded sequences may have gaps."));
+    ui->statusbar->addPermanentWidget(deliveryModeLabel_);
+    updateDeliveryModeBadge();
+
     statsTimer_ = new QTimer(this);
     statsTimer_->setInterval(500);
     connect(statsTimer_, &QTimer::timeout, this, &MainWindow::onUpdateStats);
@@ -445,6 +454,27 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
             previewPage->getConfigWatcher(), &frontend::AppConfigWatcher::writeBackProcessingConfig);
     connect(previewPage->getConfigWatcher(), &frontend::AppConfigWatcher::configFileChanged,
             monitoringTab, &frontend::ExperimentMonitoringTab::loadCurrentConfig);
+
+    // Delivery mode: combo change -> persist to active profile + refresh badge;
+    // config (re)load -> reflect in combo + badge without re-persisting.
+    {
+        auto* configWatcher = previewPage->getConfigWatcher();
+        connect(connectTab_, &frontend::ConnectTab::deliveryModeChanged,
+                this, [this, configWatcher](camera::common::FrameDeliveryMode mode) {
+                    configWatcher->writeBackCameraConfig(mode);
+                    updateDeliveryModeBadge();
+                });
+        connect(configWatcher, &frontend::AppConfigWatcher::deliveryModeLoaded,
+                this, [this](camera::common::FrameDeliveryMode mode) {
+                    if (connectTab_)
+                        connectTab_->syncDeliveryMode(mode);
+                    updateDeliveryModeBadge();
+                });
+        // The initial config load happened inside PreviewPage's constructor,
+        // before these connections existed; sync once now.
+        connectTab_->syncDeliveryMode(configWatcher->loadedDeliveryMode());
+        updateDeliveryModeBadge();
+    }
 
     connect(overviewTab_, &frontend::OverviewTab::roiChanged,
             monitoringTab, &frontend::ExperimentMonitoringTab::updateRoiDisplay);
@@ -741,6 +771,37 @@ void MainWindow::onStartExperiment()
                              tr("Camera must be running before starting an experiment. Please start the camera first."));
         statusLabel_->setText("Camera not running");
         return;
+    }
+
+    // Guard: Latest Frame intentionally discards frames, so a recording made in
+    // that mode can be incomplete. Require an explicit acknowledgement (#332).
+    if (backend_.capture().activeDeliveryMode() ==
+        camera::common::FrameDeliveryMode::LatestFrame)
+    {
+        QMessageBox box(this);
+        box.setWindowTitle(tr("Start Experiment"));
+        box.setIcon(QMessageBox::Warning);
+        box.setText(tr("Latest Frame prioritizes low latency and may intentionally discard frames. "
+                       "The recorded sequence may be incomplete."));
+        QPushButton* switchBtn = box.addButton(tr("Switch to Every Frame"), QMessageBox::AcceptRole);
+        QPushButton* continueBtn = box.addButton(tr("Continue with Latest Frame"), QMessageBox::DestructiveRole);
+        box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(switchBtn);
+        box.exec();
+        if (box.clickedButton() == switchBtn)
+        {
+            // Same setConfig + persist path as the ConnectTab combo; the
+            // running capture is not restarted, so the new mode takes effect
+            // at the next capture start (the badge keeps showing the
+            // backend-confirmed mode until then).
+            if (connectTab_)
+                connectTab_->setDeliveryMode(camera::common::FrameDeliveryMode::EveryFrame);
+            updateDeliveryModeBadge();
+        }
+        else if (box.clickedButton() != continueBtn)
+        {
+            return; // Cancel: abort experiment start
+        }
     }
 
     // Show file dialog to select HDF5 save location
@@ -1153,6 +1214,29 @@ void MainWindow::onUpdateStats()
     }
 
     statusLabel_->setText(status);
+
+    // Keep the acquisition-mode badge in sync with the backend-confirmed mode
+    // (the confirmation lands shortly after capture start).
+    updateDeliveryModeBadge();
+}
+
+void MainWindow::updateDeliveryModeBadge()
+{
+    if (!deliveryModeLabel_)
+        return;
+    const auto& cap = backend_.capture();
+    const bool latest =
+        cap.activeDeliveryMode() == camera::common::FrameDeliveryMode::LatestFrame;
+    QString text = latest ? tr("⏩ LATEST FRAME · drops stale frames")
+                          : tr("▶ EVERY FRAME · sequence preserved");
+    if (!cap.stats().deliveryModeConfirmed.load(std::memory_order_acquire))
+    {
+        text += tr(" (requested)");
+    }
+    deliveryModeLabel_->setText(text);
+    // Color is supplementary only; the glyph + text fully identify the mode.
+    deliveryModeLabel_->setStyleSheet(latest ? QStringLiteral("color: #b06a00;")
+                                             : QStringLiteral("color: #2e7d32;"));
 }
 
 void MainWindow::startExperimentServices()
