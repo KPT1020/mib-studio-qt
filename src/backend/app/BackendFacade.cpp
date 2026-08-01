@@ -323,6 +323,17 @@ namespace backend::bridge
             emitEvent(makeCameraStatus(CameraState::Configured));
             return {true, BackendCommandType::Camera, "Camera script applied"};
         }
+        case CameraCommandAction::SoftTriggerCamera:
+        {
+            std::string error;
+            if (!backend_.softTriggerCamera(&error))
+            {
+                const std::string message = error.empty() ? "Software trigger failed" : error;
+                emitEvent(BackendErrorEvent{BackendErrorSource::Camera, BackendCommandType::Camera, message});
+                return {false, BackendCommandType::Camera, message};
+            }
+            return {true, BackendCommandType::Camera, "Software trigger fired"};
+        }
         case CameraCommandAction::ResetSelectedHardwareCamera:
         {
             std::string error;

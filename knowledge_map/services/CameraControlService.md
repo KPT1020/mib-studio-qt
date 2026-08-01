@@ -18,8 +18,10 @@
 - `applyMindVisionConfig(cameraIndex, configPath, errorOut)` — apply a JSON
   config to a selected MindVision device before capture starts. The parse +
   bounds validation is the shared pure `parseConfig` documented in
-  [[../camera/MindVisionCamera]] (`MindVisionConfig.h`); this service applies
-  only its historical field subset (resolution/exposure/trigger/gain).
+  [[../camera/MindVisionCamera]] (`MindVisionConfig.h`); the application also
+  goes through the shared `applyConfigToHandle` (`MindVisionApply.cpp`), so
+  this path now applies the full field set — strobe and acquisition-trigger
+  extras included (the historical 7-field drift is closed).
 - `applyScriptToDevice(ifIdx, devIdx, scriptPath, errorOut)` — push a
   GenICam JS file to a specific device.
 - `deviceReset(ifIdx, devIdx, errorOut)` — issue SFNC `DeviceReset`;

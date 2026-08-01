@@ -24,6 +24,22 @@
   Tests: `camera.delivery_mode_overload`, `camera.delivery_mode_contract`;
   hardware runbook `docs/howto/camera-latency-mode-validation.md`; task
   note [[../task/2026-08-01-frame-delivery-mode]].
+- **MindVision external-trigger acquisition + strobe sync + pulse-generator
+  control** (2026-07-31, epic #323) — camera can now run software- (mode 1,
+  `softTrigger()` end-to-end from a new MindVision tab in
+  [[../frontend/ConfigTabs]]) or externally-triggered (mode 2) acquisition
+  with strobe synced to exposure. New JSON keys `ext_trig_signal_type`,
+  `ext_trig_jitter_us`, `acq_trigger_delay_us`, `trigger_count`; `strobe_mode`
+  widened to [0,3]. Both config-apply paths unified through
+  `MindVisionApply.cpp` (closed the 19-vs-7 field drift). Health check no
+  longer steals triggered frames; `grabFrame` buffer copy moved under the
+  state lock (stop() race); mono8 ISP output forced unconditionally (color
+  sensor overrun). New [[../services/PulseGeneratorService]] controls the
+  Zhongsheng pulse module (external trigger source) over Modbus RTU from the
+  same tab. Task note: [[../task/2026-07-31-mindvision-external-trigger]].
+  Tests: `backend.pulse_generator_frame`, extended `backend.mindvision_config`,
+  extended facade boundary test. Hardware verification on the Windows rig
+  still pending (#327).
 - **Latency & target-identification-loss metrics** (2026-07-21, issue #292) —
   quantifies pipeline latency and lost sort targets. New counted losses:
   [[../services/TriggerService]] no-camera / set-failed pulse drops

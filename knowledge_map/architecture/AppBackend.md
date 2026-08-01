@@ -127,6 +127,12 @@ the realtime thread live).
 - `resetSelectedHardwareCamera()` — issue GenICam `DeviceReset`
 - `applyMindVisionConfigFromFile(path)` — apply the selected MindVision JSON
   config and refresh the capture factory path
+- `softTriggerCamera(errorOut)` — fire one software acquisition trigger on the
+  live capture camera via `CaptureService::softTriggerActiveCamera` (requires
+  capture running with `trigger_mode: 1`); exposed to the facade as
+  `CameraCommandAction::SoftTriggerCamera`
+- `pulseGenerator()` — accessor for [[../services/PulseGeneratorService]]
+  (external-trigger pulse source, created alongside the syringe-pump service)
 
 ### Platform behavior
 

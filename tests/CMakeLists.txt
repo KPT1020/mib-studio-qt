@@ -67,6 +67,10 @@ mib_add_backend_test_executable(roi_crop_test backend/roi_crop_test.cpp)
 add_test(NAME backend.roi_crop COMMAND $<TARGET_FILE:roi_crop_test>)
 set_tests_properties(backend.roi_crop PROPERTIES LABELS "backend" TIMEOUT 30)
 
+mib_add_backend_test_executable(pulse_generator_frame_test backend/pulse_generator_frame_test.cpp)
+add_test(NAME backend.pulse_generator_frame COMMAND $<TARGET_FILE:pulse_generator_frame_test>)
+set_tests_properties(backend.pulse_generator_frame PROPERTIES LABELS "backend" TIMEOUT 30)
+
 mib_add_backend_test_executable(mindvision_config_test backend/mindvision_config_test.cpp)
 add_test(NAME backend.mindvision_config COMMAND $<TARGET_FILE:mindvision_config_test>)
 set_tests_properties(backend.mindvision_config PROPERTIES LABELS "backend;camera" TIMEOUT 30)

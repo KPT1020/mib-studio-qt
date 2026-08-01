@@ -21,6 +21,7 @@ namespace backend::services
     class TriggerService;
     class YoloService;
     class SyringePumpService;
+    class PulseGeneratorService;
 }
 
 namespace backend
@@ -61,6 +62,7 @@ namespace backend
         services::TriggerService &trigger();
         services::YoloService &yolo();
         services::SyringePumpService &syringePump();
+        services::PulseGeneratorService &pulseGenerator();
         
         // Get frame store for service lifecycle management
         std::shared_ptr<playback::FrameStore> getFrameStore() const { return frameStore_; }
@@ -83,6 +85,10 @@ namespace backend
 
         // Returns true if a MindVision camera is currently selected.
         bool isMindVisionCameraSelected() const;
+
+        // Fire one software acquisition trigger on the live capture camera
+        // (camera must be running in soft-trigger mode). NOT the sort pulse.
+        bool softTriggerCamera(std::string *errorOut = nullptr);
 
         // Issue GenICam DeviceReset to the selected hardware camera.
         // If capture is running, it will be stopped first. Capture remains stopped.
@@ -141,6 +147,7 @@ namespace backend
         std::unique_ptr<services::TriggerService> triggerService_;
         std::unique_ptr<services::YoloService> yoloService_;
         std::unique_ptr<services::SyringePumpService> syringePumpService_;
+        std::unique_ptr<services::PulseGeneratorService> pulseGeneratorService_;
         std::shared_ptr<playback::FrameStore> frameStore_;
 
         // Last selected hardware device (for script apply)

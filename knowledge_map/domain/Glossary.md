@@ -73,6 +73,21 @@
 - **StreamModule** — EGrabber statistics module
   (`StatisticsFrameRate`, `StatisticsDataRate`). Must refresh before
   stopping capture.
+- **Acquisition trigger** — the signal that starts a camera exposure.
+  `trigger_mode` in the MindVision JSON config: 0 free-run, 1 software
+  (`softTrigger()` / `CameraSoftTrigger`), 2 external (TTL edge on the camera
+  trigger input). See [[../camera/MindVisionCamera]]. Distinct from the sort
+  trigger below — opposite signal direction.
+- **Sort trigger (sort-output pulse)** — TTL pulse the camera's GPIO emits
+  toward the sorter when a target group is detected, driven by
+  [[../services/TriggerService]] via `setTriggerOutput`. NOT an acquisition
+  trigger.
+- **Strobe** — camera output synchronized to exposure, used to fire
+  illumination. MindVision modes: 0 auto-sync with exposure, 1 manual
+  (delay + pulse width), 2 always high, 3 always low.
+- **Pulse generator** — Zhongsheng RS485 module producing the external
+  acquisition-trigger pulse train (400 Hz–40 kHz, duty-gated on/off); driven
+  by [[../services/PulseGeneratorService]].
 - **Modbus RTU** — serial protocol used by
   [[../services/SyringePumpService]] (Sample + Sheath pumps).
 - **Coremor XMT** — serial protocol for the piezo nanopositioner used by

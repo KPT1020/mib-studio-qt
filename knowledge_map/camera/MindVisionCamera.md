@@ -5,17 +5,22 @@
 
 **Source:** `src/backend/camera/mindvision/MindVisionCamera.cpp`,
 `include/backend/camera/mindvision/MindVisionCamera.h`,
-`include/backend/camera/mindvision/MindVisionConfig.h` (pure JSON parse + bounds)
+`include/backend/camera/mindvision/MindVisionConfig.h` (pure JSON parse + bounds),
+`include/backend/camera/mindvision/MindVisionApply.h` +
+`src/backend/camera/mindvision/MindVisionApply.cpp` (shared SDK apply helper)
 **Tests:** `tests/backend/mindvision_config_test.cpp`
 **Related:** [[ICamera]], [[../services/CameraControlService]],
-[[../architecture/AppBackend]], [[../frontend/ConnectTab]]
+[[../services/PulseGeneratorService]], [[../architecture/AppBackend]],
+[[../frontend/ConnectTab]], [[../frontend/ConfigTabs]]
 
 ## Responsibility
 
 - Own the MindVision camera lifecycle: open, start, grab frame, stop, and
   release the SDK handle.
-- Apply an optional JSON config file before capture starts.
-- Expose trigger-output helpers used by the backend camera wiring.
+- Apply an optional JSON config file before capture starts (acquisition
+  trigger, strobe, exposure, ROI, …).
+- Expose trigger-output helpers used by the backend camera wiring (sort pulse)
+  and `softTrigger()` for software acquisition triggering.
 
 ## Key APIs
 
@@ -27,7 +32,31 @@
 - `deliveryCapabilities()` / `activeDeliveryMode()` /
   `pollAcquisitionQueueStats(AcquisitionQueueStats&)`
 - `checkDeviceHealth()`
-- `configureTriggerOutput(lineSelector)` / `setTriggerOutput(high)`
+- `configureTriggerOutput(lineSelector)` / `setTriggerOutput(high)` — **sort
+  output pulse** (TriggerService)
+- `softTrigger()` — **software acquisition trigger** (`CameraSoftTrigger`);
+  requires the camera running with `trigger_mode: 1`
+
+## Acquisition trigger modes
+
+`trigger_mode` selects how exposures start: `0` continuous (free-run, default),
+`1` software (`softTrigger()` fires one exposure × `trigger_count`), `2`
+external (a TTL edge on the camera trigger input starts each exposure — in
+this system the edge comes from the Zhongsheng pulse-output module, see
+[[../services/PulseGeneratorService]]). External-trigger shaping keys:
+`ext_trig_signal_type` (0 falling / 1 rising / 2 high level / 3 low level /
+4 double edge), `ext_trig_jitter_us` (de-glitch filter),
+`acq_trigger_delay_us` (edge→exposure delay), `trigger_count` (frames per
+trigger). Strobe (`strobe_mode` 0 auto-sync / 1 manual delay+width / 2 always
+high / 3 always low, plus pulse width/delay/polarity) fires per exposure for
+illumination sync.
+
+Under trigger modes 1/2, `checkDeviceHealth()` **skips the frame probe**: the
+probe (a 100 ms `CameraGetImageBuffer`) would consume a real triggered frame,
+and a timeout is the normal idle state so it carries no health signal. It
+returns true on a valid running handle instead. (`CameraConnectTest` would be
+the proper probe but its presence in deployed `CameraApiLoad.h` function
+tables is unverified — revisit when the Windows SDK version is pinned.)
 
 ## Frame delivery modes (issue #330)
 
@@ -95,26 +124,41 @@ it reports `config_.deliveryMode`.
 - **Windows + `MIB_ENABLE_MINDVISION=OFF`** and all non-Windows builds: safe
   stub that logs unsupported calls and returns failure/no-op.
 
-## JSON config parsing (`MindVisionConfig.h`)
+## JSON config parsing (`MindVisionConfig.h`) and applying (`MindVisionApply.h`)
 
 The config-file parse + validation is a pure, QtCore-only function shared by
 both `MindVisionCamera::applyJsonConfig` and
-[[../services/CameraControlService]]`::applyMindVisionJsonToCamera` (the two had
-**drifted** — the camera applied ~19 fields, the control service only 7 — and
-neither validated bounds):
+[[../services/CameraControlService]]`::applyMindVisionJsonToCamera`:
 
 - `backend::camera::mindvision::parseConfig(QByteArray)` → `ParseResult{ok,
   config, error, warnings}`. Malformed JSON or a non-object root → `ok=false`
   with `error`. Otherwise every numeric field is clamped to a safe range and one
   warning is recorded per clamp.
-- Critical clamps: `width`/`height` forced `>= 1` (a non-positive ROI was
-  unusable), `exposure_time_us > 0`, and **`strobe_pulse_width_us` /
-  `strobe_delay_us` forced `>= 0`** — a negative value previously wrapped to a
-  multi-second pulse when cast to the SDK's unsigned type.
+- Critical clamps: `width`/`height` forced `>= 1`, `exposure_time_us > 0`,
+  `strobe_pulse_width_us` / `strobe_delay_us` / `ext_trig_jitter_us` /
+  `acq_trigger_delay_us` forced `>= 0` (negative values wrapped to huge
+  unsigned SDK durations), `trigger_count >= 1` (0 silently captures nothing).
 
-Both call sites read the file, call `parseConfig`, log warnings, then apply
-`config.*` to the SDK (the camera applies the full set; the control service
-still applies only its historical subset).
+The **application** of a parsed config is also shared now:
+`backend::camera::mindvision::applyConfigToHandle(hCamera, cfg, firstError)`
+(`MindVisionApply.cpp`) pushes every field into the SDK. Both call sites route
+through it, which closed the historical 19-vs-7-field drift — strobe and
+trigger extras now apply on the control-service path too. It must run before
+`CameraPlay` on the streaming path; `firstError` reports only a
+`CameraSetImageResolution` failure (the control service's historical error
+contract). `MindVisionApply.cpp` includes the SDK header **without**
+`API_LOAD_MAIN`.
+
+A documented sample config ships at `resources/defaults/mindvisionConfig.json`
+(the GUI seeds a user-writable copy). Its defaults ARE the bench setup for the
+MV-XGC51GM (10GigE, IMX426): **external trigger at 5000 fps** — the Zhongsheng
+pulse generator on TRIG_IN determines the frame rate — with 512×96 ROI (the
+5000 fps figure is only valid at this reduced ROI), `exposure_time_us: 1.0`
+(sensor minimum is 0.8 µs), and strobe in semi-auto/manual mode
+(`strobe_mode: 1`) with `strobe_delay_us: 10`, `strobe_pulse_width_us: 35`
+driving the LED driver from STRB_OUT. Soft-trigger bench variant: change
+`trigger_mode` to 1; free-run: 0 (code defaults for absent keys remain
+free-run/conservative — only the shipped file carries the bench values).
 
 ## Gotchas
 
@@ -124,9 +168,18 @@ still applies only its historical subset).
   `MindVision/CameraApiLoad.h` and a flat `CameraApiLoad.h` directly under
   the configured include directory.
 - `MindVisionCamera.cpp` owns the SDK dynamic-loader definitions by defining
-  `API_LOAD_MAIN`; other MindVision users include the SDK header as extern
-  declarations only.
+  `API_LOAD_MAIN`; other MindVision users (`CameraControlService.cpp`,
+  `MindVisionApply.cpp`) include the SDK header as extern declarations only.
+- `grabFrame` copies out of `outBuffer_` **while holding `stateMutex_`** —
+  `stop()` frees the buffer under the same lock, so the copy must not be moved
+  outside the locked region (use-after-free on stop/start churn).
+- `CameraSetIspOutFormat(MONO8)` is applied unconditionally: `outBuffer_` is
+  sized 1 byte/px and the pipeline is mono8-only, so a color sensor left at
+  the ISP's 3-byte default would overrun the buffer.
 - Runtime deployment copies the MindVision DLL next to the app when Windows
   packaging is enabled.
 - The current backend treats MindVision as a separate camera provider; mock
   and EGrabber paths remain independent.
+- Naming: "trigger output" / `TriggerService` vocabulary means the **sort
+  pulse** (camera → sorter). The acquisition trigger (pulse generator →
+  camera) uses `softTrigger` / `acq_trigger_*` / `ext_trig_*` naming.

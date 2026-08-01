@@ -154,6 +154,14 @@ namespace camera::common
          * Set trigger output line to High or Low. Returns false if not supported.
          */
         virtual bool setTriggerOutput(bool high) { (void)high; return false; }
+
+        /**
+         * Fire one software acquisition trigger (starts an exposure when the
+         * camera is in software-trigger mode). This is the acquisition-side
+         * trigger — NOT the sort-output pulse driven by setTriggerOutput.
+         * Returns false when unsupported, not running, or rejected.
+         */
+        virtual bool softTrigger() { return false; }
     };
 
 } // namespace camera::common

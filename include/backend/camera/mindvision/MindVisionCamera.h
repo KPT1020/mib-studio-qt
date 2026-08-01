@@ -33,6 +33,10 @@ public:
     void configureTriggerOutput(const std::string &lineSelector) override;
     bool setTriggerOutput(bool high) override;
 
+    // Software acquisition trigger (CameraSoftTrigger). Distinct from
+    // setTriggerOutput, which drives the sort-output pulse.
+    bool softTrigger() override;
+
 private:
     bool applyJsonConfig(int hCamera);
 
@@ -45,6 +49,9 @@ private:
     int bufferWidth_{0};
     int bufferHeight_{0};
     int triggerOutputIndex_{-1};
+    // trigger_mode from the applied JSON config (0 continuous, 1 software,
+    // 2 external) — checkDeviceHealth keys off it.
+    int configuredTriggerMode_{0};
 
     bool running_{false};
     mutable std::mutex stateMutex_;

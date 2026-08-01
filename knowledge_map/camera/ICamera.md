@@ -4,7 +4,7 @@
 > hardware vs mock differences so [[../services/CaptureService]] doesn't
 > care.
 
-**Source:** `include/camera/common/ICamera.h`, `include/camera/common/Frame.h`
+**Source:** `include/backend/camera/common/ICamera.h`, `include/backend/camera/common/Frame.h`
 
 ## Types
 
@@ -39,7 +39,8 @@ virtual bool pollStats(CameraStats& out) const = 0;
 
 virtual bool checkDeviceHealth() const { return true; }
 virtual void configureTriggerOutput(const std::string& lineSelector) {}
-virtual bool setTriggerOutput(bool high) { return false; }
+virtual bool setTriggerOutput(bool high) { return false; }   // SORT pulse out
+virtual bool softTrigger() { return false; }  // software ACQUISITION trigger
 
 // Delivery-mode contract (defaults: EveryFrame-only, no queue telemetry)
 virtual FrameDeliveryCapabilities deliveryCapabilities() const;
@@ -50,9 +51,13 @@ virtual bool pollAcquisitionQueueStats(AcquisitionQueueStats& out) const;
 ## Related
 
 - [[EGrabberCamera]] — hardware implementation
+- [[MindVisionCamera]] — MindVision SDK implementation (only backend
+  overriding `softTrigger`)
 - [[MockCamera]] — folder-backed implementation
 - [[../services/TriggerService]] calls `setTriggerOutput` via the live
-  camera pointer
+  camera pointer (sort pulse); [[../services/CaptureService]] exposes
+  `softTriggerActiveCamera()` for the acquisition trigger — the two are
+  opposite signal directions and must not be conflated
 - [[../services/CameraControlService]] uses the Euresys SDK directly for
   discovery; it does not go through `ICamera`.
 

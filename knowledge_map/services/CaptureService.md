@@ -41,6 +41,8 @@ void setFrameStore(shared_ptr<FrameStore>);     // ring buffer sink
 void setCameraFactory(CameraFactory);           // injects ICamera builder
 void setCameraReadyCallback(CameraReadyCallback); // fires with ptr on start, nullptr on stop
 bool start();  void stop();  bool isRunning();
+bool softTriggerActiveCamera();  // one software ACQUISITION trigger on the
+                                 // live camera (not the sort pulse)
 ```
 
 Camera factory is how `AppBackend` chooses between
@@ -68,6 +70,12 @@ realtime loop shuts down.
   `docs/howto/safe-start-stop-egrabber.md`.
 - `setCameraReadyCallback` fires from this thread; [[TriggerService]] uses
   it to grab a live `ICamera*` and start itself.
+- `softTriggerActiveCamera` takes `cameraMutex_` then the camera's own state
+  mutex — the same order as `stop()`, so GUI-thread soft triggers cannot
+  deadlock against teardown.
+- The periodic `checkDeviceHealth()` call is frame-consuming on MindVision
+  only in free-run mode; under trigger modes the camera skips the probe (see
+  [[../camera/MindVisionCamera]]).
 - `stop()` (GUI thread) invokes `cameraReadyCallback_(nullptr)` **before**
   `activeCamera_->stop()` so the trigger thread is stopped before the grabber
   is torn down; `releaseCamera()` on the capture thread repeats the call
