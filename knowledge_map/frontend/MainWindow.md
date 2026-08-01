@@ -90,10 +90,11 @@
   acquisition mode is visible on every tab. `updateDeliveryModeBadge()` shows
   the **backend-confirmed** `CaptureService::activeDeliveryMode()` and
   appends " (requested)" while `deliveryModeConfirmed` is false; it refreshes
-  on every `onUpdateStats` tick and on combo/config changes. Because the
-  confirmed flag persists after capture stop, a mode changed while stopped
-  keeps showing the last confirmed mode until the next capture start — the
-  ConnectTab combo is the requested-mode source of truth.
+  on every `onUpdateStats` tick and on combo/config changes.
+  `CaptureService` clears the confirmed flag when the capture loop releases
+  the camera, so between runs the badge tracks the requested config mode
+  (with the "(requested)" suffix) — the ConnectTab combo is the
+  requested-mode source of truth.
 - The async experiment flush (`QtConcurrent::run` + `flushWatcher_`) captures
   the **backend pointer, not `this`**: `QFutureWatcher`'s destructor does not
   block on a running future, so the task can outlive the window (the backend

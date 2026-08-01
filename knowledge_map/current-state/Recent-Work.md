@@ -5,6 +5,25 @@
 
 ## Features shipped
 
+- **Explicit camera delivery modes** (2026-08-01, epic #328, issues
+  #329–#334) — user-selectable `Every Frame` (ordered, complete) vs
+  `Latest Frame` (freshest, intentionally discards stale SDK buffers)
+  applied at the camera SDK queue itself. New contract in
+  [[../camera/ICamera]] (`FrameDeliveryMode`, capabilities,
+  `AcquisitionQueueStats` with distinct intentional/transport/underrun
+  counters); [[../services/CaptureService]] rejects unsupported modes,
+  reports the backend-confirmed mode, and polls queue/frame-age telemetry.
+  [[../camera/EGrabberCamera]] gets corrected start sequencing (single
+  `grabber->start()`, no camera-first 50 ms window) and a ScopedBuffer
+  stale-frame drain (`BufferPartCount` forced to 1 in Latest Frame);
+  [[../camera/MindVisionCamera]] gets newest-priority retrieval with an
+  exact-counting bounded-drain fallback. Per-profile persistence via
+  `camera.frame_delivery_mode` (AppConfigWatcher → the first-ever
+  `CaptureService::setConfig` call site), status-bar badge, ConnectTab
+  combo, and a blocking Latest-Frame acknowledgement before experiments.
+  Tests: `camera.delivery_mode_overload`, `camera.delivery_mode_contract`;
+  hardware runbook `docs/howto/camera-latency-mode-validation.md`; task
+  note [[../task/2026-08-01-frame-delivery-mode]].
 - **Latency & target-identification-loss metrics** (2026-07-21, issue #292) —
   quantifies pipeline latency and lost sort targets. New counted losses:
   [[../services/TriggerService]] no-camera / set-failed pulse drops

@@ -47,6 +47,14 @@ Camera factory is how `AppBackend` chooses between
 [[../camera/EGrabberCamera]] and [[../camera/MockCamera]] without this
 service knowing which one.
 
+`setConfig` has its single call site in
+`frontend::AppConfigWatcher::loadAndApplyFromPath` (fed by the
+`camera.frame_delivery_mode` profile key and the
+[[../frontend/ConnectTab]] delivery-mode combo).
+`deliveryModeConfirmed` is cleared when the capture loop releases the
+camera, so `activeDeliveryMode()` falls back to the requested config mode
+between runs.
+
 ## Threading
 
 Dedicated thread. `grabFrame` blocks until a frame is available or `stop()`

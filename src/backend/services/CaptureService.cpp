@@ -78,6 +78,10 @@ void CaptureService::run() {
     std::unique_ptr<camera::common::ICamera> camera;
 
     auto releaseCamera = [&]() {
+        // Without a running camera there is no confirmed mode; consumers
+        // (status-bar badge) fall back to the requested config mode, so a mode
+        // changed between runs shows up immediately as "(requested)".
+        stats_.deliveryModeConfirmed.store(false, std::memory_order_release);
         if (cameraReadyCallback_) {
             cameraReadyCallback_(nullptr);
         }
