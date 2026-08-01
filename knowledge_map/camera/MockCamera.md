@@ -43,6 +43,11 @@ bool loopFiles{true};
   of course.
 - Timestamps are synthesized from steady-clock deltas, not device ticks —
   useful for dev, not for absolute timing.
+- Delivery modes: frames are synthesized on demand (pull source), so both
+  `EveryFrame` and `LatestFrame` are supported and behave identically —
+  `pollAcquisitionQueueStats` reports a genuinely-zero completed queue and
+  no restart is required for mode changes. The queue policies themselves
+  are exercised by `tests/support/queue_camera.h`, not by MockCamera.
 - See `docs/howto/mock-camera-dev-mode.md` and task
   `knowledge_map/task/mock_camera_dev_mode.md`.
 - `data/mock_frames/frame_00000.tiff` is checked in as a minimal sample.
