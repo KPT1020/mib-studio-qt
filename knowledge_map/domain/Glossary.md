@@ -89,3 +89,11 @@
   themselves never decrease.
 - **FrameStore filter mode** — frame filter that returns `true` to SKIP
   (used by recording mode to drop empty frames).
+- **Frame delivery mode** — user-facing SDK-queue policy in
+  [[../camera/ICamera]]: **Every Frame** (ordered, never intentionally
+  skipped; backlog grows under overload) vs **Latest Frame** (stale
+  completed SDK buffers are drained before the copy; every deliberate
+  discard is counted). Applied at the earliest controllable SDK queue,
+  not in [[../data-model/FrameStore]]. Intentional discards, transport
+  loss/underrun, and downstream processing drops are separate counters
+  by contract.
