@@ -196,20 +196,48 @@ int main()
         return 11;
     }
 
+    // Soft trigger on a running mock camera: the mock does not support
+    // software acquisition triggering, so the command must fail cleanly
+    // (ok=false + message) rather than crash or pretend success.
+    bridge::CameraCommand softTriggerRunning;
+    softTriggerRunning.action = bridge::CameraCommandAction::SoftTriggerCamera;
+    {
+        const auto result = facade.dispatch(softTriggerRunning);
+        if (result.ok || result.message.empty())
+        {
+            std::cerr << "SoftTriggerCamera should fail with a message on an unsupported camera\n";
+            facade.shutdown();
+            return 12;
+        }
+    }
+
     bridge::CameraCommand stopCapture;
     stopCapture.action = bridge::CameraCommandAction::StopCapture;
     if (!facade.dispatch(stopCapture).ok)
     {
         std::cerr << "CameraCommand should stop capture through CaptureService\n";
         facade.shutdown();
-        return 12;
+        return 13;
+    }
+
+    // Soft trigger with capture stopped: must also fail cleanly.
+    bridge::CameraCommand softTriggerStopped;
+    softTriggerStopped.action = bridge::CameraCommandAction::SoftTriggerCamera;
+    {
+        const auto result = facade.dispatch(softTriggerStopped);
+        if (result.ok || result.message.empty())
+        {
+            std::cerr << "SoftTriggerCamera should fail with a message when capture is stopped\n";
+            facade.shutdown();
+            return 14;
+        }
     }
 
     facade.shutdown();
     if (facade.isInitialized())
     {
         std::cerr << "BackendFacade shutdown should make lifecycle explicit\n";
-        return 13;
+        return 15;
     }
 
     if (!hasEvent<bridge::CameraStatusEvent>(events) ||
@@ -219,7 +247,7 @@ int main()
         !hasEvent<bridge::ProcessingResultEvent>(events))
     {
         std::cerr << "BackendFacade should emit frontend-neutral event variants\n";
-        return 14;
+        return 16;
     }
 
         return 0;

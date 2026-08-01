@@ -20,6 +20,7 @@
 #include "backend/services/TriggerService.h"
 #include "backend/services/YoloService.h"
 #include "backend/services/SyringePumpService.h"
+#include "backend/services/PulseGeneratorService.h"
 #include "backend/processing/EModulusLutCatalog.h"
 
 #include <algorithm>
@@ -205,6 +206,7 @@ namespace backend
         triggerService_ = std::make_unique<services::TriggerService>();
         yoloService_ = std::make_unique<services::YoloService>();
         syringePumpService_ = std::make_unique<services::SyringePumpService>();
+        pulseGeneratorService_ = std::make_unique<services::PulseGeneratorService>();
         frameStore_ = std::make_shared<playback::FrameStore>(5000);
 
         bool bootSqlite = true;
@@ -679,6 +681,7 @@ namespace backend
     services::TriggerService &AppBackend::trigger() { return *triggerService_; }
     services::YoloService &AppBackend::yolo() { return *yoloService_; }
     services::SyringePumpService &AppBackend::syringePump() { return *syringePumpService_; }
+    services::PulseGeneratorService &AppBackend::pulseGenerator() { return *pulseGeneratorService_; }
 
     void AppBackend::configureMockCamera(const camera::mock::MockCameraOptions &options)
     {
@@ -837,6 +840,23 @@ namespace backend
     bool AppBackend::isMindVisionCameraSelected() const
     {
         return selectedMvCameraIndex_ >= 0;
+    }
+
+    bool AppBackend::softTriggerCamera(std::string *errorOut)
+    {
+        if (!captureService_ || !captureService_->isRunning())
+        {
+            if (errorOut)
+                *errorOut = "Capture is not running";
+            return false;
+        }
+        if (!captureService_->softTriggerActiveCamera())
+        {
+            if (errorOut)
+                *errorOut = "Camera rejected software trigger (not in soft-trigger mode, or unsupported)";
+            return false;
+        }
+        return true;
     }
 
     bool AppBackend::resetSelectedHardwareCamera(std::string *errorOut)

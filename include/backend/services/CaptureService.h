@@ -57,6 +57,11 @@ public:
     void stop();
     bool isRunning() const;
 
+    // Fire one software acquisition trigger on the live camera. Thread-safe;
+    // returns false when no camera is active or it does not support it.
+    // (Acquisition trigger — not the sort-output pulse.)
+    bool softTriggerActiveCamera();
+
     const CaptureStats& stats() const { return stats_; }
 
 private:

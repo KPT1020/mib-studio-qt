@@ -17,6 +17,8 @@
 - [[AutofocusService]] — nanopositioner voltage via serial (Coremor XMT)
 - [[TriggerService]] — camera digital-output pulse on target-group detection
 - [[SyringePumpService]] — dual-pump Modbus RTU over serial
+- [[PulseGeneratorService]] — Zhongsheng pulse module (camera ext-trigger
+  source) via Modbus RTU over serial
 
 ## Optional / specialised
 - [[YoloService]] — ONNX Runtime session (segmentation; placeholder-ish)

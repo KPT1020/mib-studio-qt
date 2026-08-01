@@ -35,6 +35,7 @@ namespace backend::bridge
         SelectMindVisionCamera,
         ApplyCameraScript,
         ResetSelectedHardwareCamera,
+        SoftTriggerCamera,
         StartCapture,
         StopCapture,
     };

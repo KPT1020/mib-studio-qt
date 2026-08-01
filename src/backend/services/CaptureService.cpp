@@ -74,6 +74,11 @@ void CaptureService::stop() {
 
 bool CaptureService::isRunning() const { return running_.load(); }
 
+bool CaptureService::softTriggerActiveCamera() {
+    std::scoped_lock lk(cameraMutex_);
+    return activeCamera_ && activeCamera_->softTrigger();
+}
+
 void CaptureService::run() {
     std::unique_ptr<camera::common::ICamera> camera;
 
@@ -137,6 +142,12 @@ void CaptureService::run() {
         // never allocates.
         size_t reservedFrameBytes = 0;
 
+        // Declared outside the loop so grabFrame's data.assign reuses the
+        // vector's capacity frame-to-frame (pushFrame copies out of it) —
+        // at triggered rates of 5000 fps a per-iteration Frame would malloc
+        // the pixel buffer every 200 µs.
+        camera::common::Frame frame;
+
         while (running_.load()) {
             // Periodic health check
             const uint64_t now = Tools::getTimestamp();
@@ -148,7 +159,6 @@ void CaptureService::run() {
                 nextHealthCheck = now + kHealthCheckInterval;
             }
 
-            camera::common::Frame frame;
             const bool grabbed = camera->grabFrame(frame);
             // Host monotonic acquisition stamp: the anchor every downstream
             // latency measurement (algo start/end, trigger fire) compares
