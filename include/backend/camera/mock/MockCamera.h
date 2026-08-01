@@ -28,6 +28,21 @@ public:
     bool grabFrame(camera::common::Frame& out) override;
     bool pollStats(camera::common::CameraStats& out) const override;
 
+    // The mock source synthesizes frames on demand, so there is no SDK queue
+    // to drain: both delivery modes are supported and behave identically, with
+    // a genuinely-zero completed-buffer backlog.
+    camera::common::FrameDeliveryCapabilities deliveryCapabilities() const override {
+        camera::common::FrameDeliveryCapabilities caps;
+        caps.supportsEveryFrame = true;
+        caps.supportsLatestFrame = true;
+        caps.modeChangeRequiresRestart = false;
+        return caps;
+    }
+    camera::common::FrameDeliveryMode activeDeliveryMode() const override {
+        return config_.deliveryMode;
+    }
+    bool pollAcquisitionQueueStats(camera::common::AcquisitionQueueStats& out) const override;
+
     // Simulated digital trigger output so TriggerService works end-to-end in
     // mock mode (headless pipeline dry-runs, latency instrumentation). The
     // "line" only records level changes; rising edges are counted.
@@ -54,6 +69,7 @@ private:
     std::atomic<bool> running_{false};
     std::chrono::steady_clock::time_point lastFrameTime_{};
     mutable camera::common::CameraStats stats_{};
+    std::atomic<uint64_t> deliveredFrames_{0};
 
     // Simulated trigger line (written by the trigger thread).
     std::atomic<bool> triggerLineHigh_{false};

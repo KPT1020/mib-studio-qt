@@ -92,7 +92,12 @@ void CaptureService::run() {
     };
 
     try {
-        SPDLOG_INFO("CaptureService starting: parts={}, buffers={}", config_.bufferPartCount, config_.numBuffers);
+        SPDLOG_INFO("CaptureService starting: parts={}, buffers={}, mode={}",
+                    config_.bufferPartCount, config_.numBuffers,
+                    camera::common::toString(config_.deliveryMode));
+        stats_.requestedDeliveryMode.store(static_cast<int>(config_.deliveryMode),
+                                           std::memory_order_relaxed);
+        stats_.deliveryModeConfirmed.store(false, std::memory_order_release);
         {
             auto& m = backend::diagnostics::CrashStateMirror::instance().capture;
             m.running.store(true, std::memory_order_relaxed);
@@ -109,9 +114,24 @@ void CaptureService::run() {
             throw std::runtime_error("CaptureService camera factory returned null");
         }
 
+        const auto deliveryCaps = camera->deliveryCapabilities();
+        if (config_.deliveryMode == camera::common::FrameDeliveryMode::LatestFrame &&
+            !deliveryCaps.supportsLatestFrame) {
+            throw std::runtime_error(
+                "This camera backend does not support Latest Frame delivery; "
+                "select Every Frame or use a backend with newest-frame support");
+        }
+        if (config_.deliveryMode == camera::common::FrameDeliveryMode::EveryFrame &&
+            !deliveryCaps.supportsEveryFrame) {
+            throw std::runtime_error(
+                "This camera backend does not support Every Frame delivery; "
+                "select Latest Frame");
+        }
+
         camera::common::CameraConfig camCfg;
         camCfg.bufferPartCount = config_.bufferPartCount;
         camCfg.numBuffers = config_.numBuffers;
+        camCfg.deliveryMode = config_.deliveryMode;
         camera->applyConfig(camCfg);
 
         {
@@ -122,6 +142,10 @@ void CaptureService::run() {
         if (!camera->start()) {
             throw std::runtime_error("CaptureService camera failed to start");
         }
+
+        stats_.activeDeliveryMode.store(static_cast<int>(camera->activeDeliveryMode()),
+                                        std::memory_order_relaxed);
+        stats_.deliveryModeConfirmed.store(true, std::memory_order_release);
 
         if (cameraReadyCallback_) {
             cameraReadyCallback_(camera.get());
@@ -153,8 +177,16 @@ void CaptureService::run() {
             // Host monotonic acquisition stamp: the anchor every downstream
             // latency measurement (algo start/end, trigger fire) compares
             // against. The frame's own `timestamp` is a device tick and lives
-            // on a different clock.
+            // on a different clock — unless the backend has verified the
+            // domains match (timestampsHostComparable), in which case the
+            // difference is the frame's age in the SDK queues.
             frame.hostTimestampUs = Tools::getTimestamp();
+            if (grabbed && deliveryCaps.timestampsHostComparable &&
+                frame.timestamp <= frame.hostTimestampUs) {
+                stats_.lastFrameAgeUs.store(frame.hostTimestampUs - frame.timestamp,
+                                            std::memory_order_relaxed);
+                stats_.frameAgeValid.store(true, std::memory_order_relaxed);
+            }
             if (!grabbed) {
                 if (!running_.load()) {
                     break;
@@ -192,6 +224,8 @@ void CaptureService::run() {
                                        frame.timestamp,
                                        frame.hostTimestampUs);
             }
+            stats_.lastPublishLatencyUs.store(Tools::getTimestamp() - frame.hostTimestampUs,
+                                              std::memory_order_relaxed);
             stats_.framesProcessed.fetch_add(1, std::memory_order_relaxed);
             backend::diagnostics::CrashStateMirror::instance().capture.framesProcessed
                 .fetch_add(1, std::memory_order_relaxed);
@@ -205,6 +239,30 @@ void CaptureService::run() {
                     m.lastFrameRate.store(cameraStats.frameRate, std::memory_order_relaxed);
                     m.lastDataRateMBps.store(cameraStats.dataRateMBps, std::memory_order_relaxed);
                     SPDLOG_DEBUG("Capture stats: {} fps, {} MB/s", cameraStats.frameRate, cameraStats.dataRateMBps);
+                }
+                camera::common::AcquisitionQueueStats queueStats{};
+                if (camera->pollAcquisitionQueueStats(queueStats)) {
+                    stats_.intentionallyDiscardedFrames.store(
+                        queueStats.intentionallyDiscardedFrames, std::memory_order_relaxed);
+                    stats_.transportLostFrames.store(queueStats.transportLostFrames,
+                                                     std::memory_order_relaxed);
+                    stats_.bufferUnderruns.store(queueStats.bufferUnderruns,
+                                                 std::memory_order_relaxed);
+                    stats_.sdkCompletedQueueDepth.store(queueStats.sdkCompletedQueueDepth,
+                                                        std::memory_order_relaxed);
+                    stats_.sdkInputBufferCount.store(queueStats.sdkInputBufferCount,
+                                                     std::memory_order_relaxed);
+                    stats_.queueStatsValid.store(true, std::memory_order_release);
+                    // In EveryFrame mode a growing completed-buffer backlog is
+                    // hidden latency; surface it (rate-limited to this 1 s
+                    // stats interval).
+                    if (config_.deliveryMode == camera::common::FrameDeliveryMode::EveryFrame &&
+                        queueStats.completedQueueDepthValid &&
+                        queueStats.sdkCompletedQueueDepth > 0) {
+                        SPDLOG_WARN("CaptureService: {} completed SDK buffers backlogged in "
+                                    "EveryFrame mode (latency is growing)",
+                                    queueStats.sdkCompletedQueueDepth);
+                    }
                 }
                 nextStatsPoll = now + kStatsInterval;
             }

@@ -79,6 +79,7 @@ namespace camera::mock
         running_ = true;
         lastFrameTime_ = std::chrono::steady_clock::now();
         stats_ = {};
+        deliveredFrames_.store(0, std::memory_order_relaxed);
 
         SPDLOG_INFO("MockCamera started with {} files from {} (preloaded {} frames)",
                     files_.size(), options_.folder.string(), preloadedFrames_.size());
@@ -174,6 +175,7 @@ namespace camera::mock
         {
             fps = 1'000'000.0 / static_cast<double>(interval.count());
         }
+        deliveredFrames_.fetch_add(1, std::memory_order_relaxed);
         stats_.frameRate = fps > 0.0 ? static_cast<uint64_t>(std::llround(fps)) : 0;
         stats_.dataRateMBps = (fps > 0.0 && !out.data.empty())
                                   ? static_cast<uint64_t>(std::llround(
@@ -190,6 +192,17 @@ namespace camera::mock
             return false;
         }
         out = stats_;
+        return true;
+    }
+
+    bool MockCamera::pollAcquisitionQueueStats(camera::common::AcquisitionQueueStats &out) const
+    {
+        out = {};
+        out.deliveredFrames = deliveredFrames_.load(std::memory_order_relaxed);
+        out.completedQueueDepthValid = true; // genuinely zero: frames are made on demand
+        out.inputBufferCountValid = false;
+        out.underrunsValid = false;
+        out.transportLossValid = false;
         return true;
     }
 
