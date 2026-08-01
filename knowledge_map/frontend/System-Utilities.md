@@ -21,6 +21,14 @@
   **preserving all existing user values**. This stops an updated install from
   drifting away from a fresh install when new config keys are introduced. An
   external user-chosen config path is never rewritten.
+  Config loads also parse `camera.frame_delivery_mode`
+  (`"everyFrame"`/`"latestFrame"`; missing or unknown values deterministically
+  map to `everyFrame`) and apply it through
+  `CaptureService::setConfig` — the only frontend `setConfig` call path —
+  then emit `deliveryModeLoaded(FrameDeliveryMode)`.
+  `writeBackCameraConfig(mode)` persists just that key back to the active
+  config file (preserving all unrelated keys) and is wired by [[MainWindow]]
+  to the [[ConnectTab]] delivery-mode combo.
 - **`AutoUpdater`** — update check + channel/version selection; see
   `docs/howto/auto-update-r2.md` and `docs/howto/release-workflow.md`.
   - Channel persisted in `QSettings` (`Update/Channel`, `stable`|`beta`); the
@@ -52,6 +60,9 @@
   `processing_contract_version` is round-tripped through catalog/local
   metadata and marks the profile incompatible when it differs from the active
   core; it never selects a core.
+  `camera.frame_delivery_mode` is classified medium-risk in profile diffs
+  (`isMediumRiskPath`), and `configSourceForPath` buckets `camera.*` paths as
+  Config (not "Camera script", which only matches the `camera_script*` keys).
 - **`DeviceInitManager`** — runs [[../services/CameraControlService]]
   `discoverCameras()` off the UI thread. Emits a signal when discovery
   completes (including "no cameras found").

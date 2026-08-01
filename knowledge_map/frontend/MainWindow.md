@@ -15,7 +15,12 @@
 - `onStartCapture` / `onStopCapture` — start/stop camera acquisition via
   [[Controllers]] `CameraController`.
 - `onStartExperiment` / `onStopExperiment` — drive
-  [[Controllers]] `ExperimentController`. Stop path now issues an explicit
+  [[Controllers]] `ExperimentController`. Start now blocks with an explicit
+  acknowledgement when `CaptureService::activeDeliveryMode()` is
+  `LatestFrame`: "Switch to Every Frame" (default; routes through
+  `ConnectTab::setDeliveryMode`, i.e. the same setConfig + persist path as
+  the combo, without restarting the running capture), "Continue with Latest
+  Frame" (explicit override), or Cancel (abort). Stop path now issues an explicit
   `Hdf5Service::flush()` immediately before `writeExperimentInfo()` to reduce
   risk of metadata writes invalidating already-persisted frame batches. When
   multi-image is enabled and realtime mode is `async_batch`, start now
@@ -80,6 +85,16 @@
 - The status-bar `Core: <version> · contract <n>` label is authoritative for
   the selected engine. Experiment metadata receives that core identity on
   stop; activation itself is rejected while an operation is active.
+- `deliveryModeLabel_` is a permanent status-bar badge ("▶ EVERY FRAME ·
+  sequence preserved" / "⏩ LATEST FRAME · drops stale frames"), so the
+  acquisition mode is visible on every tab. `updateDeliveryModeBadge()` shows
+  the **backend-confirmed** `CaptureService::activeDeliveryMode()` and
+  appends " (requested)" while `deliveryModeConfirmed` is false; it refreshes
+  on every `onUpdateStats` tick and on combo/config changes.
+  `CaptureService` clears the confirmed flag when the capture loop releases
+  the camera, so between runs the badge tracks the requested config mode
+  (with the "(requested)" suffix) — the ConnectTab combo is the
+  requested-mode source of truth.
 - The async experiment flush (`QtConcurrent::run` + `flushWatcher_`) captures
   the **backend pointer, not `this`**: `QFutureWatcher`'s destructor does not
   block on a running future, so the task can outlive the window (the backend

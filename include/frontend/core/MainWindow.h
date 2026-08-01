@@ -42,6 +42,7 @@ private slots:
 private:
     void updateExperimentButtonStates();
     void updateTabStates();
+    void updateDeliveryModeBadge();
     void startExperimentServices();
     void stopExperimentServices();
     void setupCornerWidgets();
@@ -51,6 +52,7 @@ private:
     backend::AppBackend& backend_;
     QLabel* statusLabel_ = nullptr;
     QLabel* processingCoreLabel_ = nullptr;
+    QLabel* deliveryModeLabel_ = nullptr;
     QTimer* statsTimer_ = nullptr;
     PlaybackPanel* playbackPanel_ = nullptr;
     QTabWidget* experimentTabs_ = nullptr;

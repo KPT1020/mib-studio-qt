@@ -1,5 +1,7 @@
 #pragma once
 
+#include "backend/camera/common/ICamera.h"
+
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -7,11 +9,6 @@
 #include <mutex>
 #include <string>
 #include <thread>
-
-namespace camera::common {
-class ICamera;
-struct CameraConfig;
-}
 
 namespace backend { namespace playback { class FrameStore; } }
 
@@ -21,6 +18,26 @@ struct CaptureStats {
     std::atomic<uint64_t> framesProcessed{0};
     std::atomic<uint64_t> lastFrameRate{0};     // from StreamModule StatisticsFrameRate
     std::atomic<uint64_t> lastDataRateMBps{0};  // from StreamModule StatisticsDataRate
+
+    // Delivery mode + acquisition-queue telemetry. Modes are stored as the
+    // integer value of camera::common::FrameDeliveryMode so the struct stays
+    // lock-free; deliveryModeConfirmed distinguishes the backend-confirmed
+    // active mode from the merely requested one.
+    std::atomic<int> requestedDeliveryMode{0};
+    std::atomic<int> activeDeliveryMode{0};
+    std::atomic<bool> deliveryModeConfirmed{false};
+    std::atomic<uint64_t> intentionallyDiscardedFrames{0};
+    std::atomic<uint64_t> transportLostFrames{0};
+    std::atomic<uint64_t> bufferUnderruns{0};
+    std::atomic<uint64_t> sdkCompletedQueueDepth{0};
+    std::atomic<uint64_t> sdkInputBufferCount{0};
+    std::atomic<bool> queueStatsValid{false};
+    // Age of the last grabbed frame (device stamp -> host dequeue), only
+    // populated when the backend reports timestampsHostComparable.
+    std::atomic<uint64_t> lastFrameAgeUs{0};
+    std::atomic<bool> frameAgeValid{false};
+    // Host dequeue -> post-publish (callback + FrameStore copy) duration.
+    std::atomic<uint64_t> lastPublishLatencyUs{0};
 };
 
 class CaptureService {
@@ -36,6 +53,9 @@ public:
     struct Config {
         int bufferPartCount = 1;  // number of images per buffer
         int numBuffers = 20;        // ring size
+        // Requested SDK-queue policy; backends confirm or reject at start().
+        camera::common::FrameDeliveryMode deliveryMode =
+            camera::common::FrameDeliveryMode::EveryFrame;
     };
 
     CaptureService();
@@ -63,6 +83,16 @@ public:
     bool softTriggerActiveCamera();
 
     const CaptureStats& stats() const { return stats_; }
+
+    // Backend-confirmed active mode (falls back to the requested mode until a
+    // camera has confirmed one). Prefer this over Config::deliveryMode when
+    // displaying state to the user.
+    camera::common::FrameDeliveryMode activeDeliveryMode() const {
+        return stats_.deliveryModeConfirmed.load(std::memory_order_acquire)
+                   ? static_cast<camera::common::FrameDeliveryMode>(
+                         stats_.activeDeliveryMode.load(std::memory_order_acquire))
+                   : config_.deliveryMode;
+    }
 
 private:
     void run();

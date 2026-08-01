@@ -23,6 +23,23 @@
 #error "MindVision CameraApiLoad.h not found"
 #endif
 
+// Compile-time detection of the newest-frame priority retrieval API
+// (CameraGetImageBufferPriority + CAMERA_GET_IMAGE_PRIORITY_NEWEST).
+// SDK variants that expose the priority constant as a preprocessor #define are
+// detected automatically. Variants that declare emCameraGetImagePriority as a
+// plain C enum in CameraDefine.h (every public SDK mirror observed as of
+// 2026-08) are invisible to the preprocessor, so those builds take the
+// bounded-drain fallback below unless the build opts in explicitly with
+// -DMIB_MINDVISION_USE_PRIORITY_API=1 after verifying the SDK ships the API.
+#ifndef MIB_MINDVISION_USE_PRIORITY_API
+#define MIB_MINDVISION_USE_PRIORITY_API 0
+#endif
+#if defined(CAMERA_GET_IMAGE_PRIORITY_NEWEST) || MIB_MINDVISION_USE_PRIORITY_API
+#define MIB_MINDVISION_HAS_PRIORITY_NEWEST 1
+#else
+#define MIB_MINDVISION_HAS_PRIORITY_NEWEST 0
+#endif
+
 #include "backend/camera/mindvision/MindVisionApply.h"
 #include "backend/camera/mindvision/MindVisionConfig.h"
 
@@ -198,10 +215,19 @@ bool MindVisionCamera::start()
     }
 
     frameCount_ = 0;
+    intentionalDiscards_.store(0, std::memory_order_relaxed);
     startTime_ = std::chrono::steady_clock::now();
+
+    // Confirm the delivery mode for this run. Mode changes require a full
+    // stop() -> applyConfig() -> start() cycle (modeChangeRequiresRestart);
+    // we never clear or reorder an active SDK queue mid-run.
+    confirmedDeliveryMode_ = config_.deliveryMode;
+    deliveryModeConfirmed_ = true;
+
     running_ = true;
-    SPDLOG_INFO("MindVisionCamera: started (index={}, {}x{}, mono={})",
-                cameraIndex_, bufferWidth_, bufferHeight_, static_cast<int>(cap.sIspCapacity.bMonoSensor));
+    SPDLOG_INFO("MindVisionCamera: started (index={}, {}x{}, mono={}, deliveryMode={})",
+                cameraIndex_, bufferWidth_, bufferHeight_, static_cast<int>(cap.sIspCapacity.bMonoSensor),
+                toString(confirmedDeliveryMode_));
     return true;
 }
 
@@ -234,6 +260,8 @@ bool MindVisionCamera::grabFrame(Frame &out)
     while (true)
     {
         int hCamera = -1;
+        FrameDeliveryMode mode = FrameDeliveryMode::EveryFrame;
+        int maxDrain = 0;
         {
             std::lock_guard<std::mutex> lock(stateMutex_);
             if (!running_)
@@ -241,11 +269,60 @@ bool MindVisionCamera::grabFrame(Frame &out)
                 return false;
             }
             hCamera = hCamera_;
+            mode = confirmedDeliveryMode_;
+            maxDrain = config_.numBuffers;
         }
 
         tSdkFrameHead frameHead{};
         BYTE *pBuffer = nullptr;
-        const CameraSdkStatus status = CameraGetImageBuffer(hCamera, &frameHead, &pBuffer, 100);
+        CameraSdkStatus status;
+
+        if (mode == FrameDeliveryMode::LatestFrame)
+        {
+#if MIB_MINDVISION_HAS_PRIORITY_NEWEST
+            (void)maxDrain; // Only the drain fallback bounds its loop with it.
+            // SDK-side newest-frame retrieval: the SDK discards every completed
+            // buffer older than the returned one before handing it out.
+            // Limitation: those SDK-internal skips have no per-skip callback,
+            // so intentionalDiscards_ cannot count them exactly on this path
+            // (the drain fallback below does count exactly).
+            status = CameraGetImageBufferPriority(hCamera, &frameHead, &pBuffer, 100,
+                                                  CAMERA_GET_IMAGE_PRIORITY_NEWEST);
+#else
+            // Fallback for SDK variants without the priority API: block for the
+            // next completed buffer, then drain any further already-completed
+            // buffers non-blocking (zero timeout), keeping only the newest.
+            // Bounded by numBuffers so a producer outpacing us cannot starve
+            // delivery. Exactly one buffer is held at any time; each superseded
+            // buffer is released immediately and counted as an intentional
+            // discard.
+            status = CameraGetImageBuffer(hCamera, &frameHead, &pBuffer, 100);
+            if (status == CAMERA_STATUS_SUCCESS)
+            {
+                for (int i = 0; i < maxDrain; ++i)
+                {
+                    tSdkFrameHead newerHead{};
+                    BYTE *newerBuffer = nullptr;
+                    const CameraSdkStatus drainStatus =
+                        CameraGetImageBuffer(hCamera, &newerHead, &newerBuffer, 0);
+                    if (drainStatus != CAMERA_STATUS_SUCCESS)
+                    {
+                        break; // No newer completed buffer; keep the held one.
+                    }
+                    CameraReleaseImageBuffer(hCamera, pBuffer);
+                    intentionalDiscards_.fetch_add(1, std::memory_order_relaxed);
+                    pBuffer = newerBuffer;
+                    frameHead = newerHead;
+                }
+            }
+#endif
+        }
+        else
+        {
+            // EveryFrame: ordered retrieval, never skip. The priority API is
+            // deliberately not used here.
+            status = CameraGetImageBuffer(hCamera, &frameHead, &pBuffer, 100);
+        }
 
         if (status == CAMERA_STATUS_TIME_OUT)
         {
@@ -253,7 +330,8 @@ bool MindVisionCamera::grabFrame(Frame &out)
         }
         if (status != CAMERA_STATUS_SUCCESS)
         {
-            SPDLOG_WARN("MindVisionCamera: CameraGetImageBuffer returned {}", status);
+            SPDLOG_WARN("MindVisionCamera: frame retrieval returned {} (mode={})",
+                        status, toString(mode));
             return false;
         }
 
@@ -316,6 +394,53 @@ bool MindVisionCamera::pollStats(CameraStats &out) const
         lastStats_.dataRateMBps = (lastStats_.frameRate * bytesPerFrame) / (1024ULL * 1024ULL);
     }
     out = lastStats_;
+    return true;
+}
+
+FrameDeliveryCapabilities MindVisionCamera::deliveryCapabilities() const
+{
+    FrameDeliveryCapabilities caps;
+    caps.supportsEveryFrame = true;
+    caps.supportsLatestFrame = true;
+    caps.modeChangeRequiresRestart = true;
+    // frameHead.uiTimeStamp is a device tick counter, not the host monotonic
+    // clock, so frame age cannot be estimated against Tools::getTimestamp().
+    caps.timestampsHostComparable = false;
+    return caps;
+}
+
+FrameDeliveryMode MindVisionCamera::activeDeliveryMode() const
+{
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    return deliveryModeConfirmed_ ? confirmedDeliveryMode_ : config_.deliveryMode;
+}
+
+bool MindVisionCamera::pollAcquisitionQueueStats(AcquisitionQueueStats &out) const
+{
+    std::lock_guard<std::mutex> lock(stateMutex_);
+    if (!running_ || hCamera_ < 0)
+    {
+        return false;
+    }
+
+    out = AcquisitionQueueStats{};
+    out.deliveredFrames = frameCount_;
+    out.intentionallyDiscardedFrames = intentionalDiscards_.load(std::memory_order_relaxed);
+
+    // The MindVision SDK exposes no completed-queue depth, input-buffer count,
+    // or underrun counter, so those fields stay 0 with their valid flags false
+    // ("unknown", not "zero") as required by issue #333.
+
+    // Transport loss is observable through the SDK's cumulative frame
+    // statistics (tSdkFrameStatistic: iTotal/iCapture/iLost, present in all
+    // known SDK variants).
+    tSdkFrameStatistic frameStat{};
+    if (CameraGetFrameStatistic(hCamera_, &frameStat) == CAMERA_STATUS_SUCCESS)
+    {
+        out.transportLostFrames = frameStat.iLost > 0 ? static_cast<uint64_t>(frameStat.iLost) : 0;
+        out.transportLossValid = true;
+    }
+
     return true;
 }
 
@@ -457,6 +582,22 @@ bool MindVisionCamera::grabFrame(Frame &out)
 }
 
 bool MindVisionCamera::pollStats(CameraStats &out) const
+{
+    (void)out;
+    return false;
+}
+
+FrameDeliveryCapabilities MindVisionCamera::deliveryCapabilities() const
+{
+    return {};
+}
+
+FrameDeliveryMode MindVisionCamera::activeDeliveryMode() const
+{
+    return FrameDeliveryMode::EveryFrame;
+}
+
+bool MindVisionCamera::pollAcquisitionQueueStats(AcquisitionQueueStats &out) const
 {
     (void)out;
     return false;

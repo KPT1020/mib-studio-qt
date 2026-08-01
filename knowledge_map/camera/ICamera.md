@@ -10,8 +10,21 @@
 
 - `camera::common::Frame` — `{ width, height, pixelFormat (PFNC),
   linePitch, timestamp, data }`.
-- `CameraConfig` — `{ bufferPartCount = 1, numBuffers = 20 }`.
+- `CameraConfig` — `{ bufferPartCount = 1, numBuffers = 20, deliveryMode }`.
 - `CameraStats` — `{ frameRate, dataRateMBps }`.
+- `FrameDeliveryMode` — `EveryFrame` (ordered, never intentionally skips)
+  vs `LatestFrame` (drains stale completed SDK buffers before the copy,
+  returns the freshest frame, counts every deliberate discard). Serialized
+  as `"everyFrame"` / `"latestFrame"` via `toString` /
+  `frameDeliveryModeFromString`; unknown text maps to `EveryFrame` so
+  legacy profiles keep ordered behavior.
+- `FrameDeliveryCapabilities` — per-backend support flags
+  (`supportsEveryFrame`, `supportsLatestFrame`,
+  `modeChangeRequiresRestart`, `timestampsHostComparable`).
+- `AcquisitionQueueStats` — queue telemetry with *distinct* counters for
+  intentional discards, transport loss, and underruns (never merged), plus
+  completed-queue depth and input-buffer count. Fields a backend cannot
+  observe keep their `*Valid` flag false ("unknown", not "zero").
 
 ## Virtual methods
 
@@ -28,6 +41,11 @@ virtual bool checkDeviceHealth() const { return true; }
 virtual void configureTriggerOutput(const std::string& lineSelector) {}
 virtual bool setTriggerOutput(bool high) { return false; }   // SORT pulse out
 virtual bool softTrigger() { return false; }  // software ACQUISITION trigger
+
+// Delivery-mode contract (defaults: EveryFrame-only, no queue telemetry)
+virtual FrameDeliveryCapabilities deliveryCapabilities() const;
+virtual FrameDeliveryMode activeDeliveryMode() const;   // backend-confirmed
+virtual bool pollAcquisitionQueueStats(AcquisitionQueueStats& out) const;
 ```
 
 ## Related

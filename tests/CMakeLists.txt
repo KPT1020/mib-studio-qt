@@ -101,6 +101,16 @@ mib_add_backend_test_executable(mock_camera_smoke_test camera/mock_camera_smoke_
 add_test(NAME camera.mock_smoke COMMAND $<TARGET_FILE:mock_camera_smoke_test>)
 set_tests_properties(camera.mock_smoke PROPERTIES LABELS "camera;backend")
 
+mib_add_backend_test_executable(delivery_mode_overload_test camera/delivery_mode_overload_test.cpp)
+target_link_libraries(delivery_mode_overload_test PRIVATE Threads::Threads)
+add_test(NAME camera.delivery_mode_overload COMMAND $<TARGET_FILE:delivery_mode_overload_test>)
+set_tests_properties(camera.delivery_mode_overload PROPERTIES LABELS "camera;backend" TIMEOUT 60)
+
+mib_add_backend_test_executable(delivery_mode_contract_test camera/delivery_mode_contract_test.cpp)
+target_link_libraries(delivery_mode_contract_test PRIVATE Threads::Threads)
+add_test(NAME camera.delivery_mode_contract COMMAND $<TARGET_FILE:delivery_mode_contract_test>)
+set_tests_properties(camera.delivery_mode_contract PROPERTIES LABELS "camera;backend" TIMEOUT 60)
+
 mib_add_backend_test_executable(processing_science_seam_test processing/processing_science_seam_test.cpp)
 add_test(NAME processing.science_seam COMMAND $<TARGET_FILE:processing_science_seam_test>)
 set_tests_properties(processing.science_seam PROPERTIES LABELS "processing;backend" TIMEOUT 30)

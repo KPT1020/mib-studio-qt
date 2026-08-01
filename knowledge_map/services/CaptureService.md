@@ -18,12 +18,24 @@
 - Copies frame bytes into `FrameStore` (including the host stamp) and fires
   `FrameCallback` (used by UI for live preview).
 - Exposes `CaptureStats` — `framesProcessed`, `lastFrameRate`,
-  `lastDataRateMBps` (the latter two come from EGrabber StreamModule).
+  `lastDataRateMBps` (the latter two come from EGrabber StreamModule), plus
+  delivery-mode and acquisition-queue telemetry: requested vs
+  backend-confirmed mode (`deliveryModeConfirmed`), intentional discards,
+  transport loss, underruns, SDK queue depths, `lastFrameAgeUs` (only when
+  the backend reports host-comparable timestamps), and
+  `lastPublishLatencyUs` (dequeue → post-publish copy duration).
+- Owns the delivery-mode handshake: pre-checks the requested
+  `FrameDeliveryMode` against `deliveryCapabilities()` (unsupported mode →
+  actionable `runtime_error`, capture never starts), forwards the mode via
+  `CameraConfig`, records the backend-confirmed mode after `start()`, and
+  warns (rate-limited to the 1 s stats poll) when an EveryFrame backlog is
+  growing. `activeDeliveryMode()` is what the UI badge should display.
 
 ## Key APIs
 
 ```cpp
-void setConfig(const Config& cfg);              // bufferPartCount, numBuffers
+void setConfig(const Config& cfg);              // bufferPartCount, numBuffers, deliveryMode
+camera::common::FrameDeliveryMode activeDeliveryMode(); // backend-confirmed
 void setFrameCallback(FrameCallback cb);        // UI live preview hook
 void setFrameStore(shared_ptr<FrameStore>);     // ring buffer sink
 void setCameraFactory(CameraFactory);           // injects ICamera builder
@@ -36,6 +48,14 @@ bool softTriggerActiveCamera();  // one software ACQUISITION trigger on the
 Camera factory is how `AppBackend` chooses between
 [[../camera/EGrabberCamera]] and [[../camera/MockCamera]] without this
 service knowing which one.
+
+`setConfig` has its single call site in
+`frontend::AppConfigWatcher::loadAndApplyFromPath` (fed by the
+`camera.frame_delivery_mode` profile key and the
+[[../frontend/ConnectTab]] delivery-mode combo).
+`deliveryModeConfirmed` is cleared when the capture loop releases the
+camera, so `activeDeliveryMode()` falls back to the requested config mode
+between runs.
 
 ## Threading
 
