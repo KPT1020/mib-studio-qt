@@ -29,6 +29,16 @@
   generator group (COM/baud/addr connect, channel, frequency 400–40000 Hz
   defaulting to 5000 Hz = the 5000 fps bench trigger rate, duty %,
   Set/Start/Stop) driving [[../services/PulseGeneratorService]] synchronously.
+- MindVision "Trigger & strobe parameters" form: combos/spinboxes for
+  trigger mode, edge type, exposure (0.8–838860 µs = MV-XGC51 sensor range),
+  trigger delay/jitter/count, strobe mode/delay/width/polarity. **Two-way
+  synced with the JSON editor** (`syncMvFormFromJson` /
+  `syncMvJsonFromForm`, 150 ms debounce on editor edits, `mvSyncGuard_`
+  breaks recursion): widget edits rewrite only their keys into the current
+  JSON (untouched keys like ROI/gain survive; QJson alphabetizes on
+  rewrite); Save/Apply always read the editor text, so the form never
+  bypasses the config file. Mid-edit invalid JSON leaves the form at its
+  last good state.
 - Render/edit JSON config using `models/JsonTableModel.cpp` and
   `utils/JsonFlatten.cpp`.
 - Persist config via `utils/ConfigPathManager.cpp` and

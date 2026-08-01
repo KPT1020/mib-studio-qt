@@ -318,6 +318,72 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         row->addSpacing(8);
         row->addWidget(mvUnsavedLabel_);
         v->addLayout(row);
+
+        // Quick-adjust form for the bench-relevant parameters. Two-way synced
+        // with the JSON editor below: widget edits rewrite the JSON keys,
+        // editor edits (debounced) repopulate the widgets. Apply/Save always
+        // read the editor text, so the form never bypasses the config file.
+        auto* mvForm = new QGroupBox(tr("Trigger && strobe parameters"), page);
+        auto* formRow = new QHBoxLayout(mvForm);
+        formRow->addWidget(new QLabel(tr("Trigger"), mvForm));
+        mvTriggerModeCombo_ = new QComboBox(mvForm);
+        mvTriggerModeCombo_->addItem(tr("0: Free run"), 0);
+        mvTriggerModeCombo_->addItem(tr("1: Software"), 1);
+        mvTriggerModeCombo_->addItem(tr("2: External"), 2);
+        formRow->addWidget(mvTriggerModeCombo_);
+        mvSignalTypeCombo_ = new QComboBox(mvForm);
+        mvSignalTypeCombo_->addItem(tr("Rising edge"), 0);
+        mvSignalTypeCombo_->addItem(tr("Falling edge"), 1);
+        mvSignalTypeCombo_->addItem(tr("High level"), 2);
+        mvSignalTypeCombo_->addItem(tr("Low level"), 3);
+        mvSignalTypeCombo_->addItem(tr("Double edge"), 4);
+        mvSignalTypeCombo_->setToolTip(tr("External trigger signal type (ext_trig_signal_type)"));
+        formRow->addWidget(mvSignalTypeCombo_);
+        formRow->addWidget(new QLabel(tr("Exposure (µs)"), mvForm));
+        mvExposureSpin_ = new QDoubleSpinBox(mvForm);
+        mvExposureSpin_->setRange(0.8, 838860.0); // MV-XGC51 sensor range
+        mvExposureSpin_->setDecimals(1);
+        mvExposureSpin_->setValue(1.0);
+        formRow->addWidget(mvExposureSpin_);
+        formRow->addWidget(new QLabel(tr("Delay (µs)"), mvForm));
+        mvTrigDelaySpin_ = new QSpinBox(mvForm);
+        mvTrigDelaySpin_->setRange(0, 1000000);
+        mvTrigDelaySpin_->setToolTip(tr("Trigger edge to exposure start (acq_trigger_delay_us)"));
+        formRow->addWidget(mvTrigDelaySpin_);
+        formRow->addWidget(new QLabel(tr("Jitter (µs)"), mvForm));
+        mvJitterSpin_ = new QSpinBox(mvForm);
+        mvJitterSpin_->setRange(0, 1000000);
+        mvJitterSpin_->setToolTip(tr("Trigger de-glitch filter (ext_trig_jitter_us)"));
+        formRow->addWidget(mvJitterSpin_);
+        formRow->addWidget(new QLabel(tr("Count"), mvForm));
+        mvTrigCountSpin_ = new QSpinBox(mvForm);
+        mvTrigCountSpin_->setRange(1, 1000);
+        mvTrigCountSpin_->setToolTip(tr("Frames per trigger (trigger_count)"));
+        formRow->addWidget(mvTrigCountSpin_);
+        formRow->addSpacing(16);
+        formRow->addWidget(new QLabel(tr("Strobe"), mvForm));
+        mvStrobeModeCombo_ = new QComboBox(mvForm);
+        mvStrobeModeCombo_->addItem(tr("0: Auto (follows exposure)"), 0);
+        mvStrobeModeCombo_->addItem(tr("1: Semi-auto (delay+width)"), 1);
+        mvStrobeModeCombo_->addItem(tr("2: Always high"), 2);
+        mvStrobeModeCombo_->addItem(tr("3: Always low"), 3);
+        formRow->addWidget(mvStrobeModeCombo_);
+        formRow->addWidget(new QLabel(tr("Delay (µs)"), mvForm));
+        mvStrobeDelaySpin_ = new QSpinBox(mvForm);
+        mvStrobeDelaySpin_->setRange(0, 1000000);
+        formRow->addWidget(mvStrobeDelaySpin_);
+        formRow->addWidget(new QLabel(tr("Width (µs)"), mvForm));
+        mvStrobeWidthSpin_ = new QSpinBox(mvForm);
+        mvStrobeWidthSpin_->setRange(0, 1000000);
+        formRow->addWidget(mvStrobeWidthSpin_);
+        mvStrobePolarityCombo_ = new QComboBox(mvForm);
+        mvStrobePolarityCombo_->addItem(tr("Active high"), 1);
+        mvStrobePolarityCombo_->addItem(tr("Active low"), 0);
+        mvStrobePolarityCombo_->setToolTip(tr("strobe_polarity"));
+        formRow->addWidget(mvStrobePolarityCombo_);
+        formRow->addStretch(1);
+        v->addWidget(mvForm);
+
         v->addWidget(mvEdit_, 1);
 
         auto* pgGroup = new QGroupBox(tr("Pulse generator (external trigger source, RS485)"), page);
@@ -382,9 +448,26 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         connect(mvSoftTriggerBtn_, &QPushButton::clicked, this, &ConfigTabs::onSoftTrigger);
         connect(mvBrowseBtn_, &QPushButton::clicked, this, &ConfigTabs::onBrowseMv);
         connect(mvClearBtn_, &QPushButton::clicked, this, &ConfigTabs::onClearMv);
+        mvDebounceTimer_ = new QTimer(this);
+        mvDebounceTimer_->setSingleShot(true);
+        mvDebounceTimer_->setInterval(150);
+        connect(mvDebounceTimer_, &QTimer::timeout, this, &ConfigTabs::onMvTextChangedDebounced);
         connect(mvEdit_, &QPlainTextEdit::textChanged, this, [this]() {
             if (mvUnsavedLabel_) mvUnsavedLabel_->setVisible(true);
+            if (!mvSyncGuard_) mvDebounceTimer_->start();
         });
+        for (auto* combo : {mvTriggerModeCombo_, mvSignalTypeCombo_, mvStrobeModeCombo_,
+                            mvStrobePolarityCombo_}) {
+            connect(combo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                    this, &ConfigTabs::onMvFormChanged);
+        }
+        for (auto* spin : {mvTrigDelaySpin_, mvJitterSpin_, mvTrigCountSpin_,
+                           mvStrobeDelaySpin_, mvStrobeWidthSpin_}) {
+            connect(spin, QOverload<int>::of(&QSpinBox::valueChanged),
+                    this, &ConfigTabs::onMvFormChanged);
+        }
+        connect(mvExposureSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+                this, &ConfigTabs::onMvFormChanged);
         connect(pgConnectBtn_, &QPushButton::clicked, this, &ConfigTabs::onPulseGenConnectToggle);
         connect(pgApplyBtn_, &QPushButton::clicked, this, &ConfigTabs::onPulseGenApplySettings);
         connect(pgStartBtn_, &QPushButton::clicked, this, &ConfigTabs::onPulseGenStart);
@@ -725,6 +808,7 @@ void ConfigTabs::onReloadMv() {
     }
     mvPathLabel_->setText(path);
     if (mvUnsavedLabel_) mvUnsavedLabel_->setVisible(false);
+    syncMvFormFromJson();
 }
 
 void ConfigTabs::onSaveMv() {
@@ -795,6 +879,7 @@ void ConfigTabs::onBrowseMv() {
     }
     mvPathLabel_->setText(selected);
     if (mvUnsavedLabel_) mvUnsavedLabel_->setVisible(false);
+    syncMvFormFromJson();
 }
 
 void ConfigTabs::onClearMv() {
@@ -809,6 +894,71 @@ void ConfigTabs::onClearMv() {
     if (ret == QMessageBox::Yes) {
         onReloadMv();
     }
+}
+
+namespace {
+// Select the combo entry whose userData matches `value`; falls back to index 0.
+void selectComboData(QComboBox* combo, int value) {
+    const int idx = combo->findData(value);
+    combo->setCurrentIndex(idx >= 0 ? idx : 0);
+}
+} // namespace
+
+void ConfigTabs::syncMvFormFromJson() {
+    QJsonParseError parseErr{};
+    const QJsonDocument doc =
+        QJsonDocument::fromJson(mvEdit_->toPlainText().toUtf8(), &parseErr);
+    if (doc.isNull() || !doc.isObject()) {
+        return; // mid-edit invalid JSON: leave the form showing the last good state
+    }
+    const QJsonObject obj = doc.object();
+
+    mvSyncGuard_ = true;
+    selectComboData(mvTriggerModeCombo_, obj.value("trigger_mode").toInt(0));
+    selectComboData(mvSignalTypeCombo_, obj.value("ext_trig_signal_type").toInt(0));
+    mvExposureSpin_->setValue(obj.value("exposure_time_us").toDouble(3000.0));
+    mvTrigDelaySpin_->setValue(obj.value("acq_trigger_delay_us").toInt(0));
+    mvJitterSpin_->setValue(obj.value("ext_trig_jitter_us").toInt(0));
+    mvTrigCountSpin_->setValue(obj.value("trigger_count").toInt(1));
+    selectComboData(mvStrobeModeCombo_, obj.value("strobe_mode").toInt(0));
+    mvStrobeDelaySpin_->setValue(obj.value("strobe_delay_us").toInt(0));
+    mvStrobeWidthSpin_->setValue(obj.value("strobe_pulse_width_us").toInt(500));
+    selectComboData(mvStrobePolarityCombo_, obj.value("strobe_polarity").toInt(1));
+    mvSyncGuard_ = false;
+}
+
+void ConfigTabs::syncMvJsonFromForm() {
+    QJsonParseError parseErr{};
+    const QJsonDocument doc =
+        QJsonDocument::fromJson(mvEdit_->toPlainText().toUtf8(), &parseErr);
+    // Start from the current text so form edits never drop keys the form
+    // doesn't cover (ROI, gain, mirrors, ...). Invalid text starts fresh.
+    QJsonObject obj = (doc.isObject()) ? doc.object() : QJsonObject{};
+
+    obj["trigger_mode"] = mvTriggerModeCombo_->currentData().toInt();
+    obj["ext_trig_signal_type"] = mvSignalTypeCombo_->currentData().toInt();
+    obj["exposure_time_us"] = mvExposureSpin_->value();
+    obj["acq_trigger_delay_us"] = mvTrigDelaySpin_->value();
+    obj["ext_trig_jitter_us"] = mvJitterSpin_->value();
+    obj["trigger_count"] = mvTrigCountSpin_->value();
+    obj["strobe_mode"] = mvStrobeModeCombo_->currentData().toInt();
+    obj["strobe_delay_us"] = mvStrobeDelaySpin_->value();
+    obj["strobe_pulse_width_us"] = mvStrobeWidthSpin_->value();
+    obj["strobe_polarity"] = mvStrobePolarityCombo_->currentData().toInt();
+
+    mvSyncGuard_ = true;
+    mvEdit_->setPlainText(QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Indented)));
+    mvSyncGuard_ = false;
+    if (mvUnsavedLabel_) mvUnsavedLabel_->setVisible(true);
+}
+
+void ConfigTabs::onMvFormChanged() {
+    if (mvSyncGuard_) return;
+    syncMvJsonFromForm();
+}
+
+void ConfigTabs::onMvTextChangedDebounced() {
+    syncMvFormFromJson();
 }
 
 void ConfigTabs::refreshPulseGenUi() {

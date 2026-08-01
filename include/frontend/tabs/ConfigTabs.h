@@ -68,6 +68,8 @@ private slots:
     void onClearMv();
     void onApplyMvConfig();
     void onSoftTrigger();
+    void onMvFormChanged();
+    void onMvTextChangedDebounced();
     void onPulseGenConnectToggle();
     void onPulseGenApplySettings();
     void onPulseGenStart();
@@ -91,6 +93,8 @@ private:
     QString currentJsonPath() const;
     QString currentMvJsonPath() const;
     void refreshPulseGenUi();
+    void syncMvFormFromJson();
+    void syncMvJsonFromForm();
     void clearJsonSyncIndicators();
     bool loadFileToEditor(const QString& path, QPlainTextEdit* editor, QString* err);
     bool saveEditorToFile(QPlainTextEdit* editor, const QString& path, QString* err);
@@ -171,6 +175,19 @@ private:
     QPushButton* mvClearBtn_ = nullptr;
     QLabel* mvPathLabel_ = nullptr;
     QLabel* mvUnsavedLabel_ = nullptr;
+    // Trigger & strobe parameter form (two-way synced with the JSON editor)
+    QComboBox* mvTriggerModeCombo_ = nullptr;
+    QComboBox* mvSignalTypeCombo_ = nullptr;
+    QDoubleSpinBox* mvExposureSpin_ = nullptr;
+    QSpinBox* mvTrigDelaySpin_ = nullptr;
+    QSpinBox* mvJitterSpin_ = nullptr;
+    QSpinBox* mvTrigCountSpin_ = nullptr;
+    QComboBox* mvStrobeModeCombo_ = nullptr;
+    QSpinBox* mvStrobeDelaySpin_ = nullptr;
+    QSpinBox* mvStrobeWidthSpin_ = nullptr;
+    QComboBox* mvStrobePolarityCombo_ = nullptr;
+    QTimer* mvDebounceTimer_ = nullptr;
+    bool mvSyncGuard_ = false;
     // Pulse generator (Zhongsheng module = external trigger source)
     QSpinBox* pgComPortSpin_ = nullptr;
     QComboBox* pgBaudCombo_ = nullptr;
