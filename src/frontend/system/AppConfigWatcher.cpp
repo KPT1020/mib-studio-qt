@@ -21,8 +21,10 @@
 #endif
 
 #include "backend/app/AppBackend.h"
+#include "backend/camera/common/ICamera.h"
 #include "backend/processing/ProcessingService.h"
 #include "backend/services/AutofocusService.h"
+#include "backend/services/CaptureService.h"
 #include "frontend/system/PlaybackPanel.h"
 #include "frontend/utils/JsonConfigMerge.h"
 
@@ -399,6 +401,26 @@ namespace frontend
 						batchSettings.workerCount, batchSettings.maxBatchDelayMs);
 		}
 
+		// 2.3) Camera frame delivery mode. A missing/unknown value maps to
+		// EveryFrame (deterministic migration for pre-existing profiles), so
+		// the config is applied unconditionally.
+		{
+			QString modeText;
+			if (root.contains("camera") && root.value("camera").isObject())
+			{
+				modeText = root.value("camera").toObject().value("frame_delivery_mode").toString();
+			}
+			backend::services::CaptureService::Config ccfg{};
+			// bufferPartCount/numBuffers stay at the service defaults; only the
+			// delivery mode is profile-configurable.
+			ccfg.deliveryMode = camera::common::frameDeliveryModeFromString(modeText.toStdString());
+			backend_.capture().setConfig(ccfg);
+			lastDeliveryMode_ = ccfg.deliveryMode;
+			SPDLOG_INFO("AppConfigWatcher: applied camera frame_delivery_mode={}",
+						camera::common::toString(ccfg.deliveryMode));
+			emit deliveryModeLoaded(ccfg.deliveryMode);
+		}
+
 		// 2.5) Pixel to micron conversion factor
 		if (root.contains("pixel_to_micron_factor"))
 		{
@@ -656,6 +678,58 @@ namespace frontend
 		backend_.setLastConfigJson(serialized.toStdString());
 
 		SPDLOG_INFO("AppConfigWatcher: wrote back processing config to {}", watchedPath_.toStdString());
+		emit configFileChanged(watchedPath_);
+	}
+
+	void AppConfigWatcher::writeBackCameraConfig(camera::common::FrameDeliveryMode mode)
+	{
+		if (watchedPath_.isEmpty())
+		{
+			SPDLOG_DEBUG("AppConfigWatcher: no watched path, skipping camera write-back");
+			return;
+		}
+
+		QFile file(watchedPath_);
+		if (!file.exists())
+		{
+			SPDLOG_DEBUG("AppConfigWatcher: config file does not exist, skipping camera write-back");
+			return;
+		}
+
+		if (!file.open(QIODevice::ReadWrite | QIODevice::Text))
+		{
+			SPDLOG_WARN("AppConfigWatcher: failed to open {} for camera write-back: {}", watchedPath_.toStdString(), file.errorString().toStdString());
+			return;
+		}
+
+		QByteArray data = file.readAll();
+		QJsonParseError parseError;
+		QJsonDocument doc = QJsonDocument::fromJson(data, &parseError);
+		if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+		{
+			SPDLOG_WARN("AppConfigWatcher: failed to parse config for camera write-back");
+			file.close();
+			return;
+		}
+
+		QJsonObject root = doc.object();
+		QJsonObject cam = root.value("camera").toObject();
+		cam.insert("frame_delivery_mode", QString::fromLatin1(camera::common::toString(mode)));
+		root.insert("camera", cam);
+		doc.setObject(root);
+
+		file.resize(0);
+		file.seek(0);
+		QTextStream out(&file);
+		const QByteArray serialized = doc.toJson(QJsonDocument::Indented);
+		out << serialized;
+		file.close();
+
+		backend_.setLastConfigJson(serialized.toStdString());
+		lastDeliveryMode_ = mode;
+
+		SPDLOG_INFO("AppConfigWatcher: wrote back camera frame_delivery_mode={} to {}",
+					camera::common::toString(mode), watchedPath_.toStdString());
 		emit configFileChanged(watchedPath_);
 	}
 
