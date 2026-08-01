@@ -24,8 +24,70 @@
 - `start()` / `stop()`
 - `grabFrame(Frame&)`
 - `pollStats(CameraStats&)`
+- `deliveryCapabilities()` / `activeDeliveryMode()` /
+  `pollAcquisitionQueueStats(AcquisitionQueueStats&)`
 - `checkDeviceHealth()`
 - `configureTriggerOutput(lineSelector)` / `setTriggerOutput(high)`
+
+## Frame delivery modes (issue #330)
+
+Capabilities: `supportsEveryFrame=true`, `supportsLatestFrame=true`,
+`modeChangeRequiresRestart=true`, `timestampsHostComparable=false`
+(`frameHead.uiTimeStamp` is a device tick counter, not the host clock).
+
+- **EveryFrame** (default): unchanged ordered `CameraGetImageBuffer`
+  retrieval; frames are never intentionally skipped. The priority API is
+  deliberately never used in this mode.
+- **LatestFrame**: stale completed SDK buffers are dropped before the
+  expensive `CameraImageProcess` copy so `grabFrame()` returns the freshest
+  complete image. Two implementations, selected at compile time:
+  - **SDK priority path** — when `CAMERA_GET_IMAGE_PRIORITY_NEWEST` is
+    visible to the preprocessor (`#ifdef`), or the build passes
+    `-DMIB_MINDVISION_USE_PRIORITY_API=1`, `grabFrame` calls
+    `CameraGetImageBufferPriority(h, &head, &buf, 100,
+    CAMERA_GET_IMAGE_PRIORITY_NEWEST)` and the SDK itself discards older
+    completed buffers. **Limitation:** the SDK gives no per-skip callback, so
+    `intentionallyDiscardedFrames` cannot count these SDK-internal skips
+    exactly on this path.
+  - **Bounded drain fallback** — otherwise: blocking
+    `CameraGetImageBuffer(..., 100)` first, then at most
+    `config_.numBuffers` non-blocking (`0` timeout) fetches; each newer
+    completed buffer supersedes the held one, which is released immediately
+    and counted. This path counts every intentional discard **exactly**.
+  - Note: every public SDK mirror observed (2026-08) declares the priority
+    constants as a plain C `enum emCameraGetImagePriority` in
+    `CameraDefine.h`, which `#ifdef` cannot see — so on those SDKs the drain
+    fallback is what actually compiles in unless the build opts in with
+    `MIB_MINDVISION_USE_PRIORITY_API=1` after verifying the SDK ships
+    `CameraGetImageBufferPriority`.
+
+**Release-exactly-once invariant:** on every path through `grabFrame` —
+priority, drain, EveryFrame, stop-while-holding, and `CameraImageProcess`
+failure — each buffer acquired from the SDK is passed to
+`CameraReleaseImageBuffer` exactly once. The drain loop holds exactly one
+buffer at any moment (release old, then adopt new). Audit this whenever the
+grab path changes.
+
+Mode changes require a full `stop()` → `applyConfig()` → `start()` cycle;
+the active SDK queue is never cleared or reordered mid-run
+(no `CameraClearBuffer` on a running camera). `activeDeliveryMode()` reports
+the mode confirmed at the most recent successful `start()`; before any start
+it reports `config_.deliveryMode`.
+
+## Acquisition-queue telemetry (issues #330/#333)
+
+`pollAcquisitionQueueStats` returns `true` while running and fills:
+
+- `deliveredFrames` — `frameCount_` (reset at `start()`).
+- `intentionallyDiscardedFrames` — atomic counter (reset at `start()`;
+  exact on the drain path, see limitation above for the priority path).
+- `transportLostFrames` — `tSdkFrameStatistic::iLost` via
+  `CameraGetFrameStatistic` (present in all known SDK variants, including the
+  dynamic-loader `CameraApiLoad.h`), with `transportLossValid=true` when the
+  call succeeds.
+- **Explicitly unavailable** (left `0` with valid flags `false`, per #333):
+  `sdkCompletedQueueDepth`, `sdkInputBufferCount`, `bufferUnderruns` — the
+  MindVision SDK exposes no queue-depth or underrun observability.
 
 ## Platform behavior
 

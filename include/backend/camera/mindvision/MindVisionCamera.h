@@ -2,6 +2,7 @@
 
 #include "backend/camera/common/ICamera.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <mutex>
@@ -25,6 +26,10 @@ public:
     bool pollStats(CameraStats &out) const override;
     bool checkDeviceHealth() const override;
 
+    FrameDeliveryCapabilities deliveryCapabilities() const override;
+    FrameDeliveryMode activeDeliveryMode() const override;
+    bool pollAcquisitionQueueStats(AcquisitionQueueStats &out) const override;
+
     void configureTriggerOutput(const std::string &lineSelector) override;
     bool setTriggerOutput(bool high) override;
 
@@ -43,6 +48,15 @@ private:
 
     bool running_{false};
     mutable std::mutex stateMutex_;
+
+    // Delivery mode confirmed at the most recent successful start(). Until a
+    // start() succeeds, activeDeliveryMode() reports config_.deliveryMode.
+    FrameDeliveryMode confirmedDeliveryMode_{FrameDeliveryMode::EveryFrame};
+    bool deliveryModeConfirmed_{false};
+
+    // Stale completed SDK buffers dropped by the LatestFrame policy (exact
+    // count on the drain path; the SDK priority path cannot observe skips).
+    std::atomic<uint64_t> intentionalDiscards_{0};
 
     mutable uint64_t frameCount_{0};
     mutable std::chrono::steady_clock::time_point startTime_{};
