@@ -163,6 +163,10 @@ public:
     uint64_t strandedAtStopCount() const { return strandedAtStop_.load(std::memory_order_relaxed); }
     size_t peakQueueDepth() const { return peakDepth_.load(std::memory_order_relaxed); }
     uint64_t newestProducedSequence() const { return nextSequence_.load(std::memory_order_relaxed); }
+    uint64_t newestCompletedSequence() const
+    {
+        return newestCompletedSequence_.load(std::memory_order_relaxed);
+    }
 
     static uint64_t sequenceOf(const camera::common::Frame& frame)
     {
@@ -206,6 +210,7 @@ private:
                     underruns_.fetch_add(1, std::memory_order_relaxed);
                 } else {
                     queue_.push_back(std::move(frame));
+                    newestCompletedSequence_.store(seq, std::memory_order_relaxed);
                     size_t depth = queue_.size();
                     size_t peak = peakDepth_.load(std::memory_order_relaxed);
                     while (depth > peak &&
@@ -230,6 +235,7 @@ private:
     std::atomic<bool> running_{false};
 
     std::atomic<uint64_t> nextSequence_{0};
+    std::atomic<uint64_t> newestCompletedSequence_{0};
     std::atomic<uint64_t> produced_{0};
     std::atomic<uint64_t> delivered_{0};
     std::atomic<uint64_t> intentionalDiscards_{0};
