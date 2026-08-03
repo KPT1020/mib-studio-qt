@@ -6,13 +6,14 @@
 
 ## By theme
 
-### Camera lifecycle & EGrabber
+### Camera lifecycle & hardware SDKs
 - `task/2025-11-14-safe-start-stop-egrabber.md`
 - `task/camera-reset.md`
 - `task/fps_mbs_zero.md`
 - `task/fix_hdfreviewtab_linker_error.md`
 - `task/qt_qpa_platform_plugin_missing_windows.md`
 - `task/2026-04-20-linux-build-windows-hardware-guards.md`
+- `task/2026-08-03-issue-338-mindvision-release-builds.md`
 
 ### Cloud/Linux build environment
 - `task/2026-04-20-cloud-toolchain-cxx-libstdcpp-fix.md`
@@ -84,6 +85,7 @@
 2026-07-13-processing-core-registry.md
 2026-07-13-hot-swappable-processing-core-native.md
 2026-07-15-ultra96-direct-ddr.md
+2026-08-03-issue-338-mindvision-release-builds.md
 camera-reset.md
 diagnostic-logging.md
 external-config-browse.md

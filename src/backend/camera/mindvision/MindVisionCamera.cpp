@@ -14,6 +14,7 @@
 #include <stdio.h>
 #endif
 
+#ifdef _WIN32
 #define API_LOAD_MAIN
 #if __has_include(<MindVision/CameraApiLoad.h>)
 #include <MindVision/CameraApiLoad.h>
@@ -21,6 +22,15 @@
 #include <CameraApiLoad.h>
 #else
 #error "MindVision CameraApiLoad.h not found"
+#endif
+#else
+#if __has_include(<MindVision/CameraApi.h>)
+#include <MindVision/CameraApi.h>
+#elif __has_include(<CameraApi.h>)
+#include <CameraApi.h>
+#else
+#error "MindVision CameraApi.h not found"
+#endif
 #endif
 
 // Compile-time detection of the newest-frame priority retrieval API
@@ -117,11 +127,13 @@ bool MindVisionCamera::start()
         return true;
     }
 
+#ifdef _WIN32
     if (LoadSdkApi() != CAMERA_STATUS_SUCCESS)
     {
         SPDLOG_ERROR("MindVisionCamera: failed to load MVCAMSDK DLL");
         return false;
     }
+#endif
 
     CameraSdkStatus status = CameraSdkInit(0);
     if (status != CAMERA_STATUS_SUCCESS)

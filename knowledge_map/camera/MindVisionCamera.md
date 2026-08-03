@@ -55,8 +55,8 @@ Under trigger modes 1/2, `checkDeviceHealth()` **skips the frame probe**: the
 probe (a 100 ms `CameraGetImageBuffer`) would consume a real triggered frame,
 and a timeout is the normal idle state so it carries no health signal. It
 returns true on a valid running handle instead. (`CameraConnectTest` would be
-the proper probe but its presence in deployed `CameraApiLoad.h` function
-tables is unverified — revisit when the Windows SDK version is pinned.)
+the proper probe but its presence in every deployed Windows
+`CameraApiLoad.h` function table is unverified.)
 
 ## Frame delivery modes (issue #330)
 
@@ -120,9 +120,12 @@ it reports `config_.deliveryMode`.
 
 ## Platform behavior
 
-- **Windows + `MIB_ENABLE_MINDVISION=ON`**: real SDK-backed implementation.
-- **Windows + `MIB_ENABLE_MINDVISION=OFF`** and all non-Windows builds: safe
-  stub that logs unsupported calls and returns failure/no-op.
+- **Windows, Linux, macOS (default `MIB_ENABLE_MINDVISION=ON`)**: real
+  SDK-backed implementation. Windows uses the SDK's `CameraApiLoad.h`
+  function table; Linux/macOS include `CameraApi.h` and link the platform
+  shared library directly.
+- **`MIB_ENABLE_MINDVISION=OFF` or processing-only builds**: safe stub that
+  logs unsupported calls and returns failure/no-op.
 
 ## JSON config parsing (`MindVisionConfig.h`) and applying (`MindVisionApply.h`)
 
@@ -163,13 +166,18 @@ free-run/conservative — only the shipped file carries the bench values).
 ## Gotchas
 
 - The SDK is discovered at configure time through `MIB_MINDVISION_SDK_ROOT`
-  or the `MIB_MINDVISION_SDK_DIR` environment variable.
-- The implementation accepts both SDK include layouts:
-  `MindVision/CameraApiLoad.h` and a flat `CameraApiLoad.h` directly under
-  the configured include directory.
-- `MindVisionCamera.cpp` owns the SDK dynamic-loader definitions by defining
-  `API_LOAD_MAIN`; other MindVision users (`CameraControlService.cpp`,
-  `MindVisionApply.cpp`) include the SDK header as extern declarations only.
+  or the `MIB_MINDVISION_SDK_DIR` environment variable; runtime lookup can be
+  separated with `MIB_MINDVISION_RUNTIME_DIR`.
+- Every pinned platform SDK declares both `CameraGetImageBufferPriority` and
+  `CAMERA_GET_IMAGE_PRIORITY_NEWEST`; SDK-backed builds therefore define
+  `MIB_MINDVISION_USE_PRIORITY_API=1` and use native newest-buffer retrieval.
+- The implementation accepts namespaced or flat SDK include layouts. Windows
+  looks for `MindVision/CameraApiLoad.h` / `CameraApiLoad.h`; Linux/macOS look
+  for `MindVision/CameraApi.h` / `CameraApi.h`.
+- On Windows, `MindVisionCamera.cpp` owns the SDK dynamic-loader definitions
+  by defining `API_LOAD_MAIN`; other MindVision users include the loader as
+  extern declarations. Unix builds have ordinary linked C functions and do
+  not define a loader table.
 - `grabFrame` copies out of `outBuffer_` **while holding `stateMutex_`** —
   `stop()` frees the buffer under the same lock, so the copy must not be moved
   outside the locked region (use-after-free on stop/start churn).
@@ -177,7 +185,8 @@ free-run/conservative — only the shipped file carries the bench values).
   sized 1 byte/px and the pipeline is mono8-only, so a color sensor left at
   the ISP's 3-byte default would overrun the buffer.
 - Runtime deployment copies the MindVision DLL next to the app when Windows
-  packaging is enabled.
+  packaging is enabled. Linux build RPATH resolves the provisioned `.so`; the
+  macOS provisioner converts the dylib install name to `@rpath` and re-signs it.
 - The current backend treats MindVision as a separate camera provider; mock
   and EGrabber paths remain independent.
 - Naming: "trigger output" / `TriggerService` vocabulary means the **sort

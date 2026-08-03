@@ -16,15 +16,24 @@
 #include <stdio.h>
 #endif
 
-// NOTE: no API_LOAD_MAIN here — MindVisionCamera.cpp owns the function-pointer
-// table; this translation unit only gets the extern declarations (the same
-// pattern CameraControlService.cpp uses).
+#ifdef _WIN32
+// NOTE: no API_LOAD_MAIN here — MindVisionCamera.cpp owns the Windows
+// function-pointer table; this translation unit only gets extern declarations.
 #if __has_include(<MindVision/CameraApiLoad.h>)
 #include <MindVision/CameraApiLoad.h>
 #elif __has_include(<CameraApiLoad.h>)
 #include <CameraApiLoad.h>
 #else
 #error "MindVision CameraApiLoad.h not found"
+#endif
+#else
+#if __has_include(<MindVision/CameraApi.h>)
+#include <MindVision/CameraApi.h>
+#elif __has_include(<CameraApi.h>)
+#include <CameraApi.h>
+#else
+#error "MindVision CameraApi.h not found"
+#endif
 #endif
 
 namespace backend::camera::mindvision {

@@ -26,12 +26,22 @@ using namespace Euresys;
 #include <stdio.h>
 #endif
 
+#ifdef _WIN32
 #if __has_include(<MindVision/CameraApiLoad.h>)
 #include <MindVision/CameraApiLoad.h>
 #elif __has_include(<CameraApiLoad.h>)
 #include <CameraApiLoad.h>
 #else
 #error "MindVision CameraApiLoad.h not found"
+#endif
+#else
+#if __has_include(<MindVision/CameraApi.h>)
+#include <MindVision/CameraApi.h>
+#elif __has_include(<CameraApi.h>)
+#include <CameraApi.h>
+#else
+#error "MindVision CameraApi.h not found"
+#endif
 #endif
 
 #include "backend/camera/mindvision/MindVisionApply.h"
@@ -399,11 +409,13 @@ namespace backend::services
         std::vector<DiscoveredCamera> results;
         try
         {
+#ifdef _WIN32
             if (LoadSdkApi() != CAMERA_STATUS_SUCCESS)
             {
                 SPDLOG_WARN("CameraControlService::discoverMindVisionCameras: SDK DLL not available");
                 return results;
             }
+#endif
 
             CameraSdkStatus status = CameraSdkInit(0);
             if (status != CAMERA_STATUS_SUCCESS)
@@ -458,11 +470,13 @@ namespace backend::services
 
         try
         {
+#ifdef _WIN32
             if (LoadSdkApi() != CAMERA_STATUS_SUCCESS)
             {
                 setErr("MindVision SDK DLL not available");
                 return false;
             }
+#endif
 
             CameraSdkStatus status = CameraSdkInit(0);
             if (status != CAMERA_STATUS_SUCCESS)

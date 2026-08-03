@@ -1,7 +1,7 @@
 # Agent Guide — MIB Studio Qt
 
-C++17 / Qt 6.7.3 desktop app for real-time microscopy capture, processing, and
-HDF5 storage. OpenCV imaging, Euresys EGrabber cameras, optional ONNX YOLO.
+C++17 / Qt 6.7.3 microscopy app: OpenCV imaging, Euresys EGrabber and
+MindVision cameras, HDF5 storage, and optional ONNX YOLO.
 
 This file is a map, not a manual. Deep knowledge lives in the vault and docs.
 
@@ -35,11 +35,14 @@ commit/PR. The source-file to vault-note mapping is in
 ## Build and Run
 
 ```bash
-cmake --preset windows-default            # Windows, VS2022 x64, Conan toolchain
-cmake --build build --config Debug
+./scripts/provision-mindvision-sdk.sh      # Linux/macOS; populates build/vendor
 cmake --preset linux-backend-only         # Linux, backend lib + tests only
 cmake --build --preset linux-backend-only-build
 ```
+
+Windows: run `./scripts/provision-mindvision-sdk.ps1`, then configure/build the
+`windows-default` preset. MindVision is default-on for desktop builds;
+`MIB_BUILD_PROCESSING_ONLY=ON` remains SDK-free.
 
 - `mib_studio_qt` — the app; mock camera via ConnectTab "Configure Mock…" or
   `MIB_CAMERA_MODE=mock` + `MIB_MOCK_CAMERA_DIR=<path>` (see
@@ -47,15 +50,10 @@ cmake --build --preset linux-backend-only-build
 - `screenshot_tour` — headless UI tour regenerating the user-manual
   screenshots ([`docs/manual/README.md`](docs/manual/README.md))
 
-**Fresh cloud agent / container:** the base image has `cmake`/`ninja`/`g++` but
-no Qt, no OpenCV/HDF5/spdlog, and an empty Conan cache, so provision system
-packages first (`apt-get update` — the index is stale). Qt6 installs cleanly
-from apt (Ubuntu Noble ships 6.4.2, older than the pinned 6.7.3 but it builds
-and passes the `linux-backend-only` CTest suite); or skip Qt entirely and build
-the `mib_processing` core for the fastest loop. Both paths, with exact package
-lists and commands, are in
-[`docs/howto/linux-build.md`](docs/howto/linux-build.md) ("Cloud agent / fresh
-container setup").
+**Fresh cloud agent / container:** provision packages first (`apt-get update` —
+the index is stale). Ubuntu Noble's Qt 6.4.2 builds and passes backend CTest; or
+build only `mib_processing` for the fastest Qt-free loop. Exact commands:
+[`docs/howto/linux-build.md`](docs/howto/linux-build.md).
 
 ## Verification
 

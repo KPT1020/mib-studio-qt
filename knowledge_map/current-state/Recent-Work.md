@@ -5,6 +5,16 @@
 
 ## Features shipped
 
+- **MindVision enabled by default on every desktop OS** (2026-08-03, issue #338)
+  — R2 contains pinned Windows x64, Linux x86/x64/arm/arm64, and macOS
+  x86_64/arm64 SDKs. CMake and maintained presets now enable the real provider
+  on all three OSes; platform provisioners verify checksums/APIs and Linux CI
+  lanes provision before configure. Windows release paths also fail if
+  `MVCAMSDK_X64.dll` is missing from the payload. Processing-only builds remain
+  SDK-free. Regression guard:
+  `scripts.mindvision_release_gate`; task record:
+  [[../task/2026-08-03-issue-338-mindvision-release-builds]].
+
 - **Explicit camera delivery modes** (2026-08-01, epic #328, issues
   #329–#334) — user-selectable `Every Frame` (ordered, complete) vs
   `Latest Frame` (freshest, intentionally discards stale SDK buffers)

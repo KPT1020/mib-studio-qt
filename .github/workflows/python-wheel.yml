@@ -277,6 +277,13 @@ jobs:
           conan install . -of build --build=missing -s build_type=Release -pr ci
           -o "opencv/*:shared=False"
 
+      - name: Provision pinned MindVision SDK
+        shell: pwsh
+        run: |
+          $sdk = ./scripts/provision-mindvision-sdk.ps1 -PassThru
+          "MIB_MINDVISION_SDK_ROOT=$($sdk.SdkRoot)" >> $env:GITHUB_ENV
+          "MIB_MINDVISION_RUNTIME_DIR=$($sdk.RuntimeDir)" >> $env:GITHUB_ENV
+
       - name: Configure and build native plugin
         shell: pwsh
         env:
@@ -442,6 +449,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential \
             cmake \
+            curl \
             git \
             libgl1-mesa-dev \
             libhdf5-dev \
@@ -455,6 +463,10 @@ jobs:
             python3-pip \
             qt6-base-dev \
             qt6-serialport-dev
+
+      - name: Provision pinned MindVision SDK
+        shell: bash
+        run: ./scripts/provision-mindvision-sdk.sh --github-env "$GITHUB_ENV"
 
       - name: Configure and build native plugin
         shell: bash

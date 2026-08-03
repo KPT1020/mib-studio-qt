@@ -239,7 +239,11 @@ else()
 endif()
 
 if(MIB_HAS_MINDVISION)
-    target_compile_definitions(mib_backend PUBLIC MIB_HAS_MINDVISION=1)
+    target_compile_definitions(mib_backend PUBLIC
+        MIB_HAS_MINDVISION=1
+        # Verified against every pinned R2 SDK by the platform provisioners.
+        MIB_MINDVISION_USE_PRIORITY_API=1
+    )
 else()
     target_compile_definitions(mib_backend PUBLIC MIB_HAS_MINDVISION=0)
 endif()
@@ -263,6 +267,11 @@ if(MIB_HAS_MINDVISION)
     target_include_directories(mib_backend PUBLIC
         ${MIB_MINDVISION_INCLUDE_DIR}
     )
+    if(NOT WIN32)
+        target_link_libraries(mib_backend PUBLIC
+            ${MIB_MINDVISION_LIBRARY}
+        )
+    endif()
 endif()
 
 target_link_libraries(mib_backend PUBLIC
