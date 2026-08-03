@@ -44,6 +44,16 @@ Implementation Notes:
   accounting) + `tests/camera/delivery_mode_overload_test.cpp` and
   `delivery_mode_contract_test.cpp`; hardware runbook
   `docs/howto/camera-latency-mode-validation.md`.
+- Test determinism (2026-08-03): the original overload generation relied on
+  sleep-rate ratios (500 us producer vs 5 ms consumer) which Windows CI's
+  ~15.6 ms timer granularity flattens to 1:1 — both delivery-mode tests
+  failed/flaked on every beta build. The overload test now paces the consumer
+  on logical producer progress (wait until the producer advances
+  `capacity + 2` sequences per grab), `queue_camera.h` gained a
+  `produceBurst` option so the contract test's producer outruns
+  CaptureService's callback regardless of sleep granularity, and the
+  freshness/frame-age gates use medians plus cross-mode bounds instead of
+  per-sample maxima (robust to single scheduler stalls).
 
 Logging:
 - spdlog only; EveryFrame backlog warning is rate-limited to the stats poll.

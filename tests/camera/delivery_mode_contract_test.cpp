@@ -69,6 +69,10 @@ int main()
         service.setCameraFactory([&rawCamera]() {
             QueueBackedTestCamera::Options options;
             options.produceInterval = std::chrono::microseconds(500);
+            // Burst > 1: outrun the 5 ms/frame callback below even where OS
+            // sleep granularity (~15.6 ms on Windows CI) flattens the
+            // producer/consumer interval ratio, so discards are guaranteed.
+            options.produceBurst = 4;
             auto camera = std::make_unique<QueueBackedTestCamera>(options);
             rawCamera = camera.get();
             return std::unique_ptr<camera::common::ICamera>(std::move(camera));

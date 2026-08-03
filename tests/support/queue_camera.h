@@ -35,6 +35,11 @@ class QueueBackedTestCamera : public camera::common::ICamera {
 public:
     struct Options {
         std::chrono::microseconds produceInterval{500};
+        // Frames produced per wake-up. OS sleep granularity (~15.6 ms on
+        // Windows CI) puts a floor under produceInterval, so a consumer that
+        // also sleeps can never be outrun by interval alone; a burst > 1
+        // guarantees the producer outpaces a one-frame-per-tick consumer.
+        int produceBurst = 1;
         uint64_t width = 16;
         uint64_t height = 8;
         bool supportsLatestFrame = true; // false: exercise the unsupported-mode error path
@@ -186,36 +191,38 @@ private:
             if (!running_.load(std::memory_order_acquire)) {
                 return;
             }
-            camera::common::Frame frame;
-            frame.width = options_.width;
-            frame.height = options_.height;
-            frame.linePitch = options_.width;
-            frame.pixelFormat = 0x01080001; // Mono8
-            frame.timestamp = backend::Tools::getTimestamp();
-            frame.data.assign(static_cast<size_t>(options_.width * options_.height), 0);
-            const uint64_t seq = nextSequence_.fetch_add(1, std::memory_order_relaxed) + 1;
-            std::memcpy(frame.data.data(), &seq, sizeof(seq));
+            for (int burst = 0; burst < options_.produceBurst; ++burst) {
+                camera::common::Frame frame;
+                frame.width = options_.width;
+                frame.height = options_.height;
+                frame.linePitch = options_.width;
+                frame.pixelFormat = 0x01080001; // Mono8
+                frame.timestamp = backend::Tools::getTimestamp();
+                frame.data.assign(static_cast<size_t>(options_.width * options_.height), 0);
+                const uint64_t seq = nextSequence_.fetch_add(1, std::memory_order_relaxed) + 1;
+                std::memcpy(frame.data.data(), &seq, sizeof(seq));
 
-            {
-                std::lock_guard<std::mutex> lock(mutex_);
-                if (!running_.load(std::memory_order_acquire)) {
-                    return;
-                }
-                if (queue_.size() >= static_cast<size_t>(config_.numBuffers)) {
-                    // No input buffer available: the transport must drop.
-                    underruns_.fetch_add(1, std::memory_order_relaxed);
-                } else {
-                    queue_.push_back(std::move(frame));
-                    size_t depth = queue_.size();
-                    size_t peak = peakDepth_.load(std::memory_order_relaxed);
-                    while (depth > peak &&
-                           !peakDepth_.compare_exchange_weak(peak, depth,
-                                                             std::memory_order_relaxed)) {
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    if (!running_.load(std::memory_order_acquire)) {
+                        return;
                     }
+                    if (queue_.size() >= static_cast<size_t>(config_.numBuffers)) {
+                        // No input buffer available: the transport must drop.
+                        underruns_.fetch_add(1, std::memory_order_relaxed);
+                    } else {
+                        queue_.push_back(std::move(frame));
+                        size_t depth = queue_.size();
+                        size_t peak = peakDepth_.load(std::memory_order_relaxed);
+                        while (depth > peak &&
+                               !peakDepth_.compare_exchange_weak(peak, depth,
+                                                                 std::memory_order_relaxed)) {
+                        }
+                    }
+                    produced_.fetch_add(1, std::memory_order_relaxed);
                 }
-                produced_.fetch_add(1, std::memory_order_relaxed);
+                cv_.notify_one();
             }
-            cv_.notify_one();
         }
     }
 

@@ -10,7 +10,12 @@
 // transition, no buffer-pool shrinkage over repeated cycles.
 //
 // Timing gates use logical sequence distances and cross-mode ratios, not
-// absolute milliseconds, so the test is machine-independent.
+// absolute milliseconds, so the test is machine-independent. The overload
+// itself is also logical: the consumer holds each grab until the producer
+// has advanced a fixed sequence distance, instead of relying on sleep-based
+// rate ratios (Windows' default ~15.6 ms timer granularity rounds both a
+// 500 us producer sleep and a 5 ms consumer sleep up to the same tick, so a
+// wall-clock "slow" consumer never actually falls behind on CI runners).
 
 #include "support/assert.h"
 #include "support/queue_camera.h"
@@ -33,14 +38,24 @@ namespace {
 
 constexpr int kQueueCapacity = 8;
 constexpr auto kProduceInterval = std::chrono::microseconds(500);
-constexpr auto kSlowConsumerDelay = std::chrono::milliseconds(5);
+// Sequences the producer must advance past each grab before the consumer
+// grabs again. > capacity forces a full queue plus unavoidable underruns in
+// EveryFrame and discards/gaps in LatestFrame; keeping it close to capacity
+// keeps LatestFrame's staleness within the freshness bound below.
+constexpr uint64_t kProducerLeadPerGrab = kQueueCapacity + 2;
 constexpr int kOverloadGrabs = 30;
 
 struct OverloadResult {
     std::vector<uint64_t> sequences;
     std::vector<uint64_t> lagAtGrab; // newest produced sequence - delivered sequence
-    uint64_t maxFrameAgeUs = 0;
+    std::vector<uint64_t> frameAgesUs;
 };
+
+uint64_t medianOf(std::vector<uint64_t> values)
+{
+    std::sort(values.begin(), values.end());
+    return values[values.size() / 2];
+}
 
 OverloadResult runOverload(QueueBackedTestCamera& camera, FrameDeliveryMode mode,
                            mib::test::Watchdog& dog)
@@ -61,10 +76,13 @@ OverloadResult runOverload(QueueBackedTestCamera& camera, FrameDeliveryMode mode
         result.sequences.push_back(seq);
         result.lagAtGrab.push_back(camera.newestProducedSequence() - seq);
         const uint64_t now = backend::Tools::getTimestamp();
-        if (now > frame.timestamp) {
-            result.maxFrameAgeUs = std::max(result.maxFrameAgeUs, now - frame.timestamp);
+        result.frameAgesUs.push_back(now > frame.timestamp ? now - frame.timestamp : 0);
+        // The overload: hold the next grab until the producer demonstrably
+        // outran the queue. Progress is measured in sequences, not wall time.
+        const uint64_t target = camera.newestProducedSequence() + kProducerLeadPerGrab;
+        while (camera.newestProducedSequence() < target) {
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
         }
-        std::this_thread::sleep_for(kSlowConsumerDelay); // the overload: consumer is ~10x slower
     }
     camera.stop();
     return result;
@@ -128,16 +146,25 @@ int main()
     MIB_EXPECT(missing <= lfCamera.intentionalDiscardCount() + lfCamera.underrunCount(),
                "every sequence gap must be accounted for by a counted drop");
 
-    // Freshness is bounded: each delivered frame is within the queue capacity
-    // of the newest produced frame (logical distance, machine-independent).
-    for (const uint64_t lag : lf.lagAtGrab) {
-        MIB_EXPECT(lag <= static_cast<uint64_t>(kQueueCapacity),
-                   "LatestFrame delivery must stay near the producer head");
-    }
-    // Frame age stays bounded instead of growing with the backlog: the stalest
-    // LatestFrame delivery must be meaningfully fresher than EveryFrame's.
-    MIB_EXPECT(lf.maxFrameAgeUs * 2 < ef.maxFrameAgeUs,
-               "LatestFrame max frame age must be well under EveryFrame's");
+    // Freshness is bounded: the typical delivered frame is within the queue
+    // capacity of the newest produced frame (logical distance,
+    // machine-independent). Median, not per-grab: a preempted consumer lets
+    // the free-running producer advance while the full queue drops new
+    // frames, so any single grab can look stale under scheduler noise.
+    MIB_EXPECT(medianOf(lf.lagAtGrab) <= static_cast<uint64_t>(kQueueCapacity),
+               "LatestFrame delivery must typically stay near the producer head");
+    // Even the stalest LatestFrame delivery stays far from EveryFrame's
+    // terminal backlog.
+    const uint64_t worstLfLag =
+        *std::max_element(lf.lagAtGrab.begin(), lf.lagAtGrab.end());
+    MIB_EXPECT(worstLfLag * 2 < ef.lagAtGrab.back(),
+               "LatestFrame worst-case staleness must stay well under EveryFrame's backlog");
+    // Frame age stays bounded instead of growing with the backlog. Medians,
+    // not maxima: a single scheduler stall can age one LatestFrame delivery
+    // arbitrarily, but the typical delivery must stay meaningfully fresher
+    // than EveryFrame's backlogged ones.
+    MIB_EXPECT(medianOf(lf.frameAgesUs) * 2 < medianOf(ef.frameAgesUs),
+               "LatestFrame median frame age must be well under EveryFrame's");
 
     MIB_EXPECT(lfCamera.producedCount() ==
                    lfCamera.deliveredCount() + lfCamera.intentionalDiscardCount() +
