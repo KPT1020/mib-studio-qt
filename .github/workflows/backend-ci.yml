@@ -35,6 +35,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential \
             cmake \
+            curl \
             git \
             libgl1-mesa-dev \
             libhdf5-dev \
@@ -47,6 +48,10 @@ jobs:
             python3-pip \
             qt6-base-dev \
             qt6-serialport-dev
+
+      - name: Provision pinned MindVision SDK
+        shell: bash
+        run: ./scripts/provision-mindvision-sdk.sh --github-env "$GITHUB_ENV"
 
       - name: Install Conan
         shell: bash

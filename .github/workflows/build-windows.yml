@@ -197,6 +197,15 @@ jobs:
           curl.exe --fail --location --retry 3 --output resources\installers\vc_redist.x64.exe "https://aka.ms/vs/17/release/vc_redist.x64.exe"
         shell: pwsh
 
+      - name: Provision pinned MindVision SDK
+        shell: pwsh
+        run: |
+          $sdk = .\scripts\provision-mindvision-sdk.ps1 `
+            -Destination build\vendor\mindvision-sdk `
+            -PassThru
+          "MIB_MINDVISION_SDK_ROOT=$($sdk.SdkRoot)" >> $env:GITHUB_ENV
+          "MIB_MINDVISION_RUNTIME_DIR=$($sdk.RuntimeDir)" >> $env:GITHUB_ENV
+
       # ── Build ──────────────────────────────────────────────────
       - name: Conan install
         shell: pwsh
@@ -241,12 +250,14 @@ jobs:
           # public identifier on the Sentry side, but we still treat it as a
           # secret because anyone who knows it can submit events that count
           # against quota.
-          # Hosted GitHub runners do not have the proprietary MindVision SDK.
-          # Keep this explicit so CI continues to exercise the portable stub.
+          # The pinned R2 artifact is provisioned above. Keep MindVision
+          # explicit so a stale CMake cache can never produce a release stub.
           $args = @(
             '--preset',
             'windows-default',
-            '-DMIB_ENABLE_MINDVISION=OFF',
+            '-DMIB_ENABLE_MINDVISION=ON',
+            "-DMIB_MINDVISION_SDK_ROOT=$env:MIB_MINDVISION_SDK_ROOT",
+            "-DMIB_MINDVISION_RUNTIME_DIR=$env:MIB_MINDVISION_RUNTIME_DIR",
             '-DMIB_REQUIRE_PROCESSING_CORE_SIGNER_SPKI=ON',
             "-DMIB_PROCESSING_CORE_SIGNER_SPKI_SHA256=$env:PROCESSING_CORE_SIGNER_SPKI_SHA256",
             '-DMIB_RELEASE_VERSION_OVERRIDE=${{ steps.version.outputs.artifact_version }}',
@@ -284,7 +295,8 @@ jobs:
         run: |
           $required = @(
             'build\Release\mib_studio_qt.exe',
-            'build\Release\mib_studio_qt.pdb'
+            'build\Release\mib_studio_qt.pdb',
+            'build\Release\MVCAMSDK_X64.dll'
           )
           $missing = @()
           foreach ($p in $required) {

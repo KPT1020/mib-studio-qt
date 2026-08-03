@@ -35,10 +35,9 @@ Synchronous, called from main thread.
 
 - **Windows (`MIB_HAS_EGRABBER=1`)**: full EGrabber-backed discovery, script
   apply, and device reset.
-- **Windows (`MIB_HAS_MINDVISION=1`)**: MindVision discovery and config
-  application are enabled when `MIB_ENABLE_MINDVISION=ON` and the SDK can be
-  located at configure time.
-- **Non-Windows / disabled SDK builds**: methods compile as safe fallbacks:
+- **Windows/Linux/macOS (`MIB_HAS_MINDVISION=1`)**: MindVision discovery and
+  config application are enabled when the platform SDK is provisioned.
+- **Disabled/processing-only SDK builds**: methods compile as safe fallbacks:
   discovery returns empty vectors; mutating operations return `false` and can
   populate `errorOut`.
 
@@ -50,8 +49,9 @@ Synchronous, called from main thread.
   `AppBackend::configureMockCamera`.
 - MindVision selection is handled separately from EGrabber selection in
   [[../frontend/ConnectTab]] and `AppBackend`.
-- MindVision SDK loader symbols are defined by
-  [[../camera/MindVisionCamera]]; this service includes the SDK header without
-  `API_LOAD_MAIN` to avoid duplicate loader definitions.
+- On Windows, MindVision SDK loader symbols are defined by
+  [[../camera/MindVisionCamera]]; this service includes `CameraApiLoad.h`
+  without `API_LOAD_MAIN`. Linux/macOS include `CameraApi.h` and call the
+  linked shared library directly.
 - See `docs/howto/external-config-and-camera-script.md` for script format
   and `docs/integration/egrabber.md` for SDK notes.

@@ -460,6 +460,15 @@ set_tests_properties(frontend.update_catalog PROPERTIES LABELS "frontend;utility
 
 if(Python3_Interpreter_FOUND)
     add_test(
+        NAME scripts.mindvision_release_gate
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/test_mindvision_release_gate.py
+    )
+    set_tests_properties(scripts.mindvision_release_gate PROPERTIES
+        LABELS "scripts;camera;release"
+        TIMEOUT 30
+    )
+
+    add_test(
         NAME scripts.export_hdf5_paths
         COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/test_export_hdf5_paths.py
     )

@@ -232,11 +232,11 @@ different Conan package IDs after reinstalls).
   - `ON` on Windows
   - `OFF` on non-Windows
 - `cmake/MIBOptions.cmake` adds `MIB_ENABLE_MINDVISION`:
-  - `OFF` by default
-  - `ON` enables MindVision SDK discovery on Windows
+  - `ON` by default on Windows, Linux, and macOS
+  - callers may explicitly use `OFF` only for a deliberate SDK-free stub build
 - `cmake/MIBDependencies.cmake` sets `MIB_HAS_MINDVISION`:
-  - `ON` when `WIN32 AND MIB_ENABLE_MINDVISION`
-  - `OFF` otherwise
+  - `ON` when `MIB_ENABLE_MINDVISION=ON` for desktop/backend builds
+  - `OFF` for processing-only builds, which do not compile camera services
 - When `MIB_HAS_EGRABBER=OFF`, build wiring skips:
   - EGrabber include path (`C:/Program Files/Euresys/eGrabber/include`)
   - Coremor include path (`include/Coremor`)
@@ -245,10 +245,19 @@ different Conan package IDs after reinstalls).
 - Non-Windows uses `src/backend/services/AutofocusService.stub.cpp` so Linux
   cloud builds can compile and run mock/non-hardware workflows.
 - When `MIB_HAS_MINDVISION=ON`, CMake requires:
-  - `MindVision/CameraApiLoad.h` (or `CameraApiLoad.h`)
-  - `MVCAMSDK.dll` or `MVCAMSDK_X64.dll`
+  - Windows: `CameraApiLoad.h` plus `MVCAMSDK.dll` / `MVCAMSDK_X64.dll`
+  - Linux/macOS: `CameraApi.h` plus `libMVSDK.so` / `libmvsdk.dylib`
   - SDK root overrides via `MIB_MINDVISION_SDK_ROOT` or the
-    `MIB_MINDVISION_SDK_DIR` environment variable
+    `MIB_MINDVISION_SDK_DIR` environment variable; a separate runtime path may
+    be supplied with `MIB_MINDVISION_RUNTIME_DIR`
+- Official beta/stable workflows and `release.ps1` run
+  `scripts/provision-mindvision-sdk.ps1`, which checksum-verifies the pinned
+  R2 vendor installer, extracts the build headers/runtime without installing
+  drivers on CI, and fails the release if `MVCAMSDK_X64.dll` is absent from
+  the deployed payload.
+- Linux backend, sanitizer, soak, and native-core CI run
+  `scripts/provision-mindvision-sdk.sh`; the same command provisions local
+  Linux/macOS build trees from the platform/architecture-specific R2 archive.
 - When MindVision is disabled, the backend still compiles a stub camera
   implementation and the connect UI keeps mock/EGrabber workflows intact.
 

@@ -1,9 +1,8 @@
 # Linux Build
 
 Use this path for fast local compile verification when changing portable app
-code. It deliberately disables Windows-only hardware SDKs and installer
-packaging, so it does not require EGrabber, Coremor, MSVC, windeployqt, or
-InnoSetup.
+code. It disables Windows-only EGrabber/Coremor and installer packaging, but
+MindVision is enabled by default from the pinned Linux SDK on R2.
 
 ## Prerequisites
 
@@ -28,6 +27,21 @@ sudo apt install cmake build-essential pkg-config git \
   libopencv-dev libhdf5-dev libspdlog-dev nlohmann-json3-dev libsqlite3-dev
 ```
 
+Provision the architecture-matched MindVision headers/shared library before
+configuring either desktop preset:
+
+```bash
+./scripts/provision-mindvision-sdk.sh
+```
+
+CMake discovers this default `build/vendor` output automatically. If you pass
+`--destination`, export `MIB_MINDVISION_SDK_ROOT=<destination>/extracted` and
+`MIB_MINDVISION_RUNTIME_DIR=$MIB_MINDVISION_SDK_ROOT/lib` before configuring.
+
+The archive includes `libMVSDK.so` for x86, x86_64, arm, and arm64. For USB
+cameras, install the extracted udev rules on the target workstation and reload
+udev; the provisioner deliberately does not use `sudo` or alter host policy.
+
 ## Configure And Build
 
 Fast local build from system packages:
@@ -48,11 +62,12 @@ cmake --build --preset linux-release-build
 The `linux-release` preset sets:
 
 - `MIB_ENABLE_HARDWARE_SDKS=OFF`
+- `MIB_ENABLE_MINDVISION=ON`
 - `MIB_ENABLE_WINDOWS_PACKAGING=OFF`
 - `MIB_USE_SENTRY=OFF`
 
-That builds the application with the existing mock/stub paths for proprietary
-hardware and local-only crash reporting.
+That builds EGrabber as a stub, MindVision as the real SDK-backed provider,
+and keeps local-only crash reporting.
 
 ## Cloud agent / fresh container setup
 
@@ -97,6 +112,8 @@ sudo apt-get install -y --no-install-recommends \
     qt6-base-dev qt6-charts-dev qt6-serialport-dev libsqlite3-dev \
     libopencv-dev libhdf5-dev libspdlog-dev libfmt-dev nlohmann-json3-dev
 
+./scripts/provision-mindvision-sdk.sh
+
 cmake --preset linux-backend-only          # or linux-system-release for the frontend libs
 cmake --build --preset linux-backend-only-build
 ctest --preset linux-backend-only-test     # `pip install numpy` for the conformance script test
@@ -116,7 +133,8 @@ cmake --preset linux-sentry-release
 cmake --build --preset linux-sentry-release-build
 ```
 
-This keeps Windows SDKs and packaging disabled but enables `MIB_USE_SENTRY`.
+This keeps Windows-only SDKs and packaging disabled, keeps MindVision enabled,
+and enables `MIB_USE_SENTRY`.
 If sentry-native or system curl dependencies are unavailable, use the regular
 `linux-release` preset for the quick compile loop and keep the Windows workflow
 for final release packaging.
