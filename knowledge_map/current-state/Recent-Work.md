@@ -5,6 +5,15 @@
 
 ## Features shipped
 
+- **Windows beta test portability follow-up** (2026-08-03, issue #338) — the
+  first default-on MindVision beta runner successfully provisioned the pinned
+  R2 SDK and configured/compiled the complete Windows app, then exposed two
+  test-only portability assumptions. The release gate now checks the Unix
+  provisioner's executable bit only on POSIX filesystems, and the simulated
+  camera overload workload pauses its consumer above the coarse Windows timer
+  quantum while retaining queue-depth, sequence-distance, and cross-mode-ratio
+  assertions.
+
 - **MindVision enabled by default on every desktop OS** (2026-08-03, issue #338)
   — R2 contains pinned Windows x64, Linux x86/x64/arm/arm64, and macOS
   x86_64/arm64 SDKs. CMake and maintained presets now enable the real provider

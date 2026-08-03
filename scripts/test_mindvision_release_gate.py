@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import pathlib
 import re
 import stat
@@ -59,7 +60,10 @@ class MindVisionReleaseGateTest(unittest.TestCase):
     def test_unix_provisioner_pins_linux_and_macos_sdks(self) -> None:
         provisioner_path = ROOT / "scripts/provision-mindvision-sdk.sh"
         provisioner = provisioner_path.read_text(encoding="utf-8")
-        self.assertTrue(provisioner_path.stat().st_mode & stat.S_IXUSR)
+        # Windows filesystems do not expose the executable bit recorded by Git.
+        # The permission is meaningful and testable only on POSIX checkouts.
+        if os.name == "posix":
+            self.assertTrue(provisioner_path.stat().st_mode & stat.S_IXUSR)
         for expected in (
             LINUX_SDK_URL,
             LINUX_SDK_SHA256,

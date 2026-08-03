@@ -33,12 +33,14 @@ namespace {
 
 constexpr int kQueueCapacity = 8;
 constexpr auto kProduceInterval = std::chrono::microseconds(500);
-constexpr auto kSlowConsumerDelay = std::chrono::milliseconds(5);
+// Keep the consumer pause above the coarse Windows timer quantum. Assertions
+// remain based on queue depth, sequence distance, and cross-mode age ratios.
+constexpr auto kSlowConsumerDelay = std::chrono::milliseconds(50);
 constexpr int kOverloadGrabs = 30;
 
 struct OverloadResult {
     std::vector<uint64_t> sequences;
-    std::vector<uint64_t> lagAtGrab; // newest produced sequence - delivered sequence
+    std::vector<uint64_t> lagAtGrab; // newest completed sequence - delivered sequence
     uint64_t maxFrameAgeUs = 0;
 };
 
@@ -59,7 +61,10 @@ OverloadResult runOverload(QueueBackedTestCamera& camera, FrameDeliveryMode mode
         MIB_REQUIRE(camera.grabFrame(frame), "producer outruns consumer; grab must succeed");
         const uint64_t seq = QueueBackedTestCamera::sequenceOf(frame);
         result.sequences.push_back(seq);
-        result.lagAtGrab.push_back(camera.newestProducedSequence() - seq);
+        // Compare with the newest frame that reached the completed-buffer
+        // queue. Sequence numbers rejected by a full queue are underruns, not
+        // frames that LatestFrame could have delivered.
+        result.lagAtGrab.push_back(camera.newestCompletedSequence() - seq);
         const uint64_t now = backend::Tools::getTimestamp();
         if (now > frame.timestamp) {
             result.maxFrameAgeUs = std::max(result.maxFrameAgeUs, now - frame.timestamp);

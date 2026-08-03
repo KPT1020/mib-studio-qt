@@ -71,3 +71,18 @@ its runtime payload.
   verification. An attempted all-target macOS build reached an unrelated
   pre-existing OpenCV 5 test compile error (`cv::boundingRect` include) after
   the backend and focused camera targets had already built successfully.
+
+## Windows beta follow-up
+
+The first beta run from the merged change successfully downloaded and
+validated the Windows SDK, configured with MindVision enabled, and compiled
+the complete app. CTest then exposed two test-only portability assumptions:
+Windows does not surface Git's Unix executable bit through `stat`, and its
+coarser sleep scheduling did not reliably overload the simulated camera with a
+5 ms consumer pause. The release gate now checks `S_IXUSR` only on POSIX, and
+the overload workload uses a 50 ms pause while continuing to gate on logical
+queue/sequence relationships and cross-mode age ratios rather than absolute
+timings. Its freshness comparison uses the newest frame that actually reached
+the completed-buffer queue; capture attempts rejected by a full queue remain
+accounted underruns rather than impossible delivery candidates. Production
+camera and release behavior are unchanged.
