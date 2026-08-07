@@ -5,6 +5,17 @@
 
 ## Features shipped
 
+- **Processing-core wheels for ARM64** (2026-08-07, issue #341) —
+  advanced `mib-processing` to 0.2.1 and expanded the `manylinux_2_28` wheel
+  release matrix from x86_64-only to
+  CPython 3.10–3.13 on x86_64 and aarch64. Every architecture
+  gets an in-container install/import smoke test (QEMU-backed for ARM64), while
+  x86_64 retains the full pytest/conformance and Biowork-base gates. Release
+  validation now requires exactly 8 Python/architecture wheel pairs. Linux
+  i686 is intentionally excluded because the NumPy dependency ecosystem has
+  dropped it. Task record:
+  [[../task/2026-08-07-issue-341-processing-core-wheel-architectures]].
+
 - **Windows beta test portability follow-up** (2026-08-03, issue #338) — the
   first default-on MindVision beta runner successfully provisioned the pinned
   R2 SDK and configured/compiled the complete Windows app, then exposed two

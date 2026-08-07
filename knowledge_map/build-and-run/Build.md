@@ -73,20 +73,28 @@ has `POSITION_INDEPENDENT_CODE ON` (needed to link a static library into a
 shared `.so` extension module); this has no effect on the desktop static/
 executable link.
 
-CI produces repaired `manylinux_2_28_x86_64` wheels for CPython 3.10–3.13 and
-imports CPython 3.12 in a slim production base with Biowork's `libgl1` and
-`libglib2.0-0` prerequisites (manylinux-allowlisted OS libraries). The pinned AlmaLinux 8
-builder enables EPEL to obtain HDF5 and spdlog development packages before
-`auditwheel` repairs their runtime libraries into the wheel. See
-`bindings/python/README.md`. `.github/workflows/python-wheel.yml` builds + tests on every relevant PR
-then runs the full-parity conformance harness before publishing wheels as
-GitHub Release assets on `mib-processing-v*` tags
+CI produces repaired `manylinux_2_28` wheels for CPython 3.10–3.13 on
+`x86_64` and `aarch64`. cibuildwheel installs/imports every
+wheel in its matching container (QEMU-backed for ARM64 on the GitHub x86_64
+runner); the x86_64 jobs retain the full pytest/conformance suite and import
+CPython 3.12 in a slim production base with Biowork's `libgl1` and
+`libglib2.0-0` prerequisites. AlmaLinux/EPEL supplies the build dependencies
+before `auditwheel` repair. Linux i686 is intentionally unsupported because
+NumPy no longer publishes those wheels and the workload is not a practical fit
+for a 32-bit address space. See `bindings/python/README.md`.
+ARMv7 is excluded because cibuildwheel 2.22 marks it experimental and lacks a
+CPython 3.12 manylinux ARMv7 target.
+
+`.github/workflows/python-wheel.yml` builds + tests on every relevant PR then
+runs the full-parity conformance harness before publishing wheels as GitHub
+Release assets on `mib-processing-v*` tags
 (a separate tag namespace from the app's own `v*.*.*` releases,
 `.github/workflows/release.yml`).
 
 The same workflow is the processing-core release gate. Its wheel matrix covers
-CPython 3.10–3.13, a Windows x64 job builds the native core artifact, and a tag
-release attaches all assets before `publish-processing-core.py --from-release`
+all 8 CPython/architecture pairs, a Windows x64 job builds the native core
+artifact, and a tag release rejects any incomplete wheel set before
+`publish-processing-core.py --from-release`
 updates the R2 registry. Publication order is immutable
 `processing-core/versions/<version>.json`, merged `index.json`, generated PEP
 503 page, then the backward-compatible full `latest.json` pointer. A tag build

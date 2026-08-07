@@ -61,6 +61,7 @@
 - `task/2026-07-13-hot-swappable-processing-core-native.md`
 - `task/2026-07-13-processing-conformance.md`
 - `task/2026-07-13-processing-core-registry.md`
+- `task/2026-08-07-issue-341-processing-core-wheel-architectures.md`
 
 ## By filename (selected historical records)
 
@@ -84,6 +85,7 @@
 2026-07-13-processing-conformance.md
 2026-07-13-processing-core-registry.md
 2026-07-13-hot-swappable-processing-core-native.md
+2026-08-07-issue-341-processing-core-wheel-architectures.md
 2026-07-15-ultra96-direct-ddr.md
 2026-08-03-issue-338-mindvision-release-builds.md
 camera-reset.md
