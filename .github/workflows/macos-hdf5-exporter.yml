@@ -77,7 +77,7 @@ jobs:
           executable="$app/Contents/MacOS/hdf5_export_app"
           test -x "$executable"
           codesign --verify --deep --strict --verbose=2 "$app"
-          lipo -verify_arch "$EXPECTED_ARCHITECTURE" "$executable"
+          lipo "$executable" -verify_arch "$EXPECTED_ARCHITECTURE"
           plutil -lint "$app/Contents/Info.plist"
 
       - name: Smoke-test packaged GUI
