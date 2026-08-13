@@ -103,7 +103,10 @@ if [ "$CREATE_DMG" = true ]; then
         -ov \
         -format UDZO \
         "$DMG_PATH"
-    shasum -a 256 "$DMG_PATH" > "${DMG_PATH}.sha256"
+    (
+        cd "$(dirname "$DMG_PATH")"
+        shasum -a 256 "$(basename "$DMG_PATH")" > "$(basename "$DMG_PATH").sha256"
+    )
     echo -e "${GREEN}DMG: $DMG_PATH${NC}"
 fi
 
