@@ -54,41 +54,26 @@ The HDF5 Export GUI Application is a standalone PySide6 (Qt for Python) applicat
 
 ### macOS
 
-1. **Navigate to the scripts directory:**
+1. **Run the exporter-only build from the repository root:**
    ```bash
-   cd scripts
+   ./tools/build_mac.sh --clean --dmg --exporter-only
    ```
 
-2. **Make the build script executable (first time only):**
-   ```bash
-   chmod +x build_mac.sh
-   ```
-
-3. **Run the build script:**
-   ```bash
-   ./build_mac.sh
-   ```
-
-   To clean previous builds:
-   ```bash
-   ./build_mac.sh --clean
-   ```
-
-   To also create a DMG file:
-   ```bash
-   ./build_mac.sh --dmg
-   ```
-
-4. **Find the application bundle:**
+2. **Find the application bundle and disk image:**
    The built application will be located at:
    ```
-   scripts/dist/hdf5_export_app.app
+   tools/dist/hdf5_export_app.app
    ```
 
-   If you created a DMG:
+   The native disk image is named for the build machine's architecture:
    ```
-   scripts/dist/hdf5_export_app.dmg
+   tools/dist/MIB_HDF5_Exporter_macos_arm64.dmg
+   tools/dist/MIB_HDF5_Exporter_macos_x86_64.dmg
    ```
+
+The `macOS HDF5 Exporter` GitHub Actions workflow builds both variants and
+checks the bundle signature, executable architecture, property list, and GUI
+startup before uploading them as workflow artifacts.
 
 ### Linux
 
@@ -159,7 +144,7 @@ Double-click `hdf5_export_app.exe` or run from command line:
 **macOS:**
 Double-click `hdf5_export_app.app` in Finder, or run from command line:
 ```bash
-open dist/hdf5_export_app.app
+open tools/dist/hdf5_export_app.app
 ```
 
 **Linux:**
@@ -259,7 +244,9 @@ Where `XXXXXX` is the zero-padded frame index.
 
 **Application won't start**
 - On Windows, check Windows Defender or antivirus isn't blocking the executable
-- On macOS, you may need to allow the app in System Preferences > Security & Privacy
+- The macOS internal build is ad-hoc signed but not Apple notarized. On first
+  launch, Control-click the app and choose **Open**. If macOS still blocks it,
+  review the message under System Settings > Privacy & Security.
 - On Linux, ensure required Qt/X11 runtime libraries are installed (for example `libxcb-cursor0` and TIFF runtime libs, depending on distro)
 - Try running from command line to see error messages
 
@@ -293,16 +280,16 @@ The `.exe` file is standalone and can be distributed directly. Users don't need 
 
 ### macOS
 
-You can distribute either:
-- The `.app` bundle directly (users can drag it to Applications)
-- A `.dmg` file (recommended for distribution)
-
-To create a DMG after building:
+Build the native architecture-specific DMG from the repository root:
 ```bash
-cd scripts
-hdiutil create -volname "HDF5 Export App" -srcfolder dist/hdf5_export_app.app \
-    -ov -format UDZO dist/hdf5_export_app.dmg
+./tools/build_mac.sh --clean --dmg --exporter-only
 ```
+
+Use the `arm64` artifact for Apple Silicon and `x86_64` for Intel. The build
+also writes a `.sha256` checksum beside the DMG. Public distribution without a
+Gatekeeper warning requires an Apple Developer ID signing certificate and
+notarization; the automated internal build currently uses PyInstaller's ad-hoc
+signature.
 
 ### Linux
 
