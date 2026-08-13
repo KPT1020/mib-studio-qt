@@ -12,7 +12,10 @@ Standalone end-user tools for working with MIB Studio HDF5 files after recording
 ## Download
 
 - **Windows:** Versioned zip per release, e.g. `MIB_Studio_Tools_vX.Y.Z_windows.zip`, containing `hdf5_export_app.exe`, `mib_reanalyse_hdf5.exe`, and `README.txt`.
-- **macOS:** Build from source (see [tools/README.md](../../tools/README.md)); optional .app and .dmg via `tools/build_mac.sh`.
+- **macOS:** The `macOS HDF5 Exporter` workflow produces separate native DMGs
+  for Apple Silicon (`arm64`) and Intel (`x86_64`). You can also build from
+  source with `./tools/build_mac.sh --clean --dmg --exporter-only`; see
+  [tools/README.md](../../tools/README.md).
 
 Published builds are uploaded to the same Cloudflare R2 update bucket as the main app, under the `stable/tools/` prefix. A manifest `tools-latest.json` is updated so the latest tools zip URL can be fetched programmatically.
 
@@ -30,6 +33,15 @@ Production URLs:
    mib_reanalyse_hdf5.exe -i path\to\experiment.h5 -o path\to\reanalysis
    mib_reanalyse_hdf5.exe --help
    ```
+
+## Quick start (macOS, from the DMG)
+
+1. Download the DMG matching the Mac: `arm64` for Apple Silicon (M1 or newer),
+   or `x86_64` for Intel.
+2. Open the DMG and drag `hdf5_export_app.app` to Applications.
+3. These internal builds are ad-hoc signed but not Apple notarized. On first
+   launch, Control-click the app, choose **Open**, then confirm **Open**.
+4. Choose the input `.h5` file and output directory, then select **Export**.
 
 ## Compatibility
 

@@ -5,6 +5,14 @@
 
 ## Features shipped
 
+- **Native macOS HDF5 exporter artifacts** (2026-08-13) — corrected the
+  exporter PyInstaller spec to create a real native `.app`, hardened the Mac
+  build to verify its bundle and emit an architecture-labelled DMG/checksum,
+  and added an Actions matrix for Apple Silicon and Intel with signature,
+  architecture, plist, and packaged-GUI startup checks. Internal artifacts are
+  ad-hoc signed and not yet Apple notarized. Task record:
+  [[../task/2026-08-13-macos-hdf5-exporter]].
+
 - **Processing-core wheels for ARM64** (2026-08-07, issue #341) —
   advanced `mib-processing` to 0.2.1 and expanded the `manylinux_2_28` wheel
   release matrix from x86_64-only to

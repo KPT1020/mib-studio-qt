@@ -16,7 +16,15 @@ Source and build specs live under `tools/<toolname>/`. Core logic remains in `sc
 From the repository root:
 
 - **Windows:** `.\tools\build_windows.ps1` (optionally `-Clean`). Output: `tools\dist\`.
-- **macOS:** `./tools/build_mac.sh` (options: `--clean`, `--dmg`). Output: `tools/dist/`.
+- **macOS:** `./tools/build_mac.sh` (options: `--clean`, `--dmg`,
+  `--exporter-only`). Output: `tools/dist/`. For an exporter-only disk image,
+  run `./tools/build_mac.sh --clean --dmg --exporter-only`; the filename is
+  `MIB_HDF5_Exporter_macos_arm64.dmg` on Apple Silicon or
+  `MIB_HDF5_Exporter_macos_x86_64.dmg` on Intel.
+
+The `macOS HDF5 Exporter` GitHub Actions workflow builds and smoke-tests both
+native architectures. These internal builds are ad-hoc signed but not Apple
+notarized; on first launch, Control-click the app and choose **Open**.
 
 Requires Python 3.8+, a virtual environment is created under `tools/.venv` and dependencies from `tools/requirements-runtime.txt` and `tools/requirements-build.txt`.
 
