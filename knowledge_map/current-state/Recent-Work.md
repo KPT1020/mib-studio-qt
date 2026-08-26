@@ -5,6 +5,39 @@
 
 ## Features shipped
 
+- **Shutdown crash prevention** (2026-08-26) — Sentry crash analysis
+  revealed SIGSEGV crashes occurring after all services stopped, during the
+  C++ destructor chain. Root cause: cross-service callbacks (camera-ready,
+  target-group, background-capture) could fire into already-destroyed
+  `unique_ptr` services due to reverse-declaration-order member destruction.
+  Fixes: (1) `AppBackend::shutdown()` now clears all cross-service callbacks
+  before stopping any service, (2) `MainWindow::closeEvent()` now stops the
+  capture service before window destruction begins, (3) `OverviewTab` and
+  `MainWindow` destructors now stop their timers before `delete ui` to
+  prevent use-after-free on `backend_` during widget teardown. Files: `AppBackend.cpp`, `MainWindow.cpp`, `OverviewTab.cpp`.
+
+- **Crash-reporting minidump attachment fix** (2026-08-26, issue #345) —
+  pending `.dmp` files are now submitted via `sentry_capture_minidump`
+  (attaches the actual minidump binary) instead of `sentry_capture_event`
+  (message-only). Custom SEH/signal handlers are no longer installed when
+  Sentry/Crashpad is active, avoiding handler ownership conflicts; the
+  `on_crash` callback writes the JSON sidecar instead. State snapshot
+  extras are cleaned between dumps to prevent leakage. File lifecycle
+  changed from `.uploaded` to `.queued`; legacy `.dmp.uploaded` files are
+  recovered on startup. Bounded retention removes oldest `.queued` dumps
+  beyond `maxRetainedDumps`. CI now runs `sentry-cli debug-files check`
+  after symbol upload. Test: `backend.crash_reporter_pending_upload`.
+  Post-review hardening (same day): pending upload is gated on
+  `isSentryActive()` so never-sent dumps are not marked `.queued` and
+  destroyed by retention; a SIGABRT fallback handler stays installed when
+  Sentry is active (Crashpad cannot see CRT aborts); the `on_crash` hook
+  guards reentrancy, snapshots once, and mutates the event instead of the
+  scope; retention also bounds orphan `.json` sidecars and only logs
+  removals that succeeded; directory scans collect paths before renaming
+  (Windows `FindNextFile` can skip entries otherwise); the test suite was
+  rewritten from `assert()` (vacuous under NDEBUG — CI builds Release) to
+  an explicit failure counter.
+
 - **Processing-core wheels for ARM64** (2026-08-07, issue #341) —
   advanced `mib-processing` to 0.2.1 and expanded the `manylinux_2_28` wheel
   release matrix from x86_64-only to

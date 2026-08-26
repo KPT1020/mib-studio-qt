@@ -103,18 +103,19 @@ with source frames. See `docs/howto/pipeline-latency-diagnosis.md`.
 
 ## Shutdown
 
-`shutdown()` stops every service-owned thread in dependency order — capture
-(joins the capture thread, which stops the trigger via the camera-ready
-callback), trigger (defensive, idempotent), frame recording, then processing
-(`stopRealtime()` + `stopBatchPipeline()` + `stop()`). The destructor calls
-it, so teardown no longer depends on `MainWindow::closeEvent` having stopped
-experiment services first. Ordering matters: members are destroyed in reverse
-declaration order, so `triggerService_`/`autofocusService_` die before
-`processingService_` — a realtime loop still running at member destruction
-would invoke its callbacks on freed services. `shutdown()` is idempotent and
-safe on a never-initialized backend. Verified by
-`tests/backend/backend_lifecycle_smoke_test.cpp` (destroys the backend with
-the realtime thread live).
+`shutdown()` first clears cross-service callbacks (camera-ready, target-group,
+background-capture) so that no callback can fire into an already-destroyed
+service during the member-destruction chain. It then stops every service-owned
+thread in dependency order — capture (joins the capture thread), trigger
+(defensive, idempotent), frame recording, then processing (`stopRealtime()` +
+`stopBatchPipeline()` + `stop()`). The destructor calls it, so teardown no
+longer depends on `MainWindow::closeEvent` having stopped experiment services
+first. Ordering matters: members are destroyed in reverse declaration order,
+so `triggerService_`/`autofocusService_` die before `processingService_` — a
+realtime loop still running at member destruction would invoke its callbacks
+on freed services. `shutdown()` is idempotent and safe on a never-initialized
+backend. Verified by `tests/backend/backend_lifecycle_smoke_test.cpp`
+(destroys the backend with the realtime thread live).
 
 ## Camera selection
 

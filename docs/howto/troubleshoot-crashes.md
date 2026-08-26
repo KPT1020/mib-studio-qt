@@ -25,11 +25,17 @@ Artifacts land here:
 ```
 
 When the installer was built with a Sentry DSN baked in (the system
-env var `MIB_SENTRY_DSN` is set), dumps are forwarded to Sentry by
+env var `MIB_SENTRY_DSN` is set), live crashes are forwarded to Sentry by
 the `crashpad_handler.exe` that lives next to the application. Pending
-dumps from previous runs are drained on the next launch. With matching
-PDBs uploaded by the release pipeline, Sentry symbolicates the stack
-frames automatically.
+dumps from previous runs are submitted on the next launch via
+`sentry_capture_minidump`, which attaches the actual `.dmp` binary to the
+Sentry event for full stack-trace symbolication. Successfully submitted
+dumps are renamed from `.dmp` to `.dmp.queued` to indicate they are in
+the Sentry transport queue. When Sentry is not active (no DSN configured,
+or initialization failed), pending dumps are left in place untouched and
+submitted on a later launch instead. Old `.dmp.uploaded` files (from
+builds before this fix) are automatically recovered to `.dmp` and
+re-submitted.
 
 Quick checks:
 
@@ -37,9 +43,14 @@ Quick checks:
 # Is the DSN configured for this install?
 [System.Environment]::GetEnvironmentVariable('MIB_SENTRY_DSN','Machine')
 
-# How many unsent crashes have piled up locally?
+# How many unsubmitted crashes are pending?
 Get-ChildItem "$env:LOCALAPPDATA\MIB_Studio_Qt\crashes" -Filter *.dmp |
-    Where-Object { $_.Name -notlike '*.uploaded' } | Measure-Object
+    Where-Object { $_.Name -notlike '*.queued' -and $_.Name -notlike '*.uploaded' } |
+    Measure-Object
+
+# How many have been queued for Sentry upload?
+Get-ChildItem "$env:LOCALAPPDATA\MIB_Studio_Qt\crashes" -Filter *.dmp.queued |
+    Measure-Object
 
 # Inspect the JSON sidecar for the most recent crash
 Get-ChildItem "$env:LOCALAPPDATA\MIB_Studio_Qt\crashes\*.json" |

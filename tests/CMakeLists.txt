@@ -278,6 +278,10 @@ target_link_libraries(pipeline_timing_recorder_test PRIVATE Threads::Threads)
 add_test(NAME backend.pipeline_timing_recorder COMMAND $<TARGET_FILE:pipeline_timing_recorder_test>)
 set_tests_properties(backend.pipeline_timing_recorder PROPERTIES LABELS "backend;diagnostics" TIMEOUT 30)
 
+mib_add_backend_test_executable(crash_reporter_pending_upload_test backend/crash_reporter_pending_upload_test.cpp)
+add_test(NAME backend.crash_reporter_pending_upload COMMAND $<TARGET_FILE:crash_reporter_pending_upload_test>)
+set_tests_properties(backend.crash_reporter_pending_upload PROPERTIES LABELS "backend;observability" TIMEOUT 60)
+
 mib_add_backend_test_executable(e2e_pipeline_timing_test integration/e2e_pipeline_timing_test.cpp)
 target_link_libraries(e2e_pipeline_timing_test PRIVATE Threads::Threads)
 add_test(NAME integration.e2e_pipeline_timing COMMAND $<TARGET_FILE:e2e_pipeline_timing_test>)

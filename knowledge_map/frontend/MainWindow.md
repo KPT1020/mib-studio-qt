@@ -78,8 +78,11 @@
 
 ## Gotchas
 
-- `closeEvent` must stop capture + experiment cleanly. Mis-ordering causes
-  the stale `StreamModule` stats seen in `docs/howto/safe-start-stop-egrabber.md`.
+- `closeEvent` stops experiment services, then stops the capture service
+  before the window destructs. Mis-ordering causes the stale `StreamModule`
+  stats seen in `docs/howto/safe-start-stop-egrabber.md`.
+- The destructor stops `statsTimer_` before `delete ui` to prevent timer
+  callbacks from accessing backend_ on a partially-destroyed widget tree.
 - `experimentServicesActive_` must stay in sync with
   `ExperimentController::State` or buttons wedge.
 - The status-bar `Core: <version> · contract <n>` label is authoritative for

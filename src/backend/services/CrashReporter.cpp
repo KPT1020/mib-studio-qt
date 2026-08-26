@@ -2,7 +2,9 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -10,6 +12,7 @@
 #include <ctime>
 #include <exception>
 #include <fstream>
+#include <functional>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -43,6 +46,7 @@ namespace {
 struct CrashGlobals {
     std::atomic<bool> initialized{false};
     std::atomic<bool> handlingCrash{false};
+    std::atomic<bool> sentryActive{false};
     CrashReporter::Config config{};
     CrashReporter::StateSnapshotFn stateSnapshot;
     std::mutex stateSnapshotMutex;
@@ -95,22 +99,22 @@ uint64_t epochMicrosNow() {
             .count());
 }
 
-// Safe to call from a crash handler — only uses C-runtime file APIs.
-void writeStateJsonSidecar(const std::filesystem::path& jsonPath) {
+// Captures the registered state snapshot. try_lock avoids deadlock when the
+// crashing thread already holds the snapshot mutex; in that case the snapshot
+// is skipped entirely — calling it unguarded would race registerStateMirror's
+// assignment of the std::function.
+std::string snapshotStateJson() {
     auto& g = globals();
-    std::string json;
-    {
-        // try_lock avoids deadlock if the crashing thread already holds
-        // the snapshot mutex.
-        std::unique_lock<std::mutex> lk(g.stateSnapshotMutex, std::defer_lock);
-        if (lk.try_lock() && g.stateSnapshot) {
-            json = g.stateSnapshot();
-        } else if (g.stateSnapshot) {
-            json = g.stateSnapshot();
-        } else {
-            json = R"({"note":"no state mirror registered"})";
-        }
+    std::unique_lock<std::mutex> lk(g.stateSnapshotMutex, std::defer_lock);
+    if (lk.try_lock() && g.stateSnapshot) {
+        return g.stateSnapshot();
     }
+    return R"({"note":"state mirror unavailable at crash time"})";
+}
+
+// Safe to call from a crash handler — only uses C-runtime file APIs.
+void writeStateJsonSidecar(const std::filesystem::path& jsonPath,
+                           const std::string& json) {
     std::FILE* f = nullptr;
 #ifdef _WIN32
     if (fopen_s(&f, jsonPath.string().c_str(), "wb") != 0) f = nullptr;
@@ -122,6 +126,56 @@ void writeStateJsonSidecar(const std::filesystem::path& jsonPath) {
     std::fflush(f);
     std::fclose(f);
 }
+
+void writeStateJsonSidecar(const std::filesystem::path& jsonPath) {
+    writeStateJsonSidecar(jsonPath, snapshotStateJson());
+}
+
+bool endsWith(const std::string& str, const std::string& suffix) {
+    if (suffix.size() > str.size()) return false;
+    return str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+#if defined(MIB_USE_SENTRY) && MIB_USE_SENTRY
+sentry_value_t onCrashHook(const sentry_ucontext_t* uctx,
+                           sentry_value_t event,
+                           void* closure) {
+    (void)uctx;
+    (void)closure;
+    auto& g = globals();
+
+    // Another thread is already inside a crash handler: do no further work
+    // (heap/lock state is unknown); let Crashpad finish the minidump.
+    bool expected = false;
+    if (!g.handlingCrash.compare_exchange_strong(expected, true)) {
+        return event;
+    }
+
+    try {
+        // Snapshot once; reuse for both the local sidecar and the event.
+        const std::string json = snapshotStateJson();
+
+        std::error_code ec;
+        std::filesystem::create_directories(g.config.crashDir, ec);
+        const auto base = makeCrashFilenameBase(g.config.crashDir, "crashpad");
+        writeStateJsonSidecar(std::filesystem::path(base.string() + ".json"),
+                              json);
+
+        // Mutate the event itself rather than the scope: with the crashpad
+        // backend, scope changes made this late may not reach the uploaded
+        // event, but the returned event does.
+        sentry_value_t extra = sentry_value_get_by_key(event, "extra");
+        if (sentry_value_is_null(extra)) {
+            extra = sentry_value_new_object();
+            sentry_value_set_by_key(event, "extra", extra);
+        }
+        sentry_value_set_by_key(extra, "state_snapshot",
+                                sentry_value_new_string(json.c_str()));
+    } catch (...) {}
+
+    return event;
+}
+#endif
 
 #ifdef _WIN32
 LONG writeMinidumpInternal(EXCEPTION_POINTERS* eptr,
@@ -232,8 +286,10 @@ void terminateHandler() {
         const auto json = std::filesystem::path(base.string() + ".json");
         writeStateJsonSidecar(json);
 #ifdef _WIN32
-        const auto dump = std::filesystem::path(base.string() + ".dmp");
-        writeMinidumpInternal(nullptr, dump);
+        if (!g.sentryActive.load(std::memory_order_relaxed)) {
+            const auto dump = std::filesystem::path(base.string() + ".dmp");
+            writeMinidumpInternal(nullptr, dump);
+        }
 #endif
     } catch (...) {
     }
@@ -256,37 +312,190 @@ void qtMessageHandler(QtMsgType type, const QMessageLogContext& ctx, const QStri
     }
 }
 
-void uploadPendingCrashes(const std::filesystem::path& dir) {
-#if defined(MIB_USE_SENTRY) && MIB_USE_SENTRY
+void recoverLegacyUploaded(const std::filesystem::path& dir) {
     std::error_code ec;
     if (!std::filesystem::exists(dir, ec)) return;
+
+    // Collect first, rename after: renaming while a directory_iterator is
+    // live can skip entries (FindNextFile semantics on Windows).
+    std::vector<std::filesystem::path> legacy;
     for (auto& entry : std::filesystem::directory_iterator(dir, ec)) {
         if (ec) break;
         if (!entry.is_regular_file()) continue;
-        const auto p = entry.path();
-        if (p.extension() != ".dmp") continue;
+        if (endsWith(entry.path().string(), ".dmp.uploaded")) {
+            legacy.push_back(entry.path());
+        }
+    }
 
-        sentry_value_t event = sentry_value_new_event();
-        sentry_value_set_by_key(event, "level", sentry_value_new_string("fatal"));
-        sentry_value_set_by_key(event, "message",
-            sentry_value_new_string(("Recovered crash dump: " + p.filename().string()).c_str()));
+    for (const auto& p : legacy) {
+        const std::string pathStr = p.string();
+        const std::string dmpSuffix = ".dmp.uploaded";
+        const std::string base = pathStr.substr(0, pathStr.size() - dmpSuffix.size());
+        const std::string restoredDmp = base + ".dmp";
+        std::filesystem::rename(p, restoredDmp, ec);
+        if (ec) {
+            SPDLOG_WARN("CrashReporter: failed to recover legacy dump {}: {}",
+                        pathStr, ec.message());
+            ec.clear();
+            continue;
+        }
+        SPDLOG_INFO("CrashReporter: recovered legacy dump for re-upload: {}",
+                    restoredDmp);
 
-        auto sidecar = std::filesystem::path(p).replace_extension(".json");
-        if (std::filesystem::exists(sidecar, ec)) {
+        const std::string sidecarUploaded = base + ".json.uploaded";
+        if (std::filesystem::exists(sidecarUploaded, ec)) {
+            std::filesystem::rename(sidecarUploaded, base + ".json", ec);
+            ec.clear();
+        }
+    }
+}
+
+struct RetainedEntry {
+    std::filesystem::path path;
+    std::filesystem::file_time_type modified;
+};
+
+// Removes the oldest entries beyond maxCount. removeSibling maps an entry to
+// an optional companion file removed alongside it (best-effort).
+void trimOldest(std::vector<RetainedEntry>& entries, size_t maxCount,
+                const char* what,
+                const std::function<std::string(const std::string&)>& sibling) {
+    if (entries.size() <= maxCount) return;
+
+    std::sort(entries.begin(), entries.end(),
+              [](const RetainedEntry& a, const RetainedEntry& b) {
+                  return a.modified < b.modified;
+              });
+
+    std::error_code ec;
+    const size_t toRemove = entries.size() - maxCount;
+    for (size_t i = 0; i < toRemove; ++i) {
+        std::filesystem::remove(entries[i].path, ec);
+        if (ec) {
+            SPDLOG_WARN("CrashReporter: failed to remove old {} {}: {}",
+                        what, entries[i].path.string(), ec.message());
+            ec.clear();
+            continue;
+        }
+        SPDLOG_INFO("CrashReporter: removed old {} (retention limit {}): {}",
+                    what, maxCount, entries[i].path.string());
+
+        if (sibling) {
+            const std::string companion = sibling(entries[i].path.string());
+            if (!companion.empty()) {
+                std::filesystem::remove(companion, ec);
+                ec.clear();
+            }
+        }
+    }
+}
+
+void cleanupRetainedDumps(const std::filesystem::path& dir, size_t maxCount) {
+    std::error_code ec;
+    if (!std::filesystem::exists(dir, ec)) return;
+
+    std::vector<RetainedEntry> queued;
+    // Bare .json sidecars with no dump (terminate / on_crash / diagnostic
+    // paths): nothing uploads or renames them, so bound them here too.
+    std::vector<RetainedEntry> orphanJson;
+
+    for (auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+        if (ec) break;
+        if (!entry.is_regular_file()) continue;
+        const std::string pathStr = entry.path().string();
+        if (endsWith(pathStr, ".dmp.queued")) {
+            queued.push_back({entry.path(), entry.last_write_time(ec)});
+            ec.clear();
+        } else if (endsWith(pathStr, ".json")) {
+            // Keep the sidecar of any dump still on disk (pending or queued).
+            const std::string base = pathStr.substr(0, pathStr.size() - 5);
+            const bool hasDump =
+                std::filesystem::exists(base + ".dmp", ec) ||
+                std::filesystem::exists(base + ".dmp.queued", ec);
+            ec.clear();
+            if (!hasDump) {
+                orphanJson.push_back({entry.path(), entry.last_write_time(ec)});
+                ec.clear();
+            }
+        }
+    }
+
+    trimOldest(queued, maxCount, "queued dump",
+               [](const std::string& p) {
+                   const std::string suffix = ".dmp.queued";
+                   return p.substr(0, p.size() - suffix.size()) + ".json.queued";
+               });
+    trimOldest(orphanJson, maxCount, "orphan sidecar",
+               [](const std::string& p) {
+                   // captureException writes a .txt next to its .json.
+                   return p.substr(0, p.size() - 5) + ".txt";
+               });
+}
+
+void uploadPendingCrashes(const std::filesystem::path& dir) {
+#if defined(MIB_USE_SENTRY) && MIB_USE_SENTRY
+    // Without a live Sentry (no DSN, or sentry_init failed) capture calls are
+    // no-ops: leave the dumps untouched so a later launch with Sentry active
+    // can still submit them. Renaming here would mark never-sent dumps as
+    // queued and retention would eventually destroy them.
+    if (!globals().sentryActive.load()) {
+        SPDLOG_INFO("CrashReporter: Sentry inactive; leaving pending dumps in place");
+        return;
+    }
+
+    std::error_code ec;
+    if (!std::filesystem::exists(dir, ec)) return;
+
+    // Collect first, act after: renaming while a directory_iterator is live
+    // can skip entries (FindNextFile semantics on Windows).
+    std::vector<std::filesystem::path> pending;
+    for (auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+        if (ec) break;
+        if (!entry.is_regular_file()) continue;
+        if (entry.path().extension() == ".dmp") {
+            pending.push_back(entry.path());
+        }
+    }
+
+    for (const auto& p : pending) {
+        const auto sidecar = std::filesystem::path(
+            p.string().substr(0, p.string().size() - 4) + ".json");
+        bool hasSidecar = std::filesystem::exists(sidecar, ec);
+
+        if (hasSidecar) {
             std::ifstream f(sidecar);
-            std::stringstream ss; ss << f.rdbuf();
-            sentry_set_extra("state_snapshot", sentry_value_new_string(ss.str().c_str()));
+            std::stringstream ss;
+            ss << f.rdbuf();
+            sentry_set_extra("state_snapshot",
+                             sentry_value_new_string(ss.str().c_str()));
         }
 
-        sentry_capture_event(event);
-        // Note: Crashpad-managed dumps are attached automatically. For
-        // dumps we wrote outside Crashpad we attach the file path here.
-        SPDLOG_INFO("CrashReporter: queued pending crash for upload: {}", p.string());
+        sentry_set_tag("crash_recovery", "pending_dump");
+        sentry_set_extra("original_dump_file",
+                         sentry_value_new_string(p.filename().string().c_str()));
 
-        // Move to .uploaded to avoid re-submission on next launch.
-        std::filesystem::rename(p, p.string() + ".uploaded", ec);
-        if (std::filesystem::exists(sidecar, ec)) {
-            std::filesystem::rename(sidecar, sidecar.string() + ".uploaded", ec);
+        // sentry_capture_minidump reads the dump into the Sentry envelope
+        // and generates a fatal event with an event.minidump attachment.
+        // In 0.7.20 it returns void, so per-capture success cannot be
+        // checked; with Sentry active the envelope is handed to Sentry's
+        // disk-backed transport queue, hence the .queued rename below.
+        sentry_capture_minidump(p.string().c_str());
+
+        sentry_remove_extra("state_snapshot");
+        sentry_remove_extra("original_dump_file");
+        sentry_remove_tag("crash_recovery");
+
+        SPDLOG_INFO("CrashReporter: submitted pending minidump: {}", p.string());
+
+        std::filesystem::rename(p, p.string() + ".queued", ec);
+        if (ec) {
+            SPDLOG_WARN("CrashReporter: failed to rename {} to .queued: {}",
+                        p.string(), ec.message());
+            ec.clear();
+        }
+        if (hasSidecar && std::filesystem::exists(sidecar, ec)) {
+            std::filesystem::rename(sidecar, sidecar.string() + ".queued", ec);
+            ec.clear();
         }
     }
 #else
@@ -327,9 +536,12 @@ bool CrashReporter::init(const Config& cfg) {
         sentry_options_set_auto_session_tracking(options, 1);
         sentry_options_set_symbolize_stacktraces(options, 1);
 
+        sentry_options_set_on_crash(options, onCrashHook, nullptr);
+
         if (sentry_init(options) != 0) {
             SPDLOG_WARN("CrashReporter: sentry_init failed; continuing local-only");
         } else {
+            g.sentryActive.store(true);
             SPDLOG_INFO("CrashReporter: Sentry initialized (release={}, env={}, tracesSampleRate={})",
                         cfg.release, cfg.environment, tracesSampleRate);
         }
@@ -340,15 +552,29 @@ bool CrashReporter::init(const Config& cfg) {
     SPDLOG_INFO("CrashReporter: built without Sentry support; running in local-only mode");
 #endif
 
+    // Install local fault handlers only when Sentry/Crashpad is NOT active.
+    // When Sentry owns the crash backend, competing handlers would intercept
+    // faults before Crashpad and prevent it from generating real minidump
+    // events. The on_crash callback writes local JSON sidecars instead.
+    if (!g.sentryActive.load()) {
 #ifdef _WIN32
-    ::SetUnhandledExceptionFilter(sehHandler);
+        ::SetUnhandledExceptionFilter(sehHandler);
 #endif
-
-    if (cfg.installSignalHandlers) {
-        std::signal(SIGSEGV, signalHandler);
-        std::signal(SIGABRT, signalHandler);
-        std::signal(SIGFPE,  signalHandler);
-        std::signal(SIGILL,  signalHandler);
+        if (cfg.installSignalHandlers) {
+            std::signal(SIGSEGV, signalHandler);
+            std::signal(SIGABRT, signalHandler);
+            std::signal(SIGFPE,  signalHandler);
+            std::signal(SIGILL,  signalHandler);
+        }
+    } else {
+        // Crashpad only intercepts native faults (SEH); a CRT abort() never
+        // reaches it. Keep a SIGABRT handler as the local fallback so aborts
+        // still produce a dump + sidecar, then re-raise with SIG_DFL.
+        if (cfg.installSignalHandlers) {
+            std::signal(SIGABRT, signalHandler);
+        }
+        SPDLOG_INFO("CrashReporter: Sentry active — Crashpad owns fault capture; "
+                    "local SIGABRT fallback installed");
     }
 
     if (cfg.installTerminateHandler) {
@@ -363,7 +589,9 @@ bool CrashReporter::init(const Config& cfg) {
     SPDLOG_INFO("CrashReporter initialized: crashDir={}", cfg.crashDir.string());
 
     if (cfg.uploadPendingOnStart) {
+        recoverLegacyUploaded(cfg.crashDir);
         uploadPendingCrashes(cfg.crashDir);
+        cleanupRetainedDumps(cfg.crashDir, cfg.maxRetainedDumps);
     }
     return true;
 }
@@ -374,11 +602,16 @@ void CrashReporter::shutdown() {
 #if defined(MIB_USE_SENTRY) && MIB_USE_SENTRY
     sentry_close();
 #endif
+    g.sentryActive.store(false);
     g.initialized.store(false);
 }
 
 bool CrashReporter::isInitialized() {
     return globals().initialized.load();
+}
+
+bool CrashReporter::isSentryActive() {
+    return globals().sentryActive.load();
 }
 
 void CrashReporter::setTag(std::string_view key, std::string_view value) {

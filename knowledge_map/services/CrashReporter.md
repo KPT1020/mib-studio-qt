@@ -12,30 +12,59 @@
 
 ## Responsibility
 
-- Installs:
+- Installs (local-only mode, i.e. when Sentry is not active):
   - Windows `SetUnhandledExceptionFilter` → `MiniDumpWriteDump` (always
     available via `dbghelp.lib`).
   - `std::signal` handlers for SIGSEGV / SIGABRT / SIGFPE / SIGILL.
   - `std::set_terminate` for uncaught C++ exceptions.
   - `qInstallMessageHandler` to route Qt warnings/criticals into spdlog
     and forward fatal Qt messages as Sentry events.
+- When Sentry is active (`isSentryActive() == true`):
+  - The SEH filter and SIGSEGV/SIGFPE/SIGILL handlers are **not**
+    installed — Crashpad owns native fault capture. The
+    `sentry_options_set_on_crash` callback writes the JSON state sidecar
+    when Crashpad catches a crash.
+  - A **SIGABRT handler is still installed** as a local fallback:
+    Crashpad only intercepts SEH/native faults, so a CRT `abort()` would
+    otherwise produce no dump at all.
+  - `std::set_terminate` and `qInstallMessageHandler` are still
+    installed (they handle C++ exceptions and Qt fatals that Crashpad
+    does not intercept).
 - On crash: writes `{timestamp}-pid{N}-{reason}.dmp` (Windows) and a
   `.json` sidecar containing the current
   [[../diagnostics/CrashStateMirror]] snapshot under
   `%LOCALAPPDATA%/MIB_Studio_Qt/crashes/`.
-- On startup: scans the crash dir for `.dmp` files left over from previous
-  runs and (when Sentry is enabled) submits them via `sentry_capture_event`
-  before renaming them `.uploaded` to prevent re-submission.
+- On startup (when `uploadPendingOnStart` is true):
+  1. **Legacy recovery:** scans for `.dmp.uploaded` files (the old
+     suffix from before issue #345) and renames them back to `.dmp`
+     (plus matching `.json.uploaded` → `.json`) for re-submission.
+  2. **Pending upload:** only when Sentry actually initialized
+     (`isSentryActive()`), scans for `.dmp` files and submits each via
+     `sentry_capture_minidump(path)`, which attaches the actual minidump
+     binary to the Sentry event. Each dump's JSON sidecar is loaded and
+     attached as a `state_snapshot` extra, then cleaned up after
+     submission to prevent state leakage between dumps. Submitted dumps
+     are renamed to `.dmp.queued` (not `.uploaded`). When Sentry is
+     inactive (no DSN / init failure / built without Sentry), pending
+     dumps are left untouched so a later launch can submit them.
+  3. **Bounded retention:** removes the oldest `.dmp.queued` dumps
+     beyond `maxRetainedDumps` (default 50), and separately bounds
+     orphan `.json` sidecars (terminate / on_crash / diagnostic files
+     with no matching dump) by the same limit — sidecars of dumps still
+     on disk are never touched.
 
 ## Key APIs
 
 ```cpp
 struct Config { dsn; release; environment; crashDir; databaseDir;
-                installSignalHandlers; installQtMessageHandler;
-                installTerminateHandler; uploadPendingOnStart; };
+                tracesSampleRate; installSignalHandlers;
+                installQtMessageHandler; installTerminateHandler;
+                uploadPendingOnStart; maxRetainedDumps; };
 
 static bool init(const Config& cfg);
 static void shutdown();
+static bool isInitialized();
+static bool isSentryActive();
 static void setTag(string_view k, string_view v);
 static void setContextJson(string_view name, string_view json);
 static void breadcrumb(string_view category, string_view msg,
@@ -43,11 +72,35 @@ static void breadcrumb(string_view category, string_view msg,
 static void registerStateMirror(StateSnapshotFn);
 static void captureMessage(string_view);
 static void captureException(string_view);
+static void capturePerformanceTransaction(string_view name,
+    string_view op, double durationMs, string_view jsonData = {});
 static bool writeDiagnosticSnapshot(string_view reason);
 ```
 
 Public free-form decoration calls (`setTag`, `breadcrumb`) are no-ops when
 Sentry is not compiled in — they remain safe to sprinkle through services.
+
+## Handler ownership
+
+When `isSentryActive()` is true (Sentry initialized successfully with a
+DSN), CrashReporter does **not** install its own SEH filter or
+SIGSEGV/SIGFPE/SIGILL handlers — Crashpad's handlers take precedence for
+native crash capture. It **does** keep a SIGABRT handler, because
+Crashpad never sees a CRT `abort()`. The `on_crash` callback
+(`sentry_options_set_on_crash`) is registered so that CrashReporter can
+still write the JSON state sidecar at crash time; the callback guards
+against reentrancy, snapshots the state mirror exactly once (skipping it
+when the mutex is contended rather than calling it unlocked), and sets
+`state_snapshot` on the event itself rather than the scope (scope
+mutations this late may not reach the crashpad-uploaded event).
+
+When Sentry is not active (no DSN, `MIB_USE_SENTRY=OFF`, or init
+failure), CrashReporter falls back to its own handlers for local
+minidump capture.
+
+The `std::terminate` handler skips its own `MiniDumpWriteDump` call when
+Sentry is active (Crashpad handles it), but still writes the JSON
+sidecar.
 
 ## DSN configuration
 
@@ -105,7 +158,18 @@ Operator setup (org slug, auth token, self-hosted URL) is documented in
   20260522T143015-pid12345-sigsegv.json   ← (signal-handler path, no dmp on non-Win)
   20260522T143015-pid12345-terminate.json ← std::terminate path
   20260522T143015-pid12345-exception.json ← non-fatal captureException()
-  *.uploaded                              ← already sent to Sentry
+  *.dmp.queued                            ← submitted to Sentry transport queue
+  *.dmp.uploaded                          ← legacy suffix (recovered to .dmp on next launch)
+```
+
+### File lifecycle
+
+```
+[crash] → .dmp + .json
+[next launch, Sentry active] → sentry_capture_minidump() → .dmp.queued + .json.queued
+[next launch, Sentry inactive] → .dmp + .json stay as-is (submitted later)
+[legacy recovery] → .dmp.uploaded → .dmp → (re-submitted as above)
+[retention cleanup] → oldest .dmp.queued (and orphan .json) removed beyond maxRetainedDumps
 ```
 
 ## Symbolication
@@ -117,7 +181,8 @@ Minidumps are useless without matching PDB. The CMake config emits
 The `Build Windows` GitHub Actions workflow runs
 `sentry-cli debug-files upload --include-sources build\Release` on
 every release/beta build, so symbols are pushed automatically when
-`SENTRY_AUTH_TOKEN` is present. The workflow then creates a Sentry
+`SENTRY_AUTH_TOKEN` is present. The workflow then verifies the uploaded
+symbols with `sentry-cli debug-files check` and creates a Sentry
 release named `mib_studio_qt@<version>`, matching the `release` field
 set at runtime by `main.cpp`.
 
@@ -130,6 +195,7 @@ $env:SENTRY_ORG = "sentry"
 $env:SENTRY_PROJECT = "mib-studio-qt"
 
 sentry-cli debug-files upload --include-sources build\Release
+sentry-cli debug-files check build\Release\mib_studio_qt.pdb
 sentry-cli releases new "mib_studio_qt@$version"
 sentry-cli releases finalize "mib_studio_qt@$version"
 ```
@@ -140,6 +206,21 @@ sentry-cli releases finalize "mib_studio_qt@$version"
   post-build copy step handles this when `MIB_USE_SENTRY=ON`. Without it
   Sentry silently falls back to in-process capture and loses dumps from
   non-recoverable crashes (heap corruption, stack overflow).
+- **Do not install a custom SEH filter or fault-signal handlers when
+  Sentry is active.** They overwrite Crashpad's handlers and prevent
+  minidump capture. The `init()` code gates SEH + SIGSEGV/SIGFPE/SIGILL
+  installation behind `!isSentryActive()`; only the SIGABRT fallback
+  (which Crashpad cannot see) stays installed in both modes.
+- **Pending dumps are only renamed `.queued` after a real submission.**
+  `uploadPendingCrashes` is gated on `isSentryActive()` — with Sentry
+  inactive, `sentry_capture_minidump` would be a no-op and renaming
+  would mark never-sent dumps as queued, letting retention destroy
+  them. Note 0.7.20's `sentry_capture_minidump` returns `void`, so
+  per-capture success cannot be verified beyond the active check.
+- **State snapshot isolation.** Each pending dump's extras
+  (`state_snapshot`, `original_dump_file`) are set before
+  `sentry_capture_minidump` and removed immediately after, so one dump's
+  state never leaks into the next event.
 - The signal handler intentionally re-raises the signal with `SIG_DFL`
   so debuggers and Windows Error Reporting still see the fault.
 - `registerStateMirror` MUST point to a function that does not allocate
@@ -152,3 +233,8 @@ sentry-cli releases finalize "mib_studio_qt@$version"
   silently; Crashpad only catches SEH/native faults.
 - Building with `MIB_USE_SENTRY=OFF` (or with no DSN) keeps the local
   minidump path active — useful for offline / air-gapped deployments.
+- **`sentry_capture_minidump` vs `sentry_capture_event`:** The upload
+  path uses `sentry_capture_minidump(path)` which attaches the actual
+  `.dmp` binary to the Sentry event. The old `sentry_capture_event`
+  approach only sent a message event without the minidump attachment,
+  making stack-based grouping and symbolication impossible.

@@ -370,6 +370,11 @@ jobs:
           # into the symbol map for nicer stack frames.
           sentry-cli debug-files upload --include-sources build\Release
 
+          # Verify that the uploaded symbols contain valid debug IDs so
+          # minidumps submitted via sentry_capture_minidump can be
+          # symbolicated. Fails the step if no debug info is found.
+          sentry-cli debug-files check build\Release\mib_studio_qt.pdb
+
           # Tie this build to a Sentry release so events arriving with
           # release="mib_studio_qt@$version" group cleanly in the UI.
           sentry-cli releases new $release
