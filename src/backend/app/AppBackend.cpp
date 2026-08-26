@@ -146,6 +146,19 @@ namespace backend
         // die before processingService_ — a still-running realtime loop would
         // invoke its callbacks on freed services. Every call below is
         // idempotent, so shutdown() may run more than once.
+
+        // Clear cross-service callbacks BEFORE stopping anything.  A callback
+        // that fires during teardown could dereference a service that has
+        // already been destroyed (e.g. triggerService_ destroyed before
+        // processingService_ in the member-destruction chain).
+        if (captureService_) {
+            captureService_->setCameraReadyCallback({});
+        }
+        if (processingService_) {
+            processingService_->setTargetGroupCallback({});
+            processingService_->setBackgroundCaptureCallback({});
+        }
+
         if (captureService_) {
             captureService_->stop();
         }

@@ -5,6 +5,21 @@
 
 ## Features shipped
 
+- **Shutdown crash prevention** (2026-08-26) — Sentry crash analysis
+  revealed SIGSEGV crashes occurring after all services stopped, during the
+  C++ destructor chain. Root cause: cross-service callbacks (camera-ready,
+  target-group, background-capture) could fire into already-destroyed
+  `unique_ptr` services due to reverse-declaration-order member destruction.
+  Fixes: (1) `AppBackend::shutdown()` now clears all cross-service callbacks
+  before stopping any service, (2) `MainWindow::closeEvent()` now stops the
+  capture service before window destruction begins, (3) `OverviewTab` and
+  `MainWindow` destructors now stop their timers before `delete ui` to
+  prevent use-after-free on `backend_` during widget teardown,
+  (4) `CrashReporter::uploadPendingCrashes` now tags recovered crash events
+  with `crash_dump_file` for Crashpad minidump correlation. Files:
+  `AppBackend.cpp`, `MainWindow.cpp`, `OverviewTab.cpp`,
+  `CrashReporter.cpp`.
+
 - **Processing-core wheels for ARM64** (2026-08-07, issue #341) —
   advanced `mib-processing` to 0.2.1 and expanded the `manylinux_2_28` wheel
   release matrix from x86_64-only to

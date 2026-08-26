@@ -25,7 +25,9 @@
   `%LOCALAPPDATA%/MIB_Studio_Qt/crashes/`.
 - On startup: scans the crash dir for `.dmp` files left over from previous
   runs and (when Sentry is enabled) submits them via `sentry_capture_event`
-  before renaming them `.uploaded` to prevent re-submission.
+  with a `crash_dump_file` tag (the dump filename) for correlation with the
+  Crashpad-managed minidump event, before renaming them `.uploaded` to
+  prevent re-submission.
 
 ## Key APIs
 

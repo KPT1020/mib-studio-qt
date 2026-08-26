@@ -271,6 +271,13 @@ void uploadPendingCrashes(const std::filesystem::path& dir) {
         sentry_value_set_by_key(event, "message",
             sentry_value_new_string(("Recovered crash dump: " + p.filename().string()).c_str()));
 
+        // Tag with the dump filename so it can be correlated with the
+        // Crashpad-managed minidump event (which carries the stack trace).
+        sentry_value_t tags = sentry_value_new_object();
+        sentry_value_set_by_key(tags, "crash_dump_file",
+            sentry_value_new_string(p.filename().string().c_str()));
+        sentry_value_set_by_key(event, "tags", tags);
+
         auto sidecar = std::filesystem::path(p).replace_extension(".json");
         if (std::filesystem::exists(sidecar, ec)) {
             std::ifstream f(sidecar);
@@ -279,8 +286,6 @@ void uploadPendingCrashes(const std::filesystem::path& dir) {
         }
 
         sentry_capture_event(event);
-        // Note: Crashpad-managed dumps are attached automatically. For
-        // dumps we wrote outside Crashpad we attach the file path here.
         SPDLOG_INFO("CrashReporter: queued pending crash for upload: {}", p.string());
 
         // Move to .uploaded to avoid re-submission on next launch.

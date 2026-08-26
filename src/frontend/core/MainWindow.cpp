@@ -542,6 +542,13 @@ MainWindow::~MainWindow() {
     if (flushWatcher_ && flushWatcher_->isRunning()) {
         flushWatcher_->waitForFinished();
     }
+    // Stop all timers that access backend_ via callbacks before the UI is
+    // torn down. The OverviewTab 50fps timer fires onTick() which calls
+    // backend_.playback().fetchLatest() — if the timer fires after the
+    // widget tree is partially destroyed, that's a use-after-free.
+    if (statsTimer_) {
+        statsTimer_->stop();
+    }
     delete ui;
 }
 
@@ -1468,5 +1475,12 @@ void MainWindow::closeEvent(QCloseEvent* event)
     if (experimentServicesActive_) {
         stopExperimentServices();
     }
+
+    // Stop the capture service so the camera hardware is released and no
+    // new frames are pushed into FrameStore while the window destructs.
+    if (backend_.capture().isRunning()) {
+        backend_.capture().stop();
+    }
+
     QMainWindow::closeEvent(event);
 }
