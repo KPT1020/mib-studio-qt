@@ -27,6 +27,16 @@
   recovered on startup. Bounded retention removes oldest `.queued` dumps
   beyond `maxRetainedDumps`. CI now runs `sentry-cli debug-files check`
   after symbol upload. Test: `backend.crash_reporter_pending_upload`.
+  Post-review hardening (same day): pending upload is gated on
+  `isSentryActive()` so never-sent dumps are not marked `.queued` and
+  destroyed by retention; a SIGABRT fallback handler stays installed when
+  Sentry is active (Crashpad cannot see CRT aborts); the `on_crash` hook
+  guards reentrancy, snapshots once, and mutates the event instead of the
+  scope; retention also bounds orphan `.json` sidecars and only logs
+  removals that succeeded; directory scans collect paths before renaming
+  (Windows `FindNextFile` can skip entries otherwise); the test suite was
+  rewritten from `assert()` (vacuous under NDEBUG — CI builds Release) to
+  an explicit failure counter.
 
 - **Processing-core wheels for ARM64** (2026-08-07, issue #341) —
   advanced `mib-processing` to 0.2.1 and expanded the `manylinux_2_28` wheel

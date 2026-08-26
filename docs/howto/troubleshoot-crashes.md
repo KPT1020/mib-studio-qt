@@ -31,8 +31,11 @@ dumps from previous runs are submitted on the next launch via
 `sentry_capture_minidump`, which attaches the actual `.dmp` binary to the
 Sentry event for full stack-trace symbolication. Successfully submitted
 dumps are renamed from `.dmp` to `.dmp.queued` to indicate they are in
-the Sentry transport queue. Old `.dmp.uploaded` files (from builds before
-this fix) are automatically recovered to `.dmp` and re-submitted.
+the Sentry transport queue. When Sentry is not active (no DSN configured,
+or initialization failed), pending dumps are left in place untouched and
+submitted on a later launch instead. Old `.dmp.uploaded` files (from
+builds before this fix) are automatically recovered to `.dmp` and
+re-submitted.
 
 Quick checks:
 
