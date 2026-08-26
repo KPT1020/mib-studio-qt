@@ -27,6 +27,7 @@ public:
         bool installSignalHandlers{true};
         bool installQtMessageHandler{true};
         bool installTerminateHandler{true};
+        size_t maxRetainedDumps{50};        // max .queued dumps to keep
     };
 
     // Returns true if at least the local minidump path is armed. Returns
@@ -35,6 +36,7 @@ public:
     static bool init(const Config& cfg);
     static void shutdown();
     static bool isInitialized();
+    static bool isSentryActive();
 
     // Diagnostic decorations attached to subsequent crash events.
     static void setTag(std::string_view key, std::string_view value);

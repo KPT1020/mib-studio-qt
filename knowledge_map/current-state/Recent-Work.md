@@ -14,11 +14,19 @@
   before stopping any service, (2) `MainWindow::closeEvent()` now stops the
   capture service before window destruction begins, (3) `OverviewTab` and
   `MainWindow` destructors now stop their timers before `delete ui` to
-  prevent use-after-free on `backend_` during widget teardown,
-  (4) `CrashReporter::uploadPendingCrashes` now tags recovered crash events
-  with `crash_dump_file` for Crashpad minidump correlation. Files:
-  `AppBackend.cpp`, `MainWindow.cpp`, `OverviewTab.cpp`,
-  `CrashReporter.cpp`.
+  prevent use-after-free on `backend_` during widget teardown. Files: `AppBackend.cpp`, `MainWindow.cpp`, `OverviewTab.cpp`.
+
+- **Crash-reporting minidump attachment fix** (2026-08-26, issue #345) —
+  pending `.dmp` files are now submitted via `sentry_capture_minidump`
+  (attaches the actual minidump binary) instead of `sentry_capture_event`
+  (message-only). Custom SEH/signal handlers are no longer installed when
+  Sentry/Crashpad is active, avoiding handler ownership conflicts; the
+  `on_crash` callback writes the JSON sidecar instead. State snapshot
+  extras are cleaned between dumps to prevent leakage. File lifecycle
+  changed from `.uploaded` to `.queued`; legacy `.dmp.uploaded` files are
+  recovered on startup. Bounded retention removes oldest `.queued` dumps
+  beyond `maxRetainedDumps`. CI now runs `sentry-cli debug-files check`
+  after symbol upload. Test: `backend.crash_reporter_pending_upload`.
 
 - **Processing-core wheels for ARM64** (2026-08-07, issue #341) —
   advanced `mib-processing` to 0.2.1 and expanded the `manylinux_2_28` wheel
