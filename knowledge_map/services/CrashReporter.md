@@ -47,11 +47,17 @@
      are renamed to `.dmp.queued` (not `.uploaded`). When Sentry is
      inactive (no DSN / init failure / built without Sentry), pending
      dumps are left untouched so a later launch can submit them.
-  3. **Bounded retention:** removes the oldest `.dmp.queued` dumps
-     beyond `maxRetainedDumps` (default 50), and separately bounds
-     orphan `.json` sidecars (terminate / on_crash / diagnostic files
-     with no matching dump) by the same limit — sidecars of dumps still
-     on disk are never touched.
+     A `.dmp.queued` still on disk after `queuedRetryAfterDays` (default
+     7; 0 disables) is re-submitted exactly once — tagged
+     `crash_recovery: queued_retry` — and renamed to the terminal
+     `.dmp.queued2`. This covers the transport's send-failure loss
+     window (see Gotchas).
+  3. **Bounded retention:** removes the oldest files beyond
+     `maxRetainedDumps` (default 50) per class: queued dumps
+     (`.dmp.queued` + `.dmp.queued2` together), never-submitted pending
+     `.dmp` files (local-only installs), and orphan `.json` sidecars
+     (terminate / on_crash / diagnostic files with no matching dump) —
+     sidecars of dumps still on disk are never touched.
 
 ## Key APIs
 
@@ -59,7 +65,8 @@
 struct Config { dsn; release; environment; crashDir; databaseDir;
                 tracesSampleRate; installSignalHandlers;
                 installQtMessageHandler; installTerminateHandler;
-                uploadPendingOnStart; maxRetainedDumps; };
+                uploadPendingOnStart; maxRetainedDumps;
+                queuedRetryAfterDays; };
 
 static bool init(const Config& cfg);
 static void shutdown();
@@ -98,9 +105,14 @@ When Sentry is not active (no DSN, `MIB_USE_SENTRY=OFF`, or init
 failure), CrashReporter falls back to its own handlers for local
 minidump capture.
 
-The `std::terminate` handler skips its own `MiniDumpWriteDump` call when
-Sentry is active (Crashpad handles it), but still writes the JSON
-sidecar.
+The `std::terminate` handler writes its own minidump **unconditionally**
+(issue #347): Crashpad never sees `std::terminate` — the `abort()` at the
+end of the handler is intercepted by the SIGABRT fallback, which `_Exit`s
+while `handlingCrash` is already set, so no other layer would produce a
+dump for this path. The handler also writes the JSON sidecar and, when
+terminate was reached via an unhandled exception, a `.txt` with the
+exception's `what()`. The dump is submitted through the pending-upload
+path on the next launch.
 
 ## DSN configuration
 
@@ -156,20 +168,23 @@ Operator setup (org slug, auth token, self-hosted URL) is documented in
   20260522T143015-pid12345-seh.dmp        ← Windows minidump
   20260522T143015-pid12345-seh.json       ← state snapshot
   20260522T143015-pid12345-sigsegv.json   ← (signal-handler path, no dmp on non-Win)
-  20260522T143015-pid12345-terminate.json ← std::terminate path
+  20260522T143015-pid12345-terminate.json ← std::terminate path (+ .dmp + .txt)
   20260522T143015-pid12345-exception.json ← non-fatal captureException()
   *.dmp.queued                            ← submitted to Sentry transport queue
+  *.dmp.queued2                           ← re-submitted once after going stale (terminal)
   *.dmp.uploaded                          ← legacy suffix (recovered to .dmp on next launch)
 ```
 
 ### File lifecycle
 
 ```
-[crash] → .dmp + .json
+[crash] → .dmp + .json (+ .txt on the terminate path)
 [next launch, Sentry active] → sentry_capture_minidump() → .dmp.queued + .json.queued
 [next launch, Sentry inactive] → .dmp + .json stay as-is (submitted later)
+[stale .queued > queuedRetryAfterDays] → re-submitted once → .dmp.queued2 (terminal)
 [legacy recovery] → .dmp.uploaded → .dmp → (re-submitted as above)
-[retention cleanup] → oldest .dmp.queued (and orphan .json) removed beyond maxRetainedDumps
+[retention cleanup] → oldest removed beyond maxRetainedDumps, per class:
+                      queued (.queued/.queued2), pending .dmp, orphan .json
 ```
 
 ## Symbolication
@@ -217,6 +232,14 @@ sentry-cli releases finalize "mib_studio_qt@$version"
   would mark never-sent dumps as queued, letting retention destroy
   them. Note 0.7.20's `sentry_capture_minidump` returns `void`, so
   per-capture success cannot be verified beyond the active check.
+- **The transport is only partially durable** (verified against the
+  pinned sentry-native 0.7.20 source): envelopes still *waiting* in the
+  bgworker queue at shutdown are dumped to the database `.run` folder
+  (`sentry__transport_dump_queue`) and re-sent on a later launch
+  (`sentry__process_old_runs`); an envelope whose send attempt *fails*
+  (e.g. offline) is freed without any retry. The stale-`.queued`
+  one-shot retry exists to cover exactly that loss window; `.queued2`
+  is terminal so retries can never loop.
 - **State snapshot isolation.** Each pending dump's extras
   (`state_snapshot`, `original_dump_file`) are set before
   `sentry_capture_minidump` and removed immediately after, so one dump's
@@ -228,9 +251,11 @@ sentry-cli releases finalize "mib_studio_qt@$version"
   [[../diagnostics/CrashStateMirror]] uses atomics + `try_lock` to
   satisfy this.
 - Worker-thread exception handling is intentionally NOT hardened in this
-  change (per `task/2026-05-22-crash-monitoring.md`). Pure C++ exceptions
-  inside `ProcessingService::workerLoop` will still kill that worker
-  silently; Crashpad only catches SEH/native faults.
+  change (per `task/2026-05-22-crash-monitoring.md`). Crashpad only
+  catches SEH/native faults — but since issue #347, a C++ exception that
+  escapes a worker thread entry point reaches the terminate handler,
+  which leaves a `.dmp` + `.json` + `.txt` and gets the event to Sentry
+  on the next launch.
 - Building with `MIB_USE_SENTRY=OFF` (or with no DSN) keeps the local
   minidump path active — useful for offline / air-gapped deployments.
 - **`sentry_capture_minidump` vs `sentry_capture_event`:** The upload

@@ -282,6 +282,11 @@ mib_add_backend_test_executable(crash_reporter_pending_upload_test backend/crash
 add_test(NAME backend.crash_reporter_pending_upload COMMAND $<TARGET_FILE:crash_reporter_pending_upload_test>)
 set_tests_properties(backend.crash_reporter_pending_upload PROPERTIES LABELS "backend;observability" TIMEOUT 60)
 
+mib_add_backend_test_executable(crash_reporter_terminate_test backend/crash_reporter_terminate_test.cpp)
+target_link_libraries(crash_reporter_terminate_test PRIVATE Threads::Threads)
+add_test(NAME backend.crash_reporter_terminate COMMAND $<TARGET_FILE:crash_reporter_terminate_test>)
+set_tests_properties(backend.crash_reporter_terminate PROPERTIES LABELS "backend;observability" TIMEOUT 60)
+
 mib_add_backend_test_executable(e2e_pipeline_timing_test integration/e2e_pipeline_timing_test.cpp)
 target_link_libraries(e2e_pipeline_timing_test PRIVATE Threads::Threads)
 add_test(NAME integration.e2e_pipeline_timing COMMAND $<TARGET_FILE:e2e_pipeline_timing_test>)

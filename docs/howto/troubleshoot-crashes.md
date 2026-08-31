@@ -8,13 +8,18 @@ Starting with the crash-monitoring change (branch
 `claude/crash-monitoring-logging-jUziR`), the app installs a process-level
 crash handler at startup. Every unrecoverable failure — SEH access
 violation, stack overflow, heap corruption, signal, uncaught C++
-exception, Qt fatal — produces:
+exception (`std::terminate`), Qt fatal — produces:
 
 1. A Windows minidump (`.dmp`) capturing the faulting thread's stack and
-   register state.
+   register state. For SEH faults with Sentry active, the dump is written
+   and uploaded live by `crashpad_handler.exe`; for aborts and
+   `std::terminate` (which Crashpad cannot see) the app writes the dump
+   itself and submits it on the next launch.
 2. A JSON sidecar (`.json`) with a snapshot of live service state
    (frame counts, queue depth, HDF5 open/path, autofocus port,
    recording mode, etc.).
+3. For `std::terminate` reached via an unhandled exception, additionally a
+   `.txt` file with the exception's `what()` message.
 
 Artifacts land here:
 
@@ -29,13 +34,23 @@ env var `MIB_SENTRY_DSN` is set), live crashes are forwarded to Sentry by
 the `crashpad_handler.exe` that lives next to the application. Pending
 dumps from previous runs are submitted on the next launch via
 `sentry_capture_minidump`, which attaches the actual `.dmp` binary to the
-Sentry event for full stack-trace symbolication. Successfully submitted
-dumps are renamed from `.dmp` to `.dmp.queued` to indicate they are in
-the Sentry transport queue. When Sentry is not active (no DSN configured,
-or initialization failed), pending dumps are left in place untouched and
-submitted on a later launch instead. Old `.dmp.uploaded` files (from
-builds before this fix) are automatically recovered to `.dmp` and
-re-submitted.
+Sentry event for full stack-trace symbolication. Submitted dumps are
+renamed from `.dmp` to `.dmp.queued`. The transport is only partially
+durable: envelopes still waiting in the queue at shutdown are saved to
+the Sentry database dir and re-sent on a later launch, but an envelope
+whose send attempt fails outright (machine offline) is dropped. To cover
+that window, a `.dmp.queued` file still present after 7 days is
+re-submitted exactly once (tagged `crash_recovery: queued_retry`) and
+renamed to `.dmp.queued2`, which is terminal. When Sentry is not active
+(no DSN configured, or initialization failed), pending dumps are left in
+place untouched and submitted on a later launch instead. Old
+`.dmp.uploaded` files (from builds before this fix) are automatically
+recovered to `.dmp` and re-submitted.
+
+The crash directory is bounded: at most 50 (configurable) files are kept
+per class — pending `.dmp`, queued `.dmp.queued`/`.queued2`, and orphan
+`.json` sidecars — oldest deleted first, so a local-only install cannot
+grow it without limit.
 
 Quick checks:
 

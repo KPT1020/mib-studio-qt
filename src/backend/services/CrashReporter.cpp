@@ -285,11 +285,30 @@ void terminateHandler() {
         const auto base = makeCrashFilenameBase(g.config.crashDir, "terminate");
         const auto json = std::filesystem::path(base.string() + ".json");
         writeStateJsonSidecar(json);
-#ifdef _WIN32
-        if (!g.sentryActive.load(std::memory_order_relaxed)) {
-            const auto dump = std::filesystem::path(base.string() + ".dmp");
-            writeMinidumpInternal(nullptr, dump);
+
+        // When terminate() was reached via an unhandled exception, record
+        // its message alongside the snapshot (same .txt convention as
+        // captureException).
+        if (std::current_exception()) {
+            std::string what = "unknown (non-std::exception)";
+            try {
+                std::rethrow_exception(std::current_exception());
+            } catch (const std::exception& e) {
+                what = e.what();
+            } catch (...) {
+            }
+            std::ofstream f(base.string() + ".txt");
+            f << "terminate: " << what << "\n";
         }
+
+#ifdef _WIN32
+        // Write the minidump unconditionally, even with Sentry active. The
+        // abort() below is intercepted by our SIGABRT handler, which
+        // _Exit()s while handlingCrash is already set — so neither Crashpad
+        // nor the abort fallback ever produces a dump for this path. This
+        // dump rides the pending-upload path on the next launch.
+        const auto dump = std::filesystem::path(base.string() + ".dmp");
+        writeMinidumpInternal(nullptr, dump);
 #endif
     } catch (...) {
     }
@@ -395,17 +414,39 @@ void cleanupRetainedDumps(const std::filesystem::path& dir, size_t maxCount) {
     if (!std::filesystem::exists(dir, ec)) return;
 
     std::vector<RetainedEntry> queued;
+    // Pending .dmp files that never got submitted (local-only installs, or
+    // Sentry inactive for many launches): bound them too so a no-DSN
+    // install cannot grow the crash dir without limit. This runs AFTER
+    // uploadPendingCrashes, so with Sentry active this set is empty.
+    std::vector<RetainedEntry> pendingDumps;
     // Bare .json sidecars with no dump (terminate / on_crash / diagnostic
     // paths): nothing uploads or renames them, so bound them here too.
     std::vector<RetainedEntry> orphanJson;
+    // Bare .txt notes whose .json and .dmp companions are both gone
+    // (renamed away by upload, or already trimmed): bound them as well.
+    std::vector<RetainedEntry> orphanTxt;
 
     for (auto& entry : std::filesystem::directory_iterator(dir, ec)) {
         if (ec) break;
         if (!entry.is_regular_file()) continue;
         const std::string pathStr = entry.path().string();
-        if (endsWith(pathStr, ".dmp.queued")) {
+        if (endsWith(pathStr, ".dmp.queued") ||
+            endsWith(pathStr, ".dmp.queued2")) {
             queued.push_back({entry.path(), entry.last_write_time(ec)});
             ec.clear();
+        } else if (endsWith(pathStr, ".dmp")) {
+            pendingDumps.push_back({entry.path(), entry.last_write_time(ec)});
+            ec.clear();
+        } else if (endsWith(pathStr, ".txt")) {
+            const std::string base = pathStr.substr(0, pathStr.size() - 4);
+            const bool hasCompanion =
+                std::filesystem::exists(base + ".json", ec) ||
+                std::filesystem::exists(base + ".dmp", ec);
+            ec.clear();
+            if (!hasCompanion) {
+                orphanTxt.push_back({entry.path(), entry.last_write_time(ec)});
+                ec.clear();
+            }
         } else if (endsWith(pathStr, ".json")) {
             // Keep the sidecar of any dump still on disk (pending or queued).
             const std::string base = pathStr.substr(0, pathStr.size() - 5);
@@ -422,14 +463,24 @@ void cleanupRetainedDumps(const std::filesystem::path& dir, size_t maxCount) {
 
     trimOldest(queued, maxCount, "queued dump",
                [](const std::string& p) {
+                   if (endsWith(p, ".dmp.queued2")) {
+                       const std::string suffix = ".dmp.queued2";
+                       return p.substr(0, p.size() - suffix.size()) +
+                              ".json.queued2";
+                   }
                    const std::string suffix = ".dmp.queued";
                    return p.substr(0, p.size() - suffix.size()) + ".json.queued";
+               });
+    trimOldest(pendingDumps, maxCount, "pending dump",
+               [](const std::string& p) {
+                   return p.substr(0, p.size() - 4) + ".json";
                });
     trimOldest(orphanJson, maxCount, "orphan sidecar",
                [](const std::string& p) {
                    // captureException writes a .txt next to its .json.
                    return p.substr(0, p.size() - 5) + ".txt";
                });
+    trimOldest(orphanTxt, maxCount, "orphan text note", {});
 }
 
 void uploadPendingCrashes(const std::filesystem::path& dir) {
@@ -446,55 +497,118 @@ void uploadPendingCrashes(const std::filesystem::path& dir) {
     std::error_code ec;
     if (!std::filesystem::exists(dir, ec)) return;
 
+    const int retryAfterDays = globals().config.queuedRetryAfterDays;
+
     // Collect first, act after: renaming while a directory_iterator is live
     // can skip entries (FindNextFile semantics on Windows).
-    std::vector<std::filesystem::path> pending;
+    struct Submission {
+        std::filesystem::path dmp;
+        std::filesystem::path sidecar;
+        std::filesystem::path message;  // optional <base>.txt (terminate path)
+        bool isRetry;
+    };
+    std::vector<Submission> pending;
     for (auto& entry : std::filesystem::directory_iterator(dir, ec)) {
         if (ec) break;
         if (!entry.is_regular_file()) continue;
-        if (entry.path().extension() == ".dmp") {
-            pending.push_back(entry.path());
+        const std::string pathStr = entry.path().string();
+        if (endsWith(pathStr, ".dmp")) {
+            const std::string base = pathStr.substr(0, pathStr.size() - 4);
+            pending.push_back(
+                {entry.path(), base + ".json", base + ".txt", false});
+        } else if (retryAfterDays > 0 && endsWith(pathStr, ".dmp.queued")) {
+            // A .queued dump whose envelope was dropped (send failed, or the
+            // process died before the shutdown queue dump) gets exactly one
+            // re-submission once it has sat queued long enough that the
+            // transport clearly never delivered it (its mtime is bumped at
+            // submission time below). .queued2 is terminal.
+            const auto age = std::filesystem::file_time_type::clock::now() -
+                             std::filesystem::last_write_time(entry.path(), ec);
+            if (ec) {
+                ec.clear();
+                continue;
+            }
+            if (age > std::chrono::hours(24) * retryAfterDays) {
+                const std::string base =
+                    pathStr.substr(0, pathStr.size() - sizeof(".dmp.queued") + 1);
+                pending.push_back(
+                    {entry.path(), base + ".json.queued", base + ".txt", true});
+            }
         }
     }
 
-    for (const auto& p : pending) {
-        const auto sidecar = std::filesystem::path(
-            p.string().substr(0, p.string().size() - 4) + ".json");
-        bool hasSidecar = std::filesystem::exists(sidecar, ec);
+    for (const auto& sub : pending) {
+        const auto& p = sub.dmp;
+        bool hasSidecar = std::filesystem::exists(sub.sidecar, ec);
 
         if (hasSidecar) {
-            std::ifstream f(sidecar);
+            std::ifstream f(sub.sidecar);
             std::stringstream ss;
             ss << f.rdbuf();
             sentry_set_extra("state_snapshot",
                              sentry_value_new_string(ss.str().c_str()));
         }
 
-        sentry_set_tag("crash_recovery", "pending_dump");
+        // Terminate-path dumps carry the unhandled exception's what() in a
+        // .txt note — attach it so the message reaches the event.
+        bool hasMessage = std::filesystem::exists(sub.message, ec);
+        if (hasMessage) {
+            std::ifstream f(sub.message);
+            std::stringstream ss;
+            ss << f.rdbuf();
+            sentry_set_extra("crash_message",
+                             sentry_value_new_string(ss.str().c_str()));
+        }
+
+        sentry_set_tag("crash_recovery",
+                       sub.isRetry ? "queued_retry" : "pending_dump");
         sentry_set_extra("original_dump_file",
                          sentry_value_new_string(p.filename().string().c_str()));
 
-        // sentry_capture_minidump reads the dump into the Sentry envelope
-        // and generates a fatal event with an event.minidump attachment.
-        // In 0.7.20 it returns void, so per-capture success cannot be
-        // checked; with Sentry active the envelope is handed to Sentry's
-        // disk-backed transport queue, hence the .queued rename below.
+        // sentry_capture_minidump reads the dump into an envelope and
+        // generates a fatal event with an event.minidump attachment. In
+        // 0.7.20 it returns void, so per-capture success cannot be checked.
+        // Durability (verified against the pinned sentry-native 0.7.20
+        // source): envelopes still WAITING in the transport queue at
+        // shutdown are dumped into the database .run folder and re-sent on
+        // a later launch (sentry__transport_dump_queue +
+        // sentry__process_old_runs); an envelope whose send attempt FAILS
+        // (e.g. offline) is freed without retry. The rename below is
+        // therefore optimistic — the stale-.queued retry pass above covers
+        // the send-failure loss window.
         sentry_capture_minidump(p.string().c_str());
 
         sentry_remove_extra("state_snapshot");
+        sentry_remove_extra("crash_message");
         sentry_remove_extra("original_dump_file");
         sentry_remove_tag("crash_recovery");
 
-        SPDLOG_INFO("CrashReporter: submitted pending minidump: {}", p.string());
+        SPDLOG_INFO("CrashReporter: submitted {} minidump: {}",
+                    sub.isRetry ? "stale queued" : "pending", p.string());
 
-        std::filesystem::rename(p, p.string() + ".queued", ec);
+        // Pending: .dmp → .dmp.queued. Retry: .dmp.queued → .dmp.queued2
+        // (terminal — never picked up again).
+        const std::filesystem::path renamed(
+            p.string() + (sub.isRetry ? "2" : ".queued"));
+        std::filesystem::rename(p, renamed, ec);
         if (ec) {
-            SPDLOG_WARN("CrashReporter: failed to rename {} to .queued: {}",
+            SPDLOG_WARN("CrashReporter: failed to rename {}: {}",
                         p.string(), ec.message());
             ec.clear();
+        } else if (!sub.isRetry) {
+            // rename() preserves mtime, which for a fresh .dmp is the CRASH
+            // time — a dump submitted more than retryAfterDays after the
+            // crash would look stale immediately and be duplicated on the
+            // next launch. Stamp the submission time instead so the retry
+            // clock starts now.
+            std::filesystem::last_write_time(
+                renamed, std::filesystem::file_time_type::clock::now(), ec);
+            ec.clear();
         }
-        if (hasSidecar && std::filesystem::exists(sidecar, ec)) {
-            std::filesystem::rename(sidecar, sidecar.string() + ".queued", ec);
+        if (hasSidecar && std::filesystem::exists(sub.sidecar, ec)) {
+            std::filesystem::rename(
+                sub.sidecar,
+                sub.sidecar.string() + (sub.isRetry ? "2" : ".queued"), ec);
             ec.clear();
         }
     }
@@ -570,6 +684,8 @@ bool CrashReporter::init(const Config& cfg) {
         // Crashpad only intercepts native faults (SEH); a CRT abort() never
         // reaches it. Keep a SIGABRT handler as the local fallback so aborts
         // still produce a dump + sidecar, then re-raise with SIG_DFL.
+        // std::terminate is likewise invisible to Crashpad — terminateHandler
+        // writes its own dump + sidecar before aborting (see above).
         if (cfg.installSignalHandlers) {
             std::signal(SIGABRT, signalHandler);
         }
