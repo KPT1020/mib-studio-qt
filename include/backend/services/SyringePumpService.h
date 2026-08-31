@@ -9,7 +9,11 @@
 #include <vector>
 
 class QByteArray;
-class QSerialPort;
+
+namespace backend::services::serialbus {
+class ModbusBusSession;
+class SerialBusManager;
+} // namespace backend::services::serialbus
 
 namespace backend::services {
 
@@ -49,7 +53,9 @@ public:
         bool stalled{false};
     };
 
-    SyringePumpService();
+    // Pump serial I/O goes through the shared RS485 bus layer so a pump and
+    // other Modbus devices (e.g. the pulse generator) can share one adapter.
+    explicit SyringePumpService(serialbus::SerialBusManager& busManager);
     ~SyringePumpService();
 
     // Connection management
@@ -103,12 +109,13 @@ private:
     bool writeMultipleRegisters(int pumpIdx, uint16_t startReg, const QByteArray& regData);
 
     struct PumpConnection {
-        QSerialPort* serial{nullptr};
+        std::shared_ptr<serialbus::ModbusBusSession> bus;
         PumpConfig config;
         PumpStatus status;
         mutable std::mutex mutex;
     };
 
+    serialbus::SerialBusManager& busManager_;
     std::array<PumpConnection, PUMP_COUNT> pumps_;
 };
 

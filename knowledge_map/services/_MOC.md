@@ -16,9 +16,11 @@
 - [[CameraControlService]] — GenICam script apply, device reset, discovery
 - [[AutofocusService]] — nanopositioner voltage via serial (Coremor XMT)
 - [[TriggerService]] — camera digital-output pulse on target-group detection
+- [[SerialBus]] — shared RS485/Modbus bus sessions (one `QSerialPort` owner
+  per adapter, strict response correlation); transport for the two below
 - [[SyringePumpService]] — dual-pump Modbus RTU over serial
 - [[PulseGeneratorService]] — Zhongsheng pulse module (camera ext-trigger
-  source) via Modbus RTU over serial
+  source) via Modbus RTU over serial; addressed device on a shared bus
 
 ## Optional / specialised
 - [[YoloService]] — ONNX Runtime session (segmentation; placeholder-ish)

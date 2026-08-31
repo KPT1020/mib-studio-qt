@@ -87,9 +87,17 @@
   (delay + pulse width), 2 always high, 3 always low.
 - **Pulse generator** — Zhongsheng RS485 module producing the external
   acquisition-trigger pulse train (400 Hz–40 kHz, duty-gated on/off); driven
-  by [[../services/PulseGeneratorService]].
+  by [[../services/PulseGeneratorService]]. Identified by (bus, serial
+  settings, Modbus slave address); the output channel is a setting below
+  that identity.
+- **RS485 bus session** — one shared `QSerialPort` owner per physical
+  USB/RS485 adapter ([[../services/SerialBus]]); RS485 is multi-drop, so
+  several Modbus devices at different slave addresses share one adapter and
+  all requests on it are serialized with strict response correlation.
 - **Modbus RTU** — serial protocol used by
-  [[../services/SyringePumpService]] (Sample + Sheath pumps).
+  [[../services/SyringePumpService]] (Sample + Sheath pumps) and
+  [[../services/PulseGeneratorService]], framed by `ModbusRtu.h` over
+  [[../services/SerialBus]].
 - **Coremor XMT** — serial protocol for the piezo nanopositioner used by
   [[../services/AutofocusService]]. DLL under `include/Coremor/`.
 - **ONNX Runtime** — ML runtime for [[../services/YoloService]].

@@ -49,6 +49,7 @@
 
 #include "backend/app/AppBackend.h"
 #include "backend/services/PulseGeneratorService.h"
+#include "backend/services/SerialBus.h"
 #include "backend/processing/ProcessingService.h"
 #include "frontend/system/ProfileManager.h"
 #include "frontend/models/JsonTableModel.h"
@@ -387,27 +388,58 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         v->addWidget(mvEdit_, 1);
 
         auto* pgGroup = new QGroupBox(tr("Pulse generator (external trigger source, RS485)"), page);
-        auto* pgRow = new QHBoxLayout(pgGroup);
-        pgRow->addWidget(new QLabel(tr("COM"), pgGroup));
-        pgComPortSpin_ = new QSpinBox(pgGroup);
-        pgComPortSpin_->setRange(1, 255);
-        pgComPortSpin_->setValue(1);
-        pgRow->addWidget(pgComPortSpin_);
-        pgRow->addWidget(new QLabel(tr("Baud"), pgGroup));
+        auto* pgLayout = new QVBoxLayout(pgGroup);
+        // Bus row: physical port + serial settings + slave address. RS485 is a
+        // multi-drop bus — one adapter can carry several Modbus devices, so
+        // the device is (port, bus settings, address), and channel sits below.
+        auto* pgBusRow = new QHBoxLayout();
+        pgBusRow->addWidget(new QLabel(tr("Port"), pgGroup));
+        pgPortCombo_ = new QComboBox(pgGroup);
+        pgPortCombo_->setMinimumWidth(220);
+        pgPortCombo_->setToolTip(tr("System serial port (e.g. /dev/ttyUSB0 or COM3)."));
+        pgBusRow->addWidget(pgPortCombo_, 1);
+        pgRefreshPortsBtn_ = new QPushButton(tr("Refresh"), pgGroup);
+        pgRefreshPortsBtn_->setToolTip(tr("Re-enumerate serial ports."));
+        pgBusRow->addWidget(pgRefreshPortsBtn_);
+        pgBusRow->addWidget(new QLabel(tr("Baud"), pgGroup));
         pgBaudCombo_ = new QComboBox(pgGroup);
         for (int baud : {4800, 9600, 14400, 19200, 38400, 56000, 57600, 115200}) {
             pgBaudCombo_->addItem(QString::number(baud), baud);
         }
         pgBaudCombo_->setCurrentText("9600"); // module factory default
-        pgRow->addWidget(pgBaudCombo_);
-        pgRow->addWidget(new QLabel(tr("Addr"), pgGroup));
+        pgBusRow->addWidget(pgBaudCombo_);
+        pgDataBitsCombo_ = new QComboBox(pgGroup);
+        pgDataBitsCombo_->addItem(QStringLiteral("8"), 8);
+        pgDataBitsCombo_->addItem(QStringLiteral("7"), 7);
+        pgDataBitsCombo_->setToolTip(tr("Data bits"));
+        pgBusRow->addWidget(pgDataBitsCombo_);
+        pgParityCombo_ = new QComboBox(pgGroup);
+        pgParityCombo_->addItem(QStringLiteral("N"), QChar('N'));
+        pgParityCombo_->addItem(QStringLiteral("E"), QChar('E'));
+        pgParityCombo_->addItem(QStringLiteral("O"), QChar('O'));
+        pgParityCombo_->setToolTip(tr("Parity"));
+        pgBusRow->addWidget(pgParityCombo_);
+        pgStopBitsCombo_ = new QComboBox(pgGroup);
+        pgStopBitsCombo_->addItem(QStringLiteral("1"), 1);
+        pgStopBitsCombo_->addItem(QStringLiteral("2"), 2);
+        pgStopBitsCombo_->setToolTip(tr("Stop bits"));
+        pgBusRow->addWidget(pgStopBitsCombo_);
+        pgBusRow->addWidget(new QLabel(tr("Addr"), pgGroup));
         pgAddrSpin_ = new QSpinBox(pgGroup);
         pgAddrSpin_->setRange(1, 255);
         pgAddrSpin_->setValue(1);
-        pgRow->addWidget(pgAddrSpin_);
+        pgAddrSpin_->setToolTip(tr("Modbus slave address of the pulse generator on this bus."));
+        pgBusRow->addWidget(pgAddrSpin_);
+        pgScanBtn_ = new QPushButton(tr("Scan"), pgGroup);
+        pgScanBtn_->setToolTip(tr("Probe addresses 1–16 on the selected port with a read-only "
+                                  "register read. Never writes to any device."));
+        pgBusRow->addWidget(pgScanBtn_);
         pgConnectBtn_ = new QPushButton(tr("Connect"), pgGroup);
-        pgRow->addWidget(pgConnectBtn_);
-        pgRow->addSpacing(16);
+        pgBusRow->addWidget(pgConnectBtn_);
+        pgBusRow->addStretch(1);
+        pgLayout->addLayout(pgBusRow);
+
+        auto* pgRow = new QHBoxLayout();
         pgRow->addWidget(new QLabel(tr("Ch"), pgGroup));
         pgChannelSpin_ = new QSpinBox(pgGroup);
         pgChannelSpin_->setRange(1, backend::services::PulseGeneratorService::CHANNEL_COUNT);
@@ -438,6 +470,7 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         pgRow->addStretch(1);
         pgStatusLabel_ = new QLabel(tr("Disconnected"), pgGroup);
         pgRow->addWidget(pgStatusLabel_);
+        pgLayout->addLayout(pgRow);
         v->addWidget(pgGroup);
 
         page->setLayout(v);
@@ -472,6 +505,9 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
         connect(pgApplyBtn_, &QPushButton::clicked, this, &ConfigTabs::onPulseGenApplySettings);
         connect(pgStartBtn_, &QPushButton::clicked, this, &ConfigTabs::onPulseGenStart);
         connect(pgStopBtn_, &QPushButton::clicked, this, &ConfigTabs::onPulseGenStop);
+        connect(pgRefreshPortsBtn_, &QPushButton::clicked, this, &ConfigTabs::onPulseGenRefreshPorts);
+        connect(pgScanBtn_, &QPushButton::clicked, this, &ConfigTabs::onPulseGenScanToggle);
+        restorePulseGenSettings();
         refreshPulseGenUi();
     }
 
@@ -493,6 +529,10 @@ ConfigTabs::ConfigTabs(backend::AppBackend& backend, QWidget* parent)
     connect(showDiffBtn_, &QPushButton::clicked, this, &ConfigTabs::onShowProfileDiff);
     connect(duplicateAsLocalBtn_, &QPushButton::clicked, this, &ConfigTabs::onDuplicateProfileAsLocal);
     refreshProfileStatusLabel();
+}
+
+ConfigTabs::~ConfigTabs() {
+    stopPulseGenScan();
 }
 
 QString ConfigTabs::appDirIncludePath(const QString& fileName) const {
@@ -961,28 +1001,257 @@ void ConfigTabs::onMvTextChangedDebounced() {
     syncMvFormFromJson();
 }
 
+namespace {
+// Extra item-data roles on the port combo so USB identity survives for
+// persistence and node-rename re-resolution.
+constexpr int PortRoleSerialNumber = Qt::UserRole + 1;
+constexpr int PortRoleVid = Qt::UserRole + 2;
+constexpr int PortRolePid = Qt::UserRole + 3;
+
+backend::services::serialbus::SerialSettings pulseGenSettingsFromUi(
+    QComboBox* baud, QComboBox* dataBits, QComboBox* parity, QComboBox* stopBits) {
+    backend::services::serialbus::SerialSettings s;
+    s.baudRate = baud->currentData().toInt();
+    s.dataBits = dataBits->currentData().toInt();
+    s.parity = parity->currentData().toChar().toLatin1();
+    s.stopBits = stopBits->currentData().toInt();
+    return s;
+}
+} // namespace
+
 void ConfigTabs::refreshPulseGenUi() {
     auto& gen = backend_.pulseGenerator();
     const bool connected = gen.isConnected();
     pgConnectBtn_->setText(connected ? tr("Disconnect") : tr("Connect"));
-    pgComPortSpin_->setEnabled(!connected);
-    pgBaudCombo_->setEnabled(!connected);
-    pgAddrSpin_->setEnabled(!connected);
+    pgConnectBtn_->setEnabled(!pgScanRunning_);
+    pgPortCombo_->setEnabled(!connected && !pgScanRunning_);
+    pgRefreshPortsBtn_->setEnabled(!connected && !pgScanRunning_);
+    pgBaudCombo_->setEnabled(!connected && !pgScanRunning_);
+    pgDataBitsCombo_->setEnabled(!connected && !pgScanRunning_);
+    pgParityCombo_->setEnabled(!connected && !pgScanRunning_);
+    pgStopBitsCombo_->setEnabled(!connected && !pgScanRunning_);
+    pgAddrSpin_->setEnabled(!connected && !pgScanRunning_);
+    pgScanBtn_->setEnabled(!connected);
+    pgScanBtn_->setText(pgScanRunning_ ? tr("Cancel scan") : tr("Scan"));
     pgApplyBtn_->setEnabled(connected);
     pgStartBtn_->setEnabled(connected);
     pgStopBtn_->setEnabled(connected);
     if (!connected) {
-        pgStatusLabel_->setText(tr("Disconnected"));
+        const auto lastError = gen.lastError();
+        if (pgScanRunning_) {
+            pgStatusLabel_->setText(tr("Scanning…"));
+        } else if (lastError == backend::services::PulseGeneratorService::LinkError::None) {
+            pgStatusLabel_->setText(tr("Disconnected"));
+        } else {
+            pgStatusLabel_->setText(tr("Disconnected — %1")
+                .arg(QString::fromLatin1(
+                    backend::services::PulseGeneratorService::toString(lastError))));
+        }
         return;
     }
     const auto status = gen.getStatus();
     const int ch = pgChannelSpin_->value() - 1;
     const auto& state = status.channels[static_cast<size_t>(ch)];
-    pgStatusLabel_->setText(tr("Ch%1: %2 Hz, %3%% duty, output %4")
+    pgStatusLabel_->setText(tr("Verified addr %1 — Ch%2: %3 Hz, %4%% duty, output %5")
+                                .arg(gen.getConfig().modbusAddress)
                                 .arg(ch + 1)
                                 .arg(state.frequencyHz)
                                 .arg(state.dutyPercent)
                                 .arg(state.outputEnabled ? tr("ON") : tr("off")));
+}
+
+void ConfigTabs::refreshPulseGenPorts() {
+    const QString previous = pgPortCombo_->currentData().toString();
+    pgPortCombo_->clear();
+    const auto ports = backend::services::serialbus::availablePorts();
+    for (const auto& p : ports) {
+        QString label = p.systemName;
+        QStringList extra;
+        if (!p.description.isEmpty()) extra << p.description;
+        if (!p.serialNumber.isEmpty()) extra << tr("S/N %1").arg(p.serialNumber);
+        if (p.vendorId != 0) {
+            extra << QStringLiteral("%1:%2")
+                         .arg(p.vendorId, 4, 16, QLatin1Char('0'))
+                         .arg(p.productId, 4, 16, QLatin1Char('0'));
+        }
+        if (!extra.isEmpty()) label += QStringLiteral(" — ") + extra.join(QStringLiteral(", "));
+        pgPortCombo_->addItem(label, p.systemName);
+        const int idx = pgPortCombo_->count() - 1;
+        pgPortCombo_->setItemData(idx, p.systemLocation, Qt::ToolTipRole);
+        pgPortCombo_->setItemData(idx, p.serialNumber, PortRoleSerialNumber);
+        pgPortCombo_->setItemData(idx, static_cast<uint>(p.vendorId), PortRoleVid);
+        pgPortCombo_->setItemData(idx, static_cast<uint>(p.productId), PortRolePid);
+    }
+    if (pgPortCombo_->count() == 0) {
+        pgPortCombo_->addItem(tr("No serial ports found"), QString());
+    } else if (!previous.isEmpty()) {
+        const int idx = pgPortCombo_->findData(previous);
+        if (idx >= 0) pgPortCombo_->setCurrentIndex(idx);
+    }
+}
+
+void ConfigTabs::onPulseGenRefreshPorts() {
+    refreshPulseGenPorts();
+}
+
+void ConfigTabs::savePulseGenSettings() const {
+    QSettings s;
+    s.beginGroup(QStringLiteral("PulseGenerator"));
+    s.setValue(QStringLiteral("PortName"), pgPortCombo_->currentData().toString());
+    s.setValue(QStringLiteral("PortSerialNumber"),
+               pgPortCombo_->currentData(PortRoleSerialNumber).toString());
+    s.setValue(QStringLiteral("PortVid"), pgPortCombo_->currentData(PortRoleVid).toUInt());
+    s.setValue(QStringLiteral("PortPid"), pgPortCombo_->currentData(PortRolePid).toUInt());
+    s.setValue(QStringLiteral("Baud"), pgBaudCombo_->currentData().toInt());
+    s.setValue(QStringLiteral("DataBits"), pgDataBitsCombo_->currentData().toInt());
+    s.setValue(QStringLiteral("Parity"), QString(pgParityCombo_->currentData().toChar()));
+    s.setValue(QStringLiteral("StopBits"), pgStopBitsCombo_->currentData().toInt());
+    s.setValue(QStringLiteral("Address"), pgAddrSpin_->value());
+    s.setValue(QStringLiteral("Channel"), pgChannelSpin_->value());
+    s.setValue(QStringLiteral("FrequencyHz"), pgFreqSpin_->value());
+    s.setValue(QStringLiteral("DutyPercent"), pgDutySpin_->value());
+    s.endGroup();
+}
+
+void ConfigTabs::restorePulseGenSettings() {
+    refreshPulseGenPorts();
+    QSettings s;
+    s.beginGroup(QStringLiteral("PulseGenerator"));
+    auto selectCombo = [](QComboBox* combo, const QVariant& value) {
+        const int idx = combo->findData(value);
+        if (idx >= 0) combo->setCurrentIndex(idx);
+    };
+    if (s.contains(QStringLiteral("Baud")))
+        selectCombo(pgBaudCombo_, s.value(QStringLiteral("Baud")).toInt());
+    if (s.contains(QStringLiteral("DataBits")))
+        selectCombo(pgDataBitsCombo_, s.value(QStringLiteral("DataBits")).toInt());
+    if (s.contains(QStringLiteral("Parity")))
+        selectCombo(pgParityCombo_,
+                    QChar(s.value(QStringLiteral("Parity")).toString().isEmpty()
+                              ? QChar('N')
+                              : s.value(QStringLiteral("Parity")).toString().at(0)));
+    if (s.contains(QStringLiteral("StopBits")))
+        selectCombo(pgStopBitsCombo_, s.value(QStringLiteral("StopBits")).toInt());
+    if (s.contains(QStringLiteral("Address")))
+        pgAddrSpin_->setValue(s.value(QStringLiteral("Address")).toInt());
+    if (s.contains(QStringLiteral("Channel")))
+        pgChannelSpin_->setValue(s.value(QStringLiteral("Channel")).toInt());
+    if (s.contains(QStringLiteral("FrequencyHz")))
+        pgFreqSpin_->setValue(s.value(QStringLiteral("FrequencyHz")).toDouble());
+    if (s.contains(QStringLiteral("DutyPercent")))
+        pgDutySpin_->setValue(s.value(QStringLiteral("DutyPercent")).toDouble());
+
+    // Port re-resolution: exact system name first; if the node was renamed
+    // (ttyUSB0 -> ttyUSB1), fall back to the stored USB identity — but only
+    // when it matches exactly one port, otherwise the operator must choose.
+    const QString portName = s.value(QStringLiteral("PortName")).toString();
+    const QString serialNumber = s.value(QStringLiteral("PortSerialNumber")).toString();
+    const uint vid = s.value(QStringLiteral("PortVid")).toUInt();
+    const uint pid = s.value(QStringLiteral("PortPid")).toUInt();
+    s.endGroup();
+
+    if (!portName.isEmpty()) {
+        const int byName = pgPortCombo_->findData(portName);
+        if (byName >= 0) {
+            pgPortCombo_->setCurrentIndex(byName);
+            return;
+        }
+    }
+    if (!serialNumber.isEmpty() || vid != 0) {
+        int match = -1;
+        int matches = 0;
+        for (int i = 0; i < pgPortCombo_->count(); ++i) {
+            const bool serialOk =
+                pgPortCombo_->itemData(i, PortRoleSerialNumber).toString() == serialNumber;
+            const bool usbOk = pgPortCombo_->itemData(i, PortRoleVid).toUInt() == vid &&
+                               pgPortCombo_->itemData(i, PortRolePid).toUInt() == pid;
+            if (serialOk && usbOk) {
+                match = i;
+                ++matches;
+            }
+        }
+        if (matches == 1) {
+            pgPortCombo_->setCurrentIndex(match);
+            SPDLOG_INFO("ConfigTabs: pulse-generator port re-resolved by USB identity to {}",
+                        pgPortCombo_->currentData().toString().toStdString());
+        } else if (matches > 1) {
+            SPDLOG_WARN("ConfigTabs: {} ports share the stored USB identity — "
+                        "operator must pick the pulse-generator port", matches);
+        }
+    }
+}
+
+void ConfigTabs::stopPulseGenScan() {
+    pgScanCancel_.store(true);
+    if (pgScanThread_.joinable()) {
+        pgScanThread_.join();
+    }
+    pgScanRunning_ = false;
+}
+
+void ConfigTabs::onPulseGenScanToggle() {
+    using ScanHit = backend::services::PulseGeneratorService::ScanHit;
+    if (pgScanRunning_) {
+        stopPulseGenScan();
+        refreshPulseGenUi();
+        return;
+    }
+    const QString portName = pgPortCombo_->currentData().toString();
+    if (portName.isEmpty()) {
+        QMessageBox::warning(this, tr("Pulse Generator"),
+                             tr("Select a serial port before scanning."));
+        return;
+    }
+    if (pgScanThread_.joinable()) {
+        pgScanThread_.join();
+    }
+    const auto settings = pulseGenSettingsFromUi(pgBaudCombo_, pgDataBitsCombo_,
+                                                 pgParityCombo_, pgStopBitsCombo_);
+    pgScanCancel_.store(false);
+    pgScanRunning_ = true;
+    refreshPulseGenUi();
+    // Bounded, read-only, cancelable probe off the GUI thread; results are
+    // marshaled back with a queued call.
+    pgScanThread_ = std::thread([this, portName, settings]() {
+        const auto hits = backend_.pulseGenerator().scanBus(
+            portName, settings, 1, 16, pgScanCancel_);
+        QMetaObject::invokeMethod(this, [this, portName, hits]() {
+            pgScanRunning_ = false;
+            refreshPulseGenUi();
+            if (pgScanCancel_.load()) {
+                return;
+            }
+            if (hits.empty()) {
+                QMessageBox::information(this, tr("Pulse Generator"),
+                                         tr("No Modbus devices responded on %1 "
+                                            "(addresses 1–16).").arg(portName));
+                return;
+            }
+            QStringList lines;
+            uint8_t firstGenerator = 0;
+            for (const auto& hit : hits) {
+                switch (hit.kind) {
+                case ScanHit::Kind::PulseGenerator:
+                    if (firstGenerator == 0) firstGenerator = hit.address;
+                    lines << tr("Address %1 — pulse generator").arg(hit.address);
+                    break;
+                case ScanHit::Kind::ModbusDevice:
+                    lines << tr("Address %1 — Modbus device (not a pulse generator, "
+                                "left untouched)").arg(hit.address);
+                    break;
+                case ScanHit::Kind::Error:
+                    lines << tr("Address %1 — corrupt/inconsistent response "
+                                "(possible duplicate-address collision)").arg(hit.address);
+                    break;
+                }
+            }
+            if (firstGenerator != 0) {
+                pgAddrSpin_->setValue(firstGenerator);
+            }
+            QMessageBox::information(this, tr("Pulse Generator scan — %1").arg(portName),
+                                     lines.join(QStringLiteral("\n")));
+        }, Qt::QueuedConnection);
+    });
 }
 
 void ConfigTabs::onPulseGenConnectToggle() {
@@ -990,14 +1259,26 @@ void ConfigTabs::onPulseGenConnectToggle() {
     if (gen.isConnected()) {
         gen.disconnect();
     } else {
-        const int comPort = pgComPortSpin_->value();
-        const int baud = pgBaudCombo_->currentData().toInt();
-        const auto addr = static_cast<uint8_t>(pgAddrSpin_->value());
-        if (!gen.connect(comPort, baud, addr)) {
+        const QString portName = pgPortCombo_->currentData().toString();
+        if (portName.isEmpty()) {
             QMessageBox::warning(this, tr("Pulse Generator"),
-                                 tr("Failed to connect on COM%1 (baud %2, addr %3). "
-                                    "Check wiring, port and Modbus address.")
-                                     .arg(comPort).arg(baud).arg(addr));
+                                 tr("No serial port selected. Plug in the RS485 adapter "
+                                    "and press Refresh."));
+            return;
+        }
+        const auto settings = pulseGenSettingsFromUi(pgBaudCombo_, pgDataBitsCombo_,
+                                                     pgParityCombo_, pgStopBitsCombo_);
+        const auto addr = static_cast<uint8_t>(pgAddrSpin_->value());
+        if (!gen.connect(portName, settings, addr)) {
+            QMessageBox::warning(
+                this, tr("Pulse Generator"),
+                tr("Failed to connect on %1 (baud %2, addr %3): %4. "
+                   "Check wiring, port and Modbus address.")
+                    .arg(portName).arg(settings.baudRate).arg(addr)
+                    .arg(QString::fromLatin1(
+                        backend::services::PulseGeneratorService::toString(gen.lastError()))));
+        } else {
+            savePulseGenSettings();
         }
     }
     refreshPulseGenUi();

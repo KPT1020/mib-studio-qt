@@ -1,6 +1,6 @@
 # PulseGeneratorService
 
-> Controls the Zhongsheng (中盛科技) pulse frequency & duty-cycle output module
+> Controls a Zhongsheng (中盛科技) pulse frequency & duty-cycle output module
 > over RS485 Modbus RTU — the TTL pulse source for the MindVision camera's
 > **external acquisition trigger** (NOT the sort-output pulse; that is
 > [[TriggerService]]).
@@ -8,24 +8,48 @@
 **Source:** `src/backend/services/PulseGeneratorService.cpp`,
 `include/backend/services/PulseGeneratorService.h`
 **Tests:** `tests/backend/pulse_generator_frame_test.cpp` (known-answer frames
-from the vendor manual)
-**Related:** [[SyringePumpService]] (pattern origin), [[../camera/MindVisionCamera]],
-[[../frontend/ConfigTabs]], [[../architecture/AppBackend]]
+from the vendor manual), `tests/backend/serial_bus_pty_test.cpp`
+(pty-simulated bus: discovery, multi-device control, failure classification)
+**Related:** [[SerialBus]] (transport), [[SyringePumpService]],
+[[../camera/MindVisionCamera]], [[../frontend/ConfigTabs]],
+[[../architecture/AppBackend]]
+
+## Device identity
+
+`(physical bus, serial settings, Modbus slave address)` — the pulse-generator
+**channel** is a setting below that identity. The service is a *client* of a
+shared [[SerialBus]] session (`SerialBusManager` hands out one `QSerialPort`
+owner per adapter), so two or more generators — and unrelated Modbus devices —
+can share one USB/RS485 adapter at different addresses. A second generator on
+the same bus is a second `PulseGeneratorService` instance built on the same
+`SerialBusManager`.
 
 ## Responsibility
 
-- One `QSerialPort` connection (blocking I/O, mutex-guarded — the
-  [[SyringePumpService]] pattern) to the module.
-- `connect(comPort, baud, addr)` verifies the device by reading all channel
-  registers (FC03) and seeds state from hardware **without writing** — an
+- `connect(portName, SerialSettings, addr)` — takes a **system port name**
+  (`"ttyUSB0"`, `"/dev/ttyACM0"`, `"COM3"`); never synthesizes `COMn`, so it
+  works on Linux (regression-tested over a pty). Acquires the shared bus
+  session, then verifies the addressed device by reading all channel registers
+  (FC03) and seeds state from hardware **without writing** — an
   already-pulsing generator keeps pulsing across a control-link reconnect.
+- `scanBus(portName, settings, from, to, cancel)` — read-only FC03 discovery
+  over a bounded address range (GUI default 1–16), cancelable between
+  addresses; **never emits a write function code**. Classifies each responding
+  address as `PulseGenerator` (expected register-map shape), `ModbusDevice`
+  (valid response, different shape/exception), or `Error` (corrupt/possible
+  duplicate-address collision). Synchronous — callers run it off the GUI
+  thread ([[../frontend/ConfigTabs]] uses a worker `std::thread`).
 - `setFrequency(ch, hz)` — clamps to the module's 400 Hz–40 kHz range, writes
   u32 = Hz×100 (high word first) via FC16.
 - `setDutyCycle(ch, %)` — clamps 0–100, u16 = %×100 via FC06. While the
   channel is gated off, the value is cached and written on the next enable.
 - `setOutputEnabled(ch, on)` — the module has **no run/stop register**: off
   writes duty 0 % (line idles low), on restores the configured duty.
-- `disconnect()` closes the port and deliberately leaves outputs untouched.
+- `disconnect()` releases the shared session (the adapter only closes when its
+  last client lets go) and deliberately leaves outputs untouched.
+- `lastError()` / `Status.lastError` — typed `LinkError` so the GUI can
+  distinguish port-unavailable / port-busy / timeout / CRC-frame error /
+  Modbus exception / address collision / incompatible device.
 
 ## Device protocol (vendor manual 脉冲频率与占空比输出系列 V2.0)
 
@@ -43,12 +67,13 @@ from the vendor manual)
 
 `clampFrequency` / `clampDuty` / `frequencyToRegisterValue` /
 `dutyToRegisterValue` / `buildFrequencyFrame` / `buildDutyFrame` are pure
-statics (unit-testable without a serial port); framing reuses
-`backend::services::modbus::*` from `ModbusRtu.h`.
+statics (unit-testable without a serial port); framing and strict response
+correlation reuse `backend::services::modbus::*` from `ModbusRtu.h`.
 
 ## Wiring
 
-Owned by [[../architecture/AppBackend]] (`pulseGenerator()` accessor), driven
-synchronously from the MindVision section of [[../frontend/ConfigTabs]]
-(connect, frequency/duty, start/stop). Compiles on every platform — it has no
-MindVision SDK dependency.
+Owned by [[../architecture/AppBackend]] (`pulseGenerator()` accessor,
+constructed against the backend-owned `SerialBusManager`), driven from the
+MindVision section of [[../frontend/ConfigTabs]] (port dropdown + refresh,
+bus settings, address, scan, connect, frequency/duty, start/stop). Compiles on
+every platform — it has no MindVision SDK dependency.

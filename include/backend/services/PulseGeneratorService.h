@@ -1,12 +1,16 @@
 #pragma once
 
+#include "backend/services/SerialBus.h"
+
 #include <array>
+#include <atomic>
 #include <cstdint>
+#include <memory>
 #include <mutex>
+#include <vector>
 
 #include <QByteArray>
-
-class QSerialPort;
+#include <QString>
 
 namespace backend::services {
 
@@ -15,6 +19,12 @@ namespace backend::services {
  * over RS485 Modbus RTU. The module generates the TTL pulse train used as the
  * camera's external acquisition-trigger source (NOT the sort-output pulse —
  * see TriggerService for that).
+ *
+ * Device identity is (physical bus, serial settings, Modbus slave address):
+ * the service is a client of a shared ModbusBusSession (one QSerialPort per
+ * adapter, owned by SerialBusManager), so several generators — and other
+ * Modbus devices — can live on one RS485 adapter at different addresses.
+ * Channel is a per-device setting below that identity.
  *
  * Protocol (vendor manual 脉冲频率与占空比输出系列 V2.0):
  *  - Modbus RTU, default address 1, 9600 8N1.
@@ -31,9 +41,27 @@ public:
     static constexpr double MIN_FREQUENCY_HZ = 400.0;
     static constexpr double MAX_FREQUENCY_HZ = 40000.0;
 
+    using SerialSettings = serialbus::SerialSettings;
+
+    // Why the last connect/write failed, mapped from the bus layer so the GUI
+    // can distinguish "port unavailable" from "bus timeout" from "collision".
+    enum class LinkError {
+        None,
+        PortUnavailable,
+        PortBusy,
+        Timeout,
+        CrcFrameError,
+        ModbusException,
+        AddressCollision,
+        IncompatibleDevice,
+        NotConnected,
+        WriteFailed
+    };
+    static const char* toString(LinkError error);
+
     struct Config {
-        int comPort{-1};
-        int baudRate{9600};
+        QString portName;         // system port name: "ttyUSB0", "COM3"
+        SerialSettings serial{};  // 9600 8N1 module factory default
         uint8_t modbusAddress{1};
     };
 
@@ -45,21 +73,45 @@ public:
 
     struct Status {
         bool connected{false};
+        LinkError lastError{LinkError::None};
         std::array<ChannelState, CHANNEL_COUNT> channels{};
     };
 
-    PulseGeneratorService();
+    // One probed address from a bus scan.
+    struct ScanHit {
+        uint8_t address{0};
+        enum class Kind {
+            PulseGenerator, // answered the FC03 identity read with the expected shape
+            ModbusDevice,   // valid Modbus response, but not a pulse generator
+            Error           // corrupt/inconsistent response — possible collision
+        } kind{Kind::Error};
+    };
+
+    explicit PulseGeneratorService(serialbus::SerialBusManager& busManager);
     ~PulseGeneratorService();
 
     PulseGeneratorService(const PulseGeneratorService&) = delete;
     PulseGeneratorService& operator=(const PulseGeneratorService&) = delete;
 
-    // Connection management. connect() verifies the device by reading back all
-    // channel registers and seeds ChannelState from the hardware (a channel
-    // reads as enabled when its duty is non-zero).
-    bool connect(int comPort, int baudRate, uint8_t modbusAddress);
+    // Connection management. connect() acquires the shared bus session for
+    // portName (system port name, never a synthesized "COMn") and verifies the
+    // addressed device by reading back all channel registers, seeding
+    // ChannelState from the hardware (a channel reads as enabled when its duty
+    // is non-zero). Never writes during connect.
+    bool connect(const QString& portName, const SerialSettings& settings, uint8_t modbusAddress);
+    bool connect(const QString& portName, int baudRate, uint8_t modbusAddress);
     void disconnect();
     bool isConnected() const;
+    LinkError lastError() const;
+
+    // Read-only bus discovery: FC03 identity read per address in [from, to] on
+    // the given port. Never emits a write function code, so a generator that
+    // is already pulsing keeps pulsing and unknown devices are left untouched.
+    // Checks `cancel` between addresses; silent addresses are omitted.
+    // Synchronous — run it off the GUI thread and use `cancel` to abort.
+    std::vector<ScanHit> scanBus(const QString& portName, const SerialSettings& settings,
+                                 uint8_t from, uint8_t to, const std::atomic<bool>& cancel,
+                                 int perAddressTimeoutMs = 250);
 
     // Control. Channel is 0-based [0, CHANNEL_COUNT). Values are clamped to
     // the module's range before writing. setDutyCycle stores the configured
@@ -83,12 +135,12 @@ public:
     static QByteArray buildDutyFrame(uint8_t addr, int channel, double percent);
 
 private:
-    bool sendRequest(const QByteArray& request, QByteArray& response, int expectedBytes);
-    bool readHoldingRegisters(uint16_t startReg, uint16_t count, QByteArray& data);
     bool writeFrame(const QByteArray& request);
     static bool validChannel(int channel);
+    static LinkError mapBusError(serialbus::BusError error);
 
-    QSerialPort* serial_{nullptr};
+    serialbus::SerialBusManager& busManager_;
+    std::shared_ptr<serialbus::ModbusBusSession> bus_;
     Config config_;
     Status status_;
     mutable std::mutex mutex_;

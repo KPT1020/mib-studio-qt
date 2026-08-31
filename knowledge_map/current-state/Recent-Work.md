@@ -5,6 +5,32 @@
 
 ## Features shipped
 
+- **Shared RS485 bus + Linux serial discovery for the pulse generator**
+  (2026-08-31, issue #323 follow-up) — the pulse-generator stack is now
+  usable on Linux and correct on multi-drop RS485. New
+  [[../services/SerialBus]] layer: `SerialBusManager` hands out one
+  `ModbusBusSession` (exclusive `QSerialPort` owner) per
+  (system port name, baud/data/parity/stop); all transactions are serialized
+  with strict request/response correlation (`modbus::classifyResponse` /
+  `expectedFrameLength` in `ModbusRtu.h`) — wrong-address frames are
+  discarded not misattributed, CRC errors and trailing bytes surface as
+  possible duplicate-address collisions, exceptions carry their code.
+  [[../services/PulseGeneratorService]] became an addressed bus client:
+  `connect(QString portName, SerialSettings, addr)` (no more synthesized
+  `COMn`), typed `LinkError` status, and a read-only cancelable
+  `scanBus(1..16)` that classifies pulse generators vs generic Modbus
+  devices vs corrupt responders and never writes.
+  [[../services/SyringePumpService]] transport was ported onto the same
+  manager (COM-number API unchanged), so a pump and a generator can share an
+  adapter. [[../frontend/ConfigTabs]] gained a `QSerialPortInfo` port
+  dropdown + Refresh, data/parity/stop combos, Scan (worker thread,
+  cancelable), and QSettings persistence including USB serial/VID/PID for
+  device-node re-resolution. Test: `backend.serial_bus_pty` (POSIX pty bus
+  simulator: two generators + generic device on one bus, concurrency,
+  correlation failure states, scan write-safety). Files: `SerialBus.{h,cpp}`,
+  `ModbusRtu.h`, `PulseGeneratorService.{h,cpp}`,
+  `SyringePumpService.{h,cpp}`, `AppBackend.{h,cpp}`, `ConfigTabs.{h,cpp}`.
+
 - **Shutdown crash prevention** (2026-08-26) — Sentry crash analysis
   revealed SIGSEGV crashes occurring after all services stopped, during the
   C++ destructor chain. Root cause: cross-service callbacks (camera-ready,

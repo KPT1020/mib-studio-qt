@@ -22,6 +22,10 @@ namespace backend::services
     class YoloService;
     class SyringePumpService;
     class PulseGeneratorService;
+    namespace serialbus
+    {
+        class SerialBusManager;
+    }
 }
 
 namespace backend
@@ -146,6 +150,9 @@ namespace backend
         std::unique_ptr<services::AutofocusService> autofocusService_;
         std::unique_ptr<services::TriggerService> triggerService_;
         std::unique_ptr<services::YoloService> yoloService_;
+        // Shared RS485/Modbus bus registry — declared before the serial
+        // services so it outlives their sessions.
+        std::unique_ptr<services::serialbus::SerialBusManager> serialBusManager_;
         std::unique_ptr<services::SyringePumpService> syringePumpService_;
         std::unique_ptr<services::PulseGeneratorService> pulseGeneratorService_;
         std::shared_ptr<playback::FrameStore> frameStore_;

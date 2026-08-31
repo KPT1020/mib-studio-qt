@@ -4,8 +4,10 @@
 #include <QMap>
 #include <QVector>
 
-#include <string>
+#include <atomic>
 #include <optional>
+#include <string>
+#include <thread>
 
 #include "frontend/system/ProfileManager.h"
 
@@ -36,6 +38,7 @@ class ConfigTabs : public QWidget {
     Q_OBJECT
 public:
     explicit ConfigTabs(backend::AppBackend& backend, QWidget* parent = nullptr);
+    ~ConfigTabs() override;
 
 signals:
 	void appConfigPathChanged(const QString& path);
@@ -74,6 +77,8 @@ private slots:
     void onPulseGenApplySettings();
     void onPulseGenStart();
     void onPulseGenStop();
+    void onPulseGenRefreshPorts();
+    void onPulseGenScanToggle();
 	// Profiles
 	void onProfileSelectionChanged(int index);
 	void onSaveProfile();
@@ -93,6 +98,10 @@ private:
     QString currentJsonPath() const;
     QString currentMvJsonPath() const;
     void refreshPulseGenUi();
+    void refreshPulseGenPorts();
+    void savePulseGenSettings() const;
+    void restorePulseGenSettings();
+    void stopPulseGenScan();
     void syncMvFormFromJson();
     void syncMvJsonFromForm();
     void clearJsonSyncIndicators();
@@ -188,11 +197,21 @@ private:
     QComboBox* mvStrobePolarityCombo_ = nullptr;
     QTimer* mvDebounceTimer_ = nullptr;
     bool mvSyncGuard_ = false;
-    // Pulse generator (Zhongsheng module = external trigger source)
-    QSpinBox* pgComPortSpin_ = nullptr;
+    // Pulse generator (Zhongsheng module = external trigger source).
+    // Device identity is (port, bus settings, Modbus slave address); the
+    // channel is a setting below that identity.
+    QComboBox* pgPortCombo_ = nullptr;
+    QPushButton* pgRefreshPortsBtn_ = nullptr;
     QComboBox* pgBaudCombo_ = nullptr;
+    QComboBox* pgDataBitsCombo_ = nullptr;
+    QComboBox* pgParityCombo_ = nullptr;
+    QComboBox* pgStopBitsCombo_ = nullptr;
     QSpinBox* pgAddrSpin_ = nullptr;
+    QPushButton* pgScanBtn_ = nullptr;
     QPushButton* pgConnectBtn_ = nullptr;
+    std::thread pgScanThread_;
+    std::atomic<bool> pgScanCancel_{false};
+    bool pgScanRunning_ = false;
     QSpinBox* pgChannelSpin_ = nullptr;
     QDoubleSpinBox* pgFreqSpin_ = nullptr;
     QDoubleSpinBox* pgDutySpin_ = nullptr;

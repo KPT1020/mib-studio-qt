@@ -1,13 +1,10 @@
 #include "backend/services/PulseGeneratorService.h"
 #include "backend/services/ModbusRtu.h"
 
-#include <QSerialPort>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
-#include <thread>
 
 namespace backend::services {
 
@@ -18,9 +15,8 @@ namespace {
     constexpr uint16_t regDuty(int channel) { return static_cast<uint16_t>(channel * 3 + 2); }
 
     constexpr int SERIAL_TIMEOUT_MS = 1000;
-    // Modbus RTU inter-frame silence (3.5 char times: ~4ms at the module's
-    // default 9600 baud).
-    constexpr int INTER_FRAME_DELAY_MS = 5;
+    // The identity read: every channel's freq/duty registers in one FC03.
+    constexpr uint16_t IDENTITY_REG_COUNT = PulseGeneratorService::CHANNEL_COUNT * 3;
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -60,138 +56,119 @@ bool PulseGeneratorService::validChannel(int channel) {
     return channel >= 0 && channel < CHANNEL_COUNT;
 }
 
-// ---------------------------------------------------------------------------
-// Serial send/receive (same blocking pattern as SyringePumpService)
-// ---------------------------------------------------------------------------
-bool PulseGeneratorService::sendRequest(const QByteArray& request, QByteArray& response, int expectedBytes) {
-    if (!serial_ || !serial_->isOpen()) {
-        return false;
+const char* PulseGeneratorService::toString(LinkError error) {
+    switch (error) {
+    case LinkError::None:               return "ok";
+    case LinkError::PortUnavailable:    return "port unavailable";
+    case LinkError::PortBusy:           return "port busy";
+    case LinkError::Timeout:            return "bus timeout";
+    case LinkError::CrcFrameError:      return "CRC/frame error";
+    case LinkError::ModbusException:    return "Modbus exception";
+    case LinkError::AddressCollision:   return "address collision";
+    case LinkError::IncompatibleDevice: return "incompatible device";
+    case LinkError::NotConnected:       return "not connected";
+    case LinkError::WriteFailed:        return "write failed";
     }
-
-    serial_->readAll(); // drop any stale bytes
-    std::this_thread::sleep_for(std::chrono::milliseconds(INTER_FRAME_DELAY_MS));
-
-    SPDLOG_DEBUG("PulseGeneratorService: TX [{}]: {}",
-                 request.size(), request.toHex(' ').constData());
-
-    if (serial_->write(request) != request.size()) {
-        SPDLOG_ERROR("PulseGeneratorService: failed to write {} bytes", request.size());
-        return false;
-    }
-    if (!serial_->waitForBytesWritten(SERIAL_TIMEOUT_MS)) {
-        SPDLOG_ERROR("PulseGeneratorService: write timeout");
-        return false;
-    }
-
-    response.clear();
-    int remaining = expectedBytes;
-    while (remaining > 0) {
-        if (!serial_->waitForReadyRead(SERIAL_TIMEOUT_MS)) {
-            SPDLOG_ERROR("PulseGeneratorService: read timeout (got {}/{} bytes): {}",
-                         response.size(), expectedBytes, response.toHex(' ').constData());
-            return false;
-        }
-        response.append(serial_->readAll());
-
-        // Modbus exception frames are always 5 bytes (addr + func|0x80 + code + crc).
-        if (response.size() >= 5 && (static_cast<uint8_t>(response[1]) & 0x80)) {
-            response.truncate(5);
-            break;
-        }
-        remaining = expectedBytes - response.size();
-    }
-
-    SPDLOG_DEBUG("PulseGeneratorService: RX [{}]: {}",
-                 response.size(), response.toHex(' ').constData());
-
-    if (!modbus::responseCrcValid(response)) {
-        SPDLOG_ERROR("PulseGeneratorService: bad/short response ({} bytes): {}",
-                     response.size(), response.toHex(' ').constData());
-        return false;
-    }
-    if (modbus::isExceptionFrame(response)) {
-        SPDLOG_ERROR("PulseGeneratorService: Modbus exception 0x{:02X} (func=0x{:02X})",
-                     static_cast<uint8_t>(response[2]),
-                     static_cast<uint8_t>(response[1]) & 0x7F);
-        return false;
-    }
-    return true;
+    return "unknown";
 }
 
-bool PulseGeneratorService::readHoldingRegisters(uint16_t startReg, uint16_t count, QByteArray& data) {
-    const QByteArray request = modbus::buildReadRequest(config_.modbusAddress, startReg, count);
-    const int expectedBytes = 3 + count * 2 + 2;
-    QByteArray response;
-    if (!sendRequest(request, response, expectedBytes)) {
-        return false;
+PulseGeneratorService::LinkError PulseGeneratorService::mapBusError(serialbus::BusError error) {
+    using BE = serialbus::BusError;
+    switch (error) {
+    case BE::None:               return LinkError::None;
+    case BE::PortUnavailable:    return LinkError::PortUnavailable;
+    case BE::PortBusy:           return LinkError::PortBusy;
+    case BE::NotOpen:            return LinkError::NotConnected;
+    case BE::WriteFailed:        return LinkError::WriteFailed;
+    case BE::Timeout:            return LinkError::Timeout;
+    case BE::CrcError:           return LinkError::AddressCollision;
+    case BE::FrameError:         return LinkError::CrcFrameError;
+    case BE::WrongAddress:       return LinkError::Timeout;
+    case BE::WrongFunction:      return LinkError::IncompatibleDevice;
+    case BE::ModbusException:    return LinkError::ModbusException;
+    case BE::CollisionSuspected: return LinkError::AddressCollision;
     }
-    if (!modbus::extractReadData(response, count, data)) {
-        SPDLOG_ERROR("PulseGeneratorService: malformed read response "
-                     "(expected {} registers, got {} bytes)", count, response.size());
-        return false;
-    }
-    return true;
+    return LinkError::CrcFrameError;
 }
 
+// ---------------------------------------------------------------------------
+// Bus I/O
+// ---------------------------------------------------------------------------
 bool PulseGeneratorService::writeFrame(const QByteArray& request) {
-    // FC06 and FC16 both answer with an 8-byte confirmation frame.
-    QByteArray response;
-    return sendRequest(request, response, 8);
+    if (!bus_) {
+        status_.lastError = LinkError::NotConnected;
+        return false;
+    }
+    const auto result = bus_->transact(request, SERIAL_TIMEOUT_MS);
+    status_.lastError = mapBusError(result.error);
+    if (result.error != serialbus::BusError::None) {
+        SPDLOG_ERROR("PulseGeneratorService: write to addr {} failed: {}",
+                     config_.modbusAddress, serialbus::toString(result.error));
+        return false;
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
-PulseGeneratorService::PulseGeneratorService() = default;
+PulseGeneratorService::PulseGeneratorService(serialbus::SerialBusManager& busManager)
+    : busManager_(busManager) {}
 
 PulseGeneratorService::~PulseGeneratorService() {
     disconnect();
 }
 
-bool PulseGeneratorService::connect(int comPort, int baudRate, uint8_t modbusAddress) {
+bool PulseGeneratorService::connect(const QString& portName, int baudRate, uint8_t modbusAddress) {
+    SerialSettings settings;
+    settings.baudRate = baudRate;
+    return connect(portName, settings, modbusAddress);
+}
+
+bool PulseGeneratorService::connect(const QString& portName, const SerialSettings& settings,
+                                    uint8_t modbusAddress) {
     std::scoped_lock lock(mutex_);
 
-    if (serial_) {
-        if (serial_->isOpen()) {
-            serial_->close();
-        }
-        delete serial_;
-        serial_ = nullptr;
-        status_ = Status{};
-    }
+    bus_.reset();
+    status_ = Status{};
 
-    config_.comPort = comPort;
-    config_.baudRate = baudRate;
+    config_.portName = portName;
+    config_.serial = settings;
     config_.modbusAddress = modbusAddress;
 
-    serial_ = new QSerialPort();
-    serial_->setPortName(QString("COM%1").arg(comPort));
-    serial_->setBaudRate(baudRate);
-    serial_->setDataBits(QSerialPort::Data8);
-    serial_->setParity(QSerialPort::NoParity);
-    serial_->setStopBits(QSerialPort::OneStop);
-    serial_->setFlowControl(QSerialPort::NoFlowControl);
-
-    if (!serial_->open(QIODevice::ReadWrite)) {
-        SPDLOG_ERROR("PulseGeneratorService: failed to open COM{}: {}",
-                     comPort, serial_->errorString().toStdString());
-        delete serial_;
-        serial_ = nullptr;
+    serialbus::BusError busError = serialbus::BusError::None;
+    QString detail;
+    bus_ = busManager_.acquire(portName, settings, &busError, &detail);
+    if (!bus_) {
+        status_.lastError = mapBusError(busError);
+        SPDLOG_ERROR("PulseGeneratorService: cannot open {}: {} ({})",
+                     portName.toStdString(), serialbus::toString(busError),
+                     detail.toStdString());
         return false;
     }
-    SPDLOG_INFO("PulseGeneratorService: COM{} opened (baud={}, addr={})",
-                comPort, baudRate, modbusAddress);
 
-    // Verify the device and seed channel state from the hardware: all four
-    // channels' freq/duty registers in one read. Does NOT write anything, so
-    // a generator that is already pulsing keeps pulsing.
+    // Verify the addressed device and seed channel state from the hardware:
+    // all four channels' freq/duty registers in one read. Does NOT write
+    // anything, so a generator that is already pulsing keeps pulsing.
+    const QByteArray request =
+        modbus::buildReadRequest(modbusAddress, 0, IDENTITY_REG_COUNT);
+    const auto result = bus_->transact(request, SERIAL_TIMEOUT_MS);
+    if (result.error != serialbus::BusError::None) {
+        status_.lastError = result.error == serialbus::BusError::ModbusException
+                                ? LinkError::IncompatibleDevice
+                                : mapBusError(result.error);
+        SPDLOG_ERROR("PulseGeneratorService: device not verified on {} addr={}: {} "
+                     "— check wiring and address", portName.toStdString(),
+                     modbusAddress, serialbus::toString(result.error));
+        bus_.reset();
+        return false;
+    }
     QByteArray data;
-    if (!readHoldingRegisters(0, CHANNEL_COUNT * 3, data)) {
-        SPDLOG_ERROR("PulseGeneratorService: device not responding on COM{} addr={} "
-                     "— check wiring and address", comPort, modbusAddress);
-        serial_->close();
-        delete serial_;
-        serial_ = nullptr;
+    if (!modbus::extractReadData(result.response, IDENTITY_REG_COUNT, data)) {
+        status_.lastError = LinkError::IncompatibleDevice;
+        SPDLOG_ERROR("PulseGeneratorService: unexpected identity-read shape from {} addr={}",
+                     portName.toStdString(), modbusAddress);
+        bus_.reset();
         return false;
     }
     const auto* regs = reinterpret_cast<const uint8_t*>(data.constData());
@@ -210,30 +187,94 @@ bool PulseGeneratorService::connect(int comPort, int baudRate, uint8_t modbusAdd
     }
 
     status_.connected = true;
-    SPDLOG_INFO("PulseGeneratorService: connected on COM{} (ch1: {} Hz, {} %)",
-                comPort, status_.channels[0].frequencyHz, status_.channels[0].dutyPercent);
+    status_.lastError = LinkError::None;
+    SPDLOG_INFO("PulseGeneratorService: connected on {} addr={} (ch1: {} Hz, {} %)",
+                portName.toStdString(), modbusAddress,
+                status_.channels[0].frequencyHz, status_.channels[0].dutyPercent);
     return true;
 }
 
 void PulseGeneratorService::disconnect() {
     std::scoped_lock lock(mutex_);
-    if (!serial_) {
+    if (!bus_) {
         return;
     }
     // Deliberately leaves the module's outputs untouched: disconnecting the
-    // control link must not stop a pulse train mid-experiment.
-    if (serial_->isOpen()) {
-        serial_->close();
-    }
-    delete serial_;
-    serial_ = nullptr;
+    // control link must not stop a pulse train mid-experiment. Releasing the
+    // shared session only closes the adapter once its last client lets go.
+    bus_.reset();
     status_.connected = false;
-    SPDLOG_INFO("PulseGeneratorService: disconnected");
+    SPDLOG_INFO("PulseGeneratorService: disconnected from {} addr={}",
+                config_.portName.toStdString(), config_.modbusAddress);
 }
 
 bool PulseGeneratorService::isConnected() const {
     std::scoped_lock lock(mutex_);
     return status_.connected;
+}
+
+PulseGeneratorService::LinkError PulseGeneratorService::lastError() const {
+    std::scoped_lock lock(mutex_);
+    return status_.lastError;
+}
+
+// ---------------------------------------------------------------------------
+// Discovery
+// ---------------------------------------------------------------------------
+std::vector<PulseGeneratorService::ScanHit> PulseGeneratorService::scanBus(
+    const QString& portName, const SerialSettings& settings, uint8_t from, uint8_t to,
+    const std::atomic<bool>& cancel, int perAddressTimeoutMs) {
+    std::vector<ScanHit> hits;
+    if (from == 0 || to < from) {
+        return hits;
+    }
+
+    // Reuse the connected session when the scan targets the same bus;
+    // otherwise acquire one for the duration of the scan.
+    std::shared_ptr<serialbus::ModbusBusSession> bus;
+    {
+        std::scoped_lock lock(mutex_);
+        bus = bus_;
+    }
+    if (!bus || bus->portName() != portName || bus->settings() != settings) {
+        serialbus::BusError busError = serialbus::BusError::None;
+        bus = busManager_.acquire(portName, settings, &busError, nullptr);
+        if (!bus) {
+            SPDLOG_ERROR("PulseGeneratorService: scan cannot open {}: {}",
+                         portName.toStdString(), serialbus::toString(busError));
+            return hits;
+        }
+    }
+
+    for (int addr = from; addr <= to; ++addr) {
+        if (cancel.load(std::memory_order_relaxed)) {
+            SPDLOG_INFO("PulseGeneratorService: scan cancelled at addr {}", addr);
+            break;
+        }
+        // Read-only FC03 identity probe — scanning must never write frequency,
+        // duty, or any other register.
+        const QByteArray request = modbus::buildReadRequest(
+            static_cast<uint8_t>(addr), 0, IDENTITY_REG_COUNT);
+        const auto result = bus->transact(request, perAddressTimeoutMs);
+        switch (result.error) {
+        case serialbus::BusError::None:
+            hits.push_back({static_cast<uint8_t>(addr), ScanHit::Kind::PulseGenerator});
+            break;
+        case serialbus::BusError::ModbusException:
+        case serialbus::BusError::WrongFunction:
+            // Somebody answered, but not with the pulse-generator register map.
+            hits.push_back({static_cast<uint8_t>(addr), ScanHit::Kind::ModbusDevice});
+            break;
+        case serialbus::BusError::CrcError:
+        case serialbus::BusError::FrameError:
+        case serialbus::BusError::CollisionSuspected:
+            hits.push_back({static_cast<uint8_t>(addr), ScanHit::Kind::Error});
+            break;
+        default:
+            break; // silence — no device at this address
+        }
+    }
+    return hits;
 }
 
 // ---------------------------------------------------------------------------
@@ -256,7 +297,8 @@ bool PulseGeneratorService::setFrequency(int channel, double hz) {
         return false;
     }
     status_.channels[static_cast<size_t>(channel)].frequencyHz = clamped;
-    SPDLOG_INFO("PulseGeneratorService: ch{} frequency set to {} Hz", channel + 1, clamped);
+    SPDLOG_INFO("PulseGeneratorService: addr{} ch{} frequency set to {} Hz",
+                config_.modbusAddress, channel + 1, clamped);
     return true;
 }
 
@@ -281,7 +323,8 @@ bool PulseGeneratorService::setDutyCycle(int channel, double percent) {
         return false;
     }
     state.dutyPercent = clamped;
-    SPDLOG_INFO("PulseGeneratorService: ch{} duty set to {} %{}", channel + 1, clamped,
+    SPDLOG_INFO("PulseGeneratorService: addr{} ch{} duty set to {} %{}",
+                config_.modbusAddress, channel + 1, clamped,
                 state.outputEnabled ? "" : " (deferred until enable)");
     return true;
 }
@@ -301,8 +344,8 @@ bool PulseGeneratorService::setOutputEnabled(int channel, bool on) {
         return false;
     }
     state.outputEnabled = on;
-    SPDLOG_INFO("PulseGeneratorService: ch{} output {} (duty {} %)",
-                channel + 1, on ? "enabled" : "disabled", dutyToWrite);
+    SPDLOG_INFO("PulseGeneratorService: addr{} ch{} output {} (duty {} %)",
+                config_.modbusAddress, channel + 1, on ? "enabled" : "disabled", dutyToWrite);
     return true;
 }
 

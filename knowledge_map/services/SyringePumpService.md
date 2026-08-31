@@ -4,13 +4,18 @@
 
 **Source:** `src/backend/services/SyringePumpService.cpp`,
 `include/backend/services/SyringePumpService.h`
-**Related:** [[../frontend/SyringePumpTab]],
+**Related:** [[SerialBus]] (transport), [[../frontend/SyringePumpTab]],
 [[../frontend/Dialogs]] (SyringePumpSettingsDialog)
 
 ## Responsibility
 
-- Maintain two independent `QSerialPort` connections
-  (`PumpId::Sample`, `PumpId::Sheath`).
+- Maintain two independent pump connections (`PumpId::Sample`,
+  `PumpId::Sheath`). Serial I/O goes through the shared [[SerialBus]]
+  session for each adapter (acquired from the `AppBackend`-owned
+  `SerialBusManager`), so a pump can share an RS485 adapter with other Modbus
+  devices instead of failing on a second open. The public API still addresses
+  adapters by Windows COM number; the `COMn` name is synthesized at this
+  service's boundary only.
 - Per-pump control: `setFlowRate`, `setDirection`, `start`, `stop`,
   `purge`, `stopPurge`, `setSyringeVolume`.
 - Per-pump status polling: `pollStatus(id)` — UI timer drives this.
@@ -36,9 +41,10 @@ Public scan helper probes `REG_RUN_COMMAND` (`0x0001`) with Modbus function
 
 ## Threading
 
-Each pump has its own `std::mutex` guarding serial I/O. UI calls are
-synchronous; `pollStatus` is invoked from the Qt timer in
-[[../frontend/SyringePumpTab]].
+Each pump has its own `std::mutex` guarding pump state; per-adapter frame
+serialization and response correlation live in the shared [[SerialBus]]
+session (bus mutex always innermost). UI calls are synchronous; `pollStatus`
+is invoked from the Qt timer in [[../frontend/SyringePumpTab]].
 
 ## Gotchas
 

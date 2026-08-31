@@ -26,9 +26,19 @@
   `isMindVisionCameraSelected()`; stops capture, rebuilds factory), **Soft
   Trigger** → `AppBackend::softTriggerCamera` (acquisition trigger — distinct
   from the sort-pulse buttons in [[ExperimentMonitoringTab]]), and a pulse
-  generator group (COM/baud/addr connect, channel, frequency 400–40000 Hz
-  defaulting to 5000 Hz = the 5000 fps bench trigger rate, duty %,
-  Set/Start/Stop) driving [[../services/PulseGeneratorService]] synchronously.
+  generator group driving [[../services/PulseGeneratorService]]. The group
+  separates **Port / bus settings / Slave address / Channel**: a
+  `QSerialPortInfo`-populated port dropdown (system name + description +
+  USB S/N + VID:PID) with an explicit Refresh, baud/data/parity/stop combos,
+  Modbus address spin, a read-only **Scan** (addresses 1–16, worker thread,
+  cancelable, classifies generators vs generic Modbus devices vs
+  corrupt/collision responses; never writes), Connect (typed `LinkError`
+  status on failure), channel, frequency 400–40000 Hz defaulting to 5000 Hz
+  = the 5000 fps bench trigger rate, duty %, Set/Start/Stop. Settings persist
+  in the QSettings group `PulseGenerator` (port name **plus USB
+  serial/VID/PID** so a renamed `/dev/ttyUSB*` node re-resolves when the
+  identity matches exactly one port; ambiguous matches force operator
+  selection). `~ConfigTabs` cancels/joins any running scan thread.
 - MindVision "Trigger & strobe parameters" form: combos/spinboxes for
   trigger mode, edge type, exposure (0.8–838860 µs = MV-XGC51 sensor range),
   trigger delay/jitter/count, strobe mode/delay/width/polarity. **Two-way

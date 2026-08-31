@@ -29,6 +29,7 @@ Jump to the notes that match your task:
 | Processing-core versions / native hot-swap | [[frontend/ProcessingCoreDialog]] + [[services/ProcessingService]] |
 | Autofocus / nanopositioner | [[services/AutofocusService]] + [[frontend/NanopositionerTab]] |
 | Syringe pumps | [[services/SyringePumpService]] + [[frontend/SyringePumpTab]] |
+| Pulse generator / shared RS485 bus | [[services/PulseGeneratorService]] + [[services/SerialBus]] + [[frontend/ConfigTabs]] |
 | Crashes / observability | [[services/CrashReporter]] + [[diagnostics/CrashStateMirror]] |
 | Pipeline / trigger latency diagnosis | [[diagnostics/PipelineTimingRecorder]] + `docs/howto/pipeline-latency-diagnosis.md` |
 | Build / deploy | [[build-and-run/Build]], [[build-and-run/Run-Modes]] |
