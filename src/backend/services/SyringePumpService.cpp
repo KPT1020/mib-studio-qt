@@ -147,19 +147,29 @@ SyringePumpService::~SyringePumpService() {
 // Connection management
 // ---------------------------------------------------------------------------
 bool SyringePumpService::connect(PumpId id, int comPort, int baudRate, uint8_t modbusAddress) {
+    if (!connect(id, comPortName(comPort), baudRate, modbusAddress)) {
+        return false;
+    }
+    auto& pump = pumps_[static_cast<size_t>(static_cast<int>(id))];
+    std::scoped_lock lock(pump.mutex);
+    pump.config.comPort = comPort;
+    return true;
+}
+
+bool SyringePumpService::connect(PumpId id, const QString& portName, int baudRate,
+                                 uint8_t modbusAddress) {
     int idx = static_cast<int>(id);
     auto& pump = pumps_[static_cast<size_t>(idx)];
 
-    {
-        std::scoped_lock lock(pump.mutex);
-        if (pump.bus) {
-            disconnect(id);
-        }
+    // disconnect() takes pump.mutex itself, so a reconnect must release the
+    // old session before this function takes the lock (non-recursive mutex).
+    if (isConnected(id)) {
+        disconnect(id);
     }
 
     std::scoped_lock lock(pump.mutex);
 
-    pump.config.comPort = comPort;
+    pump.config.comPort = -1; // unknown unless the int overload fills it in
     pump.config.baudRate = baudRate;
     pump.config.modbusAddress = modbusAddress;
 
@@ -170,20 +180,20 @@ bool SyringePumpService::connect(PumpId id, int comPort, int baudRate, uint8_t m
     settings.baudRate = baudRate;
     serialbus::BusError busError = serialbus::BusError::None;
     QString errorDetail;
-    pump.bus = busManager_.acquire(comPortName(comPort), settings, &busError, &errorDetail);
+    pump.bus = busManager_.acquire(portName, settings, &busError, &errorDetail);
     if (!pump.bus) {
-        SPDLOG_ERROR("SyringePumpService: Failed to open COM{} for {} pump: {} ({})",
-                    comPort, pumpName(id), serialbus::toString(busError),
+        SPDLOG_ERROR("SyringePumpService: Failed to open {} for {} pump: {} ({})",
+                    portName.toStdString(), pumpName(id), serialbus::toString(busError),
                     errorDetail.toStdString());
         return false;
     }
-    SPDLOG_INFO("SyringePumpService: COM{} opened for {} pump (baud={}, addr={})",
-                comPort, pumpName(id), baudRate, modbusAddress);
+    SPDLOG_INFO("SyringePumpService: {} opened for {} pump (baud={}, addr={})",
+                portName.toStdString(), pumpName(id), baudRate, modbusAddress);
 
     // Verify communication by enabling the channel (required for start/stop commands)
     if (!writeSingleRegister(idx, REG_CHANNEL_ENABLE, 1)) {
-        SPDLOG_ERROR("SyringePumpService: {} pump not responding on COM{} addr={} — check wiring and address",
-                     pumpName(id), comPort, modbusAddress);
+        SPDLOG_ERROR("SyringePumpService: {} pump not responding on {} addr={} — check wiring and address",
+                     pumpName(id), portName.toStdString(), modbusAddress);
         pump.bus.reset();
         return false;
     }
@@ -200,7 +210,8 @@ bool SyringePumpService::connect(PumpId id, int comPort, int baudRate, uint8_t m
     }
 
     pump.status.connected = true;
-    SPDLOG_INFO("SyringePumpService: {} pump connected on COM{}", pumpName(id), comPort);
+    SPDLOG_INFO("SyringePumpService: {} pump connected on {}", pumpName(id),
+                portName.toStdString());
     return true;
 }
 

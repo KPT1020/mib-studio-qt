@@ -3,10 +3,13 @@
 #include <QByteArray>
 #include <QString>
 
+#include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 class QSerialPort;
@@ -81,11 +84,14 @@ struct Transaction {
     QByteArray response;      // full validated frame when error is None/ModbusException
 };
 
-class SerialBusManager;
-
 // Exclusive owner of one QSerialPort. Construct only through
 // SerialBusManager::acquire(); hold via shared_ptr — the port closes when the
 // last client releases its reference.
+//
+// The QSerialPort lives on a dedicated I/O thread (created and used only
+// there, no event loop), so it can never race the acquiring thread's Qt event
+// loop: transact() marshals the request to that thread and blocks for the
+// result. Any thread may call transact(); callers are serialized.
 class ModbusBusSession {
 public:
     ~ModbusBusSession();
@@ -94,33 +100,58 @@ public:
     ModbusBusSession& operator=(const ModbusBusSession&) = delete;
 
     // One serialized Modbus RTU transaction: drains stale bytes, enforces the
-    // inter-frame delay, writes `request` (byte 0 = slave address) and reads
-    // exactly one strictly-correlated response frame. Complete frames from a
-    // different slave address (stale/delayed traffic) are discarded and the
-    // read continues until the deadline; corrupt or unframeable bytes fail
-    // the transaction rather than being reinterpreted.
+    // inter-frame delay (measured from the last bus activity), writes
+    // `request` (byte 0 = slave address) and reads exactly one
+    // strictly-correlated response frame. Complete frames from a different
+    // slave address (stale/delayed traffic) are discarded and the read
+    // continues until the deadline; corrupt or unframeable bytes fail the
+    // transaction rather than being reinterpreted.
     Transaction transact(const QByteArray& request, int timeoutMs = 1000);
 
     QString portName() const { return portName_; }
     SerialSettings settings() const { return settings_; }
-    bool isOpen() const;
+    bool isOpen() const { return portOpen_.load(); }
 
 private:
     friend class SerialBusManager;
-    ModbusBusSession(SerialBusManager* manager, const QString& portName,
-                     const SerialSettings& settings);
-    bool open(QString* errorDetail);
+    ModbusBusSession(const QString& portName, const SerialSettings& settings);
 
-    SerialBusManager* manager_;
-    QString portName_;
-    SerialSettings settings_;
+    // Spawns the I/O thread, which opens the port; blocks for the outcome.
+    bool start(BusError* error, QString* errorDetail);
+    void ioLoop();
+    bool openPortOnIoThread(); // io thread only
+    Transaction runTransaction(const QByteArray& request, int timeoutMs); // io thread only
+
+    const QString portName_;
+    const SerialSettings settings_;
+
+    // Touched only by the I/O thread.
     QSerialPort* serial_{nullptr};
-    mutable std::mutex ioMutex_;
+    std::chrono::steady_clock::time_point lastBusActivity_{};
+
+    std::thread ioThread_;
+    std::mutex callMutex_; // serializes transact() callers
+
+    // Handshake between callers and the I/O thread.
+    std::mutex jobMutex_;
+    std::condition_variable jobCv_;
+    const QByteArray* jobRequest_{nullptr};
+    int jobTimeoutMs_{0};
+    Transaction jobResult_;
+    bool jobPending_{false};
+    bool jobDone_{false};
+    bool stopRequested_{false};
+    bool openDone_{false};
+    BusError openErrorCode_{BusError::PortUnavailable};
+    QString openErrorDetail_;
+    std::atomic<bool> portOpen_{false};
 };
 
 // Process-wide registry: one live session per system port. acquire() returns
 // the existing session when the settings match, refuses with PortBusy when the
 // port is already held with different settings, and opens the port otherwise.
+// Session teardown (port close + registry erase) happens atomically under the
+// registry lock, so a dying session and a fresh acquire cannot interleave.
 class SerialBusManager {
 public:
     SerialBusManager() = default;
@@ -135,8 +166,6 @@ public:
                                               QString* errorDetail = nullptr);
 
 private:
-    friend class ModbusBusSession;
-    void release(const QString& key);
     static QString normalizeKey(const QString& portName);
 
     std::mutex mutex_;

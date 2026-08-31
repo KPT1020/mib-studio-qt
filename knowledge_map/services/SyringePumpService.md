@@ -13,9 +13,12 @@
   `PumpId::Sheath`). Serial I/O goes through the shared [[SerialBus]]
   session for each adapter (acquired from the `AppBackend`-owned
   `SerialBusManager`), so a pump can share an RS485 adapter with other Modbus
-  devices instead of failing on a second open. The public API still addresses
-  adapters by Windows COM number; the `COMn` name is synthesized at this
-  service's boundary only.
+  devices instead of failing on a second open. `connect()` has two overloads:
+  the historical Windows COM-number one, and a `QString` system-port-name one
+  (`"ttyUSB0"`, `"COM3"`) that makes Linux adapter sharing reachable; the
+  `COMn` synthesis lives only in the int overload. Reconnecting while
+  connected releases the old session first (a non-recursive-mutex deadlock
+  here is regression-tested in `serial_bus_pty_test`).
 - Per-pump control: `setFlowRate`, `setDirection`, `start`, `stop`,
   `purge`, `stopPurge`, `setSyringeVolume`.
 - Per-pump status polling: `pollStatus(id)` — UI timer drives this.

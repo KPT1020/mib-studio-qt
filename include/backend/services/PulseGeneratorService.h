@@ -109,9 +109,11 @@ public:
     // is already pulsing keeps pulsing and unknown devices are left untouched.
     // Checks `cancel` between addresses; silent addresses are omitted.
     // Synchronous — run it off the GUI thread and use `cancel` to abort.
+    // When the port itself cannot be acquired, returns empty and reports why
+    // through `error` (so callers can distinguish that from a silent bus).
     std::vector<ScanHit> scanBus(const QString& portName, const SerialSettings& settings,
                                  uint8_t from, uint8_t to, const std::atomic<bool>& cancel,
-                                 int perAddressTimeoutMs = 250);
+                                 int perAddressTimeoutMs = 250, LinkError* error = nullptr);
 
     // Control. Channel is 0-based [0, CHANNEL_COUNT). Values are clamped to
     // the module's range before writing. setDutyCycle stores the configured
@@ -133,6 +135,12 @@ public:
     static QByteArray buildFrequencyFrame(uint8_t addr, int channel, double hz);
     // FC06 write of the duty register 3*channel + 2.
     static QByteArray buildDutyFrame(uint8_t addr, int channel, double percent);
+    // True when the raw bytes of the 12-register identity read are plausible
+    // for this module: per channel, frequency raw is 0 or within
+    // [400 Hz, 40 kHz]×100 and duty raw ≤ 100%×100. Guards against adopting
+    // (and later writing into) an unrelated Modbus device that merely serves
+    // 12 holding registers at address 0.
+    static bool identityLooksLikeGenerator(const QByteArray& identityData);
 
 private:
     bool writeFrame(const QByteArray& request);

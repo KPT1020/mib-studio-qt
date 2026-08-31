@@ -56,6 +56,31 @@ bool PulseGeneratorService::validChannel(int channel) {
     return channel >= 0 && channel < CHANNEL_COUNT;
 }
 
+bool PulseGeneratorService::identityLooksLikeGenerator(const QByteArray& identityData) {
+    if (identityData.size() != CHANNEL_COUNT * 6) {
+        return false;
+    }
+    const auto* regs = reinterpret_cast<const uint8_t*>(identityData.constData());
+    constexpr uint32_t minFreqRaw = static_cast<uint32_t>(MIN_FREQUENCY_HZ * 100.0);
+    constexpr uint32_t maxFreqRaw = static_cast<uint32_t>(MAX_FREQUENCY_HZ * 100.0);
+    for (int ch = 0; ch < CHANNEL_COUNT; ++ch) {
+        const int off = ch * 6;
+        const uint32_t freqRaw = (static_cast<uint32_t>(regs[off]) << 24) |
+                                 (static_cast<uint32_t>(regs[off + 1]) << 16) |
+                                 (static_cast<uint32_t>(regs[off + 2]) << 8) |
+                                 static_cast<uint32_t>(regs[off + 3]);
+        const uint16_t dutyRaw = static_cast<uint16_t>(
+            (static_cast<uint16_t>(regs[off + 4]) << 8) | regs[off + 5]);
+        if (freqRaw != 0 && (freqRaw < minFreqRaw || freqRaw > maxFreqRaw)) {
+            return false;
+        }
+        if (dutyRaw > 10000) {
+            return false;
+        }
+    }
+    return true;
+}
+
 const char* PulseGeneratorService::toString(LinkError error) {
     switch (error) {
     case LinkError::None:               return "ok";
@@ -171,6 +196,17 @@ bool PulseGeneratorService::connect(const QString& portName, const SerialSetting
         bus_.reset();
         return false;
     }
+    // Refuse to adopt a device whose register values are outside the module's
+    // documented ranges — writing frequency/duty into an unrelated Modbus
+    // device's registers 0..11 is the failure this guards against.
+    if (!identityLooksLikeGenerator(data)) {
+        status_.lastError = LinkError::IncompatibleDevice;
+        SPDLOG_ERROR("PulseGeneratorService: device on {} addr={} answers the identity read "
+                     "but its register values are not plausible for this module — refusing",
+                     portName.toStdString(), modbusAddress);
+        bus_.reset();
+        return false;
+    }
     const auto* regs = reinterpret_cast<const uint8_t*>(data.constData());
     for (int ch = 0; ch < CHANNEL_COUNT; ++ch) {
         const int off = ch * 6;
@@ -223,8 +259,11 @@ PulseGeneratorService::LinkError PulseGeneratorService::lastError() const {
 // ---------------------------------------------------------------------------
 std::vector<PulseGeneratorService::ScanHit> PulseGeneratorService::scanBus(
     const QString& portName, const SerialSettings& settings, uint8_t from, uint8_t to,
-    const std::atomic<bool>& cancel, int perAddressTimeoutMs) {
+    const std::atomic<bool>& cancel, int perAddressTimeoutMs, LinkError* error) {
     std::vector<ScanHit> hits;
+    if (error) {
+        *error = LinkError::None;
+    }
     if (from == 0 || to < from) {
         return hits;
     }
@@ -242,6 +281,9 @@ std::vector<PulseGeneratorService::ScanHit> PulseGeneratorService::scanBus(
         if (!bus) {
             SPDLOG_ERROR("PulseGeneratorService: scan cannot open {}: {}",
                          portName.toStdString(), serialbus::toString(busError));
+            if (error) {
+                *error = mapBusError(busError);
+            }
             return hits;
         }
     }
@@ -257,9 +299,18 @@ std::vector<PulseGeneratorService::ScanHit> PulseGeneratorService::scanBus(
             static_cast<uint8_t>(addr), 0, IDENTITY_REG_COUNT);
         const auto result = bus->transact(request, perAddressTimeoutMs);
         switch (result.error) {
-        case serialbus::BusError::None:
-            hits.push_back({static_cast<uint8_t>(addr), ScanHit::Kind::PulseGenerator});
+        case serialbus::BusError::None: {
+            // Right shape — but only plausible register values earn the
+            // "pulse generator" label (see identityLooksLikeGenerator).
+            QByteArray data;
+            const bool plausible =
+                modbus::extractReadData(result.response, IDENTITY_REG_COUNT, data) &&
+                identityLooksLikeGenerator(data);
+            hits.push_back({static_cast<uint8_t>(addr),
+                            plausible ? ScanHit::Kind::PulseGenerator
+                                      : ScanHit::Kind::ModbusDevice});
             break;
+        }
         case serialbus::BusError::ModbusException:
         case serialbus::BusError::WrongFunction:
             // Somebody answered, but not with the pulse-generator register map.

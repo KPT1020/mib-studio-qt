@@ -1213,12 +1213,26 @@ void ConfigTabs::onPulseGenScanToggle() {
     // Bounded, read-only, cancelable probe off the GUI thread; results are
     // marshaled back with a queued call.
     pgScanThread_ = std::thread([this, portName, settings]() {
+        using LinkError = backend::services::PulseGeneratorService::LinkError;
+        LinkError scanError = LinkError::None;
         const auto hits = backend_.pulseGenerator().scanBus(
-            portName, settings, 1, 16, pgScanCancel_);
-        QMetaObject::invokeMethod(this, [this, portName, hits]() {
+            portName, settings, 1, 16, pgScanCancel_, 250, &scanError);
+        QMetaObject::invokeMethod(this, [this, portName, hits, scanError]() {
             pgScanRunning_ = false;
             refreshPulseGenUi();
             if (pgScanCancel_.load()) {
+                return;
+            }
+            if (scanError != backend::services::PulseGeneratorService::LinkError::None) {
+                // The port itself could not be opened — very different advice
+                // than a silent bus.
+                QMessageBox::warning(
+                    this, tr("Pulse Generator"),
+                    tr("Could not open %1 for scanning: %2. The port may be held "
+                       "by another program, or by MIB with different serial settings.")
+                        .arg(portName)
+                        .arg(QString::fromLatin1(
+                            backend::services::PulseGeneratorService::toString(scanError))));
                 return;
             }
             if (hits.empty()) {

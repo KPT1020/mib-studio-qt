@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include <QString>
+
 class QByteArray;
 
 namespace backend::services::serialbus {
@@ -58,8 +60,13 @@ public:
     explicit SyringePumpService(serialbus::SerialBusManager& busManager);
     ~SyringePumpService();
 
-    // Connection management
+    // Connection management. The int overload keeps the historical Windows
+    // COM-number API; the QString overload takes a system port name
+    // ("ttyUSB0", "COM3") so a pump can share a Linux RS485 adapter with
+    // other Modbus services. Reconnecting while connected is safe (the old
+    // session is released first).
     bool connect(PumpId id, int comPort, int baudRate, uint8_t modbusAddress);
+    bool connect(PumpId id, const QString& portName, int baudRate, uint8_t modbusAddress);
     void disconnect(PumpId id);
     bool isConnected(PumpId id) const;
 

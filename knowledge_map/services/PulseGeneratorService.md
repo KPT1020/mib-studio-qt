@@ -32,13 +32,22 @@ the same bus is a second `PulseGeneratorService` instance built on the same
   session, then verifies the addressed device by reading all channel registers
   (FC03) and seeds state from hardware **without writing** — an
   already-pulsing generator keeps pulsing across a control-link reconnect.
-- `scanBus(portName, settings, from, to, cancel)` — read-only FC03 discovery
-  over a bounded address range (GUI default 1–16), cancelable between
-  addresses; **never emits a write function code**. Classifies each responding
-  address as `PulseGenerator` (expected register-map shape), `ModbusDevice`
-  (valid response, different shape/exception), or `Error` (corrupt/possible
-  duplicate-address collision). Synchronous — callers run it off the GUI
+- `scanBus(portName, settings, from, to, cancel, timeout, error*)` —
+  read-only FC03 discovery over a bounded address range (GUI default 1–16),
+  cancelable between addresses; **never emits a write function code**.
+  Classifies each responding address as `PulseGenerator` (expected
+  register-map shape **and plausible values** — see below), `ModbusDevice`
+  (valid response, different shape/exception/implausible values), or `Error`
+  (corrupt/possible duplicate-address collision). A port that cannot be
+  acquired at all is reported through the `error` out-param so the GUI can
+  distinguish it from a silent bus. Synchronous — callers run it off the GUI
   thread ([[../frontend/ConfigTabs]] uses a worker `std::thread`).
+- `identityLooksLikeGenerator(data)` — plausibility gate on the 12-register
+  identity read: per channel, frequency raw must be 0 or within
+  [400 Hz, 40 kHz]×100 and duty raw ≤ 10000. Both `connect()` (refuses with
+  `IncompatibleDevice`) and `scanBus()` apply it, so an unrelated Modbus
+  device that merely serves 12 holding registers at address 0 is never
+  adopted and later written into.
 - `setFrequency(ch, hz)` — clamps to the module's 400 Hz–40 kHz range, writes
   u32 = Hz×100 (high word first) via FC16.
 - `setDutyCycle(ch, %)` — clamps 0–100, u16 = %×100 via FC06. While the

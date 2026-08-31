@@ -25,9 +25,21 @@
   adapter. [[../frontend/ConfigTabs]] gained a `QSerialPortInfo` port
   dropdown + Refresh, data/parity/stop combos, Scan (worker thread,
   cancelable), and QSettings persistence including USB serial/VID/PID for
-  device-node re-resolution. Test: `backend.serial_bus_pty` (POSIX pty bus
+  device-node re-resolution. Post-review hardening (same day): each bus
+  session runs its `QSerialPort` on a dedicated I/O thread (no cross-thread
+  races with the GUI event loop); open failures classified from the typed
+  `QSerialPort::error()` enum, not translated strings; session teardown
+  closes the port and erases the registry entry atomically under the
+  registry lock; inter-frame delay measured from last bus activity and a
+  shorter collision listen (less GUI-thread latency for pump polling);
+  `identityLooksLikeGenerator` plausibility gate on connect and scan so a
+  random 12-register Modbus device is never adopted/written into; scan
+  reports port-acquire failures distinctly from a silent bus; pump
+  `connect()` no longer self-deadlocks on reconnect and gained a `QString`
+  port-name overload. Test: `backend.serial_bus_pty` (POSIX pty bus
   simulator: two generators + generic device on one bus, concurrency,
-  correlation failure states, scan write-safety). Files: `SerialBus.{h,cpp}`,
+  correlation failure states, scan write-safety, impostor refusal, pump
+  reconnect regression). Files: `SerialBus.{h,cpp}`,
   `ModbusRtu.h`, `PulseGeneratorService.{h,cpp}`,
   `SyringePumpService.{h,cpp}`, `AppBackend.{h,cpp}`, `ConfigTabs.{h,cpp}`.
 

@@ -27,6 +27,7 @@ int main() { return 0; }
 #include "backend/services/ModbusRtu.h"
 #include "backend/services/PulseGeneratorService.h"
 #include "backend/services/SerialBus.h"
+#include "backend/services/SyringePumpService.h"
 
 #include "support/assert.h"
 #include "support/watchdog.h"
@@ -61,6 +62,9 @@ namespace {
 //   addr 1, 2 : pulse generators (12 holding registers each)
 //   addr 3    : generic Modbus device — answers every request with exception
 //               0x02 (illegal data address); must never be written to
+//   addr 5    : generic device that happens to serve 12 holding registers at
+//               address 0, but with values implausible for the generator
+//               (all 0xFFFF) — must NOT be classified as a pulse generator
 //   addr 7    : truncated responder — 3 header bytes, then silence
 //   addr 8    : corrupt responder — right shape, wrong CRC
 //   addr 9    : responds with a frame claiming slave address 10
@@ -158,6 +162,19 @@ private:
             send(resp);
             return;
         }
+        if (addr == 5 && func == modbus::kFuncReadHolding) {
+            // Valid FC03 shape, implausible register values (all 0xFFFF).
+            const uint16_t count = static_cast<uint16_t>(
+                (static_cast<uint8_t>(req[4]) << 8) | static_cast<uint8_t>(req[5]));
+            QByteArray resp;
+            resp.append(static_cast<char>(addr));
+            resp.append(static_cast<char>(func));
+            resp.append(static_cast<char>(count * 2));
+            resp.append(count * 2, static_cast<char>(0xFF));
+            modbus::appendCrc(resp);
+            send(resp);
+            return;
+        }
         if (addr == 7) { // truncated: header only, then silence
             QByteArray resp;
             resp.append(static_cast<char>(addr));
@@ -196,7 +213,17 @@ private:
                 (static_cast<uint8_t>(req[2]) << 8) | static_cast<uint8_t>(req[3]));
             const uint16_t count = static_cast<uint16_t>(
                 (static_cast<uint8_t>(req[4]) << 8) | static_cast<uint8_t>(req[5]));
-            if (start + count > 12) return;
+            if (start + count > 12) {
+                // Out-of-map read (e.g. the pump service probing its own
+                // registers): answer illegal-data-address instead of silence.
+                QByteArray resp;
+                resp.append(static_cast<char>(addr));
+                resp.append(static_cast<char>(func | 0x80));
+                resp.append(static_cast<char>(0x02));
+                modbus::appendCrc(resp);
+                send(resp);
+                return;
+            }
             QByteArray resp;
             resp.append(static_cast<char>(addr));
             resp.append(static_cast<char>(func));
@@ -406,6 +433,9 @@ int main(int argc, char** argv)
         MIB_REQUIRE(kindOf(3) != nullptr, "generic device shows up in scan");
         MIB_EXPECT(kindOf(3)->kind == PulseGeneratorService::ScanHit::Kind::ModbusDevice,
                    "addr3 classified as generic Modbus device, not a generator");
+        MIB_REQUIRE(kindOf(5) != nullptr, "12-register impostor shows up in scan");
+        MIB_EXPECT(kindOf(5)->kind == PulseGeneratorService::ScanHit::Kind::ModbusDevice,
+                   "right-shaped but implausible register values are NOT a generator");
         MIB_REQUIRE(kindOf(8) != nullptr, "corrupt responder shows up in scan");
         MIB_EXPECT(kindOf(8)->kind == PulseGeneratorService::ScanHit::Kind::Error,
                    "addr8 classified as error/possible collision");
@@ -416,6 +446,45 @@ int main(int argc, char** argv)
         std::atomic<bool> cancel{true};
         const auto hits = gen1.scanBus(slavePath, settings, 1, 255, cancel, 250);
         MIB_EXPECT(hits.empty(), "pre-cancelled scan probes nothing");
+    }
+    watchdog.mark("scan port conflict");
+    {
+        // Scanning the port with conflicting serial settings while the bus is
+        // held must report a port error, not masquerade as a silent bus.
+        serialbus::SerialSettings other = settings;
+        other.baudRate = 115200;
+        std::atomic<bool> cancel{false};
+        PulseGeneratorService::LinkError scanError = PulseGeneratorService::LinkError::None;
+        const auto hits = gen1.scanBus(slavePath, other, 1, 4, cancel, 100, &scanError);
+        MIB_EXPECT(hits.empty(), "conflicting-settings scan probes nothing");
+        MIB_EXPECT(scanError == PulseGeneratorService::LinkError::PortBusy,
+                   "conflicting-settings scan reports PortBusy");
+    }
+
+    // --- a plausible-shaped impostor is refused on connect ------------------
+    watchdog.mark("impostor connect");
+    {
+        PulseGeneratorService genX(manager);
+        MIB_EXPECT(!genX.connect(slavePath, settings, 5),
+                   "connect refuses the 12-register impostor at addr 5");
+        MIB_EXPECT(genX.lastError() == PulseGeneratorService::LinkError::IncompatibleDevice,
+                   "impostor refusal reports IncompatibleDevice");
+    }
+
+    // --- pump shares the same adapter through the QString port API ----------
+    watchdog.mark("pump shares bus");
+    {
+        backend::services::SyringePumpService pump(manager);
+        const auto pumpId = backend::services::SyringePumpService::PumpId::Sample;
+        MIB_EXPECT(pump.connect(pumpId, slavePath, 9600, 1),
+                   "pump connects via a system port name on the shared bus");
+        MIB_EXPECT(pump.isConnected(pumpId), "pump reports connected");
+        // Regression: reconnecting while connected used to self-deadlock on
+        // the pump mutex (the watchdog would fire here).
+        MIB_EXPECT(pump.connect(pumpId, slavePath, 9600, 1),
+                   "pump reconnect while connected does not deadlock");
+        pump.disconnect(pumpId);
+        MIB_EXPECT(!pump.isConnected(pumpId), "pump disconnects cleanly");
     }
 
     // --- disconnect keeps the shared port open for the other client --------

@@ -24,13 +24,19 @@
   normalized port name it keys the bus session.
 - `SerialBusManager::acquire(portName, settings)` — returns the existing
   session when the key matches, refuses with `PortBusy` when the port is held
-  with different settings, opens the port otherwise. Sessions are held via
-  `shared_ptr`; the adapter closes when the last client releases (so one
-  service disconnecting never yanks the port from another).
+  with different settings, opens the port otherwise. Open failures are
+  classified from `QSerialPort::error()` (typed enum, never the translated
+  `errorString` text): `PermissionError` → `PortBusy`, else
+  `PortUnavailable`. Sessions are held via `shared_ptr` with a custom
+  deleter that closes the port and erases the registry entry atomically
+  under the registry lock — one service disconnecting never yanks the port
+  from another, and a dying session cannot interleave with a fresh acquire
+  of the same port.
 - `ModbusBusSession::transact(request, timeoutMs)` — the only I/O path.
-  Serialized by a per-session mutex; drains stale bytes first, enforces the
-  RTU inter-frame delay, then reads exactly one frame, framed from its own
-  header via `modbus::expectedFrameLength`.
+  Callers are serialized; drains stale bytes first, enforces the RTU
+  inter-frame delay **measured from the last bus activity** (an idle bus
+  pays nothing), then reads exactly one frame, framed from its own header
+  via `modbus::expectedFrameLength`.
 
 ## Strict correlation (`modbus::classifyResponse`)
 
@@ -62,8 +68,10 @@ fighting over a second open.
 
 ## Threading
 
-Blocking I/O guarded by the session mutex (bus mutex is always innermost —
-services take their own state mutex first). Sessions are created wherever
-`acquire()` is called and may be used from other threads only through
-`transact()`'s serialization, matching the pre-existing blocking-serial
-pattern in the services.
+Each session owns a **dedicated I/O thread**: the `QSerialPort` is created,
+used (blocking `waitFor*`, no event loop), and destroyed only on that thread,
+so the acquiring thread's Qt event loop can never race the port's internal
+buffers. `transact()` marshals the request to the I/O thread and blocks for
+the result; any thread may call it, and callers are serialized by the
+session's call mutex (always innermost — services take their own state mutex
+first).
