@@ -64,10 +64,13 @@ The `linux-release` preset sets:
 - `MIB_ENABLE_HARDWARE_SDKS=OFF`
 - `MIB_ENABLE_MINDVISION=ON`
 - `MIB_ENABLE_WINDOWS_PACKAGING=OFF`
-- `MIB_USE_SENTRY=OFF`
+- `MIB_USE_SENTRY=ON`
 
 That builds EGrabber as a stub, MindVision as the real SDK-backed provider,
-and keeps local-only crash reporting.
+and compiles sentry-native in (all presets default Sentry ON; the fetch
+degrades gracefully to local-only crash reporting when offline). On Linux
+the sentry build needs `libcurl4-openssl-dev`; pass `-DMIB_USE_SENTRY=OFF`
+to skip it entirely.
 
 ## Cloud agent / fresh container setup
 
@@ -110,7 +113,8 @@ configures, builds `mib_backend` + `mib_frontend_common`, and passes the whole
 ```bash
 sudo apt-get install -y --no-install-recommends \
     qt6-base-dev qt6-charts-dev qt6-serialport-dev libsqlite3-dev \
-    libopencv-dev libhdf5-dev libspdlog-dev libfmt-dev nlohmann-json3-dev
+    libopencv-dev libhdf5-dev libspdlog-dev libfmt-dev nlohmann-json3-dev \
+    libcurl4-openssl-dev   # sentry-native curl transport (presets default Sentry ON)
 
 ./scripts/provision-mindvision-sdk.sh
 
@@ -124,8 +128,11 @@ rather than left to `backend-ci.yml`.
 
 ## Compile Sentry Integration
 
-Use this when touching `CrashReporter` code and you want local compile coverage
-for the sentry-native API calls:
+All presets now build with `MIB_USE_SENTRY=ON` by default, so touching
+`CrashReporter` code gets sentry-native compile (and test) coverage in the
+regular `linux-backend-only` / `linux-release` loops — no dedicated preset
+needed. The separate `linux-sentry-release` preset remains for the
+Conan-toolchain variant with its own binary dir:
 
 ```bash
 conan install . --profile:host=conan/profiles/linux-gcc13 --profile:build=default --output-folder=build/linux-sentry --build=missing
@@ -133,8 +140,7 @@ cmake --preset linux-sentry-release
 cmake --build --preset linux-sentry-release-build
 ```
 
-This keeps Windows-only SDKs and packaging disabled, keeps MindVision enabled,
-and enables `MIB_USE_SENTRY`.
-If sentry-native or system curl dependencies are unavailable, use the regular
-`linux-release` preset for the quick compile loop and keep the Windows workflow
-for final release packaging.
+If sentry-native or system curl dependencies are unavailable (offline or
+minimal containers), configure with `-DMIB_USE_SENTRY=OFF` — or just let the
+fetch fail: the build degrades to local-only crash reporting with a CMake
+warning.

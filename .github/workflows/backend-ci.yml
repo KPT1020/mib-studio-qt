@@ -37,6 +37,7 @@ jobs:
             cmake \
             curl \
             git \
+            libcurl4-openssl-dev \
             libgl1-mesa-dev \
             libhdf5-dev \
             libopencv-dev \

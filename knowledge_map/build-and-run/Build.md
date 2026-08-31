@@ -11,6 +11,12 @@ From `CMakePresets.json`:
 - `windows-default` — VS2022 x64, uses `build/conan_toolchain.cmake`
 - `linux-backend-only` — Linux backend-only configure (`mib_backend` + tests;
   skips frontend executables)
+- Every preset builds with `MIB_USE_SENTRY=ON` (the option's default) so
+  CrashReporter's sentry-native paths are compiled and tested everywhere;
+  on Linux this needs `libcurl4-openssl-dev`, and an offline fetch degrades
+  gracefully to local-only crash reporting. The wheel workflow's plugin
+  builds pass `-DMIB_USE_SENTRY=OFF` explicitly — processing-core wheels
+  don't ship crash reporting.
 - Build presets: `windows-default-build` (Debug),
   `windows-default-build-release` (Release),
   `linux-backend-only-build`
