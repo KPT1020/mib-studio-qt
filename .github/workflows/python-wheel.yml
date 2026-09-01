@@ -519,6 +519,7 @@ jobs:
         run: |
           set -euo pipefail
           cmake --preset linux-backend-only \
+            -DMIB_USE_SENTRY=OFF \
             -DMIB_REQUIRE_PROCESSING_CORE_APP_COMPAT=${{ startsWith(github.ref, 'refs/tags/mib-processing-v') && 'ON' || 'OFF' }} \
             -DMIB_PROCESSING_CORE_APP_MIN_VERSION="$APP_MIN_VERSION" \
             -DMIB_PROCESSING_CORE_APP_MAX_VERSION="$APP_MAX_VERSION"

@@ -43,6 +43,35 @@
   `ModbusRtu.h`, `PulseGeneratorService.{h,cpp}`,
   `SyringePumpService.{h,cpp}`, `AppBackend.{h,cpp}`, `ConfigTabs.{h,cpp}`.
 
+- **Sentry default-ON in all presets** (2026-08-31) — the three Linux
+  presets (`linux-release`, `linux-system-release`, `linux-backend-only`)
+  no longer force `MIB_USE_SENTRY=OFF`, so every preset now compiles
+  sentry-native (matching the option's default and `windows-default`).
+  `backend-ci.yml` gained `libcurl4-openssl-dev` (the Linux curl
+  transport hard-requires it) and now exercises the CrashReporter sentry
+  paths on every CI run; the python-wheel workflow's Linux plugin build
+  passes `-DMIB_USE_SENTRY=OFF` explicitly (wheels don't ship crash
+  reporting, matching its Windows job). Offline configure still degrades
+  gracefully to local-only crash reporting.
+
+- **Crash-reporting gap fixes** (2026-08-31, issue #347) — three
+  informativeness gaps left after #346. (1) The `std::terminate` handler
+  now writes its minidump unconditionally (Crashpad never sees
+  terminate/abort, and the SIGABRT fallback `_Exit`s behind the
+  `handlingCrash` guard, so nothing else captured this path) and records
+  the unhandled exception's `what()` in a `.txt`; background-thread
+  uncaught exceptions now reach Sentry with a real stack on the next
+  launch. (2) Verified against pinned sentry-native 0.7.20: envelopes
+  waiting in the transport queue at shutdown are persisted and re-sent,
+  but a *failed* send drops the envelope — so stale `.dmp.queued` files
+  (older than `Config::queuedRetryAfterDays`, default 7) get exactly one
+  re-submission, renamed to the terminal `.dmp.queued2`. (3) Retention
+  now also bounds never-submitted pending `.dmp` files, so local-only
+  (no-DSN) installs cannot grow the crash dir without limit. Tests:
+  `backend.crash_reporter_pending_upload` (stale-retry + pending
+  retention cases) and new child-process test
+  `backend.crash_reporter_terminate`.
+
 - **Shutdown crash prevention** (2026-08-26) — Sentry crash analysis
   revealed SIGSEGV crashes occurring after all services stopped, during the
   C++ destructor chain. Root cause: cross-service callbacks (camera-ready,

@@ -204,11 +204,20 @@ static void testOrphanSidecarRetention() {
                            "T120000-pid" + std::to_string(i) + "-terminate.json";
         createFile(dir / name, R"({"reason":"terminate"})");
     }
+    // 5 orphan .txt notes (terminate-path leftovers whose .json/.dmp were
+    // renamed away by a prior upload) — bounded by the same limit.
+    for (int i = 0; i < 5; ++i) {
+        std::string name = "2026040" + std::to_string(i + 1) +
+                           "T130000-pid" + std::to_string(i) + "-terminate.txt";
+        createFile(dir / name, "terminate: stray note");
+    }
     // One pending dump with its sidecar — the sidecar must survive
     // retention even when Sentry is inactive and the dump stays pending.
     createFile(dir / "20260410T120000-pid9-sigsegv.dmp", "MDMP pending");
     createFile(dir / "20260410T120000-pid9-sigsegv.json",
                R"({"snapshot":"pending"})");
+    // A .txt with a live companion .json must NOT be treated as orphan.
+    createFile(dir / "20260410T120000-pid9-sigsegv.txt", "kept: has companion");
 
     auto cfg = baseConfig(dir);
     cfg.maxRetainedDumps = 3;
@@ -219,6 +228,7 @@ static void testOrphanSidecarRetention() {
     CrashReporter::shutdown();
 
     int orphansRemaining = 0;
+    int txtRemaining = 0;
     std::error_code ec;
     for (auto& entry : fs::directory_iterator(dir, ec)) {
         if (!entry.is_regular_file()) continue;
@@ -226,12 +236,17 @@ static void testOrphanSidecarRetention() {
         if (fn.find("-terminate.json") != std::string::npos) {
             ++orphansRemaining;
         }
+        if (fn.find("-terminate.txt") != std::string::npos) {
+            ++txtRemaining;
+        }
     }
     CHECK(orphansRemaining <= 3);
+    CHECK(txtRemaining <= 3);
 
-    // The pending dump and its sidecar are untouched.
+    // The pending dump, its sidecar, and its companion .txt are untouched.
     CHECK(fileExists(dir / "20260410T120000-pid9-sigsegv.dmp"));
     CHECK(fileExists(dir / "20260410T120000-pid9-sigsegv.json"));
+    CHECK(fileExists(dir / "20260410T120000-pid9-sigsegv.txt"));
 
     cleanDir(dir);
     std::cout << "done\n";
@@ -293,6 +308,110 @@ static void testIdempotentRecovery() {
     std::cout << "done\n";
 }
 
+// ── Test 7: stale .queued dumps get exactly one re-submission ─────
+static void testStaleQueuedRetry() {
+    std::cout << "  test: stale .queued one-shot retry ... ";
+    auto dir = makeTempDir("stale_queued");
+
+    const auto backdated =
+        fs::file_time_type::clock::now() - std::chrono::hours(24) * 8;
+    std::error_code ec;
+
+    // Stale queued dump + sidecar: eligible for the one-shot retry.
+    createFile(dir / "20260101T120000-pid1-sigsegv.dmp.queued", "MDMP stale");
+    createFile(dir / "20260101T120000-pid1-sigsegv.json.queued",
+               R"({"stale":true})");
+    fs::last_write_time(dir / "20260101T120000-pid1-sigsegv.dmp.queued",
+                        backdated, ec);
+
+    // Fresh queued dump: must stay untouched.
+    createFile(dir / "20260801T120000-pid2-seh.dmp.queued", "MDMP fresh");
+
+    // Terminal .queued2: must never be re-submitted or renamed again.
+    createFile(dir / "20260201T120000-pid3-sigabrt.dmp.queued2",
+               "MDMP terminal");
+    fs::last_write_time(dir / "20260201T120000-pid3-sigabrt.dmp.queued2",
+                        backdated, ec);
+
+    auto cfg = baseConfig(dir);
+    cfg.queuedRetryAfterDays = 7;
+    CrashReporter::init(cfg);
+    const bool active = CrashReporter::isSentryActive();
+    CrashReporter::shutdown();
+
+    if (active) {
+        // Stale → resubmitted, now terminal .queued2 (sidecar follows).
+        CHECK(!fileExists(dir / "20260101T120000-pid1-sigsegv.dmp.queued"));
+        CHECK(fileExists(dir / "20260101T120000-pid1-sigsegv.dmp.queued2"));
+        CHECK(!fileExists(dir / "20260101T120000-pid1-sigsegv.json.queued"));
+        CHECK(fileExists(dir / "20260101T120000-pid1-sigsegv.json.queued2"));
+    } else {
+        // Sentry inactive → no submissions, nothing renamed.
+        CHECK(fileExists(dir / "20260101T120000-pid1-sigsegv.dmp.queued"));
+        CHECK(fileExists(dir / "20260101T120000-pid1-sigsegv.json.queued"));
+    }
+
+    // Fresh queued is untouched either way.
+    CHECK(fileExists(dir / "20260801T120000-pid2-seh.dmp.queued"));
+    CHECK(!fileExists(dir / "20260801T120000-pid2-seh.dmp.queued2"));
+
+    // Terminal stays terminal — no restore, no double suffix.
+    CHECK(fileExists(dir / "20260201T120000-pid3-sigabrt.dmp.queued2"));
+    CHECK(!fileExists(dir / "20260201T120000-pid3-sigabrt.dmp.queued22"));
+    CHECK(!fileExists(dir / "20260201T120000-pid3-sigabrt.dmp"));
+
+    cleanDir(dir);
+    std::cout << "done\n";
+}
+
+// ── Test 8: pending .dmp retention in local-only mode ─────────────
+static void testPendingDumpRetention() {
+    std::cout << "  test: pending .dmp bounded retention ... ";
+    auto dir = makeTempDir("pending_retention");
+
+    std::error_code ec;
+    const auto now = fs::file_time_type::clock::now();
+    // 5 pending dumps with sidecars, oldest first. Backdate mtimes so the
+    // retention sort is deterministic.
+    for (int i = 0; i < 5; ++i) {
+        const std::string base = "2026050" + std::to_string(i + 1) +
+                                 "T120000-pid" + std::to_string(i) + "-sigsegv";
+        createFile(dir / (base + ".dmp"), "MDMP pending " + std::to_string(i));
+        createFile(dir / (base + ".json"), R"({"i":)" + std::to_string(i) + "}");
+        fs::last_write_time(dir / (base + ".dmp"),
+                            now - std::chrono::hours(24) * (10 - i), ec);
+    }
+
+    auto cfg = baseConfig(dir);
+    cfg.maxRetainedDumps = 3;
+#if defined(MIB_USE_SENTRY) && MIB_USE_SENTRY
+    cfg.dsn.clear();  // force local-only: dumps stay pending, retention applies
+#endif
+    CrashReporter::init(cfg);
+    CrashReporter::shutdown();
+
+    int remaining = 0;
+    for (auto& entry : fs::directory_iterator(dir, ec)) {
+        if (!entry.is_regular_file()) continue;
+        const std::string fn = entry.path().filename().string();
+        if (fn.size() > 4 && fn.compare(fn.size() - 4, 4, ".dmp") == 0) {
+            ++remaining;
+        }
+    }
+    CHECK(remaining == 3);
+
+    // Newest survive with their sidecars; oldest are gone with theirs.
+    CHECK(fileExists(dir / "20260505T120000-pid4-sigsegv.dmp"));
+    CHECK(fileExists(dir / "20260505T120000-pid4-sigsegv.json"));
+    CHECK(!fileExists(dir / "20260501T120000-pid0-sigsegv.dmp"));
+    CHECK(!fileExists(dir / "20260501T120000-pid0-sigsegv.json"));
+    CHECK(!fileExists(dir / "20260502T120000-pid1-sigsegv.dmp"));
+    CHECK(!fileExists(dir / "20260502T120000-pid1-sigsegv.json"));
+
+    cleanDir(dir);
+    std::cout << "done\n";
+}
+
 int main() {
     std::cout << "crash_reporter_pending_upload_test\n";
 
@@ -302,6 +421,8 @@ int main() {
     testOrphanSidecarRetention();
     testSentryInactiveGating();
     testIdempotentRecovery();
+    testStaleQueuedRetry();
+    testPendingDumpRetention();
 
     if (g_failures != 0) {
         std::cerr << g_failures << " check(s) failed.\n";

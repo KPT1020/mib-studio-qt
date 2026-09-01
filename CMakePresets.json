@@ -13,7 +13,7 @@
         "MIB_ENABLE_HARDWARE_SDKS": "OFF",
         "MIB_ENABLE_MINDVISION": "ON",
         "MIB_ENABLE_WINDOWS_PACKAGING": "OFF",
-        "MIB_USE_SENTRY": "OFF"
+        "MIB_USE_SENTRY": "ON"
       },
       "condition": {
         "type": "equals",
@@ -32,7 +32,7 @@
         "MIB_ENABLE_HARDWARE_SDKS": "OFF",
         "MIB_ENABLE_MINDVISION": "ON",
         "MIB_ENABLE_WINDOWS_PACKAGING": "OFF",
-        "MIB_USE_SENTRY": "OFF"
+        "MIB_USE_SENTRY": "ON"
       },
       "condition": {
         "type": "equals",
@@ -53,7 +53,7 @@
         "MIB_ENABLE_HARDWARE_SDKS": "OFF",
         "MIB_ENABLE_MINDVISION": "ON",
         "MIB_ENABLE_WINDOWS_PACKAGING": "OFF",
-        "MIB_USE_SENTRY": "OFF"
+        "MIB_USE_SENTRY": "ON"
       },
       "condition": {
         "type": "equals",

@@ -27,7 +27,11 @@ public:
         bool installSignalHandlers{true};
         bool installQtMessageHandler{true};
         bool installTerminateHandler{true};
-        size_t maxRetainedDumps{50};        // max .queued dumps to keep
+        size_t maxRetainedDumps{50};        // per-class retention bound
+                                            // (pending .dmp, .queued, orphan
+                                            // .json sidecars)
+        int queuedRetryAfterDays{7};        // a .dmp.queued older than this
+                                            // is re-submitted once (0 = off)
     };
 
     // Returns true if at least the local minidump path is armed. Returns
