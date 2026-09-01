@@ -71,6 +71,13 @@ mib_add_backend_test_executable(pulse_generator_frame_test backend/pulse_generat
 add_test(NAME backend.pulse_generator_frame COMMAND $<TARGET_FILE:pulse_generator_frame_test>)
 set_tests_properties(backend.pulse_generator_frame PROPERTIES LABELS "backend" TIMEOUT 30)
 
+# Shared RS485 bus + pulse-generator discovery/control over a POSIX pty
+# (compiles to a trivial pass on Windows).
+mib_add_backend_test_executable(serial_bus_pty_test backend/serial_bus_pty_test.cpp)
+target_link_libraries(serial_bus_pty_test PRIVATE Threads::Threads)
+add_test(NAME backend.serial_bus_pty COMMAND $<TARGET_FILE:serial_bus_pty_test>)
+set_tests_properties(backend.serial_bus_pty PROPERTIES LABELS "backend" TIMEOUT 60)
+
 mib_add_backend_test_executable(mindvision_config_test backend/mindvision_config_test.cpp)
 add_test(NAME backend.mindvision_config COMMAND $<TARGET_FILE:mindvision_config_test>)
 set_tests_properties(backend.mindvision_config PROPERTIES LABELS "backend;camera" TIMEOUT 30)

@@ -144,3 +144,36 @@ Watch on the scope during bring-up (not code issues, but flagged):
    start/stop under external trigger; soft-trigger while stopped → clean
    error dialog.
 8. Record results here.
+
+## Follow-up: Linux serial discovery + shared RS485 bus (2026-08-31)
+
+Bench review found the pulse-generator stack unusable on Linux (numeric COM
+spinbox, backend-synthesized `COM%1`, empty port enumeration) and
+architecturally wrong for multi-drop RS485 (adapter ≠ device). Follow-up spec
+lives in the issue #323 comment of 2026-08-31; implementation:
+
+- [[../services/SerialBus]] — `SerialBusManager` + `ModbusBusSession`: one
+  exclusive `QSerialPort` owner per (system port name, baud/data/parity/stop),
+  serialized transactions, strict correlation (`modbus::classifyResponse`),
+  typed `BusError` incl. collision suspicion; `availablePorts()` via
+  `QSerialPortInfo` with USB serial/VID/PID identity.
+- [[../services/PulseGeneratorService]] — addressed bus client
+  (`connect(QString port, SerialSettings, addr)`), typed `LinkError`,
+  read-only cancelable `scanBus` classifying generator / generic Modbus
+  device / error. Two generators on one adapter = two service instances on
+  the shared manager (proved in the pty test).
+- [[../services/SyringePumpService]] — transport ported to the shared
+  manager; COM-number public API unchanged.
+- [[../frontend/ConfigTabs]] — Port dropdown + Refresh, bus-settings combos,
+  Addr, Scan (worker thread, cancelable), typed connect errors, QSettings
+  persistence with USB-identity re-resolution of renamed device nodes.
+- Test `backend.serial_bus_pty` (pty bus simulator) covers the acceptance
+  list: system-port-name regression, shared single owner, two generators
+  controlled independently, untouched generic device, serialized concurrent
+  requests, write-free scan, wrong-address/bad-CRC/short/exception failure
+  states, cancel.
+
+Still open (hardware): re-run the bench checklist above on Linux with a real
+USB/RS485 adapter; duplicate-address collision behavior is simulated in the
+pty test but worth one on-bench confirmation with two modules strapped to the
+same address.

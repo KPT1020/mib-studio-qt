@@ -5,6 +5,44 @@
 
 ## Features shipped
 
+- **Shared RS485 bus + Linux serial discovery for the pulse generator**
+  (2026-08-31, issue #323 follow-up) — the pulse-generator stack is now
+  usable on Linux and correct on multi-drop RS485. New
+  [[../services/SerialBus]] layer: `SerialBusManager` hands out one
+  `ModbusBusSession` (exclusive `QSerialPort` owner) per
+  (system port name, baud/data/parity/stop); all transactions are serialized
+  with strict request/response correlation (`modbus::classifyResponse` /
+  `expectedFrameLength` in `ModbusRtu.h`) — wrong-address frames are
+  discarded not misattributed, CRC errors and trailing bytes surface as
+  possible duplicate-address collisions, exceptions carry their code.
+  [[../services/PulseGeneratorService]] became an addressed bus client:
+  `connect(QString portName, SerialSettings, addr)` (no more synthesized
+  `COMn`), typed `LinkError` status, and a read-only cancelable
+  `scanBus(1..16)` that classifies pulse generators vs generic Modbus
+  devices vs corrupt responders and never writes.
+  [[../services/SyringePumpService]] transport was ported onto the same
+  manager (COM-number API unchanged), so a pump and a generator can share an
+  adapter. [[../frontend/ConfigTabs]] gained a `QSerialPortInfo` port
+  dropdown + Refresh, data/parity/stop combos, Scan (worker thread,
+  cancelable), and QSettings persistence including USB serial/VID/PID for
+  device-node re-resolution. Post-review hardening (same day): each bus
+  session runs its `QSerialPort` on a dedicated I/O thread (no cross-thread
+  races with the GUI event loop); open failures classified from the typed
+  `QSerialPort::error()` enum, not translated strings; session teardown
+  closes the port and erases the registry entry atomically under the
+  registry lock; inter-frame delay measured from last bus activity and a
+  shorter collision listen (less GUI-thread latency for pump polling);
+  `identityLooksLikeGenerator` plausibility gate on connect and scan so a
+  random 12-register Modbus device is never adopted/written into; scan
+  reports port-acquire failures distinctly from a silent bus; pump
+  `connect()` no longer self-deadlocks on reconnect and gained a `QString`
+  port-name overload. Test: `backend.serial_bus_pty` (POSIX pty bus
+  simulator: two generators + generic device on one bus, concurrency,
+  correlation failure states, scan write-safety, impostor refusal, pump
+  reconnect regression). Files: `SerialBus.{h,cpp}`,
+  `ModbusRtu.h`, `PulseGeneratorService.{h,cpp}`,
+  `SyringePumpService.{h,cpp}`, `AppBackend.{h,cpp}`, `ConfigTabs.{h,cpp}`.
+
 - **Sentry default-ON in all presets** (2026-08-31) — the three Linux
   presets (`linux-release`, `linux-system-release`, `linux-backend-only`)
   no longer force `MIB_USE_SENTRY=OFF`, so every preset now compiles

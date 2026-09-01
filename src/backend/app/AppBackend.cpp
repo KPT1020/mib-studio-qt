@@ -19,6 +19,7 @@
 #include "backend/services/AutofocusService.h"
 #include "backend/services/TriggerService.h"
 #include "backend/services/YoloService.h"
+#include "backend/services/SerialBus.h"
 #include "backend/services/SyringePumpService.h"
 #include "backend/services/PulseGeneratorService.h"
 #include "backend/processing/EModulusLutCatalog.h"
@@ -218,8 +219,9 @@ namespace backend
         autofocusService_ = std::make_unique<services::AutofocusService>();
         triggerService_ = std::make_unique<services::TriggerService>();
         yoloService_ = std::make_unique<services::YoloService>();
-        syringePumpService_ = std::make_unique<services::SyringePumpService>();
-        pulseGeneratorService_ = std::make_unique<services::PulseGeneratorService>();
+        serialBusManager_ = std::make_unique<services::serialbus::SerialBusManager>();
+        syringePumpService_ = std::make_unique<services::SyringePumpService>(*serialBusManager_);
+        pulseGeneratorService_ = std::make_unique<services::PulseGeneratorService>(*serialBusManager_);
         frameStore_ = std::make_shared<playback::FrameStore>(5000);
 
         bool bootSqlite = true;

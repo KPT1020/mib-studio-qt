@@ -133,7 +133,10 @@ backend. Verified by `tests/backend/backend_lifecycle_smoke_test.cpp`
   capture running with `trigger_mode: 1`); exposed to the facade as
   `CameraCommandAction::SoftTriggerCamera`
 - `pulseGenerator()` — accessor for [[../services/PulseGeneratorService]]
-  (external-trigger pulse source, created alongside the syringe-pump service)
+  (external-trigger pulse source, created alongside the syringe-pump service).
+  Both serial services are constructed against the backend-owned
+  [[../services/SerialBus]] `SerialBusManager` (declared before them so it
+  outlives their sessions) — one shared `QSerialPort` owner per RS485 adapter
 
 ### Platform behavior
 
