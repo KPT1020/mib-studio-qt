@@ -82,6 +82,25 @@ mib_add_backend_test_executable(mindvision_config_test backend/mindvision_config
 add_test(NAME backend.mindvision_config COMMAND $<TARGET_FILE:mindvision_config_test>)
 set_tests_properties(backend.mindvision_config PROPERTIES LABELS "backend;camera" TIMEOUT 30)
 
+# Issue #366: MindVision Mono8/geometry fail-closed conversion, driven through
+# the injectable SDK seam (no hardware, no vendor headers).
+mib_add_backend_test_executable(mindvision_conversion_fault_test backend/mindvision_conversion_fault_test.cpp)
+target_link_libraries(mindvision_conversion_fault_test PRIVATE Threads::Threads)
+add_test(NAME backend.mindvision_conversion_fault COMMAND $<TARGET_FILE:mindvision_conversion_fault_test>)
+set_tests_properties(backend.mindvision_conversion_fault PROPERTIES LABELS "backend;camera;safety" TIMEOUT 60)
+
+# Issue #365: single-owner capture lifecycle (start/stop/fault/restart,
+# blocked grab, slow teardown, stress) and trigger session ownership.
+mib_add_backend_test_executable(capture_lifecycle_test backend/capture_lifecycle_test.cpp)
+target_link_libraries(capture_lifecycle_test PRIVATE Threads::Threads)
+add_test(NAME backend.capture_lifecycle COMMAND $<TARGET_FILE:capture_lifecycle_test>)
+set_tests_properties(backend.capture_lifecycle PROPERTIES LABELS "backend;camera;stress" TIMEOUT 120)
+
+mib_add_backend_test_executable(trigger_session_test backend/trigger_session_test.cpp)
+target_link_libraries(trigger_session_test PRIVATE Threads::Threads)
+add_test(NAME backend.trigger_session COMMAND $<TARGET_FILE:trigger_session_test>)
+set_tests_properties(backend.trigger_session PROPERTIES LABELS "backend;camera" TIMEOUT 60)
+
 mib_add_backend_test_executable(camera_script_apply_test backend/camera_script_apply_test.cpp)
 add_test(NAME backend.camera_script_apply COMMAND $<TARGET_FILE:camera_script_apply_test>)
 set_tests_properties(backend.camera_script_apply PROPERTIES LABELS "backend;camera" TIMEOUT 30)

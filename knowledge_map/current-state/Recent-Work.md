@@ -5,6 +5,38 @@
 
 ## Features shipped
 
+- **Host-camera lifecycle single-owner + MindVision fail-closed conversion**
+  (2026-09-06, issues #365, #366 — reliability release #371 phase 1).
+  [[../services/CaptureService]] now owns an explicit
+  `Idle/Starting/Running/Stopping/Faulted` state machine with a per-session
+  generation (`CaptureLifecycle.h`): `requestStart()` returns a typed
+  `CaptureStartOutcome`, `lifecycleSnapshot()` is the authoritative
+  "camera ready" truth (start acceptance ≠ hardware readiness), a worker that
+  dies on its own parks in `Faulted` with its thread joinable until the next
+  start/stop **reaps** it (no more `std::terminate` on restart-after-fault),
+  and every transition/failure is generation-checked. The camera-ready
+  callback carries `(ICamera*, generation)`; [[../services/TriggerService]]
+  `setCamera(cam, gen)` waits for any in-flight pulse (`pulseMutex_`),
+  clears + counts stale requests, and refuses generation-mismatched requests
+  at fire time. `AppBackend::shutdown()` stops capture with the callback
+  still wired so the trigger thread releases the camera before it is
+  destroyed. [[../camera/MindVisionCamera]] is rebuilt on an injectable
+  `SdkOps` seam (`MindVisionSdk.h`, real binding in `MindVisionSdkReal.cpp`):
+  `start()` fails closed unless `CameraSetIspOutFormat(MONO8)` succeeds *and*
+  `CameraGetIspOutFormat` reads back Mono8, geometry passes checked
+  `width*height*bpp` validation (`MindVisionFrameGeometry.h`), and every
+  incoming frame header is validated against the session allocation before
+  `CameraImageProcess` (mismatch → structured stream fault, never a resized
+  buffer); `stop()` waits (bounded) for in-flight SDK ops before
+  `CameraUnInit` and abandons the handle instead of freeing it under a live
+  call. New `ICamera::lastFailure()` (`CameraFailure{code,message}`) flows
+  into the capture snapshot. Tests: `backend.capture_lifecycle` (blocked
+  grab, slow teardown, start failure, natural exit + direct restart, 120-cycle
+  stress), `backend.trigger_session`, `backend.mindvision_conversion_fault`
+  (format-set failure, RGB/BGR/Mono16 readback, bad dims, overflow,
+  mid-session geometry change, byte-identical Mono8, stop-while-in-flight,
+  wedged driver).
+
 - **Shared RS485 bus + Linux serial discovery for the pulse generator**
   (2026-08-31, issue #323 follow-up) — the pulse-generator stack is now
   usable on Linux and correct on multi-drop RS485. New

@@ -25,6 +25,12 @@
   intentional discards, transport loss, and underruns (never merged), plus
   completed-queue depth and input-buffer count. Fields a backend cannot
   observe keep their `*Valid` flag false ("unknown", not "zero").
+- `CameraFailure` — `{ code, message }` structured reason for the most
+  recent start rejection / stream fault (issues #365/#366). `code` is a
+  stable token (e.g. `mindvision.isp_format_rejected`,
+  `mindvision.frame.frameGeometryMismatch`); [[../services/CaptureService]]
+  copies it into its lifecycle snapshot so the UI/preflight can show *why*
+  instead of a generic "failed to start".
 
 ## Virtual methods
 
@@ -41,6 +47,7 @@ virtual bool checkDeviceHealth() const { return true; }
 virtual void configureTriggerOutput(const std::string& lineSelector) {}
 virtual bool setTriggerOutput(bool high) { return false; }   // SORT pulse out
 virtual bool softTrigger() { return false; }  // software ACQUISITION trigger
+virtual CameraFailure lastFailure() const { return {}; } // structured start/stream fault
 
 // Delivery-mode contract (defaults: EveryFrame-only, no queue telemetry)
 virtual FrameDeliveryCapabilities deliveryCapabilities() const;

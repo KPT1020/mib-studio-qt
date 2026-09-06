@@ -148,23 +148,28 @@ namespace backend
         // invoke its callbacks on freed services. Every call below is
         // idempotent, so shutdown() may run more than once.
 
-        // Clear cross-service callbacks BEFORE stopping anything.  A callback
-        // that fires during teardown could dereference a service that has
-        // already been destroyed (e.g. triggerService_ destroyed before
-        // processingService_ in the member-destruction chain).
-        if (captureService_) {
-            captureService_->setCameraReadyCallback({});
-        }
+        // Stop admitting new trigger requests before anything is torn down.
         if (processingService_) {
             processingService_->setTargetGroupCallback({});
             processingService_->setBackgroundCaptureCallback({});
         }
 
+        // Teardown order (issue #365): capture stop runs with the camera-ready
+        // callback still wired, so TriggerService unbinds (waiting for any
+        // in-flight pulse) and stops while the camera object is still valid.
+        // Only after that is the trigger service stopped a second time
+        // (idempotent) and the callback cleared. Clearing the callback first
+        // left TriggerService holding a camera pointer across the camera's
+        // destruction on the capture thread.
         if (captureService_) {
             captureService_->stop();
         }
         if (triggerService_) {
+            triggerService_->setCamera(nullptr);
             triggerService_->stop();
+        }
+        if (captureService_) {
+            captureService_->setCameraReadyCallback({});
         }
         stopFrameRecording();
         if (processingService_) {
@@ -454,9 +459,10 @@ namespace backend
         // Wire camera lifecycle to trigger service
         if (bootCapture && bootTrigger)
         {
-            captureService_->setCameraReadyCallback([this](camera::common::ICamera* cam) {
+            captureService_->setCameraReadyCallback([this](::camera::common::ICamera* cam,
+                                                           uint64_t generation) {
                 if (triggerService_) {
-                    triggerService_->setCamera(cam);
+                    triggerService_->setCamera(cam, generation);
                     if (cam) {
                         triggerService_->start();
                     } else {
@@ -523,7 +529,7 @@ namespace backend
             // Configure camera source (hardware, MindVision, or mock) before we start streaming.
             auto configureMock = [&]()
             {
-                camera::mock::MockCameraOptions options;
+                ::camera::mock::MockCameraOptions options;
                 if (const char *envDir = std::getenv("MIB_MOCK_CAMERA_DIR"))
                 {
                     options.folder = std::filesystem::path(envDir);
@@ -562,7 +568,7 @@ namespace backend
                             options.loopFiles);
 
                 captureService_->setCameraFactory([options]() mutable
-                                                  { return std::make_unique<camera::mock::MockCamera>(options); });
+                                                  { return std::make_unique<::camera::mock::MockCamera>(options); });
                 mockCameraConfigured_ = true;
                 selectedIfIndex_ = -1;
                 selectedDevIndex_ = -1;
@@ -598,7 +604,7 @@ namespace backend
                 SPDLOG_INFO("AppBackend: configuring MindVision camera (index={}, config={})",
                             cameraIndex, configPath.empty() ? "<none>" : configPath);
                 captureService_->setCameraFactory([cameraIndex, configPath]() mutable
-                                                  { return std::make_unique<camera::common::MindVisionCamera>(cameraIndex, configPath); });
+                                                  { return std::make_unique<::camera::common::MindVisionCamera>(cameraIndex, configPath); });
                 mockCameraConfigured_ = false;
                 selectedIfIndex_ = -1;
                 selectedDevIndex_ = -1;
@@ -618,7 +624,7 @@ namespace backend
 #if MIB_HAS_EGRABBER
                 SPDLOG_INFO("AppBackend: configuring hardware EGrabber camera");
                 captureService_->setCameraFactory([]()
-                                                  { return std::make_unique<camera::common::EGrabberCamera>(); });
+                                                  { return std::make_unique<::camera::common::EGrabberCamera>(); });
                 mockCameraConfigured_ = false;
                 selectedMvCameraIndex_ = -1;
             #else
@@ -632,7 +638,7 @@ namespace backend
                 SPDLOG_WARN("AppBackend: unknown camera mode '{}'; falling back to hardware/mock defaults", cameraMode);
 #if MIB_HAS_EGRABBER
                 captureService_->setCameraFactory([]()
-                                                  { return std::make_unique<camera::common::EGrabberCamera>(); });
+                                                  { return std::make_unique<::camera::common::EGrabberCamera>(); });
                 mockCameraConfigured_ = false;
                 selectedMvCameraIndex_ = -1;
 #else
@@ -698,12 +704,12 @@ namespace backend
     services::SyringePumpService &AppBackend::syringePump() { return *syringePumpService_; }
     services::PulseGeneratorService &AppBackend::pulseGenerator() { return *pulseGeneratorService_; }
 
-    void AppBackend::configureMockCamera(const camera::mock::MockCameraOptions &options)
+    void AppBackend::configureMockCamera(const ::camera::mock::MockCameraOptions &options)
     {
         if (!captureService_)
             return;
         captureService_->setCameraFactory([options]() mutable
-                                          { return std::make_unique<camera::mock::MockCamera>(options); });
+                                          { return std::make_unique<::camera::mock::MockCamera>(options); });
         selectedIfIndex_ = -1;
         selectedDevIndex_ = -1;
         selectedMvCameraIndex_ = -1;
@@ -719,10 +725,10 @@ namespace backend
 
 #if !MIB_HAS_EGRABBER
         SPDLOG_WARN("Hardware camera selection ignored: EGrabber SDK is unavailable on this platform");
-        camera::mock::MockCameraOptions options;
+        ::camera::mock::MockCameraOptions options;
         options.folder = std::filesystem::path("data") / "mock_frames";
         captureService_->setCameraFactory([options]() mutable
-                                          { return std::make_unique<camera::mock::MockCamera>(options); });
+                                          { return std::make_unique<::camera::mock::MockCamera>(options); });
         selectedIfIndex_ = -1;
         selectedDevIndex_ = -1;
         selectedMvCameraIndex_ = -1;
@@ -755,7 +761,7 @@ namespace backend
         mockCameraConfigured_ = false;
 
         captureService_->setCameraFactory([interfaceIndex, deviceIndex]()
-                                          { return std::make_unique<camera::common::EGrabberCamera>(interfaceIndex, deviceIndex); });
+                                          { return std::make_unique<::camera::common::EGrabberCamera>(interfaceIndex, deviceIndex); });
         SPDLOG_INFO("Hardware camera selected: {} (if={}, dev={})",
                     label, interfaceIndex, deviceIndex);
     }
@@ -774,13 +780,13 @@ namespace backend
 #if MIB_HAS_MINDVISION
         const std::string configPath = lastMindVisionConfigPath_;
         captureService_->setCameraFactory([cameraIndex, configPath]()
-                                          { return std::make_unique<camera::common::MindVisionCamera>(cameraIndex, configPath); });
+                                          { return std::make_unique<::camera::common::MindVisionCamera>(cameraIndex, configPath); });
 #else
         SPDLOG_WARN("MindVision camera selection requested but MindVision SDK is unavailable; falling back to mock camera");
-        camera::mock::MockCameraOptions options;
+        ::camera::mock::MockCameraOptions options;
         options.folder = std::filesystem::path("data") / "mock_frames";
         captureService_->setCameraFactory([options]() mutable
-                                          { return std::make_unique<camera::mock::MockCamera>(options); });
+                                          { return std::make_unique<::camera::mock::MockCamera>(options); });
         lastMindVisionConfigPath_.clear();
         mockCameraConfigured_ = false;
 #endif
@@ -846,7 +852,7 @@ namespace backend
             const int idx = selectedMvCameraIndex_;
             const std::string configPath = lastMindVisionConfigPath_;
             captureService_->setCameraFactory([idx, configPath]()
-                                              { return std::make_unique<camera::common::MindVisionCamera>(idx, configPath); });
+                                              { return std::make_unique<::camera::common::MindVisionCamera>(idx, configPath); });
             SPDLOG_INFO("MindVision capture factory updated with config: {}", path);
         }
         return ok;

@@ -1,9 +1,13 @@
 #pragma once
 
 #include "backend/camera/common/ICamera.h"
+#include "backend/services/CaptureLifecycle.h"
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <initializer_list>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -69,13 +73,32 @@ public:
 
     void setCameraFactory(CameraFactory factory);
 
-    // Callback fired when camera starts (with pointer) or stops (with nullptr)
-    using CameraReadyCallback = std::function<void(camera::common::ICamera*)>;
+    // Callback fired when camera starts (with pointer + session generation)
+    // or stops (with nullptr). Fired on the capture thread and, for the
+    // nullptr case, additionally on the thread calling stop() BEFORE the
+    // camera is torn down — so a consumer (TriggerService) can release its
+    // camera reference while the object is still valid.
+    using CameraReadyCallback = std::function<void(camera::common::ICamera*, uint64_t generation)>;
     void setCameraReadyCallback(CameraReadyCallback cb);
 
+    // Backwards-compatible request API. `start()` returns true when a session
+    // is scheduled or already active — it is NOT hardware readiness; consult
+    // lifecycleSnapshot().cameraReady / state for that.
     bool start();
     void stop();
     bool isRunning() const;
+
+    // Structured request API (issue #365). Serialized and idempotent: a
+    // duplicate start while Starting/Running is AlreadyActive; a naturally
+    // failed (Faulted) session is reaped and restarted.
+    CaptureStartOutcome requestStart();
+    // Authoritative lifecycle truth for UI/experiment gating.
+    CaptureLifecycleSnapshot lifecycleSnapshot() const;
+    // Blocks until the worker for the current generation has left
+    // Starting/Running, or the timeout elapses. Returns the state reached.
+    // Never called on the capture thread itself.
+    CaptureLifecycleState waitForState(std::initializer_list<CaptureLifecycleState> states,
+                                       std::chrono::milliseconds timeout) const;
 
     // Fire one software acquisition trigger on the live camera. Thread-safe;
     // returns false when no camera is active or it does not support it.
@@ -95,7 +118,13 @@ public:
     }
 
 private:
-    void run();
+    void run(uint64_t generation);
+    // Lifecycle transitions; lifecycleMutex_ must NOT be held by the caller.
+    void transition(CaptureLifecycleState state, uint64_t generation);
+    void recordFailure(CaptureFailureKind kind, const std::string& message, uint64_t generation);
+    // Join a worker that has already exited (Faulted/Idle with a joinable
+    // thread). lifecycleMutex_ must be held. Never joins a live worker.
+    void reapFinishedWorkerLocked();
 
     Config config_{};
     FrameCallback callback_{};
@@ -106,8 +135,18 @@ private:
     camera::common::ICamera* activeCamera_{nullptr};
     std::mutex cameraMutex_;
 
+    // Serializes start()/stop() and guards thread_/snapshot_. The worker
+    // takes it only for short transitions, never while blocked in grabFrame.
+    mutable std::mutex lifecycleMutex_;
+    mutable std::condition_variable lifecycleCv_;
     std::thread thread_;
+    // Worker's "keep looping" flag (cleared by stop() and by the worker on
+    // natural exit). Distinct from the lifecycle state.
     std::atomic<bool> running_{false};
+    // Set by the worker when it has fully exited run(); tells the lifecycle
+    // owner that thread_ can be joined without blocking on hardware.
+    std::atomic<bool> workerExited_{true};
+    CaptureLifecycleSnapshot snapshot_{};
 
     CaptureStats stats_{};
 };

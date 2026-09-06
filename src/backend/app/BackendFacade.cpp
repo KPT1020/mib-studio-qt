@@ -280,7 +280,7 @@ namespace backend::bridge
         {
         case CameraCommandAction::ConfigureMockCamera:
         {
-            camera::mock::MockCameraOptions options;
+            ::camera::mock::MockCameraOptions options;
             options.folder = std::filesystem::path(command.mockFrameDirectory);
             options.frameInterval = std::chrono::milliseconds(std::max(1, command.mockFrameIntervalMs));
             options.loopFiles = command.mockLoopFiles;

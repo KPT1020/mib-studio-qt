@@ -29,7 +29,13 @@ CaptureService::CaptureService() {
 #endif
 }
 
-CaptureService::~CaptureService() { stop(); }
+CaptureService::~CaptureService() {
+    stop();
+    // stop() joins the worker; nothing else can be joinable here, but a
+    // defensive reap keeps the destructor from ever std::terminate-ing.
+    std::lock_guard<std::mutex> lk(lifecycleMutex_);
+    reapFinishedWorkerLocked();
+}
 
 void CaptureService::setConfig(const Config& cfg) { config_ = cfg; }
 
@@ -45,50 +51,201 @@ void CaptureService::setCameraReadyCallback(CameraReadyCallback cb) {
     cameraReadyCallback_ = std::move(cb);
 }
 
+// ---------------------------------------------------------------------------
+// Lifecycle owner (issue #365)
+// ---------------------------------------------------------------------------
+
+void CaptureService::reapFinishedWorkerLocked() {
+    // Only join a thread whose run() has returned: joining a live worker
+    // here would block the lifecycle mutex on hardware (grabFrame timeouts).
+    if (thread_.joinable() && workerExited_.load(std::memory_order_acquire)) {
+        thread_.join();
+    }
+}
+
+void CaptureService::transition(CaptureLifecycleState state, uint64_t generation) {
+    {
+        std::lock_guard<std::mutex> lk(lifecycleMutex_);
+        // A transition from an old generation must not overwrite a newer
+        // session's state (e.g. an old worker finishing after a restart).
+        if (generation < snapshot_.generation) {
+            return;
+        }
+        snapshot_.state = state;
+        snapshot_.transitionHostTimeUs = Tools::getTimestamp();
+        if (state != CaptureLifecycleState::Running) {
+            snapshot_.cameraReady = false;
+        }
+    }
+    lifecycleCv_.notify_all();
+}
+
+void CaptureService::recordFailure(CaptureFailureKind kind, const std::string& message,
+                                   uint64_t generation) {
+    std::lock_guard<std::mutex> lk(lifecycleMutex_);
+    if (generation < snapshot_.generation) {
+        return;
+    }
+    snapshot_.lastFailure = kind;
+    snapshot_.lastFailureMessage = message;
+    snapshot_.lastFailureGeneration = generation;
+}
+
+CaptureStartOutcome CaptureService::requestStart() {
+    std::unique_lock<std::mutex> lk(lifecycleMutex_);
+    switch (snapshot_.state) {
+    case CaptureLifecycleState::Starting:
+    case CaptureLifecycleState::Running:
+        return CaptureStartOutcome::AlreadyActive;
+    case CaptureLifecycleState::Stopping:
+        // Another thread is inside stop() (it holds no lifecycle lock while
+        // joining, so we can observe this). Refuse rather than race it.
+        return CaptureStartOutcome::RejectedStopping;
+    case CaptureLifecycleState::Idle:
+    case CaptureLifecycleState::Faulted:
+        break;
+    }
+    if (!cameraFactory_) {
+        return CaptureStartOutcome::RejectedNoFactory;
+    }
+    // A Faulted session (natural worker exit) leaves thread_ joinable. Reap
+    // it before assigning a new thread — assigning over a joinable
+    // std::thread calls std::terminate (the #365 restart hazard).
+    reapFinishedWorkerLocked();
+    if (thread_.joinable()) {
+        // Worker has not signalled exit yet (Faulted state is published just
+        // before the final return). Wait briefly for it under the CV.
+        lifecycleCv_.wait_for(lk, std::chrono::seconds(5), [this] {
+            return workerExited_.load(std::memory_order_acquire);
+        });
+        reapFinishedWorkerLocked();
+        if (thread_.joinable()) {
+            SPDLOG_ERROR("CaptureService: previous worker still joinable after fault; refusing restart");
+            return CaptureStartOutcome::RejectedStopping;
+        }
+    }
+
+    const uint64_t generation = snapshot_.generation + 1;
+    snapshot_.generation = generation;
+    snapshot_.state = CaptureLifecycleState::Starting;
+    snapshot_.cameraReady = false;
+    snapshot_.transitionHostTimeUs = Tools::getTimestamp();
+    running_.store(true, std::memory_order_release);
+    workerExited_.store(false, std::memory_order_release);
+    thread_ = std::thread(&CaptureService::run, this, generation);
+    return CaptureStartOutcome::Accepted;
+}
+
 bool CaptureService::start() {
-    if (running_.load()) return true;
-    running_.store(true);
-    thread_ = std::thread(&CaptureService::run, this);
-    return true;
+    const auto outcome = requestStart();
+    if (outcome == CaptureStartOutcome::RejectedNoFactory) {
+        SPDLOG_ERROR("CaptureService::start rejected: no camera factory configured");
+    } else if (outcome == CaptureStartOutcome::RejectedStopping) {
+        SPDLOG_WARN("CaptureService::start rejected: a stop is still in progress");
+    }
+    return outcome == CaptureStartOutcome::Accepted ||
+           outcome == CaptureStartOutcome::AlreadyActive;
 }
 
 void CaptureService::stop() {
-    const bool wasRunning = running_.exchange(false);
-    if (wasRunning) {
+    uint64_t generation = 0;
+    bool needsTeardown = false;
+    {
+        std::lock_guard<std::mutex> lk(lifecycleMutex_);
+        generation = snapshot_.generation;
+        const bool active = snapshot_.state == CaptureLifecycleState::Starting ||
+                            snapshot_.state == CaptureLifecycleState::Running;
+        if (active) {
+            snapshot_.state = CaptureLifecycleState::Stopping;
+            snapshot_.cameraReady = false;
+            snapshot_.transitionHostTimeUs = Tools::getTimestamp();
+            needsTeardown = true;
+        }
+        running_.store(false, std::memory_order_release);
+    }
+    if (needsTeardown) {
+        lifecycleCv_.notify_all();
         // Stop the trigger thread BEFORE tearing the camera down: it calls
         // ICamera::setTriggerOutput and must not race the grabber teardown.
         // releaseCamera() on the capture thread repeats this call later; both
         // the callback and TriggerService::stop() are idempotent.
         if (cameraReadyCallback_) {
-            cameraReadyCallback_(nullptr);
+            cameraReadyCallback_(nullptr, generation);
         }
         std::scoped_lock lk(cameraMutex_);
         if (activeCamera_) {
             activeCamera_->stop();
         }
     }
+    // Join outside every lock: the worker takes lifecycleMutex_ for its own
+    // transitions on the way out.
     if (thread_.joinable() && thread_.get_id() != std::this_thread::get_id()) {
         thread_.join();
     }
+    {
+        std::lock_guard<std::mutex> lk(lifecycleMutex_);
+        if (thread_.get_id() != std::this_thread::get_id()) {
+            // Worker fully reaped: explicit stop always ends in Idle (the
+            // failure record, if any, survives for diagnostics).
+            snapshot_.state = CaptureLifecycleState::Idle;
+            snapshot_.cameraReady = false;
+            snapshot_.transitionHostTimeUs = Tools::getTimestamp();
+        }
+    }
+    lifecycleCv_.notify_all();
 }
 
-bool CaptureService::isRunning() const { return running_.load(); }
+bool CaptureService::isRunning() const {
+    std::lock_guard<std::mutex> lk(lifecycleMutex_);
+    return snapshot_.isActive();
+}
+
+CaptureLifecycleSnapshot CaptureService::lifecycleSnapshot() const {
+    std::lock_guard<std::mutex> lk(lifecycleMutex_);
+    return snapshot_;
+}
+
+CaptureLifecycleState CaptureService::waitForState(
+    std::initializer_list<CaptureLifecycleState> states,
+    std::chrono::milliseconds timeout) const {
+    std::unique_lock<std::mutex> lk(lifecycleMutex_);
+    auto matches = [&] {
+        for (auto s : states) {
+            if (snapshot_.state == s) return true;
+        }
+        return false;
+    };
+    lifecycleCv_.wait_for(lk, timeout, matches);
+    return snapshot_.state;
+}
 
 bool CaptureService::softTriggerActiveCamera() {
     std::scoped_lock lk(cameraMutex_);
     return activeCamera_ && activeCamera_->softTrigger();
 }
 
-void CaptureService::run() {
+// ---------------------------------------------------------------------------
+// Worker
+// ---------------------------------------------------------------------------
+
+void CaptureService::run(uint64_t generation) {
     std::unique_ptr<camera::common::ICamera> camera;
+    bool cameraStarted = false;
 
     auto releaseCamera = [&]() {
         // Without a running camera there is no confirmed mode; consumers
         // (status-bar badge) fall back to the requested config mode, so a mode
         // changed between runs shows up immediately as "(requested)".
         stats_.deliveryModeConfirmed.store(false, std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> lk(lifecycleMutex_);
+            if (generation == snapshot_.generation) {
+                snapshot_.cameraReady = false;
+            }
+        }
+        // Consumers release their camera reference while it is still valid.
         if (cameraReadyCallback_) {
-            cameraReadyCallback_(nullptr);
+            cameraReadyCallback_(nullptr, generation);
         }
         if (camera) {
             camera->stop();
@@ -100,9 +257,28 @@ void CaptureService::run() {
         camera.reset();
     };
 
+    // Terminal bookkeeping shared by every exit path. `faulted` marks a
+    // natural (unrequested) exit; an explicit stop() owns the Idle transition.
+    auto finish = [&](bool faulted) {
+        releaseCamera();
+        const bool stopRequested = !running_.exchange(false, std::memory_order_acq_rel);
+        backend::diagnostics::CrashStateMirror::instance().capture.running.store(false);
+        if (faulted && !stopRequested) {
+            transition(CaptureLifecycleState::Faulted, generation);
+        } else if (!stopRequested) {
+            // Clean natural end (camera closed its own stream) without a stop
+            // request is still a fault for the lifecycle: the session ended
+            // without its owner asking.
+            transition(CaptureLifecycleState::Faulted, generation);
+        }
+        // else: stop() is in flight and will publish Idle after the join.
+        workerExited_.store(true, std::memory_order_release);
+        lifecycleCv_.notify_all();
+    };
+
     try {
-        SPDLOG_INFO("CaptureService starting: parts={}, buffers={}, mode={}",
-                    config_.bufferPartCount, config_.numBuffers,
+        SPDLOG_INFO("CaptureService starting: gen={}, parts={}, buffers={}, mode={}",
+                    generation, config_.bufferPartCount, config_.numBuffers,
                     camera::common::toString(config_.deliveryMode));
         stats_.requestedDeliveryMode.store(static_cast<int>(config_.deliveryMode),
                                            std::memory_order_relaxed);
@@ -115,23 +291,33 @@ void CaptureService::run() {
         }
 
         if (!cameraFactory_) {
+            recordFailure(CaptureFailureKind::NoCameraFactory,
+                          "CaptureService has no camera factory configured", generation);
             throw std::runtime_error("CaptureService has no camera factory configured");
         }
 
         camera = cameraFactory_();
         if (!camera) {
+            recordFailure(CaptureFailureKind::CameraFactoryReturnedNull,
+                          "CaptureService camera factory returned null", generation);
             throw std::runtime_error("CaptureService camera factory returned null");
         }
 
         const auto deliveryCaps = camera->deliveryCapabilities();
         if (config_.deliveryMode == camera::common::FrameDeliveryMode::LatestFrame &&
             !deliveryCaps.supportsLatestFrame) {
+            recordFailure(CaptureFailureKind::UnsupportedDeliveryMode,
+                          "This camera backend does not support Latest Frame delivery",
+                          generation);
             throw std::runtime_error(
                 "This camera backend does not support Latest Frame delivery; "
                 "select Every Frame or use a backend with newest-frame support");
         }
         if (config_.deliveryMode == camera::common::FrameDeliveryMode::EveryFrame &&
             !deliveryCaps.supportsEveryFrame) {
+            recordFailure(CaptureFailureKind::UnsupportedDeliveryMode,
+                          "This camera backend does not support Every Frame delivery",
+                          generation);
             throw std::runtime_error(
                 "This camera backend does not support Every Frame delivery; "
                 "select Latest Frame");
@@ -148,16 +334,42 @@ void CaptureService::run() {
             activeCamera_ = camera.get();
         }
 
+        // A stop() that landed while we were opening must win: never confirm
+        // readiness for a session whose owner already asked it to end.
+        if (!running_.load(std::memory_order_acquire)) {
+            finish(false);
+            return;
+        }
+
         if (!camera->start()) {
+            const auto fault = camera->lastFailure();
+            recordFailure(CaptureFailureKind::CameraStartFailed,
+                          fault.message.empty() ? "CaptureService camera failed to start"
+                                                : fault.message,
+                          generation);
             throw std::runtime_error("CaptureService camera failed to start");
         }
+        cameraStarted = true;
 
         stats_.activeDeliveryMode.store(static_cast<int>(camera->activeDeliveryMode()),
                                         std::memory_order_relaxed);
         stats_.deliveryModeConfirmed.store(true, std::memory_order_release);
 
-        if (cameraReadyCallback_) {
-            cameraReadyCallback_(camera.get());
+        {
+            std::lock_guard<std::mutex> lk(lifecycleMutex_);
+            if (generation == snapshot_.generation &&
+                snapshot_.state == CaptureLifecycleState::Starting) {
+                snapshot_.state = CaptureLifecycleState::Running;
+                snapshot_.cameraReady = true;
+                snapshot_.lastFailure = CaptureFailureKind::None;
+                snapshot_.lastFailureMessage.clear();
+                snapshot_.transitionHostTimeUs = Tools::getTimestamp();
+            }
+        }
+        lifecycleCv_.notify_all();
+
+        if (cameraReadyCallback_ && running_.load(std::memory_order_acquire)) {
+            cameraReadyCallback_(camera.get(), generation);
         }
 
         constexpr uint64_t kStatsInterval = 1'000'000ULL;
@@ -175,6 +387,7 @@ void CaptureService::run() {
         // at triggered rates of 5000 fps a per-iteration Frame would malloc
         // the pixel buffer every 200 µs.
         camera::common::Frame frame;
+        bool faulted = false;
 
         while (running_.load()) {
             // Periodic health check
@@ -182,6 +395,9 @@ void CaptureService::run() {
             if (now >= nextHealthCheck) {
                 if (!camera->checkDeviceHealth()) {
                     SPDLOG_WARN("CaptureService: Device health check failed, stopping capture gracefully");
+                    recordFailure(CaptureFailureKind::DeviceHealthLost,
+                                  "Device health check failed", generation);
+                    faulted = true;
                     break;
                 }
                 nextHealthCheck = now + kHealthCheckInterval;
@@ -206,7 +422,14 @@ void CaptureService::run() {
                     break;
                 }
                 if (!camera->isRunning()) {
-                    SPDLOG_INFO("CaptureService camera stopped streaming");
+                    const auto fault = camera->lastFailure();
+                    SPDLOG_INFO("CaptureService camera stopped streaming ({})",
+                                fault.message.empty() ? "no detail" : fault.message);
+                    recordFailure(CaptureFailureKind::StreamEnded,
+                                  fault.message.empty() ? "Camera stopped streaming"
+                                                        : fault.message,
+                                  generation);
+                    faulted = true;
                     break;
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -290,20 +513,28 @@ void CaptureService::run() {
             }
         }
 
-        releaseCamera();
-        running_.store(false);
-        backend::diagnostics::CrashStateMirror::instance().capture.running.store(false);
-        SPDLOG_INFO("CaptureService stopped");
+        finish(faulted);
+        SPDLOG_INFO("CaptureService stopped (gen={}, {})", generation,
+                    faulted ? "faulted" : "requested");
     } catch (const std::exception& ex) {
         SPDLOG_ERROR("CaptureService exception: {}", ex.what());
-        releaseCamera();
-        running_.store(false);
-        backend::diagnostics::CrashStateMirror::instance().capture.running.store(false);
+        if (!cameraStarted) {
+            // recordFailure already ran for the typed pre-start failures;
+            // anything else is an unexpected exception.
+            std::lock_guard<std::mutex> lk(lifecycleMutex_);
+            if (snapshot_.lastFailureGeneration != generation) {
+                snapshot_.lastFailure = CaptureFailureKind::Exception;
+                snapshot_.lastFailureMessage = ex.what();
+                snapshot_.lastFailureGeneration = generation;
+            }
+        } else {
+            recordFailure(CaptureFailureKind::Exception, ex.what(), generation);
+        }
+        finish(true);
     } catch (...) {
         SPDLOG_ERROR("CaptureService unknown exception");
-        releaseCamera();
-        running_.store(false);
-        backend::diagnostics::CrashStateMirror::instance().capture.running.store(false);
+        recordFailure(CaptureFailureKind::Exception, "unknown exception", generation);
+        finish(true);
     }
 }
 

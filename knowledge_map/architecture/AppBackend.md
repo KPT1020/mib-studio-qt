@@ -41,7 +41,10 @@ See `src/backend/AppBackend.cpp` around lines 79–200.
 7. Wires callbacks:
    - `ProcessingService::RingRatioCallback` → `AutofocusService::onRingRatio`
    - `ProcessingService::TargetGroupCallback` → `TriggerService::onTargetGroupResult`
-   - `CaptureService::CameraReadyCallback` → starts/stops `TriggerService`
+   - `CaptureService::CameraReadyCallback(camera, generation)` →
+     `TriggerService::setCamera(camera, generation)` + start/stop; the
+     generation tags the acquisition session so stale trigger requests are
+     refused after a restart (issue #365)
      and hands it the live `ICamera*`
    - `ProcessingService::BackgroundCaptureCallback` → emits Qt signal via
      [[../frontend/System-Utilities]] `BackgroundCaptureNotifier`
@@ -103,12 +106,15 @@ with source frames. See `docs/howto/pipeline-latency-diagnosis.md`.
 
 ## Shutdown
 
-`shutdown()` first clears cross-service callbacks (camera-ready, target-group,
-background-capture) so that no callback can fire into an already-destroyed
-service during the member-destruction chain. It then stops every service-owned
-thread in dependency order — capture (joins the capture thread), trigger
-(defensive, idempotent), frame recording, then processing (`stopRealtime()` +
-`stopBatchPipeline()` + `stop()`). The destructor calls it, so teardown no
+`shutdown()` first clears the target-group and background-capture callbacks
+(no new trigger requests are admitted), then stops capture **with the
+camera-ready callback still wired** so that [[../services/TriggerService]]
+unbinds (waiting for any in-flight pulse) and stops while the camera object
+is still alive on the capture thread (issue #365 — the previous order cleared
+the callback first and left the trigger thread holding a camera pointer
+across the camera's destruction). It then stops trigger again (idempotent),
+clears the camera-ready callback, stops frame recording, then processing
+(`stopRealtime()` + `stopBatchPipeline()` + `stop()`). The destructor calls it, so teardown no
 longer depends on `MainWindow::closeEvent` having stopped experiment services
 first. Ordering matters: members are destroyed in reverse declaration order,
 so `triggerService_`/`autofocusService_` die before `processingService_` — a
