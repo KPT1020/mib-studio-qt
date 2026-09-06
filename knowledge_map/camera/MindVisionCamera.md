@@ -91,6 +91,16 @@ handle under a live call. `setTriggerOutput`/`softTrigger`/stats calls take
 `stateMutex_` and check `running_ && hCamera_ >= 0`, so they cannot reach a
 closed handle either.
 
+## Timestamps (issue #368)
+
+`tSdkFrameHead::uiTimeStamp` is a 32-bit device capture counter in 0.1 ms
+ticks; `grabFrame` stores `Frame::timestamp = ticks × 100000` (ns) and keeps
+the native value in `Frame::rawDeviceTicks`. `timestampDescriptor()` reports
+`deviceTicks @1e9 Hz (native 10000 Hz), deviceCapture, valid, 32-bit`. The
+device clock is not comparable to `Tools::getTimestamp()`
+(`timestampsHostComparable=false`), so frame age is `Unsupported` for this
+backend.
+
 ## Acquisition trigger modes
 
 `trigger_mode` selects how exposures start: `0` continuous (free-run, default),

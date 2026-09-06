@@ -18,7 +18,7 @@ namespace backend::services {
 CaptureService::CaptureService() {
 #if MIB_HAS_EGRABBER
     cameraFactory_ = []() {
-        return std::make_unique<camera::common::EGrabberCamera>();
+        return std::make_unique<::camera::common::EGrabberCamera>();
     };
 #else
     cameraFactory_ = []() {
@@ -127,6 +127,10 @@ CaptureStartOutcome CaptureService::requestStart() {
 
     const uint64_t generation = snapshot_.generation + 1;
     snapshot_.generation = generation;
+    // Telemetry belongs to the session: every metric is Unavailable until
+    // the new camera produces it (issue #368). Done here, synchronously, so
+    // a snapshot taken right after start() never shows the previous session.
+    resetSessionTelemetryLocked();
     snapshot_.state = CaptureLifecycleState::Starting;
     snapshot_.cameraReady = false;
     snapshot_.transitionHostTimeUs = Tools::getTimestamp();
@@ -225,11 +229,108 @@ bool CaptureService::softTriggerActiveCamera() {
 }
 
 // ---------------------------------------------------------------------------
+// Telemetry (issue #368)
+// ---------------------------------------------------------------------------
+
+void CaptureService::resetSessionTelemetryLocked() {
+    const int unavailable = static_cast<int>(MetricValidity::Unavailable);
+    stats_.framesProcessed.store(0, std::memory_order_relaxed);
+    stats_.lastFrameRate.store(0, std::memory_order_relaxed);
+    stats_.lastDataRateMBps.store(0, std::memory_order_relaxed);
+    stats_.intentionallyDiscardedFrames.store(0, std::memory_order_relaxed);
+    stats_.transportLostFrames.store(0, std::memory_order_relaxed);
+    stats_.bufferUnderruns.store(0, std::memory_order_relaxed);
+    stats_.sdkCompletedQueueDepth.store(0, std::memory_order_relaxed);
+    stats_.sdkInputBufferCount.store(0, std::memory_order_relaxed);
+    stats_.queueStatsValid.store(false, std::memory_order_release);
+    stats_.lastFrameAgeUs.store(0, std::memory_order_relaxed);
+    stats_.frameAgeValid.store(false, std::memory_order_relaxed);
+    stats_.lastPublishLatencyUs.store(0, std::memory_order_relaxed);
+    for (auto* slot : {&stats_.frameRateValidity, &stats_.queueDepthValidity,
+                       &stats_.inputBuffersValidity, &stats_.underrunsValidity,
+                       &stats_.transportLossValidity, &stats_.discardsValidity}) {
+        slot->store(unavailable, std::memory_order_relaxed);
+    }
+    for (auto* t : {&stats_.frameRateSampledUs, &stats_.queueStatsSampledUs,
+                    &stats_.frameAgeSampledUs, &stats_.publishLatencySampledUs,
+                    &stats_.framesSampledUs}) {
+        t->store(0, std::memory_order_relaxed);
+    }
+    timestampDescriptor_ = {};
+    timestampDescriptor_.validity = ::camera::common::TimestampValidity::Unavailable;
+}
+
+::camera::common::TimestampDescriptor CaptureService::timestampDescriptor() const {
+    std::lock_guard<std::mutex> lk(lifecycleMutex_);
+    return timestampDescriptor_;
+}
+
+AcquisitionTelemetrySnapshot CaptureService::telemetrySnapshot(uint64_t freshnessWindowUs) const {
+    AcquisitionTelemetrySnapshot t;
+    const uint64_t now = Tools::getTimestamp();
+    t.snapshotHostTimeUs = now;
+    t.freshnessWindowUs = freshnessWindowUs;
+    {
+        std::lock_guard<std::mutex> lk(lifecycleMutex_);
+        t.sessionGeneration = snapshot_.generation;
+        t.sessionActive = snapshot_.isActive();
+        t.timestampDescriptor = timestampDescriptor_;
+    }
+    auto sample = [&](uint64_t value, int validityInt, uint64_t sampledUs) {
+        MetricSample m;
+        m.value = value;
+        m.validity = static_cast<MetricValidity>(validityInt);
+        m.sampleHostTimeUs = sampledUs;
+        m.sessionGeneration = t.sessionGeneration;
+        m.ageUs = (sampledUs > 0 && now >= sampledUs) ? now - sampledUs : 0;
+        if (m.validity == MetricValidity::Valid && sampledUs > 0 && freshnessWindowUs > 0 &&
+            m.ageUs > freshnessWindowUs) {
+            m.validity = MetricValidity::Stale;
+        }
+        return m;
+    };
+    const int valid = static_cast<int>(MetricValidity::Valid);
+    const int unavailable = static_cast<int>(MetricValidity::Unavailable);
+    const uint64_t framesAt = stats_.framesSampledUs.load(std::memory_order_relaxed);
+    t.framesDelivered = sample(stats_.framesProcessed.load(std::memory_order_relaxed),
+                               framesAt > 0 ? valid : unavailable, framesAt);
+    t.captureFrameRate = sample(stats_.lastFrameRate.load(std::memory_order_relaxed),
+                                stats_.frameRateValidity.load(std::memory_order_relaxed),
+                                stats_.frameRateSampledUs.load(std::memory_order_relaxed));
+    t.captureDataRateMBps = sample(stats_.lastDataRateMBps.load(std::memory_order_relaxed),
+                                   stats_.frameRateValidity.load(std::memory_order_relaxed),
+                                   stats_.frameRateSampledUs.load(std::memory_order_relaxed));
+    const uint64_t qAt = stats_.queueStatsSampledUs.load(std::memory_order_relaxed);
+    t.sdkCompletedQueueDepth = sample(stats_.sdkCompletedQueueDepth.load(std::memory_order_relaxed),
+                                      stats_.queueDepthValidity.load(std::memory_order_relaxed), qAt);
+    t.sdkInputBufferCount = sample(stats_.sdkInputBufferCount.load(std::memory_order_relaxed),
+                                   stats_.inputBuffersValidity.load(std::memory_order_relaxed), qAt);
+    t.bufferUnderruns = sample(stats_.bufferUnderruns.load(std::memory_order_relaxed),
+                               stats_.underrunsValidity.load(std::memory_order_relaxed), qAt);
+    t.transportLostFrames = sample(stats_.transportLostFrames.load(std::memory_order_relaxed),
+                                   stats_.transportLossValidity.load(std::memory_order_relaxed), qAt);
+    t.intentionallyDiscardedFrames = sample(stats_.intentionallyDiscardedFrames.load(std::memory_order_relaxed),
+                                            stats_.discardsValidity.load(std::memory_order_relaxed), qAt);
+    const uint64_t ageAt = stats_.frameAgeSampledUs.load(std::memory_order_relaxed);
+    t.frameAgeUs = sample(stats_.lastFrameAgeUs.load(std::memory_order_relaxed),
+                          stats_.frameAgeValid.load(std::memory_order_relaxed)
+                              ? valid
+                              : (t.timestampDescriptor.domain == ::camera::common::ClockDomain::HostMonotonicUs
+                                     ? unavailable
+                                     : static_cast<int>(MetricValidity::Unsupported)),
+                          ageAt);
+    const uint64_t pubAt = stats_.publishLatencySampledUs.load(std::memory_order_relaxed);
+    t.publishLatencyUs = sample(stats_.lastPublishLatencyUs.load(std::memory_order_relaxed),
+                                pubAt > 0 ? valid : unavailable, pubAt);
+    return t;
+}
+
+// ---------------------------------------------------------------------------
 // Worker
 // ---------------------------------------------------------------------------
 
 void CaptureService::run(uint64_t generation) {
-    std::unique_ptr<camera::common::ICamera> camera;
+    std::unique_ptr<::camera::common::ICamera> camera;
     bool cameraStarted = false;
 
     auto releaseCamera = [&]() {
@@ -242,6 +343,7 @@ void CaptureService::run(uint64_t generation) {
             if (generation == snapshot_.generation) {
                 snapshot_.cameraReady = false;
             }
+            timestampDescriptor_.validity = ::camera::common::TimestampValidity::Unavailable;
         }
         // Consumers release their camera reference while it is still valid.
         if (cameraReadyCallback_) {
@@ -279,7 +381,7 @@ void CaptureService::run(uint64_t generation) {
     try {
         SPDLOG_INFO("CaptureService starting: gen={}, parts={}, buffers={}, mode={}",
                     generation, config_.bufferPartCount, config_.numBuffers,
-                    camera::common::toString(config_.deliveryMode));
+                    ::camera::common::toString(config_.deliveryMode));
         stats_.requestedDeliveryMode.store(static_cast<int>(config_.deliveryMode),
                                            std::memory_order_relaxed);
         stats_.deliveryModeConfirmed.store(false, std::memory_order_release);
@@ -304,7 +406,7 @@ void CaptureService::run(uint64_t generation) {
         }
 
         const auto deliveryCaps = camera->deliveryCapabilities();
-        if (config_.deliveryMode == camera::common::FrameDeliveryMode::LatestFrame &&
+        if (config_.deliveryMode == ::camera::common::FrameDeliveryMode::LatestFrame &&
             !deliveryCaps.supportsLatestFrame) {
             recordFailure(CaptureFailureKind::UnsupportedDeliveryMode,
                           "This camera backend does not support Latest Frame delivery",
@@ -313,7 +415,7 @@ void CaptureService::run(uint64_t generation) {
                 "This camera backend does not support Latest Frame delivery; "
                 "select Every Frame or use a backend with newest-frame support");
         }
-        if (config_.deliveryMode == camera::common::FrameDeliveryMode::EveryFrame &&
+        if (config_.deliveryMode == ::camera::common::FrameDeliveryMode::EveryFrame &&
             !deliveryCaps.supportsEveryFrame) {
             recordFailure(CaptureFailureKind::UnsupportedDeliveryMode,
                           "This camera backend does not support Every Frame delivery",
@@ -323,7 +425,7 @@ void CaptureService::run(uint64_t generation) {
                 "select Latest Frame");
         }
 
-        camera::common::CameraConfig camCfg;
+        ::camera::common::CameraConfig camCfg;
         camCfg.bufferPartCount = config_.bufferPartCount;
         camCfg.numBuffers = config_.numBuffers;
         camCfg.deliveryMode = config_.deliveryMode;
@@ -357,6 +459,8 @@ void CaptureService::run(uint64_t generation) {
 
         {
             std::lock_guard<std::mutex> lk(lifecycleMutex_);
+            timestampDescriptor_ = camera->timestampDescriptor();
+            timestampDescriptor_.sessionGeneration = generation;
             if (generation == snapshot_.generation &&
                 snapshot_.state == CaptureLifecycleState::Starting) {
                 snapshot_.state = CaptureLifecycleState::Running;
@@ -386,7 +490,7 @@ void CaptureService::run(uint64_t generation) {
         // vector's capacity frame-to-frame (pushFrame copies out of it) —
         // at triggered rates of 5000 fps a per-iteration Frame would malloc
         // the pixel buffer every 200 µs.
-        camera::common::Frame frame;
+        ::camera::common::Frame frame;
         bool faulted = false;
 
         while (running_.load()) {
@@ -416,6 +520,7 @@ void CaptureService::run(uint64_t generation) {
                 stats_.lastFrameAgeUs.store(frame.hostTimestampUs - frame.timestamp,
                                             std::memory_order_relaxed);
                 stats_.frameAgeValid.store(true, std::memory_order_relaxed);
+                stats_.frameAgeSampledUs.store(frame.hostTimestampUs, std::memory_order_relaxed);
             }
             if (!grabbed) {
                 if (!running_.load()) {
@@ -461,24 +566,50 @@ void CaptureService::run(uint64_t generation) {
                                        frame.timestamp,
                                        frame.hostTimestampUs);
             }
-            stats_.lastPublishLatencyUs.store(Tools::getTimestamp() - frame.hostTimestampUs,
-                                              std::memory_order_relaxed);
+            {
+                const uint64_t published = Tools::getTimestamp();
+                stats_.lastPublishLatencyUs.store(published - frame.hostTimestampUs,
+                                                  std::memory_order_relaxed);
+                stats_.publishLatencySampledUs.store(published, std::memory_order_relaxed);
+                stats_.framesSampledUs.store(published, std::memory_order_relaxed);
+            }
             stats_.framesProcessed.fetch_add(1, std::memory_order_relaxed);
             backend::diagnostics::CrashStateMirror::instance().capture.framesProcessed
                 .fetch_add(1, std::memory_order_relaxed);
 
             if (now >= nextStatsPoll) {
-                camera::common::CameraStats cameraStats{};
+                ::camera::common::CameraStats cameraStats{};
                 if (camera->pollStats(cameraStats)) {
                     stats_.lastFrameRate.store(cameraStats.frameRate, std::memory_order_relaxed);
                     stats_.lastDataRateMBps.store(cameraStats.dataRateMBps, std::memory_order_relaxed);
+                    stats_.frameRateValidity.store(static_cast<int>(MetricValidity::Valid),
+                                                   std::memory_order_relaxed);
+                    stats_.frameRateSampledUs.store(now, std::memory_order_relaxed);
                     auto& m = backend::diagnostics::CrashStateMirror::instance().capture;
                     m.lastFrameRate.store(cameraStats.frameRate, std::memory_order_relaxed);
                     m.lastDataRateMBps.store(cameraStats.dataRateMBps, std::memory_order_relaxed);
                     SPDLOG_DEBUG("Capture stats: {} fps, {} MB/s", cameraStats.frameRate, cameraStats.dataRateMBps);
+                } else {
+                    stats_.frameRateValidity.store(static_cast<int>(MetricValidity::Error),
+                                                   std::memory_order_relaxed);
                 }
-                camera::common::AcquisitionQueueStats queueStats{};
+                ::camera::common::AcquisitionQueueStats queueStats{};
                 if (camera->pollAcquisitionQueueStats(queueStats)) {
+                    // Per-metric validity (issue #368): a field the backend
+                    // cannot observe is Unsupported, never a measured zero.
+                    auto setV = [&](std::atomic<int>& slot, bool valid) {
+                        slot.store(static_cast<int>(valid ? MetricValidity::Valid
+                                                          : MetricValidity::Unsupported),
+                                   std::memory_order_relaxed);
+                    };
+                    setV(stats_.queueDepthValidity, queueStats.completedQueueDepthValid);
+                    setV(stats_.inputBuffersValidity, queueStats.inputBufferCountValid);
+                    setV(stats_.underrunsValidity, queueStats.underrunsValid);
+                    setV(stats_.transportLossValidity, queueStats.transportLossValid);
+                    // Intentional discards are always observable on a backend
+                    // that returns queue stats (exact on drain paths).
+                    setV(stats_.discardsValidity, true);
+                    stats_.queueStatsSampledUs.store(now, std::memory_order_relaxed);
                     stats_.intentionallyDiscardedFrames.store(
                         queueStats.intentionallyDiscardedFrames, std::memory_order_relaxed);
                     stats_.transportLostFrames.store(queueStats.transportLostFrames,
@@ -493,12 +624,19 @@ void CaptureService::run(uint64_t generation) {
                     // In EveryFrame mode a growing completed-buffer backlog is
                     // hidden latency; surface it (rate-limited to this 1 s
                     // stats interval).
-                    if (config_.deliveryMode == camera::common::FrameDeliveryMode::EveryFrame &&
+                    if (config_.deliveryMode == ::camera::common::FrameDeliveryMode::EveryFrame &&
                         queueStats.completedQueueDepthValid &&
                         queueStats.sdkCompletedQueueDepth > 0) {
                         SPDLOG_WARN("CaptureService: {} completed SDK buffers backlogged in "
                                     "EveryFrame mode (latency is growing)",
                                     queueStats.sdkCompletedQueueDepth);
+                    }
+                } else {
+                    for (auto* slot : {&stats_.queueDepthValidity, &stats_.inputBuffersValidity,
+                                       &stats_.underrunsValidity, &stats_.transportLossValidity,
+                                       &stats_.discardsValidity}) {
+                        slot->store(static_cast<int>(MetricValidity::Unsupported),
+                                    std::memory_order_relaxed);
                     }
                 }
                 nextStatsPoll = now + kStatsInterval;
@@ -506,7 +644,7 @@ void CaptureService::run(uint64_t generation) {
         }
 
         if (camera) {
-            camera::common::CameraStats cameraStats{};
+            ::camera::common::CameraStats cameraStats{};
             if (camera->pollStats(cameraStats)) {
                 stats_.lastFrameRate.store(cameraStats.frameRate, std::memory_order_relaxed);
                 stats_.lastDataRateMBps.store(cameraStats.dataRateMBps, std::memory_order_relaxed);

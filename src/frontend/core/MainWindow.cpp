@@ -43,6 +43,7 @@
 #include "backend/services/AutofocusService.h"
 #include "frontend/system/PlaybackPanel.h"
 #include "frontend/controllers/CameraController.h"
+#include "frontend/utils/StatsDisplayManager.h"
 #include "frontend/tabs/ConnectTab.h"
 #include "frontend/tabs/PreviewPage.h"
 #include "frontend/tabs/HdfReviewTab.h"
@@ -1058,6 +1059,10 @@ void MainWindow::onStopExperiment()
         if (metadataOk && !hdf5.writeRunAccounting(accounting)) {
             SPDLOG_ERROR("Experiment run accounting could not be persisted");
         }
+        if (metadataOk && !hdf5.writeAcquisitionProvenance(backend_.capture().timestampDescriptor(),
+                                                           backend_.capture().telemetrySnapshot())) {
+            SPDLOG_ERROR("Experiment acquisition provenance could not be persisted");
+        }
         SPDLOG_INFO("Experiment accounting: completion={} ({}); admitted={} empty={} processed={} "
                     "rejected={} processingFailed={} storeLoss={} persisted={}/{} failed={}",
                     backend::recording::toString(accounting.completion), accounting.completionReason,
@@ -1194,8 +1199,13 @@ void MainWindow::onUpdateStats()
         data.invalidFps = invalidFps;
         data.totalValidFlushed = totalValidFlushed;
         data.cameraRunning = cap.isRunning();
-        data.cameraFps = s.lastFrameRate.load();
-        data.cameraDataRateMBps = s.lastDataRateMBps.load();
+        {
+            const auto telemetry = cap.telemetrySnapshot();
+            data.cameraFps = s.lastFrameRate.load();
+            data.cameraDataRateMBps = s.lastDataRateMBps.load();
+            data.cameraFpsText = frontend::StatsDisplayManager::formatMetric(telemetry.captureFrameRate);
+            data.cameraDataRateText = frontend::StatsDisplayManager::formatMetric(telemetry.captureDataRateMBps);
+        }
         data.meanRingRatio = backend_.autofocus().getMedianRingRatio();
         data.experimentActive = experimentActive_;
         data.validBuffered = bufferedFrames.valid;
@@ -1217,11 +1227,13 @@ void MainWindow::onUpdateStats()
                  .arg(QString::number(invalidFps, 'f', 1))
                  .arg(QString::number(static_cast<qulonglong>(totalValidFlushed)));
 
-    // Camera transport stats
+    // Camera transport stats. Per-metric validity (issue #368): an
+    // unavailable/stale rate is shown as such, never as a measured zero.
     if (cap.isRunning()) {
+        const auto telemetry = cap.telemetrySnapshot();
         status += QString(" | Camera=%1 fps, %2 MB/s")
-                      .arg(QString::number(s.lastFrameRate.load()))
-                      .arg(QString::number(s.lastDataRateMBps.load()));
+                      .arg(frontend::StatsDisplayManager::formatMetric(telemetry.captureFrameRate))
+                      .arg(frontend::StatsDisplayManager::formatMetric(telemetry.captureDataRateMBps));
     } else {
         status += " | Camera: stopped";
     }

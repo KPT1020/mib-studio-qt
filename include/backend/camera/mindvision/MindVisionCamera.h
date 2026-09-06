@@ -52,6 +52,9 @@ public:
     bool softTrigger() override;
 
     CameraFailure lastFailure() const override;
+    // Frame::timestamp = uiTimeStamp (0.1 ms device ticks) x 100000 -> ns;
+    // rawDeviceTicks keeps the native counter. Device clock, not host.
+    TimestampDescriptor timestampDescriptor() const override;
 
     // Validated session geometry (valid while running). Exposed for
     // lifecycle/preflight reporting and tests.

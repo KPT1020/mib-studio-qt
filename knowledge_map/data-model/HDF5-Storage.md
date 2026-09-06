@@ -44,6 +44,20 @@
   `readRunAccounting` returns `false` (completion `unknown`) for files that
   predate the schema; legacy `total_recorded_frames` /
   `total_filtered_empty_frames` are never reinterpreted.
+- **Acquisition time/telemetry provenance (issue #368,
+  `timestamp_schema_version` = 1)** — `Hdf5Service::writeAcquisitionProvenance`
+  stores `timestamp_clock_domain`, `timestamp_ticks_per_second`,
+  `timestamp_native_ticks_per_second`, `timestamp_semantic`,
+  `timestamp_validity`, `timestamp_counter_bits`, `timestamp_session_generation`,
+  `timestamp_host_receipt_domain` (what the per-frame `hostTimestampUs` column
+  means) and, per metric, `telemetry_<name>_value` / `_validity` /
+  `_sample_host_time_us` for frames delivered, capture frame/data rate, SDK
+  queue depth, input buffers, underruns, transport loss, intentional
+  discards, frame age and publish latency. The per-frame `timestampNs`
+  column name is historical: its unit/domain is whatever the descriptor says.
+  Files without the schema read back as `unknown`/`unsupported`
+  (`camera::common::legacyTimestampInterpretation()` documents what old
+  values held per producer); nothing is rewritten.
 - Chart snapshot datasets — 2D/3D `cv::Mat` saved via
   `saveChartSnapshot(path, image)`.
 

@@ -485,6 +485,7 @@ bool MindVisionCamera::grabFrame(Frame &out)
                         out.pixelFormat = kMono8PfncCode;
                         out.linePitch = static_cast<std::size_t>(sessionGeometry_.width);
                         out.timestamp = static_cast<std::uint64_t>(frameHead.timeStamp) * kTickNs;
+                        out.rawDeviceTicks = frameHead.timeStamp;
                         out.data.assign(outBuffer_, outBuffer_ + sessionGeometry_.requiredBytes);
                         ++frameCount_;
                         copied = true;
@@ -527,6 +528,18 @@ bool MindVisionCamera::pollStats(CameraStats &out) const
     }
     out = lastStats_;
     return true;
+}
+
+TimestampDescriptor MindVisionCamera::timestampDescriptor() const
+{
+    TimestampDescriptor d;
+    d.domain = ClockDomain::DeviceTicks;
+    d.ticksPerSecond = 1'000'000'000ULL; // normalized to ns at the grab boundary
+    d.nativeTicksPerSecond = 1'000'000'000ULL / kTickNs; // 10 kHz (0.1 ms ticks)
+    d.semantic = TimestampSemantic::DeviceCapture; // tSdkFrameHead::uiTimeStamp
+    d.validity = TimestampValidity::Valid;
+    d.counterBits = 32; // UINT uiTimeStamp
+    return d;
 }
 
 FrameDeliveryCapabilities MindVisionCamera::deliveryCapabilities() const

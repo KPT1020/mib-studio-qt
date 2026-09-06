@@ -3582,4 +3582,141 @@ namespace backend::services {
         return true;
     }
 
+    // ---- Acquisition time/telemetry provenance (issue #368) --------------------
+
+    bool Hdf5Service::writeAcquisitionProvenance(const ::camera::common::TimestampDescriptor& d,
+                                                 const AcquisitionTelemetrySnapshot& t)
+    {
+        if (!isFileOpen()) return false;
+        const char* groupPath = runInfoGroupPath(impl_->fileId_);
+        if (!groupPath) return false;
+        hid_t group = H5Gopen2(impl_->fileId_, groupPath, H5P_DEFAULT);
+        if (group < 0) return false;
+        hid_t scalar = H5Screate(H5S_SCALAR);
+        bool ok = true;
+        auto writeU64 = [&](const std::string& name, uint64_t value) {
+            hid_t attr = H5Aopen(group, name.c_str(), H5P_DEFAULT);
+            if (attr < 0) attr = H5Acreate2(group, name.c_str(), H5T_NATIVE_UINT64, scalar, H5P_DEFAULT, H5P_DEFAULT);
+            if (attr < 0) { ok = false; return; }
+            if (H5Awrite(attr, H5T_NATIVE_UINT64, &value) < 0) ok = false;
+            H5Aclose(attr);
+        };
+        auto writeStr = [&](const std::string& name, const std::string& value) {
+            if (H5Aexists(group, name.c_str()) > 0) H5Adelete(group, name.c_str());
+            hid_t type = H5Tcopy(H5T_C_S1);
+            H5Tset_size(type, H5T_VARIABLE);
+            H5Tset_cset(type, H5T_CSET_UTF8);
+            hid_t attr = H5Acreate2(group, name.c_str(), type, scalar, H5P_DEFAULT, H5P_DEFAULT);
+            if (attr >= 0) {
+                const char* ptr = value.c_str();
+                if (H5Awrite(attr, type, &ptr) < 0) ok = false;
+                H5Aclose(attr);
+            } else {
+                ok = false;
+            }
+            H5Tclose(type);
+        };
+        writeU64("timestamp_schema_version", ::camera::common::TimestampDescriptor::kSchemaVersion);
+        writeStr("timestamp_clock_domain", ::camera::common::toString(d.domain));
+        writeU64("timestamp_ticks_per_second", d.ticksPerSecond);
+        writeU64("timestamp_native_ticks_per_second", d.nativeTicksPerSecond);
+        writeStr("timestamp_semantic", ::camera::common::toString(d.semantic));
+        writeStr("timestamp_validity", ::camera::common::toString(d.validity));
+        writeU64("timestamp_counter_bits", d.counterBits);
+        writeU64("timestamp_session_generation", d.sessionGeneration);
+        writeStr("timestamp_host_receipt_domain", "hostMonotonicUs"); // hostTimestampUs column semantics
+        writeU64("telemetry_session_generation", t.sessionGeneration);
+        auto writeMetric = [&](const char* name, const MetricSample& m) {
+            const std::string base = std::string("telemetry_") + name;
+            writeU64(base + "_value", m.value);
+            writeStr(base + "_validity", toString(m.validity));
+            writeU64(base + "_sample_host_time_us", m.sampleHostTimeUs);
+        };
+        writeMetric("frames_delivered", t.framesDelivered);
+        writeMetric("capture_frame_rate", t.captureFrameRate);
+        writeMetric("capture_data_rate_mbps", t.captureDataRateMBps);
+        writeMetric("sdk_completed_queue_depth", t.sdkCompletedQueueDepth);
+        writeMetric("sdk_input_buffer_count", t.sdkInputBufferCount);
+        writeMetric("buffer_underruns", t.bufferUnderruns);
+        writeMetric("transport_lost_frames", t.transportLostFrames);
+        writeMetric("intentionally_discarded_frames", t.intentionallyDiscardedFrames);
+        writeMetric("frame_age_us", t.frameAgeUs);
+        writeMetric("publish_latency_us", t.publishLatencyUs);
+        H5Sclose(scalar);
+        H5Gclose(group);
+        if (!ok) SPDLOG_ERROR("writeAcquisitionProvenance: failed to persist one or more attributes");
+        return ok;
+    }
+
+    bool Hdf5Service::readAcquisitionProvenance(::camera::common::TimestampDescriptor& d,
+                                                AcquisitionTelemetrySnapshot& t) const
+    {
+        d = {};
+        d.validity = ::camera::common::TimestampValidity::Unsupported; // legacy default
+        t = {};
+        if (!isFileOpen()) return false;
+        const char* groupPath = runInfoGroupPath(impl_->fileId_);
+        if (!groupPath) return false;
+        hid_t group = H5Gopen2(impl_->fileId_, groupPath, H5P_DEFAULT);
+        if (group < 0) return false;
+        if (H5Aexists(group, "timestamp_schema_version") <= 0) {
+            H5Gclose(group);
+            return false;
+        }
+        auto readU64 = [&](const std::string& name, uint64_t& v) {
+            if (H5Aexists(group, name.c_str()) <= 0) return false;
+            hid_t attr = H5Aopen(group, name.c_str(), H5P_DEFAULT);
+            if (attr < 0) return false;
+            const bool ok = H5Aread(attr, H5T_NATIVE_UINT64, &v) >= 0;
+            H5Aclose(attr);
+            return ok;
+        };
+        auto readStr = [&](const std::string& name, std::string& v) {
+            if (H5Aexists(group, name.c_str()) <= 0) return false;
+            hid_t attr = H5Aopen(group, name.c_str(), H5P_DEFAULT);
+            if (attr < 0) return false;
+            hid_t type = H5Aget_type(attr);
+            bool ok = false;
+            if (type >= 0 && H5Tget_class(type) == H5T_STRING && H5Tis_variable_str(type) > 0) {
+                char* ptr = nullptr;
+                ok = H5Aread(attr, type, &ptr) >= 0;
+                if (ok) v = ptr ? ptr : "";
+                if (ptr) H5free_memory(ptr);
+            }
+            if (type >= 0) H5Tclose(type);
+            H5Aclose(attr);
+            return ok;
+        };
+        std::string str;
+        uint64_t u = 0;
+        if (readStr("timestamp_clock_domain", str)) d.domain = ::camera::common::clockDomainFromString(str);
+        if (readU64("timestamp_ticks_per_second", u)) d.ticksPerSecond = u;
+        if (readU64("timestamp_native_ticks_per_second", u)) d.nativeTicksPerSecond = u;
+        if (readStr("timestamp_semantic", str)) d.semantic = ::camera::common::timestampSemanticFromString(str);
+        if (readStr("timestamp_validity", str)) d.validity = ::camera::common::timestampValidityFromString(str);
+        if (readU64("timestamp_counter_bits", u)) d.counterBits = static_cast<uint32_t>(u);
+        if (readU64("timestamp_session_generation", u)) d.sessionGeneration = u;
+        if (readU64("telemetry_session_generation", u)) t.sessionGeneration = u;
+        auto readMetric = [&](const char* name, MetricSample& m) {
+            const std::string base = std::string("telemetry_") + name;
+            readU64(base + "_value", m.value);
+            if (readStr(base + "_validity", str)) m.validity = metricValidityFromString(str);
+            readU64(base + "_sample_host_time_us", m.sampleHostTimeUs);
+            m.sessionGeneration = t.sessionGeneration;
+        };
+        readMetric("frames_delivered", t.framesDelivered);
+        readMetric("capture_frame_rate", t.captureFrameRate);
+        readMetric("capture_data_rate_mbps", t.captureDataRateMBps);
+        readMetric("sdk_completed_queue_depth", t.sdkCompletedQueueDepth);
+        readMetric("sdk_input_buffer_count", t.sdkInputBufferCount);
+        readMetric("buffer_underruns", t.bufferUnderruns);
+        readMetric("transport_lost_frames", t.transportLostFrames);
+        readMetric("intentionally_discarded_frames", t.intentionallyDiscardedFrames);
+        readMetric("frame_age_us", t.frameAgeUs);
+        readMetric("publish_latency_us", t.publishLatencyUs);
+        t.timestampDescriptor = d;
+        H5Gclose(group);
+        return true;
+    }
+
 } // namespace backend::services

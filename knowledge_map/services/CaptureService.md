@@ -103,6 +103,32 @@ unbind (idempotent) before destroying the camera. A `stop()` that lands while
 the worker is still opening the camera wins: readiness is never confirmed for
 a session whose owner already asked it to end.
 
+## Telemetry validity and freshness (issue #368)
+
+`telemetrySnapshot(freshnessWindowUs = 3 s)` returns an
+`AcquisitionTelemetrySnapshot` (`TelemetrySample.h`) in which **every metric
+carries its own** `MetricValidity` (`Valid` / `Unavailable` / `Unsupported` /
+`Error` / `Stale`), sample host time, age, and session generation:
+`framesDelivered`, `captureFrameRate`, `captureDataRateMBps`,
+`sdkCompletedQueueDepth`, `sdkInputBufferCount`, `bufferUnderruns`,
+`transportLostFrames`, `intentionallyDiscardedFrames` (deliberate LatestFrame
+drops — never merged with loss), `frameAgeUs`, `publishLatencyUs`, plus the
+session's `TimestampDescriptor`. `CaptureStats` keeps the raw atomics and
+now per-metric validity/sample-time atomics; the old aggregate
+`queueStatsValid` remains only as a compatibility flag. Rules: a backend
+field with `*Valid == false` is `Unsupported` (never a measured zero); a
+Valid sample older than the window is `Stale` (value retained, structurally
+distinct); `requestStart()` resets every metric to `Unavailable` and re-tags
+the generation synchronously, so a reconnect can never show the previous
+camera's numbers. `timestampDescriptor()` describes `Frame::timestamp` for the
+session ([[../camera/ICamera]] contract) and is cleared to `Unavailable` on
+release. `frameAgeUs` is Valid only for host-comparable domains; host
+receipt/publish timing is host-side latency, never exposure time. Consumers:
+[[../frontend/MainWindow]] status/statistics rendering
+(`StatsDisplayManager::formatMetric` shows `n/a` / `unsupported` /
+`N (stale x s)`), `Hdf5Service::writeAcquisitionProvenance`. Guard:
+`backend.timestamp_telemetry`.
+
 ## Gotchas
 
 - Always refresh EGrabber `StreamModule` stat counters before calling

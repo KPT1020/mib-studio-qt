@@ -123,6 +123,14 @@ persist and read the versioned `accounting_*` attributes described in
 [[../frontend/HdfReviewTab]] status text. Types live in
 `include/backend/recording/RecordingAccounting.h` (Qt-free, header-only).
 
+## Acquisition provenance (issue #368)
+
+`writeAcquisitionProvenance(descriptor, telemetry)` /
+`readAcquisitionProvenance(...)` persist the session `TimestampDescriptor` and
+the per-metric telemetry with validity (see [[../data-model/HDF5-Storage]]).
+Written by `AppBackend` raw recording and `MainWindow::onStopExperiment` after
+the run info; legacy files return `false` with an Unsupported descriptor.
+
 ## Gotchas
 
 - `openFile(path)` creates the destination's parent directory tree

@@ -2,6 +2,7 @@
 
 #include "backend/camera/common/ICamera.h"
 #include "backend/services/CaptureLifecycle.h"
+#include "backend/services/TelemetrySample.h"
 
 #include <atomic>
 #include <chrono>
@@ -24,7 +25,7 @@ struct CaptureStats {
     std::atomic<uint64_t> lastDataRateMBps{0};  // from StreamModule StatisticsDataRate
 
     // Delivery mode + acquisition-queue telemetry. Modes are stored as the
-    // integer value of camera::common::FrameDeliveryMode so the struct stays
+    // integer value of ::camera::common::FrameDeliveryMode so the struct stays
     // lock-free; deliveryModeConfirmed distinguishes the backend-confirmed
     // active mode from the merely requested one.
     std::atomic<int> requestedDeliveryMode{0};
@@ -35,6 +36,10 @@ struct CaptureStats {
     std::atomic<uint64_t> bufferUnderruns{0};
     std::atomic<uint64_t> sdkCompletedQueueDepth{0};
     std::atomic<uint64_t> sdkInputBufferCount{0};
+    // Aggregate compatibility flag: true when the backend returned ANY queue
+    // telemetry. Prefer the per-metric validity below (issue #368): a metric
+    // this backend cannot observe stays Unsupported/Unavailable even while
+    // this flag is true, so "unknown" is never read as a measured zero.
     std::atomic<bool> queueStatsValid{false};
     // Age of the last grabbed frame (device stamp -> host dequeue), only
     // populated when the backend reports timestampsHostComparable.
@@ -42,6 +47,21 @@ struct CaptureStats {
     std::atomic<bool> frameAgeValid{false};
     // Host dequeue -> post-publish (callback + FrameStore copy) duration.
     std::atomic<uint64_t> lastPublishLatencyUs{0};
+
+    // Per-metric validity (MetricValidity as int) and sample host time
+    // (Tools::getTimestamp µs; 0 = never sampled). Reset at every session
+    // start so a reconnect cannot inherit the previous session's values.
+    std::atomic<int> frameRateValidity{static_cast<int>(MetricValidity::Unavailable)};
+    std::atomic<uint64_t> frameRateSampledUs{0};
+    std::atomic<int> queueDepthValidity{static_cast<int>(MetricValidity::Unavailable)};
+    std::atomic<int> inputBuffersValidity{static_cast<int>(MetricValidity::Unavailable)};
+    std::atomic<int> underrunsValidity{static_cast<int>(MetricValidity::Unavailable)};
+    std::atomic<int> transportLossValidity{static_cast<int>(MetricValidity::Unavailable)};
+    std::atomic<int> discardsValidity{static_cast<int>(MetricValidity::Unavailable)};
+    std::atomic<uint64_t> queueStatsSampledUs{0};
+    std::atomic<uint64_t> frameAgeSampledUs{0};
+    std::atomic<uint64_t> publishLatencySampledUs{0};
+    std::atomic<uint64_t> framesSampledUs{0};
 };
 
 class CaptureService {
@@ -52,14 +72,14 @@ public:
                                              uint64_t height,
                                              uint64_t timestampNs)>;
 
-    using CameraFactory = std::function<std::unique_ptr<camera::common::ICamera>()>;
+    using CameraFactory = std::function<std::unique_ptr<::camera::common::ICamera>()>;
 
     struct Config {
         int bufferPartCount = 1;  // number of images per buffer
         int numBuffers = 20;        // ring size
         // Requested SDK-queue policy; backends confirm or reject at start().
-        camera::common::FrameDeliveryMode deliveryMode =
-            camera::common::FrameDeliveryMode::EveryFrame;
+        ::camera::common::FrameDeliveryMode deliveryMode =
+            ::camera::common::FrameDeliveryMode::EveryFrame;
     };
 
     CaptureService();
@@ -78,7 +98,7 @@ public:
     // nullptr case, additionally on the thread calling stop() BEFORE the
     // camera is torn down — so a consumer (TriggerService) can release its
     // camera reference while the object is still valid.
-    using CameraReadyCallback = std::function<void(camera::common::ICamera*, uint64_t generation)>;
+    using CameraReadyCallback = std::function<void(::camera::common::ICamera*, uint64_t generation)>;
     void setCameraReadyCallback(CameraReadyCallback cb);
 
     // Backwards-compatible request API. `start()` returns true when a session
@@ -107,12 +127,23 @@ public:
 
     const CaptureStats& stats() const { return stats_; }
 
+    // Consistent per-metric telemetry view (issue #368): every metric carries
+    // its own validity (Valid / Unavailable / Unsupported / Error / Stale),
+    // sample time, age, and session generation. `freshnessWindowUs` marks a
+    // Valid sample older than that as Stale. Between sessions every metric
+    // is Unavailable (never a stale zero from the previous camera).
+    AcquisitionTelemetrySnapshot telemetrySnapshot(uint64_t freshnessWindowUs = 3'000'000ULL) const;
+
+    // Describes Frame::timestamp for the current/last session (from
+    // ICamera::timestampDescriptor, tagged with the session generation).
+    ::camera::common::TimestampDescriptor timestampDescriptor() const;
+
     // Backend-confirmed active mode (falls back to the requested mode until a
     // camera has confirmed one). Prefer this over Config::deliveryMode when
     // displaying state to the user.
-    camera::common::FrameDeliveryMode activeDeliveryMode() const {
+    ::camera::common::FrameDeliveryMode activeDeliveryMode() const {
         return stats_.deliveryModeConfirmed.load(std::memory_order_acquire)
-                   ? static_cast<camera::common::FrameDeliveryMode>(
+                   ? static_cast<::camera::common::FrameDeliveryMode>(
                          stats_.activeDeliveryMode.load(std::memory_order_acquire))
                    : config_.deliveryMode;
     }
@@ -125,6 +156,9 @@ private:
     // Join a worker that has already exited (Faulted/Idle with a joinable
     // thread). lifecycleMutex_ must be held. Never joins a live worker.
     void reapFinishedWorkerLocked();
+    // Set every telemetry metric to Unavailable and clear the descriptor at
+    // the start of a session (issue #368). lifecycleMutex_ must be held.
+    void resetSessionTelemetryLocked();
 
     Config config_{};
     FrameCallback callback_{};
@@ -132,7 +166,7 @@ private:
 
     CameraFactory cameraFactory_{};
     CameraReadyCallback cameraReadyCallback_;
-    camera::common::ICamera* activeCamera_{nullptr};
+    ::camera::common::ICamera* activeCamera_{nullptr};
     std::mutex cameraMutex_;
 
     // Serializes start()/stop() and guards thread_/snapshot_. The worker
@@ -149,6 +183,9 @@ private:
     CaptureLifecycleSnapshot snapshot_{};
 
     CaptureStats stats_{};
+    // Session timestamp descriptor (set when the camera opens, cleared on
+    // release). Guarded by lifecycleMutex_.
+    ::camera::common::TimestampDescriptor timestampDescriptor_{};
 };
 
 } // namespace backend::services

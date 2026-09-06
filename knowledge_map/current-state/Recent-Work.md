@@ -5,6 +5,24 @@
 
 ## Features shipped
 
+- **Timestamp semantics + per-metric telemetry validity** (2026-09-06,
+  issue #368 — reliability release #371 phase 3). New
+  `camera/common/TimestampValue.h` (`ClockDomain`, `TimestampSemantic`,
+  `TimestampValidity`, `TimestampDescriptor`, checked `toNanoseconds()`,
+  cross-domain-refusing `differenceNs()`, `detectCounterWrap()`,
+  `legacyTimestampInterpretation()`); every `ICamera` declares
+  `timestampDescriptor()` and `Frame::rawDeviceTicks` keeps the native
+  counter ([[../camera/ICamera]] table). New `services/TelemetrySample.h`
+  (`MetricValidity`, `MetricSample`, `AcquisitionTelemetrySnapshot`);
+  [[../services/CaptureService]] `telemetrySnapshot()` gives each metric its
+  own validity/freshness/generation, resets everything to Unavailable at
+  session start, and never turns an unsupported field into a zero.
+  `Hdf5Service::write/readAcquisitionProvenance` persist descriptor +
+  telemetry (`timestamp_*`/`telemetry_*`, schema v1; legacy files read as
+  unsupported/unavailable). Status bar + statistics panel render rates via
+  `StatsDisplayManager::formatMetric` (`n/a`, `unsupported`, `N (stale x s)`).
+  Test: `backend.timestamp_telemetry`.
+
 - **Explicit host-frame accounting** (2026-09-06, issue #367 — reliability
   release #371 phase 2). New Qt-free
   `include/backend/recording/RecordingAccounting.h`: `FrameOutcome`

@@ -1192,6 +1192,13 @@ namespace backend
             if (!hdf5Service_->writeRunAccounting(finalAccounting)) {
                 SPDLOG_ERROR("Frame recording: failed to persist run accounting");
             }
+            // Time/telemetry provenance (issue #368): what timestampNs means for
+            // this file and the final per-metric telemetry with validity.
+            if (captureService_ &&
+                !hdf5Service_->writeAcquisitionProvenance(captureService_->timestampDescriptor(),
+                                                          captureService_->telemetrySnapshot())) {
+                SPDLOG_ERROR("Frame recording: failed to persist acquisition provenance");
+            }
             hdf5Service_->closeFile();
 
             SPDLOG_INFO("Frame recording stopped: {} frames recorded, {} empty filtered, "

@@ -101,6 +101,12 @@ target_link_libraries(trigger_session_test PRIVATE Threads::Threads)
 add_test(NAME backend.trigger_session COMMAND $<TARGET_FILE:trigger_session_test>)
 set_tests_properties(backend.trigger_session PROPERTIES LABELS "backend;camera" TIMEOUT 60)
 
+# Issue #368: timestamp semantics + per-metric telemetry validity/freshness.
+mib_add_backend_test_executable(timestamp_telemetry_test backend/timestamp_telemetry_test.cpp)
+target_link_libraries(timestamp_telemetry_test PRIVATE Threads::Threads)
+add_test(NAME backend.timestamp_telemetry COMMAND $<TARGET_FILE:timestamp_telemetry_test>)
+set_tests_properties(backend.timestamp_telemetry PROPERTIES LABELS "backend;camera;recording;hdf5" TIMEOUT 120)
+
 mib_add_backend_test_executable(camera_script_apply_test backend/camera_script_apply_test.cpp)
 add_test(NAME backend.camera_script_apply COMMAND $<TARGET_FILE:camera_script_apply_test>)
 set_tests_properties(backend.camera_script_apply PROPERTIES LABELS "backend;camera" TIMEOUT 30)

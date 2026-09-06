@@ -18,6 +18,7 @@ namespace backend::services {
 
 #include "backend/processing/ProcessingService.h"
 #include "backend/recording/RecordingAccounting.h"
+#include "backend/services/TelemetrySample.h"
 
 namespace backend::services {
 
@@ -155,6 +156,17 @@ public:
     // legacy files that predate the schema; it never reinterprets old counts.
     bool writeRunAccounting(const backend::recording::RecordingAccountingSnapshot& accounting);
     bool readRunAccounting(backend::recording::RecordingAccountingSnapshot& accounting) const;
+
+    // Acquisition time/telemetry provenance (issue #368, `timestamp_schema_version`
+    // = 1): the session's TimestampDescriptor (what `timestampNs` really holds)
+    // and the final per-metric telemetry with validity, as `timestamp_*` /
+    // `telemetry_*` attributes on the run info group. readAcquisitionProvenance
+    // returns false for legacy files and leaves the descriptor Unsupported —
+    // see ::camera::common::legacyTimestampInterpretation().
+    bool writeAcquisitionProvenance(const ::camera::common::TimestampDescriptor& descriptor,
+                                    const AcquisitionTelemetrySnapshot& telemetry);
+    bool readAcquisitionProvenance(::camera::common::TimestampDescriptor& descriptor,
+                                   AcquisitionTelemetrySnapshot& telemetry) const;
 
     // Recording-mode readers (counterparts to the write* functions above).
     // isRecordingFile() detects a recording-mode file via the presence of

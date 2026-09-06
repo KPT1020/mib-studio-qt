@@ -1,6 +1,7 @@
 #pragma once
 
 #include "backend/camera/common/Frame.h"
+#include "backend/camera/common/TimestampValue.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -183,6 +184,14 @@ namespace camera::common
          * instead of a generic "failed to start".
          */
         virtual CameraFailure lastFailure() const { return {}; }
+
+        /**
+         * Describes the `Frame::timestamp` values this backend produces
+         * (clock domain, tick rate after the adapter's documented
+         * normalization, native tick rate, semantic, validity). Issue #368.
+         * Default: undeclared/unsupported — consumers must not assume a unit.
+         */
+        virtual TimestampDescriptor timestampDescriptor() const { return {}; }
     };
 
 } // namespace camera::common
