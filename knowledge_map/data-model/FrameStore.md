@@ -57,8 +57,12 @@ void pushFrame(src, size, w, h, linePitch, pixelFormat, timestamp,
 // put a uniform 0-2 ms wait in front of every frame.
 uint64_t waitForFrame(uint64_t lastSeenTotal, std::chrono::microseconds timeout);
 
-bool getLatest(Frame& out) const;
-bool getByWriteIndex(uint64_t idx, Frame& out) const;
+bool getLatest(Frame& out) const;                 // latest COMMITTED frame
+bool getByWriteIndex(uint64_t idx, Frame& out) const; // wrapper: Available only
+FrameReadOutcome readByWriteIndex(uint64_t idx, Frame& out) const; // typed (issue #367)
+uint64_t committedCount() const;   // publication count (<= totalWritten())
+uint64_t latestCommittedIndex() const;
+void setCommitHookForTests(std::function<void(uint64_t)>); // barrier between reserve and commit
 bool getByWriteIndexROI(uint64_t idx, int roiX, int roiY, int roiW, int roiH,
                         Frame& out) const;  // avoids full-frame copy
 
@@ -92,6 +96,28 @@ grayscale AVIs and can crash trying. Confirmed to play in **VLC**, and
 it round-trips cleanly through `cv::VideoCapture` and ImageJ, so mask
 regeneration is unaffected. Use VLC (or ImageJ) to preview saved
 buffers visually.
+
+## Publication contract (issue #367)
+
+`pushFrame` **reserves** the next index first (`totalWritten()` advances, the
+`CrashStateMirror` mirrors it) and only after the image + metadata copy under
+the slot lock **commits** it (`committedCount()` advances, release-ordered).
+With the single capture producer, commit order equals reservation order, so
+every index below `committedCount()` is readable unless evicted.
+`readByWriteIndex` returns one of `Available` (slot holds exactly this index,
+usable geometry), `NotYetCommitted` (index reserved or beyond the reservation
+but not published; also the slot still holding the *previous* occupant), 
+`Overwritten` (evicted: a newer frame occupies the slot), `Malformed` (zero
+geometry / pitch < width / payload shorter than `(h-1)*pitch + w`), or
+`OutOfRange` (empty store). `getLatest()` uses `latestCommittedIndex()` and the
+same identity check, so it can never expose a slot whose copy is in progress;
+`getByWriteIndex` is `readByWriteIndex(...) == Available`. Consumers that must
+account for every index (the raw-recording loop, experiment accounting) switch
+on the outcome: `NotYetCommitted` → wait/retry without claiming the index;
+`Overwritten`/`Malformed` → claim and count as store loss. Guarded by
+`tests/backend/frame_store_commit_test.cpp` (`backend.frame_store_commit`),
+which uses `setCommitHookForTests` as a deterministic barrier inside the
+reserve→commit window.
 
 ## Threading
 

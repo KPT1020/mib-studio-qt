@@ -112,6 +112,17 @@ that predates provenance. The writer records the bundled identity when no
 explicit identity is supplied, preserving deterministic metadata for older
 call sites.
 
+## Run accounting (issue #367)
+
+`writeRunAccounting(RecordingAccountingSnapshot)` / `readRunAccounting(...)`
+persist and read the versioned `accounting_*` attributes described in
+[[../data-model/HDF5-Storage]] on whichever info group exists. Producers:
+`AppBackend` raw recording (after `writeRecordingInfo`) and
+`MainWindow::onStopExperiment` (after `writeExperimentInfo`, from
+`ProcessingService::experimentAccountingSnapshot()`). Consumer:
+[[../frontend/HdfReviewTab]] status text. Types live in
+`include/backend/recording/RecordingAccounting.h` (Qt-free, header-only).
+
 ## Gotchas
 
 - `openFile(path)` creates the destination's parent directory tree

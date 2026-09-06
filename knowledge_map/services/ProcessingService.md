@@ -297,6 +297,31 @@ current/max queue depth, batch size, worker count, and running state. See
 `docs/batch_pipeline_architecture.md` for the migration plan from
 `FrameStore -> realtimeLoop` to capture enqueue -> batch worker.
 
+## Frame classification and experiment accounting (issue #367)
+
+- `classifyFrameWithActiveKernel(frame, config, roi, bg)` → `FrameClassification
+  {Empty | Candidate | Malformed | ProcessingFailed, detail}`. A core error or
+  exception is `ProcessingFailed`, a bad geometry/short payload is
+  `Malformed`; neither is ever reported as a valid empty frame.
+  `isFrameEmptyWithActiveKernel` remains as a compatibility wrapper that
+  returns true for everything except `Candidate` — the raw-recording loop no
+  longer uses it.
+- On the realtime inline path every frame that reaches the empty check is
+  **admitted** to `experimentAccounting_` while an experiment is active and
+  ends in exactly one `FrameOutcome`: `Empty`, `ProcessingFailed` (empty-check
+  failure *or* mask failure — the frame is skipped, counted in
+  `getProcessingFailureCount()`, and reported as `PipelineSkipReason::KernelError`),
+  `Processed` (a valid object) or `RejectedByScientificFilter`. Ring-behind
+  skips are admitted as `StoreOverwritten`. `appendExperimentFrame` is a
+  persistence admission; frames evicted by the bounded experiment buffer are
+  `persistenceCancelledByPolicy`; the flush writer adds `persistenceCommitted`.
+  `experimentAccountingSnapshot()` derives the pending / failed persistence
+  terms from the current buffer and flush-queue error state and returns the
+  reconciled snapshot (`RunCompletionState`). `setExperimentAccountingContext(
+  captureGeneration, policyAllowsDrops)` must be called before
+  `startExperiment()` (MainWindow does). Frame counts are separate from
+  `objectsDetected`. Guard: `processing.experiment_accounting`.
+
 ## Gotchas
 
 - **The kernel seam (`IProcessingKernel`) now owns the science decisions:**

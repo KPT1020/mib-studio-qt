@@ -227,6 +227,22 @@ mib_add_backend_test_executable(processing_batch_pipeline_test processing/proces
 add_test(NAME backend.processing_batch_pipeline COMMAND $<TARGET_FILE:processing_batch_pipeline_test>)
 set_tests_properties(backend.processing_batch_pipeline PROPERTIES LABELS "processing;backend")
 
+# Issue #367: explicit frame accounting.
+mib_add_backend_test_executable(frame_store_commit_test backend/frame_store_commit_test.cpp)
+target_link_libraries(frame_store_commit_test PRIVATE Threads::Threads)
+add_test(NAME backend.frame_store_commit COMMAND $<TARGET_FILE:frame_store_commit_test>)
+set_tests_properties(backend.frame_store_commit PROPERTIES LABELS "backend;safety" TIMEOUT 60)
+
+mib_add_backend_test_executable(experiment_accounting_test processing/experiment_accounting_test.cpp)
+target_link_libraries(experiment_accounting_test PRIVATE Threads::Threads)
+add_test(NAME processing.experiment_accounting COMMAND $<TARGET_FILE:experiment_accounting_test>)
+set_tests_properties(processing.experiment_accounting PROPERTIES LABELS "processing;backend;recording;safety" TIMEOUT 120)
+
+mib_add_backend_test_executable(recording_accounting_test recording/recording_accounting_test.cpp)
+target_link_libraries(recording_accounting_test PRIVATE Threads::Threads)
+add_test(NAME recording.accounting COMMAND $<TARGET_FILE:recording_accounting_test>)
+set_tests_properties(recording.accounting PROPERTIES LABELS "recording;backend;hdf5;safety" TIMEOUT 180)
+
 mib_add_backend_test_executable(processing_fault_injection_test processing/processing_fault_injection_test.cpp)
 add_test(NAME processing.fault_injection COMMAND $<TARGET_FILE:processing_fault_injection_test>)
 set_tests_properties(processing.fault_injection PROPERTIES LABELS "processing;backend")

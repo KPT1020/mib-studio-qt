@@ -477,6 +477,7 @@ void ProcessingService::startExperiment() {
     droppedInvalidFrames_.store(0, std::memory_order_relaxed);
     lastDropLogUs_.store(0, std::memory_order_relaxed);
     resetRealtimeMetrics();
+    experimentAccounting_.reset(experimentAccountingGeneration_, experimentAccountingPolicyAllowsDrops_);
     backend::diagnostics::PipelineTimingRecorder::instance().resetLiveLatency();
     // Reset auto-capture counter when experiment starts
     consecutiveEmptyFrames_.store(0, std::memory_order_relaxed);
@@ -720,22 +721,118 @@ bool ProcessingService::isFrameEmpty(const backend::playback::Frame& frame,
 bool ProcessingService::isFrameEmptyWithActiveKernel(
     const backend::playback::Frame& frame, const ProcessingConfig& config, const Roi& roi,
     const std::shared_ptr<const cv::Mat>& background) const {
-    if (frame.width == 0 || frame.height == 0 || frame.data.empty()) return true;
+    return !classifyFrameWithActiveKernel(frame, config, roi, background).isCandidate();
+}
+
+ProcessingService::FrameClassification ProcessingService::classifyFrameWithActiveKernel(
+    const backend::playback::Frame& frame, const ProcessingConfig& config, const Roi& roi,
+    const std::shared_ptr<const cv::Mat>& background) const {
+    FrameClassification c;
+    if (frame.width == 0 || frame.height == 0 || frame.data.empty()) {
+        c.kind = FrameClassification::Kind::Malformed;
+        c.detail = "frame has zero geometry or no payload";
+        return c;
+    }
     const size_t stride = frame.linePitch == 0 ? static_cast<size_t>(frame.width) : frame.linePitch;
-    if (stride < frame.width) return true;
+    if (stride < frame.width) {
+        c.kind = FrameClassification::Kind::Malformed;
+        c.detail = "line pitch smaller than width";
+        return c;
+    }
     const uint64_t required = (frame.height - 1u) * static_cast<uint64_t>(stride) + frame.width;
-    if (required > frame.data.size()) return true;
+    if (required > frame.data.size()) {
+        c.kind = FrameClassification::Kind::Malformed;
+        c.detail = "payload shorter than geometry requires";
+        return c;
+    }
 
     cv::Mat gray(static_cast<int>(frame.height), static_cast<int>(frame.width), CV_8UC1,
                  const_cast<uint8_t*>(frame.data.data()), stride);
     const cv::Mat backgroundView = background ? *background : cv::Mat{};
     bool empty = true;
     std::string detail;
-    if (!isImageEmptyWithActiveKernel(gray, backgroundView, config, roi, false, empty, &detail)) {
-        SPDLOG_WARN("ProcessingService: active core empty-frame check failed: {}", detail);
-        return true;
+    try {
+        if (!isImageEmptyWithActiveKernel(gray, backgroundView, config, roi, false, empty, &detail)) {
+            SPDLOG_WARN("ProcessingService: active core empty-frame check failed: {}", detail);
+            c.kind = FrameClassification::Kind::ProcessingFailed;
+            c.detail = detail.empty() ? "processing core rejected the frame" : detail;
+            return c;
+        }
+    } catch (const std::exception& ex) {
+        c.kind = FrameClassification::Kind::ProcessingFailed;
+        c.detail = std::string("processing core threw: ") + ex.what();
+        return c;
+    } catch (...) {
+        c.kind = FrameClassification::Kind::ProcessingFailed;
+        c.detail = "processing core threw an unknown exception";
+        return c;
     }
-    return empty;
+    c.kind = empty ? FrameClassification::Kind::Empty : FrameClassification::Kind::Candidate;
+    return c;
+}
+
+void ProcessingService::setExperimentAccountingContext(uint64_t captureGeneration,
+                                                       bool policyAllowsDrops) {
+    experimentAccountingGeneration_ = captureGeneration;
+    experimentAccountingPolicyAllowsDrops_ = policyAllowsDrops;
+}
+
+backend::recording::RecordingAccountingSnapshot ProcessingService::experimentAccountingSnapshot() const {
+    auto s = experimentAccounting_.snapshot();
+    // Derive the persistence terms that only the run boundary can know:
+    // frames still buffered (never handed to the writer) and frames queued
+    // but not confirmed written. A latched writer error turns the latter into
+    // persistence failures instead of "pending".
+    size_t buffered = 0;
+    {
+        std::scoped_lock lk(framesMutex_);
+        buffered = validFrames_.size() + invalidFrames_.size();
+    }
+    bool queueErrored = false;
+    {
+        std::scoped_lock qlk(flushQueueMutex_);
+        queueErrored = flushQueue_ && flushQueue_->hasError();
+    }
+    const uint64_t accountedFor =
+        s.persistenceCommitted + s.persistenceCancelledByPolicy + static_cast<uint64_t>(buffered);
+    const uint64_t unresolved = s.persistenceAdmitted > accountedFor ? s.persistenceAdmitted - accountedFor : 0;
+    if (queueErrored) {
+        s.persistenceFailed = unresolved;
+        s.persistencePendingAtStop = static_cast<uint64_t>(buffered);
+    } else {
+        s.persistencePendingAtStop = unresolved + static_cast<uint64_t>(buffered);
+    }
+    return backend::recording::reconcile(s);
+}
+
+void ProcessingService::noteRealtimeAdmitted(uint64_t idx) {
+    if (experimentActive_.load(std::memory_order_relaxed)) experimentAccounting_.admit(idx);
+}
+
+void ProcessingService::noteRealtimeLost(uint64_t count) {
+    if (count > 0 && experimentActive_.load(std::memory_order_relaxed)) {
+        experimentAccounting_.admitLost(count, backend::recording::FrameOutcome::StoreOverwritten);
+    }
+}
+
+void ProcessingService::noteRealtimeOutcome(uint64_t idx, backend::recording::FrameOutcome outcome) {
+    (void)idx;
+    if (outcome == backend::recording::FrameOutcome::ProcessingFailed) {
+        processingFailures_.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (experimentActive_.load(std::memory_order_relaxed)) experimentAccounting_.count(outcome);
+}
+
+void ProcessingService::noteRealtimeValidation(uint64_t idx, const std::vector<FilterResult>& validations) {
+    if (!experimentActive_.load(std::memory_order_relaxed)) return;
+    const bool anyValid = std::any_of(validations.begin(), validations.end(),
+                                      [](const FilterResult& r) { return r.isValid; });
+    experimentAccounting_.count(anyValid ? backend::recording::FrameOutcome::Processed
+                                         : backend::recording::FrameOutcome::RejectedByScientificFilter);
+    uint64_t objects = 0;
+    for (const auto& r : validations) if (r.isValid) ++objects;
+    if (objects > 0) experimentAccounting_.objectsDetected.fetch_add(objects, std::memory_order_relaxed);
+    (void)idx;
 }
 
 bool ProcessingService::isImageEmptyWithActiveKernel(const cv::Mat& gray, const cv::Mat& background,
@@ -1359,6 +1456,14 @@ bool ProcessingService::appendExperimentFrame(ProcessedFrame&& frame, bool isVal
         }
     }
 
+    // Issue #367: every call is a persistence admission; frames evicted by
+    // the bounded-buffer policy (including this one when not stored) are
+    // CancelledByPolicy on the persistence side — never silent.
+    experimentAccounting_.persistenceAdmitted.fetch_add(1, std::memory_order_relaxed);
+    const uint64_t evicted = static_cast<uint64_t>(dropped.valid + dropped.invalid);
+    if (evicted > 0) {
+        experimentAccounting_.persistenceCancelledByPolicy.fetch_add(evicted, std::memory_order_relaxed);
+    }
     logDroppedExperimentFrames(dropped, bufferedTotal, maxBufferedFrames);
     return stored;
 }
@@ -1389,6 +1494,8 @@ size_t ProcessingService::flushBufferedFrames(class Hdf5Service& hdf5) {
         Hdf5Service* h = &hdf5;
         auto writeFn = [this, h](const ExperimentBatch& b) -> bool {
             if (!h->appendFrames(b.valid, b.invalid)) return false;
+            experimentAccounting_.persistenceCommitted.fetch_add(
+                static_cast<uint64_t>(b.valid.size() + b.invalid.size()), std::memory_order_relaxed);
             if (!b.valid.empty()) {
                 totalValidFlushed_.fetch_add(static_cast<uint64_t>(b.valid.size()),
                                              std::memory_order_relaxed);
@@ -2118,6 +2225,7 @@ void ProcessingService::realtimeInlineLoop() {
             framesSkippedSinceSummary += skipped;
             rtTimingRecorder.countSkipped(backend::diagnostics::PipelineSkipReason::RingBehind,
                                           skipped);
+            noteRealtimeLost(skipped);
             last = earliest - 1;
             // Publish the advance immediately: if the frame fetch below fails
             // (slot mid-write / evicted) the loop retries with `last` already
@@ -2272,13 +2380,22 @@ void ProcessingService::realtimeInlineLoop() {
                         ? autoCaptureBackground
                         : (hasBackground ? (*bgShared)(cv::Rect(roi.x, roi.y, roi.w, roi.h))
                                          : cv::Mat{});
+                noteRealtimeAdmitted(idx);
                 if (!isImageEmptyWithActiveKernel(
                         autoCaptureEmptyCheck ? blurredCurr : grayROI, emptyBackground, emptyConfig,
                         Roi{0, 0, roi.w, roi.h}, autoCaptureEmptyCheck, emptyFrame, &emptyError)) {
                     SPDLOG_ERROR("Realtime processing core empty check failed for frame {}: {}",
                                  idx, emptyError);
+                    // A core failure is a ProcessingFailed outcome, never an empty
+                    // frame (issue #367): skip the frame explicitly.
+                    noteRealtimeOutcome(idx, backend::recording::FrameOutcome::ProcessingFailed);
+                    rtTimingRecorder.countSkipped(
+                        backend::diagnostics::PipelineSkipReason::KernelError);
+                    rtLastProcessed_.store(idx);
+                    continue;
                 }
                 if (emptyFrame) {
+                    noteRealtimeOutcome(idx, backend::recording::FrameOutcome::Empty);
                     SPDLOG_TRACE("Empty frame detected (idx={}, pixel_count={}, threshold={}), "
                                  "skipping further processing",
                                  idx, pixelCount, config.empty_frame_pixel_threshold);
@@ -2364,6 +2481,7 @@ void ProcessingService::realtimeInlineLoop() {
                                                  Roi{0, 0, roi.w, roi.h}, mask, &kernelError)) {
                     SPDLOG_ERROR("Realtime processing core failed for frame {}: {}", idx,
                                  kernelError);
+                    noteRealtimeOutcome(idx, backend::recording::FrameOutcome::ProcessingFailed);
                     rtTimingRecorder.countSkipped(
                         backend::diagnostics::PipelineSkipReason::KernelError);
                     rtLastProcessed_.store(idx);
@@ -2378,6 +2496,7 @@ void ProcessingService::realtimeInlineLoop() {
                     validations.push_back(FilterResult{});
                 }
                 const FilterResult& validation = validations.front();
+                noteRealtimeValidation(idx, validations);
 
                 // Extract contours from validation result and adjust coordinates for full-frame
                 // snapshot Contours from filterProcessedImage are in ROI coordinates, need to
@@ -2704,13 +2823,22 @@ void ProcessingService::realtimeInlineLoop() {
                 const cv::Mat emptyBackground =
                     autoCaptureEmptyCheck ? autoCaptureBackground
                                           : (hasBackground ? (*bgShared)(cvRoi) : cv::Mat{});
+                noteRealtimeAdmitted(idx);
                 if (!isImageEmptyWithActiveKernel(
                         autoCaptureEmptyCheck ? blurredCurr : roiCurr, emptyBackground, emptyConfig,
                         Roi{0, 0, roi.w, roi.h}, autoCaptureEmptyCheck, emptyFrame, &emptyError)) {
                     SPDLOG_ERROR("Realtime processing core empty check failed for frame {}: {}",
                                  idx, emptyError);
+                    // A core failure is a ProcessingFailed outcome, never an empty
+                    // frame (issue #367): skip the frame explicitly.
+                    noteRealtimeOutcome(idx, backend::recording::FrameOutcome::ProcessingFailed);
+                    rtTimingRecorder.countSkipped(
+                        backend::diagnostics::PipelineSkipReason::KernelError);
+                    rtLastProcessed_.store(idx);
+                    continue;
                 }
                 if (emptyFrame) {
+                    noteRealtimeOutcome(idx, backend::recording::FrameOutcome::Empty);
                     SPDLOG_TRACE("Empty frame detected (idx={}, pixel_count={}, threshold={}), "
                                  "skipping further processing",
                                  idx, pixelCount, config.empty_frame_pixel_threshold);
@@ -2803,6 +2931,7 @@ void ProcessingService::realtimeInlineLoop() {
                                                  config, roi, mask, &kernelError)) {
                     SPDLOG_ERROR("Realtime processing core failed for frame {}: {}", idx,
                                  kernelError);
+                    noteRealtimeOutcome(idx, backend::recording::FrameOutcome::ProcessingFailed);
                     rtTimingRecorder.countSkipped(
                         backend::diagnostics::PipelineSkipReason::KernelError);
                     rtLastProcessed_.store(idx);
@@ -2814,6 +2943,7 @@ void ProcessingService::realtimeInlineLoop() {
                     validations.push_back(FilterResult{});
                 }
                 const FilterResult& validation = validations.front();
+                noteRealtimeValidation(idx, validations);
 
                 // Extract contours from validation result for snapshot
                 std::vector<std::vector<cv::Point>> contours =
@@ -3101,13 +3231,22 @@ void ProcessingService::realtimeInlineLoop() {
                 const cv::Mat emptyBackground =
                     autoCaptureEmptyCheck ? autoCaptureBackground
                                           : (hasBackground ? (*bgShared)(cvRoi) : cv::Mat{});
+                noteRealtimeAdmitted(idx);
                 if (!isImageEmptyWithActiveKernel(
                         autoCaptureEmptyCheck ? blurredCurr : roiCurr, emptyBackground, emptyConfig,
                         Roi{0, 0, roi.w, roi.h}, autoCaptureEmptyCheck, emptyFrame, &emptyError)) {
                     SPDLOG_ERROR("Realtime processing core empty check failed for frame {}: {}",
                                  idx, emptyError);
+                    // A core failure is a ProcessingFailed outcome, never an empty
+                    // frame (issue #367): skip the frame explicitly.
+                    noteRealtimeOutcome(idx, backend::recording::FrameOutcome::ProcessingFailed);
+                    rtTimingRecorder.countSkipped(
+                        backend::diagnostics::PipelineSkipReason::KernelError);
+                    rtLastProcessed_.store(idx);
+                    continue;
                 }
                 if (emptyFrame) {
+                    noteRealtimeOutcome(idx, backend::recording::FrameOutcome::Empty);
                     SPDLOG_TRACE("Empty frame detected (idx={}, pixel_count={}, threshold={}), "
                                  "skipping further processing",
                                  idx, pixelCount, config.empty_frame_pixel_threshold);
@@ -3219,6 +3358,7 @@ void ProcessingService::realtimeInlineLoop() {
                                                  config, roi, mask, &kernelError)) {
                     SPDLOG_ERROR("Realtime processing core failed for frame {}: {}", idx,
                                  kernelError);
+                    noteRealtimeOutcome(idx, backend::recording::FrameOutcome::ProcessingFailed);
                     rtTimingRecorder.countSkipped(
                         backend::diagnostics::PipelineSkipReason::KernelError);
                     rtLastProcessed_.store(idx);
@@ -3237,6 +3377,7 @@ void ProcessingService::realtimeInlineLoop() {
                     validations.push_back(FilterResult{});
                 }
                 const FilterResult& validation = validations.front();
+                noteRealtimeValidation(idx, validations);
 
                 // Extract contours from validation result for snapshot
                 // Contours are in ROI-relative coordinates — adjust to full-frame for

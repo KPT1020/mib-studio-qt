@@ -49,6 +49,7 @@
 
 #include "backend/app/AppBackend.h"
 #include "backend/recording/Hdf5Service.h"
+#include "backend/recording/RecordingAccounting.h"
 #include "backend/processing/ProcessingService.h"
 #include "frontend/dialogs/BatchMaskDialog.h"
 #include "frontend/dialogs/FrameViewerDialog.h"
@@ -349,6 +350,31 @@ private:
     int frameIndex_;
 };
 
+// Issue #367: Review distinguishes empty / scientifically rejected /
+// processing failed / store loss / persistence failure and shows the
+// recorded completion state. Legacy files without accounting say so
+// explicitly instead of being presented as complete.
+QString HdfReviewTab::accountingSummary() const
+{
+    if (!hdfReader_) return {};
+    backend::recording::RecordingAccountingSnapshot a;
+    if (!hdfReader_->readRunAccounting(a)) {
+        return tr(" · accounting: not recorded (legacy file)");
+    }
+    const uint64_t storeLoss = a.storeOverwritten + a.storeNotCommitted + a.storeMalformed;
+    QString text = tr(" · run %1").arg(QString::fromLatin1(backend::recording::toString(a.completion)));
+    if (!a.reconciled) text += tr(" (accounting does not reconcile)");
+    text += tr(" — empty %1, rejected %2, processing failed %3, store loss %4, persisted %5/%6, persistence failed %7")
+                .arg(static_cast<qulonglong>(a.empty))
+                .arg(static_cast<qulonglong>(a.scientificallyRejected))
+                .arg(static_cast<qulonglong>(a.processingFailed))
+                .arg(static_cast<qulonglong>(storeLoss))
+                .arg(static_cast<qulonglong>(a.persistenceCommitted))
+                .arg(static_cast<qulonglong>(a.persistenceAdmitted))
+                .arg(static_cast<qulonglong>(a.persistenceFailed));
+    return text;
+}
+
 HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
     : QWidget(parent), ui(new Ui::HdfReviewTab), backend_(backend) {
     ui->setupUi(this);
@@ -582,7 +608,8 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
             recordingMultiImageCount_ = std::max<size_t>(1, static_cast<size_t>(multiImageCount));
             ui->statusLabel->setText(tr("Recording: %1 frames, %2 empty skipped")
                                      .arg(static_cast<qulonglong>(totalFrames))
-                                     .arg(static_cast<qulonglong>(filteredFrames)));
+                                     .arg(static_cast<qulonglong>(filteredFrames)) +
+                                     accountingSummary());
             SPDLOG_INFO("HdfReviewTab: recording multi-image enabled={}, count={}",
                         recordingMultiImageEnabled_,
                         recordingMultiImageCount_);
@@ -609,7 +636,7 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
         backend::services::ProcessingService::Roi loadedRoi{0, 0, 0, 0};
         if (hdfReader_->readExperimentInfo(startTimeNs, endTimeNs, totalValid, totalInvalid, &loadedRoi)) {
             ui->statusLabel->setText(QString("Valid: %1, Invalid: %2")
-                                 .arg(totalValid).arg(totalInvalid));
+                                 .arg(totalValid).arg(totalInvalid) + accountingSummary());
             roi_ = loadedRoi;
             SPDLOG_INFO("Loaded ROI from HDF5: x={}, y={}, w={}, h={}", roi_.x, roi_.y, roi_.w, roi_.h);
             ui->roiOverlayCheck->setEnabled(true);

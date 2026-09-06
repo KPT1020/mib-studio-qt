@@ -7,6 +7,7 @@
 #include "backend/database/SqliteService.h"
 #include "backend/recording/Hdf5Service.h"
 #include "backend/recording/HdfWriteQueue.h"
+#include "backend/recording/RecordingAccounting.h"
 #include "backend/recording/RoiCrop.h"
 #include "backend/services/CaptureService.h"
 #include "backend/processing/ProcessingService.h"
@@ -946,6 +947,14 @@ namespace backend
         frameRecordingPath_ = path;
         frameRecordingWritten_.store(0);
         frameRecordingFiltered_.store(0);
+        {
+            std::lock_guard<std::mutex> alk(recordingAccountingMutex_);
+            const auto lifecycle = captureService_->lifecycleSnapshot();
+            recordingAccounting_.reset(
+                lifecycle.generation,
+                captureService_->activeDeliveryMode() == ::camera::common::FrameDeliveryMode::LatestFrame);
+            lastRecordingAccounting_ = backend::recording::RecordingAccountingSnapshot{};
+        }
         frameRecordingRunning_.store(true);
         {
             auto& m = backend::diagnostics::CrashStateMirror::instance().recorder;
@@ -990,12 +999,22 @@ namespace backend
             backend::recording::HdfWriteQueue<RecordingBatch> writeQueue(
                 3,
                 [this](const RecordingBatch& b) -> bool {
-                    if (!hdf5Service_->appendRecordingFrames(b.images, b.meta)) return false;
+                    if (!hdf5Service_->appendRecordingFrames(b.images, b.meta)) {
+                        recordingAccounting_.persistenceFailed.fetch_add(b.images.size(),
+                                                                         std::memory_order_relaxed);
+                        return false;
+                    }
                     frameRecordingWritten_.fetch_add(b.images.size(), std::memory_order_relaxed);
+                    recordingAccounting_.persistenceCommitted.fetch_add(b.images.size(),
+                                                                        std::memory_order_relaxed);
                     return true;
                 },
                 [this](const std::string& msg) {
                     frameRecordingRunning_.store(false);
+                    {
+                        std::lock_guard<std::mutex> alk(recordingAccountingMutex_);
+                        recordingAccounting_.setFatal("Recording save failed: " + msg);
+                    }
                     reportFatalSaveError("Recording save failed: " + msg);
                 });
 
@@ -1033,20 +1052,44 @@ namespace backend
                     continue;
                 }
 
-                // Process new frames
+                // Process new frames. Every index claimed here is ADMITTED and
+                // must end in exactly one accounting category (issue #367).
                 for (uint64_t idx = startIdx; idx <= latestIdx && frameRecordingRunning_.load(); ++idx) {
                     playback::Frame f{};
-                    if (!frameStore_->getByWriteIndex(idx, f)) {
+                    const auto readOutcome = frameStore_->readByWriteIndex(idx, f);
+                    if (readOutcome == playback::FrameReadOutcome::NotYetCommitted) {
+                        // Reserved but not published yet: wait for the commit
+                        // instead of claiming the index (retried next pass).
+                        break;
+                    }
+                    recordingAccounting_.admit(idx);
+                    lastProcessedIdx = idx;
+                    if (readOutcome == playback::FrameReadOutcome::Overwritten) {
+                        recordingAccounting_.count(backend::recording::FrameOutcome::StoreOverwritten);
                         continue;
                     }
-                    if (f.width == 0 || f.height == 0 || f.data.empty()) {
+                    if (readOutcome != playback::FrameReadOutcome::Available) {
+                        recordingAccounting_.count(backend::recording::FrameOutcome::StoreMalformed);
                         continue;
                     }
 
-                    if (processingService_->isFrameEmptyWithActiveKernel(f, config, roi,
-                                                                         bgShared)) {
+                    const auto classification =
+                        processingService_->classifyFrameWithActiveKernel(f, config, roi, bgShared);
+                    using Kind = services::ProcessingService::FrameClassification::Kind;
+                    if (classification.kind == Kind::Empty) {
                         frameRecordingFiltered_.fetch_add(1, std::memory_order_relaxed);
-                        lastProcessedIdx = idx;
+                        recordingAccounting_.count(backend::recording::FrameOutcome::Empty);
+                        continue;
+                    }
+                    if (classification.kind == Kind::Malformed) {
+                        recordingAccounting_.count(backend::recording::FrameOutcome::StoreMalformed);
+                        continue;
+                    }
+                    if (classification.kind == Kind::ProcessingFailed) {
+                        // Never counted as an empty/filtered frame.
+                        recordingAccounting_.count(backend::recording::FrameOutcome::ProcessingFailed);
+                        SPDLOG_WARN("Frame recording: processing failed for frame {}: {}", idx,
+                                    classification.detail);
                         continue;
                     }
 
@@ -1057,11 +1100,10 @@ namespace backend
                     const int w = static_cast<int>(f.width);
                     const int h = static_cast<int>(f.height);
                     const size_t step = (f.linePitch == 0 ? static_cast<size_t>(f.width) : f.linePitch);
-                    // isFrameEmpty() above already rejects short buffers, but
+                    // classifyFrame above already rejects short buffers, but
                     // keep the strided view safe on its own terms.
                     if (f.data.size() < static_cast<size_t>(h - 1) * step + static_cast<size_t>(w)) {
-                        frameRecordingFiltered_.fetch_add(1, std::memory_order_relaxed);
-                        lastProcessedIdx = idx;
+                        recordingAccounting_.count(backend::recording::FrameOutcome::StoreMalformed);
                         continue;
                     }
                     cv::Mat view(h, w, CV_8UC1, f.data.data(), step);
@@ -1075,12 +1117,15 @@ namespace backend
                     meta.width = static_cast<uint64_t>(crop.w);
                     meta.height = static_cast<uint64_t>(crop.h);
                     batchMeta.push_back(meta);
-
-                    lastProcessedIdx = idx;
+                    recordingAccounting_.count(backend::recording::FrameOutcome::Processed);
 
                     // Flush batch when full
                     if (batchImages.size() >= FLUSH_BATCH) {
+                        const uint64_t n = static_cast<uint64_t>(batchImages.size());
+                        recordingAccounting_.persistenceAdmitted.fetch_add(n, std::memory_order_relaxed);
                         if (!writeQueue.submit(RecordingBatch{std::move(batchImages), std::move(batchMeta)})) {
+                            // Overflow/latched error: the batch was refused.
+                            recordingAccounting_.persistenceFailed.fetch_add(n, std::memory_order_relaxed);
                             break; // fatal error already surfaced via onError
                         }
                         batchImages.clear();
@@ -1093,10 +1138,28 @@ namespace backend
 
             // Submit any remaining frames, then drain the writer thread.
             if (!batchImages.empty()) {
-                writeQueue.submit(RecordingBatch{std::move(batchImages), std::move(batchMeta)});
+                const uint64_t n = static_cast<uint64_t>(batchImages.size());
+                recordingAccounting_.persistenceAdmitted.fetch_add(n, std::memory_order_relaxed);
+                if (!writeQueue.submit(RecordingBatch{std::move(batchImages), std::move(batchMeta)})) {
+                    recordingAccounting_.persistenceFailed.fetch_add(n, std::memory_order_relaxed);
+                }
             }
             if (!writeQueue.flushAndStop()) {
+                {
+                    std::lock_guard<std::mutex> alk(recordingAccountingMutex_);
+                    recordingAccounting_.setFatal("Recording final flush failed: " + writeQueue.error());
+                }
                 reportFatalSaveError("Recording final flush failed: " + writeQueue.error());
+            }
+            // Any admission the writer neither committed nor reported failed
+            // (queue torn down mid-batch) is an explicit pending term.
+            {
+                const uint64_t admittedP = recordingAccounting_.persistenceAdmitted.load();
+                const uint64_t resolved = recordingAccounting_.persistenceCommitted.load() +
+                                          recordingAccounting_.persistenceFailed.load();
+                if (admittedP > resolved) {
+                    recordingAccounting_.persistencePendingAtStop.store(admittedP - resolved);
+                }
             }
 
             // Write recording info
@@ -1111,13 +1174,31 @@ namespace backend
                                                   recordingMultiImageCount,
                                                   &processingCoreLease.identity())) {
                 SPDLOG_ERROR("Frame recording: failed to write recording_info metadata");
+                {
+                    std::lock_guard<std::mutex> alk(recordingAccountingMutex_);
+                    recordingAccounting_.setFatal("recording_info metadata write failed");
+                }
                 reportFatalSaveError(
                     "Frame recording metadata/processing-core provenance write failed");
             }
+            // Final reconciliation (issue #367): a run is Complete only when
+            // every admitted frame and every writer admission reconcile.
+            backend::recording::RecordingAccountingSnapshot finalAccounting;
+            {
+                std::lock_guard<std::mutex> alk(recordingAccountingMutex_);
+                finalAccounting = backend::recording::reconcile(recordingAccounting_.snapshot());
+                lastRecordingAccounting_ = finalAccounting;
+            }
+            if (!hdf5Service_->writeRunAccounting(finalAccounting)) {
+                SPDLOG_ERROR("Frame recording: failed to persist run accounting");
+            }
             hdf5Service_->closeFile();
 
-            SPDLOG_INFO("Frame recording stopped: {} frames recorded, {} empty filtered, file: {}",
-                        frameRecordingWritten_.load(), frameRecordingFiltered_.load(), frameRecordingPath_);
+            SPDLOG_INFO("Frame recording stopped: {} frames recorded, {} empty filtered, "
+                        "completion={} ({}), file: {}",
+                        frameRecordingWritten_.load(), frameRecordingFiltered_.load(),
+                        backend::recording::toString(finalAccounting.completion),
+                        finalAccounting.completionReason, frameRecordingPath_);
         });
 
         SPDLOG_INFO("Frame recording started: {}", path);
@@ -1153,6 +1234,14 @@ namespace backend
 
     uint64_t AppBackend::frameRecordingFiltered() const {
         return frameRecordingFiltered_.load();
+    }
+
+    backend::recording::RecordingAccountingSnapshot AppBackend::recordingAccounting() const {
+        std::lock_guard<std::mutex> alk(recordingAccountingMutex_);
+        if (frameRecordingRunning_.load()) {
+            return backend::recording::reconcile(recordingAccounting_.snapshot());
+        }
+        return lastRecordingAccounting_;
     }
 
     void AppBackend::setBackgroundCaptureCallback(BackgroundCaptureCallback callback) {

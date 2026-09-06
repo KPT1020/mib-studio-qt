@@ -83,6 +83,7 @@ namespace frontend
         void onRegenerateMasks();
 
     private:
+        QString accountingSummary() const; // issue #367 Review summary
         void setupCharts();
         void loadHdfFile(const QString &filePath);
         void populateFrames(const std::vector<backend::services::ProcessedFrame> &frames, bool isValid);

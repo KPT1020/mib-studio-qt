@@ -17,6 +17,7 @@ namespace backend::services {
 }
 
 #include "backend/processing/ProcessingService.h"
+#include "backend/recording/RecordingAccounting.h"
 
 namespace backend::services {
 
@@ -144,6 +145,16 @@ public:
                             bool multiImageEnabled = false,
                             uint64_t multiImageCount = 1,
                             const backend::processing::ProcessingCoreIdentity* processingCore = nullptr);
+
+    // Run accounting provenance (issue #367). Writes the reconciled
+    // RecordingAccountingSnapshot as versioned `accounting_*` attributes on
+    // /experiment_info or /recording_info (whichever exists — the caller's
+    // writeExperimentInfo/writeRecordingInfo must have run first). A file whose
+    // required accounting does not reconcile is recorded as `failed`, never
+    // `complete`. readRunAccounting returns false (completion = Unknown) for
+    // legacy files that predate the schema; it never reinterprets old counts.
+    bool writeRunAccounting(const backend::recording::RecordingAccountingSnapshot& accounting);
+    bool readRunAccounting(backend::recording::RecordingAccountingSnapshot& accounting) const;
 
     // Recording-mode readers (counterparts to the write* functions above).
     // isRecordingFile() detects a recording-mode file via the presence of

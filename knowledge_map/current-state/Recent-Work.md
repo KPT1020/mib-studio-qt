@@ -5,6 +5,29 @@
 
 ## Features shipped
 
+- **Explicit host-frame accounting** (2026-09-06, issue #367 — reliability
+  release #371 phase 2). New Qt-free
+  `include/backend/recording/RecordingAccounting.h`: `FrameOutcome`
+  (Empty / Processed / RejectedByScientificFilter / ProcessingFailed /
+  StoreOverwritten / StoreNotCommitted / StoreMalformed / PersistenceFailed /
+  PendingAtStop / CancelledByPolicy), `RecordingAccounting` counters,
+  `reconcile()` → `RunCompletionState` (Complete / IntentionallyPartial /
+  IncompleteLoss / Failed / Unknown) with the equations `admitted = Σ frame
+  terms` and `persistenceAdmitted = committed + failed + pending +
+  cancelledByPolicy`; an unreconciled run is always `failed`.
+  [[../data-model/FrameStore]] gained a publication boundary
+  (`committedCount()`, typed `readByWriteIndex`, `getLatest` on committed
+  identity, test commit hook). [[../services/ProcessingService]] gained
+  `classifyFrameWithActiveKernel` (a core failure/exception is
+  `ProcessingFailed`, never empty) and per-experiment accounting on the
+  realtime path; the raw-recording loop in [[../architecture/AppBackend]] and
+  `MainWindow::onStopExperiment` reconcile and persist the snapshot through
+  `Hdf5Service::writeRunAccounting` (versioned `accounting_*` attributes,
+  legacy files read as Unknown); [[../frontend/HdfReviewTab]] shows the
+  completion state and per-category counts. Tests:
+  `backend.frame_store_commit`, `processing.experiment_accounting`,
+  `recording.accounting`.
+
 - **Host-camera lifecycle single-owner + MindVision fail-closed conversion**
   (2026-09-06, issues #365, #366 — reliability release #371 phase 1).
   [[../services/CaptureService]] now owns an explicit

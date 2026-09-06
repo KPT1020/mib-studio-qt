@@ -8,6 +8,7 @@
 #include <thread>
 
 #include "backend/app/BackgroundFrame.h"
+#include "backend/recording/RecordingAccounting.h"
 
 namespace backend::services
 {
@@ -108,6 +109,10 @@ namespace backend
         bool isFrameRecording() const;
         uint64_t frameRecordingCount() const;     // Frames written so far
         uint64_t frameRecordingFiltered() const;   // Empty frames skipped
+        // Explicit per-run frame accounting (issue #367): live (reconciled on
+        // demand) while recording, otherwise the final snapshot of the last
+        // run including its Complete/Partial/Loss/Failed completion state.
+        backend::recording::RecordingAccountingSnapshot recordingAccounting() const;
 
         // Raw config JSON storage (set by config watcher, read at experiment save)
         void setLastConfigJson(const std::string& json);
@@ -174,6 +179,9 @@ namespace backend
         std::atomic<uint64_t> frameRecordingWritten_{0};
         std::atomic<uint64_t> frameRecordingFiltered_{0};
         std::string frameRecordingPath_;
+        mutable std::mutex recordingAccountingMutex_;
+        backend::recording::RecordingAccounting recordingAccounting_;
+        backend::recording::RecordingAccountingSnapshot lastRecordingAccounting_;
 
         mutable std::mutex backgroundCaptureCallbackMutex_;
         BackgroundCaptureCallback backgroundCaptureCallback_;

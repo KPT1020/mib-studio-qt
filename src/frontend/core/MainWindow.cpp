@@ -38,6 +38,7 @@
 #include "backend/services/CrashReporter.h"
 #include "backend/processing/ProcessingService.h"
 #include "backend/recording/Hdf5Service.h"
+#include "backend/recording/RecordingAccounting.h"
 #include "backend/playback/PlaybackService.h"
 #include "backend/services/AutofocusService.h"
 #include "frontend/system/PlaybackPanel.h"
@@ -911,6 +912,11 @@ void MainWindow::onStartExperiment()
                "Your previous realtime mode will be restored when the experiment stops."));
         SPDLOG_INFO("MainWindow: switched realtime mode async_batch -> inline for multi-image experiment");
     }
+    // Issue #367: tag this run's frame accounting with the capture session
+    // generation and the declared delivery policy (LatestFrame may drop).
+    processing.setExperimentAccountingContext(
+        backend_.capture().lifecycleSnapshot().generation,
+        backend_.capture().activeDeliveryMode() == camera::common::FrameDeliveryMode::LatestFrame);
     processing.startExperiment();
 
     // Record experiment start time
@@ -1043,6 +1049,40 @@ void MainWindow::onStopExperiment()
                 this, tr("Save Error"),
                 tr("Experiment frame data was written, but mandatory metadata and "
                    "processing-core provenance could not be saved."));
+        }
+
+        // Persist the reconciled frame accounting (issue #367). A run whose
+        // required accounting does not reconcile is stored as failed, never
+        // complete; the completion state is surfaced to the operator below.
+        const auto accounting = processing.experimentAccountingSnapshot();
+        if (metadataOk && !hdf5.writeRunAccounting(accounting)) {
+            SPDLOG_ERROR("Experiment run accounting could not be persisted");
+        }
+        SPDLOG_INFO("Experiment accounting: completion={} ({}); admitted={} empty={} processed={} "
+                    "rejected={} processingFailed={} storeLoss={} persisted={}/{} failed={}",
+                    backend::recording::toString(accounting.completion), accounting.completionReason,
+                    accounting.admitted, accounting.empty, accounting.processed,
+                    accounting.scientificallyRejected, accounting.processingFailed,
+                    accounting.storeOverwritten + accounting.storeNotCommitted + accounting.storeMalformed,
+                    accounting.persistenceCommitted, accounting.persistenceAdmitted,
+                    accounting.persistenceFailed);
+        if (accounting.completion != backend::recording::RunCompletionState::Complete &&
+            accounting.completion != backend::recording::RunCompletionState::IntentionallyPartial) {
+            QMessageBox::warning(
+                this, tr("Experiment Accounting"),
+                tr("The run is recorded as '%1': %2\n\nEmpty %3 · processed %4 · rejected %5 · "
+                   "processing failed %6 · store loss %7 · persisted %8/%9 · persistence failed %10")
+                    .arg(QString::fromLatin1(backend::recording::toString(accounting.completion)))
+                    .arg(QString::fromStdString(accounting.completionReason))
+                    .arg(static_cast<qulonglong>(accounting.empty))
+                    .arg(static_cast<qulonglong>(accounting.processed))
+                    .arg(static_cast<qulonglong>(accounting.scientificallyRejected))
+                    .arg(static_cast<qulonglong>(accounting.processingFailed))
+                    .arg(static_cast<qulonglong>(accounting.storeOverwritten + accounting.storeNotCommitted +
+                                                 accounting.storeMalformed))
+                    .arg(static_cast<qulonglong>(accounting.persistenceCommitted))
+                    .arg(static_cast<qulonglong>(accounting.persistenceAdmitted))
+                    .arg(static_cast<qulonglong>(accounting.persistenceFailed)));
         }
 
         // Save full config.json content for backtracking

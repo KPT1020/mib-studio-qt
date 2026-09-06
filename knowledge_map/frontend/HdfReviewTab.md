@@ -85,6 +85,14 @@ frames. The currently active
 `processing().getProcessingConfig()` / `getRealtimeRoi()` /
 `getRealtimeBackgroundGray()`) are used as inputs.
 
+## Run accounting (issue #367)
+
+`accountingSummary()` appends the recorded completion state and the
+empty / rejected / processing-failed / store-loss / persisted / persistence-
+failed counts (from `Hdf5Service::readRunAccounting`) to the status text for
+both experiment and recording files; legacy files show "accounting: not
+recorded (legacy file)" rather than implying completeness.
+
 ## Gotchas
 
 - Multi-image series (4D dataset) need `readSeriesImagesByIndex` — not the

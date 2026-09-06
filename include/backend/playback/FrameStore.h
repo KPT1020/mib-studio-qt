@@ -25,6 +25,29 @@ struct Frame {
     std::vector<uint8_t> data;
 };
 
+// Typed result of an indexed read (issue #367). `Available` is the only
+// success; every other value names why the frame could not be delivered so
+// the recording loop can account for it instead of silently continuing.
+enum class FrameReadOutcome {
+    Available,       // the slot holds exactly this write index, fully committed
+    NotYetCommitted, // index reserved (or beyond the reservation) but not yet published
+    Overwritten,     // index evicted: a newer frame occupies the slot
+    Malformed,       // slot committed but unusable (zero geometry / short buffer)
+    OutOfRange,      // store empty / zero capacity
+};
+
+inline const char* toString(FrameReadOutcome o)
+{
+    switch (o) {
+    case FrameReadOutcome::Available: return "available";
+    case FrameReadOutcome::NotYetCommitted: return "notYetCommitted";
+    case FrameReadOutcome::Overwritten: return "overwritten";
+    case FrameReadOutcome::Malformed: return "malformed";
+    case FrameReadOutcome::OutOfRange: return "outOfRange";
+    }
+    return "unknown";
+}
+
 struct IndexRange {
     uint64_t start = 0;
     uint64_t end = 0;
@@ -45,11 +68,33 @@ public:
                    size_t linePitch, uint64_t pixelFormat, uint64_t timestamp,
                    uint64_t hostTimestampUs = 0);
 
-    // Retrieve a copy of the latest frame; returns false if empty
+    // Retrieve a copy of the latest COMMITTED frame; returns false if empty.
+    // Uses the same committed-identity contract as indexed reads: never
+    // exposes a slot whose identity/data copy has not completed.
     bool getLatest(Frame& out) const;
 
     // Retrieve a copy by absolute write index; returns false if out-of-range
+    // (compatibility wrapper over readByWriteIndex).
     bool getByWriteIndex(uint64_t writeIndex, Frame& out) const;
+
+    // Typed indexed read (issue #367): distinguishes not-yet-committed,
+    // overwritten (evicted), and malformed slots from success so consumers
+    // can account for every frame they claim.
+    FrameReadOutcome readByWriteIndex(uint64_t writeIndex, Frame& out) const;
+
+    // Publication boundary (issue #367). pushFrame first RESERVES the next
+    // write index (totalWritten() advances) and only after the image +
+    // metadata copy completes COMMITS it (committedCount() advances). With
+    // the single capture producer, commit order equals reservation order, so
+    // every index below committedCount() is readable unless evicted.
+    uint64_t committedCount() const { return committed_.load(std::memory_order_acquire); }
+    // Latest committed absolute index. Only valid when committedCount() > 0.
+    uint64_t latestCommittedIndex() const { return committed_.load(std::memory_order_acquire) - 1; }
+
+    // Test seam: invoked between reservation and commit of every push so a
+    // deterministic test can observe the NotYetCommitted window. Not for
+    // production use.
+    void setCommitHookForTests(std::function<void(uint64_t writeIndex)> hook);
 
     // Retrieve ROI region from frame by absolute write index without full frame copy
     // Returns false if out-of-range or invalid ROI
@@ -169,7 +214,9 @@ private:
     // written for this index" races are caught by one comparison.
     static constexpr uint64_t kSlotEmpty = ~0ULL;
     std::vector<uint64_t> slotWriteIndices_;
-    std::atomic<uint64_t> totalWritten_{0};
+    std::atomic<uint64_t> totalWritten_{0}; // reservation count
+    std::atomic<uint64_t> committed_{0};    // publication count (<= totalWritten_)
+    std::function<void(uint64_t)> commitHookForTests_;
 
     // Consumer wake-up (waitForFrame/pushFrame). waitWaiters_ is a
     // Dekker-style guard: the producer only takes waitMutex_ + notifies

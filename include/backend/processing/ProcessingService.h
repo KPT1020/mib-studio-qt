@@ -1,5 +1,7 @@
 #pragma once
 
+#include "backend/recording/RecordingAccounting.h"
+
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -279,11 +281,43 @@ public:
 
     // Selected-core variant used by runtime paths. The static overloads above
     // remain as compatibility helpers and use bundled behavior.
+    // Compatibility wrapper over classifyFrameWithActiveKernel: returns true
+    // for Empty AND for Malformed/ProcessingFailed (callers that need to tell
+    // those apart must use the typed API — issue #367).
     bool isFrameEmptyWithActiveKernel(
         const backend::playback::Frame& frame,
         const ProcessingConfig& config,
         const Roi& roi,
         const std::shared_ptr<const cv::Mat>& background) const;
+
+    // Typed empty-frame classification (issue #367). A processing failure
+    // or a malformed frame is never reported as a valid empty frame.
+    struct FrameClassification {
+        enum class Kind { Empty, Candidate, Malformed, ProcessingFailed };
+        Kind kind{Kind::ProcessingFailed};
+        std::string detail; // populated for Malformed / ProcessingFailed
+        bool isEmpty() const { return kind == Kind::Empty; }
+        bool isCandidate() const { return kind == Kind::Candidate; }
+    };
+    FrameClassification classifyFrameWithActiveKernel(
+        const backend::playback::Frame& frame,
+        const ProcessingConfig& config,
+        const Roi& roi,
+        const std::shared_ptr<const cv::Mat>& background) const;
+
+    // Frames whose processing core call failed on the realtime path (never
+    // counted as empty). Monotonic for the service lifetime.
+    uint64_t getProcessingFailureCount() const {
+        return processingFailures_.load(std::memory_order_relaxed);
+    }
+
+    // Experiment frame accounting (issue #367). Reset by startExperiment();
+    // set the context (capture session generation, declared drop policy)
+    // before starting. The snapshot derives the persistence pending/failed
+    // terms from the current buffer + flush-queue state, so it is exact
+    // after finishFlush().
+    void setExperimentAccountingContext(uint64_t captureGeneration, bool policyAllowsDrops);
+    backend::recording::RecordingAccountingSnapshot experimentAccountingSnapshot() const;
 
     // ---- Batch mask generation ----
     // Pure pipeline: Gaussian blur -> (optional) background subtract -> binary
@@ -519,10 +553,21 @@ private:
 
     // Experiment flush write queue (decouples HDF5 writes from frame
     // accumulation). Created lazily on the first flush, drained by finishFlush.
-    std::mutex flushQueueMutex_;
+    mutable std::mutex flushQueueMutex_;
     std::unique_ptr<backend::recording::HdfWriteQueue<ExperimentBatch>> flushQueue_;
     std::function<void(const std::string&)> flushErrorCb_;
     std::atomic<bool> experimentActive_{false};
+    // Issue #367: per-experiment frame accounting + lifetime processing
+    // failure counter. Written by the realtime thread, the flush writer, and
+    // appendExperimentFrame; read by experimentAccountingSnapshot().
+    backend::recording::RecordingAccounting experimentAccounting_;
+    std::atomic<uint64_t> processingFailures_{0};
+    uint64_t experimentAccountingGeneration_{0};
+    bool experimentAccountingPolicyAllowsDrops_{false};
+    void noteRealtimeOutcome(uint64_t idx, backend::recording::FrameOutcome outcome);
+    void noteRealtimeAdmitted(uint64_t idx);
+    void noteRealtimeLost(uint64_t count);
+    void noteRealtimeValidation(uint64_t idx, const std::vector<FilterResult>& validations);
     
     // Monitoring frames (always accumulated, separate from experiment)
     mutable std::mutex monitoringFramesMutex_;

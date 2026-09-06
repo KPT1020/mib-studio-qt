@@ -123,6 +123,22 @@ on freed services. `shutdown()` is idempotent and safe on a never-initialized
 backend. Verified by `tests/backend/backend_lifecycle_smoke_test.cpp`
 (destroys the backend with the realtime thread live).
 
+## Raw-recording accounting (issue #367)
+
+The frame-recording thread reads `FrameStore::readByWriteIndex` and admits
+every index it claims: `NotYetCommitted` is retried without claiming,
+`Overwritten`/`Malformed` are counted as store loss, then
+`ProcessingService::classifyFrameWithActiveKernel` yields `Empty`
+(`frameRecordingFiltered()`), `ProcessingFailed` (never filtered), or a
+processed frame that becomes a persistence admission; the `HdfWriteQueue`
+writer adds committed/failed, submit refusals are failures, and anything the
+queue tore down mid-batch is `persistencePendingAtStop`. At stop the snapshot
+is reconciled, stored via `Hdf5Service::writeRunAccounting`, and exposed by
+`recordingAccounting()` (live while recording; final afterwards). Guard:
+`recording.accounting` (clean run Complete, injected core failures →
+IncompleteLoss with exact counts, 6-slot ring + slow classifier →
+StoreOverwritten, HDF5 reopen round-trip, legacy file → Unknown).
+
 ## Camera selection
 
 - `setHardwareCameraSelection(ifIdx, devIdx, label)` — choose device (no start)

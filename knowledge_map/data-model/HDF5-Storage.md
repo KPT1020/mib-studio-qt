@@ -26,6 +26,24 @@
   metadata only; no contour metrics).
 - `/recording_info` — raw-recording totals/config plus the same nine
   processing-core provenance attributes as `/experiment_info`.
+- **Run accounting (issue #367, `accounting_schema_version` = 1)** — written
+  by `Hdf5Service::writeRunAccounting` as `accounting_*` attributes on
+  `/experiment_info` or `/recording_info`: `admitted_frames`, `empty_frames`,
+  `processed_frames`, `scientifically_rejected_frames`,
+  `processing_failed_frames`, `store_overwritten_frames`,
+  `store_not_committed_frames`, `store_malformed_frames`,
+  `cancelled_by_policy_frames`, `pending_at_stop_frames`,
+  `persistence_{admitted,committed,failed,pending_at_stop,cancelled_by_policy}_frames`,
+  `objects_detected`, `has_index_range` / `first_frame_index` /
+  `last_frame_index`, `sequence_gaps` / `sequence_gap_frames`,
+  `session_generation`, `policy_allows_drops`, `fatal_error` /
+  `fatal_message`, `completion_state` (`complete` | `intentionallyPartial` |
+  `incompleteLoss` | `failed`), `completion_reason`, `reconciled`. The stored
+  form is always the *reconciled* snapshot, so a file whose required
+  accounting does not reconcile is stored as `failed`, never `complete`.
+  `readRunAccounting` returns `false` (completion `unknown`) for files that
+  predate the schema; legacy `total_recorded_frames` /
+  `total_filtered_empty_frames` are never reinterpreted.
 - Chart snapshot datasets — 2D/3D `cv::Mat` saved via
   `saveChartSnapshot(path, image)`.
 
