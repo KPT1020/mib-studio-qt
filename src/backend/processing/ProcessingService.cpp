@@ -1,4 +1,5 @@
 #include "backend/processing/ProcessingService.h"
+#include "backend/processing/ProcessingCoreLoader.h"
 #include "backend/processing/ProcessingScience.h"
 #include "backend/recording/Hdf5Service.h"
 #include "backend/diagnostics/CrashStateMirror.h"
@@ -421,6 +422,8 @@ void ProcessingService::setRealtimeBackgroundGray(const cv::Mat& bg) {
             rtBgGray_.reset();
         }
     }
+    // Every publication (or clear) is a new background identity (issue #369).
+    backgroundGeneration_.fetch_add(1, std::memory_order_acq_rel);
     configVersion_.fetch_add(
         1, std::memory_order_release); // wake cached-config refresh in realtime loop
     refreshRealtimeBatchPipelineConfig();
@@ -815,20 +818,159 @@ void ProcessingService::noteRealtimeLost(uint64_t count) {
     }
 }
 
-void ProcessingService::noteRealtimeOutcome(uint64_t idx, backend::recording::FrameOutcome outcome) {
+void ProcessingService::noteRealtimeOutcome(uint64_t idx, backend::recording::FrameOutcome outcome,
+                                            const backend::playback::Frame* frame) {
     (void)idx;
     if (outcome == backend::recording::FrameOutcome::ProcessingFailed) {
         processingFailures_.fetch_add(1, std::memory_order_relaxed);
     }
     if (experimentActive_.load(std::memory_order_relaxed)) experimentAccounting_.count(outcome);
+    if (bgCalActive_.load(std::memory_order_acquire)) bgCalObserve(outcome, frame);
+}
+
+// ---- Bounded background calibration (issue #369) --------------------------
+
+std::string ProcessingService::backgroundSha256() const {
+    std::shared_ptr<const cv::Mat> bg = getRealtimeBackgroundGrayShared();
+    if (!bg || bg->empty()) return {};
+    cv::Mat contiguous = bg->isContinuous() ? *bg : bg->clone();
+    return backend::processing::processingCoreBytesSha256(contiguous.data, contiguous.total() * contiguous.elemSize());
+}
+
+bool ProcessingService::startBackgroundCalibration(const BackgroundCalibrationRequest& request,
+                                                   std::string* error) {
+    if (!rtRunning_.load(std::memory_order_acquire)) {
+        if (error) *error = "realtime processing is not running";
+        return false;
+    }
+    if (request.requiredAccepted == 0 || request.maxAttempts < request.requiredAccepted) {
+        if (error) *error = "invalid calibration request (requiredAccepted must be >= 1 and <= maxAttempts)";
+        return false;
+    }
+    std::scoped_lock lk(bgCalMutex_);
+    if (bgCalStatus_.state == BackgroundCalibrationState::Running) {
+        if (error) *error = "a background calibration is already running";
+        return false;
+    }
+    bgCalRequest_ = request;
+    bgCalStatus_ = BackgroundCalibrationStatus{};
+    bgCalStatus_.state = BackgroundCalibrationState::Running;
+    bgCalStatus_.operationGeneration = ++bgCalOperationCounter_;
+    bgCalStatus_.frozenConfigVersion = configVersion_.load(std::memory_order_acquire);
+    bgCalAccumulator_.release();
+    bgCalDeadline_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(request.timeoutMs);
+    bgCalActive_.store(true, std::memory_order_release);
+    SPDLOG_INFO("Background calibration started: required={} maxAttempts={} timeoutMs={} configVersion={}",
+                request.requiredAccepted, request.maxAttempts, request.timeoutMs,
+                bgCalStatus_.frozenConfigVersion);
+    return true;
+}
+
+void ProcessingService::cancelBackgroundCalibration() {
+    std::scoped_lock lk(bgCalMutex_);
+    if (bgCalStatus_.state != BackgroundCalibrationState::Running) return;
+    bgCalFinishLocked(BackgroundCalibrationState::Cancelled, "cancelled by operator");
+}
+
+ProcessingService::BackgroundCalibrationStatus ProcessingService::backgroundCalibrationStatus() const {
+    std::scoped_lock lk(bgCalMutex_);
+    // Lazy timeout so a stalled frame source cannot leave the operation
+    // apparently running forever.
+    if (bgCalStatus_.state == BackgroundCalibrationState::Running &&
+        std::chrono::steady_clock::now() >= bgCalDeadline_) {
+        const_cast<ProcessingService*>(this)->bgCalFinishLocked(
+            BackgroundCalibrationState::FailedTimeout,
+            "timed out after " + std::to_string(bgCalRequest_.timeoutMs) + " ms with " +
+                std::to_string(bgCalStatus_.accepted) + "/" + std::to_string(bgCalRequest_.requiredAccepted) +
+                " accepted");
+    }
+    return bgCalStatus_;
+}
+
+void ProcessingService::bgCalFinishLocked(BackgroundCalibrationState state, const std::string& message) {
+    bgCalStatus_.state = state;
+    bgCalStatus_.message = message;
+    bgCalActive_.store(false, std::memory_order_release);
+    bgCalAccumulator_.release();
+    SPDLOG_INFO("Background calibration finished: state={} attempted={} accepted={} rejectedNonEmpty={} "
+                "rejectedFailed={} — {}",
+                static_cast<int>(state), bgCalStatus_.attempted, bgCalStatus_.accepted,
+                bgCalStatus_.rejectedNonEmpty, bgCalStatus_.rejectedProcessingFailed, message);
+}
+
+void ProcessingService::bgCalObserve(backend::recording::FrameOutcome outcome,
+                                     const backend::playback::Frame* frame) {
+    using backend::recording::FrameOutcome;
+    std::scoped_lock lk(bgCalMutex_);
+    if (bgCalStatus_.state != BackgroundCalibrationState::Running) return;
+    if (std::chrono::steady_clock::now() >= bgCalDeadline_) {
+        bgCalFinishLocked(BackgroundCalibrationState::FailedTimeout,
+                          "timed out with " + std::to_string(bgCalStatus_.accepted) + "/" +
+                              std::to_string(bgCalRequest_.requiredAccepted) + " accepted");
+        return;
+    }
+    // The recipe is frozen: a config change mid-operation invalidates it.
+    if (configVersion_.load(std::memory_order_acquire) != bgCalStatus_.frozenConfigVersion) {
+        bgCalFinishLocked(BackgroundCalibrationState::FailedProcessing,
+                          "processing configuration changed during calibration");
+        return;
+    }
+    ++bgCalStatus_.attempted;
+    if (outcome == FrameOutcome::Empty && frame) {
+        cv::Mat gray = makeGrayCopy(*frame);
+        if (!gray.empty()) {
+            if (bgCalAccumulator_.empty() || bgCalAccumulator_.size() != gray.size()) {
+                bgCalAccumulator_ = cv::Mat::zeros(gray.size(), CV_64FC1);
+                bgCalStatus_.accepted = 0;
+            }
+            cv::accumulate(gray, bgCalAccumulator_);
+            ++bgCalStatus_.accepted;
+        } else {
+            ++bgCalStatus_.rejectedProcessingFailed;
+        }
+    } else if (outcome == FrameOutcome::ProcessingFailed) {
+        ++bgCalStatus_.rejectedProcessingFailed;
+    } else {
+        ++bgCalStatus_.rejectedNonEmpty; // contaminated frame
+    }
+
+    if (bgCalStatus_.accepted >= bgCalRequest_.requiredAccepted) {
+        cv::Mat mean;
+        bgCalAccumulator_.convertTo(mean, CV_8UC1, 1.0 / static_cast<double>(bgCalStatus_.accepted));
+        // Atomic publication: the previous background stays active until the
+        // candidate is installed here.
+        {
+            std::scoped_lock rtLk(rtMutex_);
+            rtBgGray_ = std::make_shared<cv::Mat>(std::move(mean));
+        }
+        backgroundGeneration_.fetch_add(1, std::memory_order_acq_rel);
+        configVersion_.fetch_add(1, std::memory_order_release);
+        refreshRealtimeBatchPipelineConfig();
+        bgCalStatus_.publishedBackgroundGeneration = backgroundGeneration_.load(std::memory_order_acquire);
+        bgCalStatus_.publishedSha256 = backgroundSha256();
+        bgCalFinishLocked(BackgroundCalibrationState::Succeeded,
+                          "published background from " + std::to_string(bgCalStatus_.accepted) + " empty frames");
+        return;
+    }
+    if (bgCalStatus_.attempted >= bgCalRequest_.maxAttempts) {
+        bgCalFinishLocked(BackgroundCalibrationState::FailedInsufficient,
+                          "only " + std::to_string(bgCalStatus_.accepted) + "/" +
+                              std::to_string(bgCalRequest_.requiredAccepted) + " empty frames in " +
+                              std::to_string(bgCalStatus_.attempted) + " attempts (" +
+                              std::to_string(bgCalStatus_.rejectedNonEmpty) + " contaminated)");
+    }
 }
 
 void ProcessingService::noteRealtimeValidation(uint64_t idx, const std::vector<FilterResult>& validations) {
-    if (!experimentActive_.load(std::memory_order_relaxed)) return;
     const bool anyValid = std::any_of(validations.begin(), validations.end(),
                                       [](const FilterResult& r) { return r.isValid; });
-    experimentAccounting_.count(anyValid ? backend::recording::FrameOutcome::Processed
-                                         : backend::recording::FrameOutcome::RejectedByScientificFilter);
+    const auto outcome = anyValid ? backend::recording::FrameOutcome::Processed
+                                  : backend::recording::FrameOutcome::RejectedByScientificFilter;
+    // A non-empty frame during background calibration is contamination
+    // regardless of whether an experiment is active (issue #369).
+    if (bgCalActive_.load(std::memory_order_acquire)) bgCalObserve(outcome, nullptr);
+    if (!experimentActive_.load(std::memory_order_relaxed)) return;
+    experimentAccounting_.count(outcome);
     uint64_t objects = 0;
     for (const auto& r : validations) if (r.isValid) ++objects;
     if (objects > 0) experimentAccounting_.objectsDetected.fetch_add(objects, std::memory_order_relaxed);
@@ -2395,7 +2537,7 @@ void ProcessingService::realtimeInlineLoop() {
                     continue;
                 }
                 if (emptyFrame) {
-                    noteRealtimeOutcome(idx, backend::recording::FrameOutcome::Empty);
+                    noteRealtimeOutcome(idx, backend::recording::FrameOutcome::Empty, &f);
                     SPDLOG_TRACE("Empty frame detected (idx={}, pixel_count={}, threshold={}), "
                                  "skipping further processing",
                                  idx, pixelCount, config.empty_frame_pixel_threshold);
@@ -2838,7 +2980,7 @@ void ProcessingService::realtimeInlineLoop() {
                     continue;
                 }
                 if (emptyFrame) {
-                    noteRealtimeOutcome(idx, backend::recording::FrameOutcome::Empty);
+                    noteRealtimeOutcome(idx, backend::recording::FrameOutcome::Empty, &f);
                     SPDLOG_TRACE("Empty frame detected (idx={}, pixel_count={}, threshold={}), "
                                  "skipping further processing",
                                  idx, pixelCount, config.empty_frame_pixel_threshold);
@@ -3246,7 +3388,7 @@ void ProcessingService::realtimeInlineLoop() {
                     continue;
                 }
                 if (emptyFrame) {
-                    noteRealtimeOutcome(idx, backend::recording::FrameOutcome::Empty);
+                    noteRealtimeOutcome(idx, backend::recording::FrameOutcome::Empty, &f);
                     SPDLOG_TRACE("Empty frame detected (idx={}, pixel_count={}, threshold={}), "
                                  "skipping further processing",
                                  idx, pixelCount, config.empty_frame_pixel_threshold);

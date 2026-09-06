@@ -61,6 +61,10 @@ private slots:
     void onSliderValueChanged(int value);
     void onToggleOverlay();
     void onSetBackground();
+    // Bounded background calibration (issue #369): starts/cancels the
+    // backend operation and polls its explicit result.
+    void onCalibrateBackground();
+    void onPollBackgroundCalibration();
     void onClearRoi();
     void onToggleCapture();
     void onSaveBuffer();
@@ -86,6 +90,7 @@ private:
 
     QTimer* timer_ = nullptr;
     QTimer* metricsTimer_ = nullptr;   // Timer for periodic metrics logging
+    QTimer* bgCalTimer_ = nullptr;     // Polls the bounded background calibration
     QWidget* canvas_ = nullptr;
     QSlider* slider_ = nullptr;
     QToolButton* overlayBtn_ = nullptr;

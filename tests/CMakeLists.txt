@@ -107,6 +107,11 @@ target_link_libraries(timestamp_telemetry_test PRIVATE Threads::Threads)
 add_test(NAME backend.timestamp_telemetry COMMAND $<TARGET_FILE:timestamp_telemetry_test>)
 set_tests_properties(backend.timestamp_telemetry PROPERTIES LABELS "backend;camera;recording;hdf5" TIMEOUT 120)
 
+mib_add_backend_test_executable(experiment_readiness_test backend/experiment_readiness_test.cpp)
+target_link_libraries(experiment_readiness_test PRIVATE Threads::Threads)
+add_test(NAME backend.experiment_readiness COMMAND $<TARGET_FILE:experiment_readiness_test>)
+set_tests_properties(backend.experiment_readiness PROPERTIES LABELS "backend;processing;recording;hdf5;safety" TIMEOUT 180)
+
 mib_add_backend_test_executable(camera_script_apply_test backend/camera_script_apply_test.cpp)
 add_test(NAME backend.camera_script_apply COMMAND $<TARGET_FILE:camera_script_apply_test>)
 set_tests_properties(backend.camera_script_apply PROPERTIES LABELS "backend;camera" TIMEOUT 30)

@@ -32,8 +32,16 @@ hardware, use the [mock camera](connect.md#mock-camera-no-hardware).
 camera, then start it again. If it recurs, save the log tail — stale
 transport statistics point to a capture start/stop ordering problem.
 
-**Start Experiment refuses.** The camera must be running first: *"Camera
-must be running before starting an experiment."*
+**Start Experiment refuses.** The readiness dialog names the blocked
+check and its remedy: `camera.session` (start Live View and wait for
+Running), `camera.source` (the hardware camera you selected is unavailable
+and the app would have used the simulated camera — select the mock camera
+explicitly or connect the hardware), `processing.core` (activate the pinned
+core), `storage.output` (choose a writable destination with free space),
+`lifecycle.fault` (the previous run's data could not be saved completely —
+acknowledge it in the dialog). *"The configuration changed while the
+experiment was being prepared"* means something (ROI, background,
+configuration, camera) changed after the check: start again.
 
 **Recording stops with a save error.** The app stops the experiment and
 shows the reason. Typical causes: disk full, missing permissions on the

@@ -11,7 +11,8 @@
 ## Step 2 — Understand the shared state
 
 4. [[data-model/FrameStore]] — the ring buffer every layer shares.
-5. [[architecture/AppBackend]] — how services are wired together.
+5. [[architecture/AppBackend]] — how services are wired together
+   (and [[architecture/ExperimentCoordinator]] — how an experiment Start is authorized).
 6. [[architecture/Threading-Model]] — who runs on which thread.
 
 ## Step 3 — Pick the relevant cluster

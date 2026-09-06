@@ -81,10 +81,19 @@ refresh rate for the Monitoring page.
 
 ## Record an experiment
 
-1. Make sure the camera is running — otherwise you'll see *"Camera must be
-   running before starting an experiment."*
+1. Make sure the camera is running (**Start Live View**). Start runs a
+   readiness check first: if anything blocks it — camera not running, a
+   requested hardware camera that fell back to the simulated one, the
+   pinned processing core not active, no free space at the destination, an
+   unacknowledged save fault from the previous run — a dialog lists each
+   blocked check with what to do about it. Warnings (no background image,
+   simulated camera, Latest Frame delivery) do not block.
 2. Click **Start Experiment** (Experiment tab-bar corner). A Save dialog
    asks where to write the HDF5 file (`.h5` is appended if you omit it).
+   The app freezes the run's configuration (camera, ROI, processing core,
+   configuration revision, background, calibration factor) into the file
+   before the first frame; if the configuration changes between the check
+   and the start, the start is refused and you simply start again.
    The corner indicator turns green and the flushed-frame counter starts.
 3. Click **Stop Experiment** when done. The final flush runs in the
    background and the file is closed with its metadata (ROI, background,

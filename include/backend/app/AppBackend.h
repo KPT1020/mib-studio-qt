@@ -8,6 +8,7 @@
 #include <thread>
 
 #include "backend/app/BackgroundFrame.h"
+#include "backend/app/ExperimentReadiness.h"
 #include "backend/recording/RecordingAccounting.h"
 
 namespace backend::services
@@ -40,6 +41,8 @@ namespace camera::mock
 {
     struct MockCameraOptions;
 }
+
+namespace backend::app { class ExperimentCoordinator; }
 
 namespace backend
 {
@@ -101,6 +104,15 @@ namespace backend
 
         // Check if a camera is configured (either hardware or mock)
         bool isCameraConfigured() const;
+
+        // Requested vs effective camera source (issue #369). A hardware
+        // selection that could not be honored is reported as a fallback —
+        // readiness refuses to treat it as a successful hardware run, and
+        // it is never silently presented as "mock selected".
+        app::CameraSourceInfo cameraSourceInfo() const;
+
+        // Backend-owned experiment readiness + Start transaction (issue #369).
+        app::ExperimentCoordinator& experiment();
 
         // Frame recording mode: record non-empty frames directly to HDF5 (images + metadata only, no contour processing)
         // Returns false if recording cannot start (e.g., capture not running, file error)
@@ -169,6 +181,11 @@ namespace backend
         int selectedMvCameraIndex_{-1};
         std::string lastMindVisionConfigPath_;
         bool mockCameraConfigured_{false};
+        // Issue #369: what was asked for vs what the capture factory builds.
+        std::string requestedCameraSource_{"unknown"};
+        std::string effectiveCameraSource_{"unknown"};
+        std::string cameraFallbackReason_;
+        std::unique_ptr<app::ExperimentCoordinator> experimentCoordinator_;
 
         // Where pipeline-timing CSVs are dumped (set in initialize()).
         std::string pipelineTimingDir_;

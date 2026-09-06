@@ -5,6 +5,29 @@
 
 ## Features shipped
 
+- **Backend readiness transaction + immutable run snapshot + bounded
+  background calibration** (2026-09-06, issue #369 + host portion of #274 —
+  reliability release #371 phase 4). New
+  [[../architecture/ExperimentCoordinator]] (`ExperimentReadiness.h`,
+  `ExperimentCoordinator.{h,cpp}`): generation-tagged `evaluateReadiness()`
+  over 16 gates (camera session/source/delivery/geometry, ROI, core pin,
+  config, calibration factor, background, trigger binding, output storage,
+  HDF5/recording/experiment lifecycle, unresolved fault, transport-loss
+  telemetry; unknown is never Pass) and a serialized `start()` that refuses a
+  stale generation, opens HDF5, persists the frozen `RunConfigurationSnapshot`
+  (`/run_provenance` `run_snapshot_json` + `readiness_json`, schema v1) and
+  only then enters Running; `finish()`, `reportUnresolvedFault()`.
+  [[../architecture/AppBackend]] `cameraSourceInfo()` records requested vs
+  effective camera source — every former silent mock fallback now carries a
+  reason and blocks `camera.source`. [[../services/ProcessingService]]
+  `backgroundGeneration()` / `backgroundSha256()` and the finite, cancellable
+  `startBackgroundCalibration()` (`Succeeded / FailedInsufficient /
+  FailedTimeout / FailedProcessing / Cancelled`, previous background
+  preserved on every non-success). [[../frontend/MainWindow]] Start/Stop run
+  through the coordinator (gate dialog with remediation, typed outcomes);
+  Preview canvas menu gained "Calibrate Background (bounded)". Test:
+  `backend.experiment_readiness` (normal + TSan).
+
 - **Timestamp semantics + per-metric telemetry validity** (2026-09-06,
   issue #368 — reliability release #371 phase 3). New
   `camera/common/TimestampValue.h` (`ClockDomain`, `TimestampSemantic`,

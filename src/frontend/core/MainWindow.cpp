@@ -27,12 +27,14 @@
 #include <QDialogButtonBox>
 #include <QSet>
 #include <QSettings>
+#include <QSysInfo>
 #include <QStringList>
 #include <QVector>
 #include <algorithm>
 #include <vector>
 
 #include "backend/app/AppBackend.h"
+#include "backend/app/ExperimentCoordinator.h"
 #include "backend/camera/common/ICamera.h"
 #include "backend/services/CaptureService.h"
 #include "backend/services/CrashReporter.h"
@@ -340,6 +342,11 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     // operation guard is a read-only view of the experiment/recording/flush
     // ownership held by this window; the controller consults it on every
     // stop request, including direct dispatch.
+    // Application identity recorded in every frozen run snapshot (issue #369).
+    backend_.experiment().setApplicationIdentity(
+        MIB_STUDIO_QT_VERSION_FULL, std::string(),
+        QSysInfo::prettyProductName().toStdString() + " " + QSysInfo::currentCpuArchitecture().toStdString());
+
     cameraController_ = new frontend::CameraController(backend_, this);
     cameraController_->setOperationGuard([this]() {
         frontend::CameraOperationBlock block;
@@ -789,6 +796,64 @@ void MainWindow::onCameraStateChanged(const frontend::CameraActionState& state)
     }
 }
 
+namespace {
+QString gateStatusLabel(backend::app::GateStatus status)
+{
+    switch (status) {
+    case backend::app::GateStatus::Pass: return QStringLiteral("OK");
+    case backend::app::GateStatus::Warn: return QStringLiteral("Warning");
+    case backend::app::GateStatus::Fail: return QStringLiteral("Blocked");
+    case backend::app::GateStatus::Unavailable: return QStringLiteral("Unknown");
+    case backend::app::GateStatus::NotRequired: return QStringLiteral("Not required");
+    }
+    return QStringLiteral("?");
+}
+} // namespace
+
+bool MainWindow::explainReadiness(const backend::app::ExperimentReadinessSnapshot& readiness)
+{
+    if (readiness.ready)
+        return true;
+    QStringList lines;
+    bool onlyFault = true;
+    for (const auto& g : readiness.gates)
+    {
+        if (!g.blocksStart())
+            continue;
+        if (g.id != "lifecycle.fault")
+            onlyFault = false;
+        QString line = QStringLiteral("%1 — %2: %3")
+                           .arg(gateStatusLabel(g.status), QString::fromStdString(g.id),
+                                QString::fromStdString(g.reason));
+        if (!g.remediation.empty())
+            line += QStringLiteral("\n    → %1").arg(QString::fromStdString(g.remediation));
+        lines << line;
+    }
+    QMessageBox box(this);
+    box.setWindowTitle(tr("Start Experiment"));
+    box.setIcon(QMessageBox::Warning);
+    box.setText(tr("The experiment cannot start until every readiness check passes."));
+    box.setInformativeText(lines.join(QStringLiteral("\n\n")));
+    QPushButton* ackBtn = nullptr;
+    if (onlyFault)
+        ackBtn = box.addButton(tr("Acknowledge fault and re-check"), QMessageBox::AcceptRole);
+    box.addButton(QMessageBox::Close);
+    box.exec();
+    if (ackBtn && box.clickedButton() == ackBtn)
+    {
+        backend_.experiment().clearUnresolvedFault();
+        SPDLOG_INFO("MainWindow: operator acknowledged the unresolved experiment fault");
+    }
+    statusLabel_->setText(tr("Experiment not ready: %1")
+                              .arg(QString::fromStdString([&] {
+                                  std::string ids;
+                                  for (const auto& id : readiness.blockingGateIds())
+                                      ids += (ids.empty() ? "" : ", ") + id;
+                                  return ids;
+                              }())));
+    return false;
+}
+
 void MainWindow::onStartExperiment()
 {
     if (experimentActive_)
@@ -798,29 +863,43 @@ void MainWindow::onStartExperiment()
         return;
     }
 
-    if (!backend_.processing().isProcessingCorePinSatisfied())
-    {
-        const QString required = QString::fromStdString(
-            backend_.processing().requiredProcessingCoreVersion());
-        QMessageBox::critical(this, tr("Processing Core Required"),
-                              tr("Experiment start is blocked because administrator-pinned "
-                                 "processing core %1 is not active.")
-                                  .arg(required));
-        statusLabel_->setText(tr("Required processing core unavailable"));
-        return;
-    }
+    auto& coordinator = backend_.experiment();
+    auto &processing = backend_.processing();
 
-    // Guard: Experiment cannot start without first starting camera
-    if (!backend_.capture().isRunning())
+    // Multi-image series capture requires inline realtime processing; decide
+    // this before the preflight so the frozen snapshot records the mode the
+    // run actually uses.
+    restoreRealtimeModeAfterExperiment_ = false;
+    realtimeModeBeforeExperiment_ =
+        static_cast<int>(processing.getRealtimeProcessingMode());
+    const auto processingConfig = processing.getProcessingConfig();
+    const bool multiImageSeriesEnabled =
+        processingConfig.multi_image_enabled && processingConfig.multi_image_count > 1;
+    const bool needsInlineForSeries =
+        multiImageSeriesEnabled &&
+        processing.getRealtimeProcessingMode() ==
+            backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch;
+
+    // Preflight (issue #369): the backend evaluates every gate against the
+    // actual state. Blocking gates are explained with their remediation; a
+    // destination-less evaluation only leaves storage.output unknown.
     {
-        QMessageBox::warning(this, tr("Start Experiment"),
-                             tr("Camera must be running before starting an experiment. Please start the camera first."));
-        statusLabel_->setText("Camera not running");
-        return;
+        auto preflight = coordinator.evaluateReadiness();
+        std::vector<backend::app::ReadinessGate> blockers;
+        for (const auto& g : preflight.gates)
+            if (g.blocksStart() && g.id != "storage.output") blockers.push_back(g);
+        if (!blockers.empty())
+        {
+            preflight.ready = false;
+            preflight.gates = blockers;
+            explainReadiness(preflight);
+            return;
+        }
     }
 
     // Guard: Latest Frame intentionally discards frames, so a recording made in
     // that mode can be incomplete. Require an explicit acknowledgement (#332).
+    bool acknowledgeLatestFrameDrops = false;
     if (backend_.capture().activeDeliveryMode() ==
         camera::common::FrameDeliveryMode::LatestFrame)
     {
@@ -843,8 +922,13 @@ void MainWindow::onStartExperiment()
             if (connectTab_)
                 connectTab_->setDeliveryMode(camera::common::FrameDeliveryMode::EveryFrame);
             updateDeliveryModeBadge();
+            acknowledgeLatestFrameDrops = true; // this session still runs LatestFrame
         }
-        else if (box.clickedButton() != continueBtn)
+        else if (box.clickedButton() == continueBtn)
+        {
+            acknowledgeLatestFrameDrops = true;
+        }
+        else
         {
             return; // Cancel: abort experiment start
         }
@@ -863,44 +947,7 @@ void MainWindow::onStartExperiment()
         return;
     }
 
-    // Convert to std::string
-    std::string hdf5Path = filePath.toStdString();
-
-    // Ensure .h5 extension
-    if (hdf5Path.size() < 3 ||
-        (hdf5Path.substr(hdf5Path.size() - 3) != ".h5" &&
-         hdf5Path.substr(hdf5Path.size() - 5) != ".hdf5"))
-    {
-        hdf5Path += ".h5";
-    }
-
-    // Open HDF5 file
-    auto &hdf5 = backend_.hdf5();
-    if (!hdf5.openFile(hdf5Path))
-    {
-        QMessageBox::critical(this, tr("Error"),
-                              tr("Failed to open HDF5 file:\n%1").arg(filePath));
-        return;
-    }
-
-    // Initialize datasets for incremental writing
-    if (!hdf5.initializeDatasets())
-    {
-        QMessageBox::warning(this, tr("Warning"),
-                             tr("Failed to initialize HDF5 datasets"));
-    }
-
-    // Start experiment (clear frame buffers)
-    auto &processing = backend_.processing();
-    restoreRealtimeModeAfterExperiment_ = false;
-    realtimeModeBeforeExperiment_ =
-        static_cast<int>(processing.getRealtimeProcessingMode());
-    const auto processingConfig = processing.getProcessingConfig();
-    const bool multiImageSeriesEnabled =
-        processingConfig.multi_image_enabled && processingConfig.multi_image_count > 1;
-    if (multiImageSeriesEnabled &&
-        processing.getRealtimeProcessingMode() ==
-            backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch)
+    if (needsInlineForSeries)
     {
         processing.setRealtimeProcessingMode(
             backend::services::ProcessingService::RealtimeProcessingMode::Inline);
@@ -913,21 +960,78 @@ void MainWindow::onStartExperiment()
                "Your previous realtime mode will be restored when the experiment stops."));
         SPDLOG_INFO("MainWindow: switched realtime mode async_batch -> inline for multi-image experiment");
     }
-    // Issue #367: tag this run's frame accounting with the capture session
-    // generation and the declared delivery policy (LatestFrame may drop).
-    processing.setExperimentAccountingContext(
-        backend_.capture().lifecycleSnapshot().generation,
-        backend_.capture().activeDeliveryMode() == camera::common::FrameDeliveryMode::LatestFrame);
-    processing.startExperiment();
 
-    // Record experiment start time
-    experimentStartTimeNs_ = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                 std::chrono::system_clock::now().time_since_epoch())
-                                 .count();
+    // Final readiness with the destination, then the Start transaction with
+    // that exact generation. The backend opens the file, freezes and
+    // persists the run snapshot, and only then enters Running; any change
+    // between the two calls is refused as stale rather than raced.
+    backend::app::ExperimentStartRequest request;
+    request.outputPath = filePath.toStdString();
+    request.acknowledgeLatestFrameDrops = acknowledgeLatestFrameDrops;
+    const auto readiness = coordinator.evaluateReadiness(request.outputPath, request.profileId);
+    if (!explainReadiness(readiness))
+    {
+        restoreRealtimeModeIfNeeded();
+        return;
+    }
+    request.readinessGeneration = readiness.generation;
+    const auto result = coordinator.start(request);
+    switch (result.outcome)
+    {
+    case backend::app::ExperimentStartOutcome::Started:
+        break;
+    case backend::app::ExperimentStartOutcome::StaleReadiness:
+        restoreRealtimeModeIfNeeded();
+        QMessageBox::warning(this, tr("Start Experiment"),
+                             tr("The configuration changed while the experiment was being prepared, "
+                                "so the readiness check is no longer valid.\n\n%1\n\nPlease start again.")
+                                 .arg(QString::fromStdString(result.message)));
+        statusLabel_->setText(tr("Experiment start refused: readiness changed"));
+        return;
+    case backend::app::ExperimentStartOutcome::NotReady:
+        restoreRealtimeModeIfNeeded();
+        explainReadiness(result.readiness);
+        return;
+    case backend::app::ExperimentStartOutcome::StorageFailed:
+    case backend::app::ExperimentStartOutcome::ProvenanceFailed:
+        restoreRealtimeModeIfNeeded();
+        QMessageBox::critical(this, tr("Error"),
+                              tr("Failed to prepare the experiment file:\n%1\n\n%2")
+                                  .arg(filePath, QString::fromStdString(result.message)));
+        statusLabel_->setText(tr("Experiment start failed: %1").arg(QString::fromStdString(result.message)));
+        return;
+    case backend::app::ExperimentStartOutcome::AlreadyActive:
+    case backend::app::ExperimentStartOutcome::Busy:
+        restoreRealtimeModeIfNeeded();
+        QMessageBox::information(this, tr("Experiment"), QString::fromStdString(result.message));
+        return;
+    }
+
+    // Record experiment start time from the frozen snapshot.
+    experimentStartTimeNs_ = result.run.startWallClockNs;
 
     experimentActive_ = true;
-    statusLabel_->setText("Experiment started");
+    statusLabel_->setText(result.run.camera.simulated
+                              ? tr("Experiment started (simulated camera)")
+                              : tr("Experiment started"));
     updateExperimentButtonStates(); // This will also call updateTabStates() to disable Overview and Review tabs
+}
+
+void MainWindow::restoreRealtimeModeIfNeeded()
+{
+    if (!restoreRealtimeModeAfterExperiment_)
+        return;
+    const auto restoreMode =
+        realtimeModeBeforeExperiment_ ==
+                static_cast<int>(backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch)
+            ? backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch
+            : backend::services::ProcessingService::RealtimeProcessingMode::Inline;
+    backend_.processing().setRealtimeProcessingMode(restoreMode);
+    restoreRealtimeModeAfterExperiment_ = false;
+    SPDLOG_INFO("MainWindow: restored realtime mode to {}",
+                restoreMode == backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch
+                    ? "async_batch"
+                    : "inline");
 }
 
 void MainWindow::onStopExperiment()
@@ -981,6 +1085,8 @@ void MainWindow::onStopExperiment()
         // direct appendFrames below (no two threads writing the shared file).
         if (!processing.finishFlush())
         {
+            backend_.experiment().reportUnresolvedFault(
+                "experiment.flushFailed", "a save error occurred while flushing experiment data to disk");
             QMessageBox::warning(this, tr("Save Error"),
                                  tr("A save error occurred while flushing experiment data to disk."));
         }
@@ -1046,6 +1152,9 @@ void MainWindow::onStopExperiment()
         }
         if (!metadataOk) {
             SPDLOG_ERROR("Experiment metadata/provenance write failed");
+            backend_.experiment().reportUnresolvedFault(
+                "experiment.provenanceFailed",
+                "mandatory metadata/processing-core provenance could not be saved for the last run");
             QMessageBox::critical(
                 this, tr("Save Error"),
                 tr("Experiment frame data was written, but mandatory metadata and "
@@ -1119,22 +1228,16 @@ void MainWindow::onStopExperiment()
         statusLabel_->setText("Experiment stopped (HDF5 file not open)");
     }
 
-    experimentActive_ = false;
-    if (restoreRealtimeModeAfterExperiment_)
+    // Release the frozen run snapshot; the coordinator returns to Idle so the
+    // next preflight evaluates a fresh state (issue #369).
+    if (auto finished = backend_.experiment().finish())
     {
-        const auto restoreMode =
-            realtimeModeBeforeExperiment_ ==
-                    static_cast<int>(backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch)
-                ? backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch
-                : backend::services::ProcessingService::RealtimeProcessingMode::Inline;
-        processing.setRealtimeProcessingMode(restoreMode);
-        restoreRealtimeModeAfterExperiment_ = false;
-        SPDLOG_INFO("MainWindow: restored realtime mode after experiment stop to {}",
-                    restoreMode ==
-                            backend::services::ProcessingService::RealtimeProcessingMode::AsyncBatch
-                        ? "async_batch"
-                        : "inline");
+        SPDLOG_INFO("MainWindow: experiment run {} finished (readiness gen {}, capture gen {})",
+                    finished->startGeneration, finished->readinessGeneration, finished->captureGeneration);
     }
+
+    experimentActive_ = false;
+    restoreRealtimeModeIfNeeded();
     updateExperimentButtonStates(); // This will also call updateTabStates() to enable Overview and Review tabs
 
     const auto cfgAtStop = processing.getProcessingConfig();

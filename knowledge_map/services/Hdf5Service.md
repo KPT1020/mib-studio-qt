@@ -123,6 +123,16 @@ persist and read the versioned `accounting_*` attributes described in
 [[../frontend/HdfReviewTab]] status text. Types live in
 `include/backend/recording/RecordingAccounting.h` (Qt-free, header-only).
 
+## Run configuration snapshot (issue #369)
+
+`writeRunSnapshotJson(runJson, readinessJson)` / `readRunSnapshotJson(...)`
+store the frozen `RunConfigurationSnapshot` and the readiness evaluation it
+was started from as variable-length UTF-8 string attributes
+(`run_snapshot_json`, `readiness_json`, `run_snapshot_schema_version` = 1)
+on the `/run_provenance` group. [[../architecture/ExperimentCoordinator]]
+writes them immediately after `initializeDatasets()` and before the run may
+enter Running; a failure rolls the Start back and removes the file.
+
 ## Acquisition provenance (issue #368)
 
 `writeAcquisitionProvenance(descriptor, telemetry)` /

@@ -3423,8 +3423,9 @@ namespace backend::services {
         hid_t scalar = H5Screate(H5S_SCALAR);
         bool ok = true;
         auto writeU64 = [&](const char* name, uint64_t value) {
-            hid_t attr = H5Aopen(group, name, H5P_DEFAULT);
-            if (attr < 0) attr = H5Acreate2(group, name, H5T_NATIVE_UINT64, scalar, H5P_DEFAULT, H5P_DEFAULT);
+            hid_t attr = H5Aexists(group, name) > 0
+                             ? H5Aopen(group, name, H5P_DEFAULT)
+                             : H5Acreate2(group, name, H5T_NATIVE_UINT64, scalar, H5P_DEFAULT, H5P_DEFAULT);
             if (attr < 0) { ok = false; return; }
             if (H5Awrite(attr, H5T_NATIVE_UINT64, &value) < 0) ok = false;
             H5Aclose(attr);
@@ -3717,6 +3718,80 @@ namespace backend::services {
         t.timestampDescriptor = d;
         H5Gclose(group);
         return true;
+    }
+
+    // ---- Run configuration snapshot (issue #369) --------------------------------
+
+    bool Hdf5Service::writeRunSnapshotJson(const std::string& runSnapshotJson,
+                                           const std::string& readinessJson)
+    {
+        if (!isFileOpen()) return false;
+        hid_t group = H5Lexists(impl_->fileId_, "/run_provenance", H5P_DEFAULT) > 0
+                          ? H5Gopen2(impl_->fileId_, "/run_provenance", H5P_DEFAULT)
+                          : H5Gcreate2(impl_->fileId_, "/run_provenance", H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+        if (group < 0) return false;
+        hid_t scalar = H5Screate(H5S_SCALAR);
+        bool ok = true;
+        auto writeStr = [&](const char* name, const std::string& value) {
+            if (H5Aexists(group, name) > 0) H5Adelete(group, name);
+            hid_t type = H5Tcopy(H5T_C_S1);
+            H5Tset_size(type, H5T_VARIABLE);
+            H5Tset_cset(type, H5T_CSET_UTF8);
+            hid_t attr = H5Acreate2(group, name, type, scalar, H5P_DEFAULT, H5P_DEFAULT);
+            if (attr >= 0) {
+                const char* ptr = value.c_str();
+                if (H5Awrite(attr, type, &ptr) < 0) ok = false;
+                H5Aclose(attr);
+            } else {
+                ok = false;
+            }
+            H5Tclose(type);
+        };
+        auto writeU64 = [&](const char* name, uint64_t value) {
+            hid_t attr = H5Aexists(group, name) > 0
+                             ? H5Aopen(group, name, H5P_DEFAULT)
+                             : H5Acreate2(group, name, H5T_NATIVE_UINT64, scalar, H5P_DEFAULT, H5P_DEFAULT);
+            if (attr < 0) { ok = false; return; }
+            if (H5Awrite(attr, H5T_NATIVE_UINT64, &value) < 0) ok = false;
+            H5Aclose(attr);
+        };
+        writeU64("run_snapshot_schema_version", 1);
+        writeStr("run_snapshot_json", runSnapshotJson);
+        writeStr("readiness_json", readinessJson);
+        H5Sclose(scalar);
+        H5Gclose(group);
+        if (ok && !flush()) SPDLOG_WARN("writeRunSnapshotJson: flush after provenance write failed");
+        return ok;
+    }
+
+    bool Hdf5Service::readRunSnapshotJson(std::string& runSnapshotJson, std::string* readinessJson) const
+    {
+        runSnapshotJson.clear();
+        if (readinessJson) readinessJson->clear();
+        if (!isFileOpen()) return false;
+        if (H5Lexists(impl_->fileId_, "/run_provenance", H5P_DEFAULT) <= 0) return false;
+        hid_t group = H5Gopen2(impl_->fileId_, "/run_provenance", H5P_DEFAULT);
+        if (group < 0) return false;
+        auto readStr = [&](const char* name, std::string& v) {
+            if (H5Aexists(group, name) <= 0) return false;
+            hid_t attr = H5Aopen(group, name, H5P_DEFAULT);
+            if (attr < 0) return false;
+            hid_t type = H5Aget_type(attr);
+            bool ok = false;
+            if (type >= 0 && H5Tget_class(type) == H5T_STRING && H5Tis_variable_str(type) > 0) {
+                char* ptr = nullptr;
+                ok = H5Aread(attr, type, &ptr) >= 0;
+                if (ok) v = ptr ? ptr : "";
+                if (ptr) H5free_memory(ptr);
+            }
+            if (type >= 0) H5Tclose(type);
+            H5Aclose(attr);
+            return ok;
+        };
+        const bool ok = readStr("run_snapshot_json", runSnapshotJson);
+        if (readinessJson) readStr("readiness_json", *readinessJson);
+        H5Gclose(group);
+        return ok && !runSnapshotJson.empty();
     }
 
 } // namespace backend::services

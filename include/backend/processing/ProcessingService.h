@@ -3,6 +3,7 @@
 #include "backend/recording/RecordingAccounting.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -319,6 +320,47 @@ public:
     void setExperimentAccountingContext(uint64_t captureGeneration, bool policyAllowsDrops);
     backend::recording::RecordingAccountingSnapshot experimentAccountingSnapshot() const;
 
+    // ---- Background identity + bounded calibration (issue #369) ----------
+    // Generation increments on every successful background publication
+    // (manual set, auto-capture, or calibration); 0 = never set.
+    uint64_t backgroundGeneration() const { return backgroundGeneration_.load(std::memory_order_acquire); }
+    // SHA-256 of the active background bytes (empty when none).
+    std::string backgroundSha256() const;
+
+    struct BackgroundCalibrationRequest {
+        uint32_t requiredAccepted{10};  // empty frames to average
+        uint32_t maxAttempts{200};      // frames examined before giving up
+        uint64_t timeoutMs{5000};       // wall-clock bound
+    };
+    enum class BackgroundCalibrationState {
+        Idle, Running, Succeeded, FailedInsufficient, FailedTimeout, FailedProcessing, Cancelled
+    };
+    struct BackgroundCalibrationStatus {
+        BackgroundCalibrationState state{BackgroundCalibrationState::Idle};
+        uint64_t operationGeneration{0};   // increments per start
+        uint64_t frozenConfigVersion{0};   // config version the recipe was frozen at
+        uint32_t attempted{0};
+        uint32_t accepted{0};
+        uint32_t rejectedNonEmpty{0};      // contaminated frames
+        uint32_t rejectedProcessingFailed{0};
+        uint64_t publishedBackgroundGeneration{0}; // set on success
+        std::string publishedSha256;
+        std::string message;
+        bool finished() const {
+            return state != BackgroundCalibrationState::Idle && state != BackgroundCalibrationState::Running;
+        }
+    };
+    // Finite, cancellable background acquisition on the realtime path: the
+    // recipe (config version) is frozen; empty frames are accepted and
+    // averaged, non-empty/failed frames rejected and counted; success
+    // publishes the candidate atomically (previous background stays active
+    // until then). Ends with an explicit result at requiredAccepted,
+    // maxAttempts, timeout, or cancel. Returns false if realtime is not
+    // running or another calibration is active.
+    bool startBackgroundCalibration(const BackgroundCalibrationRequest& request, std::string* error = nullptr);
+    void cancelBackgroundCalibration();
+    BackgroundCalibrationStatus backgroundCalibrationStatus() const;
+
     // ---- Batch mask generation ----
     // Pure pipeline: Gaussian blur -> (optional) background subtract -> binary
     // threshold -> morphology -> contour validation. Produces a full-frame mask
@@ -564,7 +606,20 @@ private:
     std::atomic<uint64_t> processingFailures_{0};
     uint64_t experimentAccountingGeneration_{0};
     bool experimentAccountingPolicyAllowsDrops_{false};
-    void noteRealtimeOutcome(uint64_t idx, backend::recording::FrameOutcome outcome);
+    void noteRealtimeOutcome(uint64_t idx, backend::recording::FrameOutcome outcome,
+                             const backend::playback::Frame* frame = nullptr);
+    // Background calibration state (issue #369); bgCalMutex_ guards the
+    // accumulator, status_ fields are read under it too.
+    mutable std::mutex bgCalMutex_;
+    BackgroundCalibrationStatus bgCalStatus_;
+    BackgroundCalibrationRequest bgCalRequest_;
+    uint64_t bgCalOperationCounter_{0};
+    cv::Mat bgCalAccumulator_; // CV_64FC1 running sum of accepted frames
+    std::chrono::steady_clock::time_point bgCalDeadline_{};
+    std::atomic<bool> bgCalActive_{false};
+    std::atomic<uint64_t> backgroundGeneration_{0};
+    void bgCalObserve(backend::recording::FrameOutcome outcome, const backend::playback::Frame* frame);
+    void bgCalFinishLocked(BackgroundCalibrationState state, const std::string& message);
     void noteRealtimeAdmitted(uint64_t idx);
     void noteRealtimeLost(uint64_t count);
     void noteRealtimeValidation(uint64_t idx, const std::vector<FilterResult>& validations);

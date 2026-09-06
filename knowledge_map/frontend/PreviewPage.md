@@ -33,6 +33,15 @@ Overlay mode, fit mode (FitToWindow / Zoom100), display FPS target, save
 buffer to disk (via [[Dialogs]] `BufferSaveDialog`), conversion-factor
 spinner (μm/pixel — see [[Dialogs]] `ConversionFactorDialog`).
 
+Preview canvas context menu: "Set Background" (current paused frame),
+"Calibrate Background (bounded)" / "Cancel Background Calibration" (issue
+#369 — `PlaybackPanel::onCalibrateBackground` starts
+`ProcessingService::startBackgroundCalibration` with the default request,
+polls `backgroundCalibrationStatus()` every 200 ms and, on `Succeeded`,
+adopts the published background for the overlay; every other terminal state
+is reported with its counts and leaves the previous background untouched),
+"Clear ROI".
+
 ## Gotchas
 
 - Display FPS is capped (60 Hz by default) — see task

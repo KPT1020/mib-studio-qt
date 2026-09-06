@@ -5,7 +5,7 @@
 
 **Source:** `src/backend/app/AppBackend.cpp`, `include/backend/app/AppBackend.h`
 **Related:** [[Overview]], [[Data-Flow]], [[Threading-Model]],
-[[../data-model/FrameStore]]
+[[../data-model/FrameStore]], [[ExperimentCoordinator]]
 
 ## What it owns
 
@@ -159,6 +159,20 @@ StoreOverwritten, HDF5 reopen round-trip, legacy file → Unknown).
   Both serial services are constructed against the backend-owned
   [[../services/SerialBus]] `SerialBusManager` (declared before them so it
   outlives their sessions) — one shared `QSerialPort` owner per RS485 adapter
+
+### Requested vs effective camera source (issue #369)
+
+`cameraSourceInfo()` returns `CameraSourceInfo{requested, effective, label,
+simulated, fallback, fallbackReason}`. `requestedCameraSource_` is what the
+operator/env asked for (`MIB_CAMERA_MODE`, `setHardwareCameraSelection`,
+`setMindVisionCameraSelection`, `configureMockCamera`); `effectiveCameraSource_`
+is what the capture factory actually builds. Every place that used to fall
+back to `MockCamera` silently now records `cameraFallbackReason_` ("EGrabber
+SDK is unavailable in this build", …). [[ExperimentCoordinator]] turns a
+fallback into a **blocking** `camera.source` gate and an explicit mock into a
+warning, so a hardware run can never be recorded as such while frames came
+from the mock. `experiment()` exposes the coordinator (created in
+`initialize()` right after the `FrameStore`).
 
 ### Platform behavior
 

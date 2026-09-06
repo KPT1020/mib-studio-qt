@@ -14,6 +14,7 @@ class QCloseEvent;
 template<typename T> class QFutureWatcher;
 
 namespace backend { class AppBackend; }
+namespace backend::app { struct ExperimentReadinessSnapshot; }
 namespace frontend { class OverviewTab; }
 namespace frontend { class ConnectTab; }
 namespace frontend { class AutoUpdater; }
@@ -49,6 +50,10 @@ public:
 
 private:
     void updateExperimentButtonStates();
+    // Issue #369: explain blocking readiness gates (with remediation) and
+    // return false; true when the snapshot is ready.
+    bool explainReadiness(const backend::app::ExperimentReadinessSnapshot& readiness);
+    void restoreRealtimeModeIfNeeded();
     void updateTabStates();
     void updateDeliveryModeBadge();
     void startExperimentServices();

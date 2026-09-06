@@ -1,4 +1,5 @@
 #include "backend/app/AppBackend.h"
+#include "backend/app/ExperimentCoordinator.h"
 
 #include "backend/services/Logger.h"
 #include "backend/services/CrashReporter.h"
@@ -229,6 +230,7 @@ namespace backend
         syringePumpService_ = std::make_unique<services::SyringePumpService>(*serialBusManager_);
         pulseGeneratorService_ = std::make_unique<services::PulseGeneratorService>(*serialBusManager_);
         frameStore_ = std::make_shared<playback::FrameStore>(5000);
+        experimentCoordinator_ = std::make_unique<app::ExperimentCoordinator>(*this);
 
         bool bootSqlite = true;
         bool bootHdf5 = true;
@@ -576,8 +578,14 @@ namespace backend
                 selectedMvCameraIndex_ = -1;
                 selectedLabel_.clear();
                 lastMindVisionConfigPath_.clear();
+                effectiveCameraSource_ = "mock";
             };
 
+            requestedCameraSource_ = cameraMode == "mock" ? "mock"
+                                     : cameraMode == "mindvision" ? "mindvision"
+                                     : (cameraMode == "egrabber" || cameraMode == "hardware") ? "egrabber"
+                                     : cameraMode;
+            cameraFallbackReason_.clear();
             if (cameraMode == "mock")
             {
                 configureMock();
@@ -607,6 +615,7 @@ namespace backend
                 captureService_->setCameraFactory([cameraIndex, configPath]() mutable
                                                   { return std::make_unique<::camera::common::MindVisionCamera>(cameraIndex, configPath); });
                 mockCameraConfigured_ = false;
+                effectiveCameraSource_ = "mindvision";
                 selectedIfIndex_ = -1;
                 selectedDevIndex_ = -1;
                 selectedMvCameraIndex_ = cameraIndex;
@@ -618,6 +627,7 @@ namespace backend
                 SPDLOG_WARN("AppBackend: MindVision mode requested but MindVision SDK is unavailable; falling back to mock camera");
                 cameraMode = "mock";
                 configureMock();
+                cameraFallbackReason_ = "MindVision SDK is unavailable in this build";
 #endif
             }
             else if (cameraMode == "egrabber" || cameraMode == "hardware")
@@ -627,11 +637,13 @@ namespace backend
                 captureService_->setCameraFactory([]()
                                                   { return std::make_unique<::camera::common::EGrabberCamera>(); });
                 mockCameraConfigured_ = false;
+                effectiveCameraSource_ = "egrabber";
                 selectedMvCameraIndex_ = -1;
             #else
                 SPDLOG_WARN("AppBackend: hardware mode requested but EGrabber SDK is unavailable; keeping mock camera");
                 cameraMode = "mock";
                 configureMock();
+                cameraFallbackReason_ = "EGrabber SDK is unavailable in this build";
 #endif
             }
             else
@@ -641,11 +653,13 @@ namespace backend
                 captureService_->setCameraFactory([]()
                                                   { return std::make_unique<::camera::common::EGrabberCamera>(); });
                 mockCameraConfigured_ = false;
+                effectiveCameraSource_ = "egrabber";
                 selectedMvCameraIndex_ = -1;
 #else
                 cameraMode = "mock";
                 configureMock();
 #endif
+                cameraFallbackReason_ = "unknown camera mode requested";
             }
 
             // No per-frame logging; rely on periodic capture stats
@@ -709,6 +723,9 @@ namespace backend
     {
         if (!captureService_)
             return;
+        requestedCameraSource_ = "mock";
+        effectiveCameraSource_ = "mock";
+        cameraFallbackReason_.clear();
         captureService_->setCameraFactory([options]() mutable
                                           { return std::make_unique<::camera::mock::MockCamera>(options); });
         selectedIfIndex_ = -1;
@@ -723,9 +740,13 @@ namespace backend
     {
         if (!captureService_)
             return;
+        requestedCameraSource_ = "egrabber";
+        cameraFallbackReason_.clear();
 
 #if !MIB_HAS_EGRABBER
         SPDLOG_WARN("Hardware camera selection ignored: EGrabber SDK is unavailable on this platform");
+        effectiveCameraSource_ = "mock";
+        cameraFallbackReason_ = "EGrabber SDK is unavailable in this build";
         ::camera::mock::MockCameraOptions options;
         options.folder = std::filesystem::path("data") / "mock_frames";
         captureService_->setCameraFactory([options]() mutable
@@ -760,6 +781,7 @@ namespace backend
         selectedMvCameraIndex_ = -1;
         lastMindVisionConfigPath_.clear();
         mockCameraConfigured_ = false;
+        effectiveCameraSource_ = "egrabber";
 
         captureService_->setCameraFactory([interfaceIndex, deviceIndex]()
                                           { return std::make_unique<::camera::common::EGrabberCamera>(interfaceIndex, deviceIndex); });
@@ -777,11 +799,14 @@ namespace backend
         selectedDevIndex_ = -1;
         selectedLabel_ = label;
         mockCameraConfigured_ = false;
+        requestedCameraSource_ = "mindvision";
+        cameraFallbackReason_.clear();
 
 #if MIB_HAS_MINDVISION
         const std::string configPath = lastMindVisionConfigPath_;
         captureService_->setCameraFactory([cameraIndex, configPath]()
                                           { return std::make_unique<::camera::common::MindVisionCamera>(cameraIndex, configPath); });
+        effectiveCameraSource_ = "mindvision";
 #else
         SPDLOG_WARN("MindVision camera selection requested but MindVision SDK is unavailable; falling back to mock camera");
         ::camera::mock::MockCameraOptions options;
@@ -790,6 +815,8 @@ namespace backend
                                           { return std::make_unique<::camera::mock::MockCamera>(options); });
         lastMindVisionConfigPath_.clear();
         mockCameraConfigured_ = false;
+        effectiveCameraSource_ = "mock";
+        cameraFallbackReason_ = "MindVision SDK is unavailable in this build";
 #endif
 
         auto &mirror = backend::diagnostics::CrashStateMirror::instance();
@@ -898,6 +925,23 @@ namespace backend
         SPDLOG_INFO("Resetting camera {}", selectedLabel_);
         return cameraControlService_->deviceReset(selectedIfIndex_, selectedDevIndex_, errorOut);
     }
+
+    app::CameraSourceInfo AppBackend::cameraSourceInfo() const
+    {
+        app::CameraSourceInfo info;
+        info.requested = requestedCameraSource_;
+        info.effective = effectiveCameraSource_;
+        info.label = selectedLabel_;
+        info.simulated = effectiveCameraSource_ == "mock";
+        info.fallback = !cameraFallbackReason_.empty() ||
+                        (requestedCameraSource_ != "unknown" && requestedCameraSource_ != effectiveCameraSource_);
+        info.fallbackReason = cameraFallbackReason_;
+        if (info.fallback && info.fallbackReason.empty())
+            info.fallbackReason = "requested " + requestedCameraSource_ + " but " + effectiveCameraSource_ + " is configured";
+        return info;
+    }
+
+    app::ExperimentCoordinator &AppBackend::experiment() { return *experimentCoordinator_; }
 
     bool AppBackend::isCameraConfigured() const
     {

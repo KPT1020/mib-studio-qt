@@ -22,8 +22,26 @@
   writes the phase/failure text to the status label. The Preview page's
   `PlaybackPanel::captureToggleRequested` (Space) is wired to
   `requestToggle()` (issue #360).
-- `onStartExperiment` / `onStopExperiment` — drive
-  [[Controllers]] `ExperimentController`. Start now blocks with an explicit
+- `onStartExperiment` / `onStopExperiment` — Start is a backend
+  transaction (issue #369, [[../architecture/ExperimentCoordinator]]):
+  a destination-less preflight (`evaluateReadiness()`) first; any blocking
+  gate other than `storage.output` is explained by `explainReadiness()`
+  (status, reason, remediation per gate; when the only blocker is
+  `lifecycle.fault` the dialog offers "Acknowledge fault and re-check",
+  which calls `clearUnresolvedFault()`). Then the LatestFrame
+  acknowledgement, the file dialog, a final `evaluateReadiness(path)` and
+  `start()` with **that** generation. Outcomes are typed: `Started` (status
+  bar says "(simulated camera)" for a mock run), `StaleReadiness` ("the
+  configuration changed … start again"), `NotReady` (gate dialog),
+  `StorageFailed` / `ProvenanceFailed` (critical), `AlreadyActive` / `Busy`.
+  The window no longer opens the HDF5 file, initializes datasets, sets the
+  accounting context or calls `startExperiment()` itself; the coordinator
+  does all of that inside the transaction and `experimentStartTimeNs_`
+  comes from the frozen snapshot. Stop still flushes / writes experiment
+  info, accounting and acquisition provenance and closes the file, then
+  calls `finish()`; a flush or metadata failure is reported to the
+  coordinator as an unresolved fault so the next Start is blocked until
+  acknowledged. Start blocks with an explicit
   acknowledgement when `CaptureService::activeDeliveryMode()` is
   `LatestFrame`: "Switch to Every Frame" (default; routes through
   `ConnectTab::setDeliveryMode`, i.e. the same setConfig + persist path as
@@ -33,7 +51,11 @@
   risk of metadata writes invalidating already-persisted frame batches. When
   multi-image is enabled and realtime mode is `async_batch`, start now
   temporarily switches processing to `inline` for the experiment so series
-  frames are actually captured and reviewable; stop restores the prior mode.
+  frames are actually captured and reviewable; stop (and every refused
+  Start) restores the prior mode via `restoreRealtimeModeIfNeeded()`.
+  The constructor records the application identity
+  (`MIB_STUDIO_QT_VERSION_FULL`, OS/arch) in the coordinator so every frozen
+  run snapshot carries it.
 - `onUpdateStats` — timer tick; pulls `CaptureStats`, count-only
   `ProcessingService::getBufferedFrameCounts()`, and autofocus state for the
   status bar/sidebar. It must not copy full `ProcessedFrame` buffers on the

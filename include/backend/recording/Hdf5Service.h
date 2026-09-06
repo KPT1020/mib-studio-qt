@@ -157,6 +157,12 @@ public:
     bool writeRunAccounting(const backend::recording::RecordingAccountingSnapshot& accounting);
     bool readRunAccounting(backend::recording::RecordingAccountingSnapshot& accounting) const;
 
+    // Frozen run configuration snapshot + readiness evaluation (issue #369),
+    // stored as JSON attributes on the /run_provenance group. Written at Start
+    // (before the run may be considered complete); readable from Review.
+    bool writeRunSnapshotJson(const std::string& runSnapshotJson, const std::string& readinessJson);
+    bool readRunSnapshotJson(std::string& runSnapshotJson, std::string* readinessJson = nullptr) const;
+
     // Acquisition time/telemetry provenance (issue #368, `timestamp_schema_version`
     // = 1): the session's TimestampDescriptor (what `timestampNs` really holds)
     // and the final per-metric telemetry with validity, as `timestamp_*` /

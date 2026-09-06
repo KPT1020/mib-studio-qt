@@ -322,6 +322,31 @@ current/max queue depth, batch size, worker count, and running state. See
   `startExperiment()` (MainWindow does). Frame counts are separate from
   `objectsDetected`. Guard: `processing.experiment_accounting`.
 
+## Background identity + bounded calibration (issue #369)
+
+- `backgroundGeneration()` increments on **every** background publication or
+  clear (`setRealtimeBackgroundGray`, auto-capture, calibration); 0 = never
+  set. `backgroundSha256()` hashes the active background bytes. Both feed the
+  [[../architecture/ExperimentCoordinator]] invalidation key and the frozen
+  run snapshot, so a background change after preflight is a stale Start.
+- `startBackgroundCalibration(BackgroundCalibrationRequest{requiredAccepted
+  = 10, maxAttempts = 200, timeoutMs = 5000})` turns background sampling into
+  a **finite, cancellable operation** on the realtime path: the recipe
+  (config version) is frozen; each realtime frame outcome is observed
+  (`noteRealtimeOutcome` / `noteRealtimeValidation` → `bgCalObserve`), empty
+  frames are accepted into a `CV_64F` mean, non-empty frames are counted as
+  `rejectedNonEmpty` (contamination), failures as
+  `rejectedProcessingFailed`. It ends with exactly one
+  `BackgroundCalibrationState`: `Succeeded` (candidate published atomically
+  under `rtMutex_`, new generation + sha), `FailedInsufficient`
+  (`maxAttempts` reached), `FailedTimeout` (also detected lazily by
+  `backgroundCalibrationStatus()` so a stalled source never looks Running
+  forever), `FailedProcessing` (config changed mid-operation), or
+  `Cancelled`. The previous background stays active on every non-success
+  path. `startBackgroundCalibration` refuses when realtime is not running or
+  another calibration is active; the UI entry point is the Preview canvas
+  context menu ([[../frontend/PreviewPage]]).
+
 ## Gotchas
 
 - **The kernel seam (`IProcessingKernel`) now owns the science decisions:**

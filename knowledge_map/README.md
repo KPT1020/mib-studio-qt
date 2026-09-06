@@ -10,6 +10,7 @@ following `[[WikiLinks]]`. If you are a new agent, start here:
 - [[architecture/_MOC|Architecture MOC]]
 - [[architecture/Overview]] — layered design (frontend → backend → services)
 - [[architecture/AppBackend]] — composition root
+- [[architecture/ExperimentCoordinator]] — experiment readiness gates + frozen run snapshot
 - [[architecture/Threading-Model]]
 - [[architecture/Data-Flow]]
 
