@@ -19,6 +19,8 @@ namespace frontend { class ConnectTab; }
 namespace frontend { class AutoUpdater; }
 namespace frontend { class SidebarWidget; }
 namespace frontend { class DeviceInitManager; }
+namespace frontend { class CameraController; }
+namespace frontend { struct CameraActionState; }
 namespace Ui { class MainWindow; }
 
 class MainWindow : public QMainWindow {
@@ -38,6 +40,12 @@ private slots:
     void onUpdateStats();
     void onTabChanged(int index);
     void onNoCamerasFound();
+    void onCameraStateChanged(const frontend::CameraActionState& state);
+
+public:
+    // Single authoritative camera command path (issue #360). Every camera
+    // Start/Stop presentation in the application dispatches through it.
+    frontend::CameraController* cameraController() const { return cameraController_; }
 
 private:
     void updateExperimentButtonStates();
@@ -61,6 +69,7 @@ private:
     frontend::AutoUpdater* updater_ = nullptr;
     frontend::SidebarWidget* sidebarWidget_ = nullptr;
     frontend::DeviceInitManager* initManager_ = nullptr;
+    frontend::CameraController* cameraController_ = nullptr;
     QSplitter* mainSplitter_ = nullptr;
     uint64_t experimentStartTimeNs_{0};
     bool experimentActive_{false};

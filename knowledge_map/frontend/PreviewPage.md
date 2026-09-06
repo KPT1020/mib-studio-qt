@@ -12,7 +12,14 @@
 ## Responsibility
 
 - Host the `PlaybackPanel` widget (see [[System-Utilities]]) for live + scrub
-  display with ROI drawing and overlay modes (mask, contours, both).
+  display with ROI drawing and overlay modes (mask, contours, both). The panel
+  is the direct, only child of `overlayContainer` (`QVBoxLayout`, zero
+  margins): the former centered "▶ Play / ■ Stop" `QStackedLayout` overlay,
+  its 300 ms polling timer and its direct `CaptureService::start()/stop()`
+  calls were removed in issue #360 — they bypassed the experiment guard and
+  covered the image. Camera Start/Stop lives in the main-window chrome
+  through [[Controllers]] `CameraController`; the Space-bar toggle in the
+  panel emits `captureToggleRequested` for [[MainWindow]] to route there.
 - Wire an `AppConfigWatcher` to pick up external JSON config changes
   (see `docs/howto/live-config-reload.md`).
 - Bridge UI events (ROI changes, overlay toggles, zoom fit) to

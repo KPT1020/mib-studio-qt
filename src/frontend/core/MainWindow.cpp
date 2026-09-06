@@ -41,6 +41,7 @@
 #include "backend/playback/PlaybackService.h"
 #include "backend/services/AutofocusService.h"
 #include "frontend/system/PlaybackPanel.h"
+#include "frontend/controllers/CameraController.h"
 #include "frontend/tabs/ConnectTab.h"
 #include "frontend/tabs/PreviewPage.h"
 #include "frontend/tabs/HdfReviewTab.h"
@@ -333,10 +334,33 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         }, Qt::QueuedConnection);
     });
 
-    // Camera buttons will be added to main tab bar corner widget, not toolbar
-    auto *startCaptureAct = new QAction("Start Camera", this);
-    auto *stopCaptureAct = new QAction("Stop Camera", this);
-    
+    // One camera command path for every presentation (issue #360). The
+    // operation guard is a read-only view of the experiment/recording/flush
+    // ownership held by this window; the controller consults it on every
+    // stop request, including direct dispatch.
+    cameraController_ = new frontend::CameraController(backend_, this);
+    cameraController_->setOperationGuard([this]() {
+        frontend::CameraOperationBlock block;
+        if (experimentActive_) {
+            block.blocked = true;
+            block.reason = tr("Cannot stop camera while an experiment is active. Stop the experiment first.");
+        } else if (flushInProgress_) {
+            block.blocked = true;
+            block.reason = tr("Cannot stop camera while experiment data is being saved. Wait for the save to finish.");
+        } else if (backend_.isFrameRecording()) {
+            block.blocked = true;
+            block.reason = tr("Cannot stop camera while frame recording is active. Stop recording first.");
+        }
+        return block;
+    });
+    connect(cameraController_, &frontend::CameraController::stateChanged,
+            this, &MainWindow::onCameraStateChanged);
+    connect(cameraController_, &frontend::CameraController::commandFailed, this,
+            [this](const QString& message) {
+                statusLabel_->setText(message);
+                QMessageBox::warning(this, tr("Camera"), message);
+            });
+
     // Experiment buttons and indicator will be added to Experiment tab, not toolbar
     startExperimentAct_ = new QAction("Start Experiment", this);
     stopExperimentAct_ = new QAction("Stop Experiment", this);
@@ -345,8 +369,6 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     backend_.processing().setInvalidFrameSamplingRate(200);
     backend_.processing().setFlushInterval(200);
 
-    connect(startCaptureAct, &QAction::triggered, this, &MainWindow::onStartCapture);
-    connect(stopCaptureAct, &QAction::triggered, this, &MainWindow::onStopCapture);
     connect(startExperimentAct_, &QAction::triggered, this, &MainWindow::onStartExperiment);
     connect(stopExperimentAct_, &QAction::triggered, this, &MainWindow::onStopExperiment);
 
@@ -412,6 +434,10 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     if (previewPage) {
         PlaybackPanel* playbackPanel = previewPage->getPlaybackPanel();
         if (playbackPanel) {
+            // Space-bar toggle in the preview goes through the same guarded
+            // command path as the chrome buttons (issue #360).
+            connect(playbackPanel, &PlaybackPanel::captureToggleRequested, this,
+                    [this]() { cameraController_->requestToggle(); });
             if (sidebarWidget_) {
                 connect(playbackPanel, &PlaybackPanel::backgroundImageSet,
                         sidebarWidget_, &frontend::SidebarWidget::updateBackgroundPreview);
@@ -628,11 +654,27 @@ void MainWindow::setupCornerWidgets() {
     cameraControlsLayout->setContentsMargins(5, 0, 5, 0);
     cameraControlsLayout->setSpacing(5);
     
-    // Create push buttons and connect them to actions
-    startCameraBtn_ = new QPushButton("Start Camera", cameraControlsWidget);
-    stopCameraBtn_ = new QPushButton("Stop Camera", cameraControlsWidget);
-    connect(startCameraBtn_, &QPushButton::clicked, this, &MainWindow::onStartCapture);
-    connect(stopCameraBtn_, &QPushButton::clicked, this, &MainWindow::onStopCapture);
+    // Buttons are pure presentations of the controller's shared actions:
+    // text/enabled/tooltip follow the action, clicks trigger the action.
+    QAction* startAct = cameraController_->startAction();
+    QAction* stopAct = cameraController_->stopAction();
+    startCameraBtn_ = new QPushButton(startAct->text(), cameraControlsWidget);
+    startCameraBtn_->setObjectName(QStringLiteral("startCameraBtn"));
+    stopCameraBtn_ = new QPushButton(stopAct->text(), cameraControlsWidget);
+    stopCameraBtn_->setObjectName(QStringLiteral("stopCameraBtn"));
+    connect(startCameraBtn_, &QPushButton::clicked, startAct, &QAction::trigger);
+    connect(stopCameraBtn_, &QPushButton::clicked, stopAct, &QAction::trigger);
+    auto bindButton = [](QPushButton* button, QAction* action) {
+        button->setEnabled(action->isEnabled());
+        button->setToolTip(action->toolTip());
+        QObject::connect(action, &QAction::changed, button, [button, action]() {
+            button->setEnabled(action->isEnabled());
+            button->setToolTip(action->toolTip());
+            button->setText(action->text());
+        });
+    };
+    bindButton(startCameraBtn_, startAct);
+    bindButton(stopCameraBtn_, stopAct);
     cameraControlsLayout->addWidget(startCameraBtn_);
     cameraControlsLayout->addWidget(stopCameraBtn_);
     
@@ -693,61 +735,56 @@ void MainWindow::updateTabStates()
 
 void MainWindow::onStartCapture()
 {
-    auto &cap = backend_.capture();
-    if (cap.isRunning())
+    // Thin wrapper kept for the screenshot tour and legacy callers: the
+    // controller owns guards, duplicate protection, and failure reporting.
+    const auto r = cameraController_->requestStart();
+    if (r.outcome == frontend::CameraCommandResult::Outcome::AlreadyInState)
     {
-        QMessageBox::information(this, tr("Start Camera"),
-                                 tr("Camera is already running."));
-        return;
-    }
-
-    // Guard: Cannot start camera unless a camera has been connected (hardware or mock)
-    if (!backend_.isCameraConfigured())
-    {
-        QMessageBox::warning(this, tr("Start Camera"),
-                             tr("No camera is configured. Please connect to a camera or configure a mock camera first."));
-        statusLabel_->setText("Camera not configured");
-        return;
-    }
-
-    // Start capture only (no experiment)
-    if (cap.start())
-    {
-        statsTimer_->start();
-        statusLabel_->setText("Camera running");
-    }
-    else
-    {
-        QMessageBox::warning(this, tr("Start Camera"),
-                             tr("Failed to start camera. Please check camera connection and try again."));
-        statusLabel_->setText("Camera start failed");
+        QMessageBox::information(this, tr("Start Camera"), r.message);
     }
 }
 
 void MainWindow::onStopCapture()
 {
-    auto &cap = backend_.capture();
-    if (!cap.isRunning())
+    const auto r = cameraController_->requestStop();
+    if (r.outcome == frontend::CameraCommandResult::Outcome::AlreadyInState)
     {
-        QMessageBox::information(this, tr("Stop Camera"),
-                                 tr("Camera is not currently running."));
-        return;
+        QMessageBox::information(this, tr("Stop Camera"), r.message);
+    }
+}
+
+void MainWindow::onCameraStateChanged(const frontend::CameraActionState& state)
+{
+    using Phase = frontend::CameraActionState::Phase;
+    // Stats sampling + flush scheduling (onUpdateStats) must run whenever a
+    // session is active, whichever route started it (issue #360: the old
+    // Preview overlay path never armed this timer).
+    const bool active = state.phase == Phase::Starting || state.phase == Phase::Running;
+    if (active && !statsTimer_->isActive())
+    {
+        statsTimer_->start();
+    }
+    else if (!active && statsTimer_->isActive() && !experimentActive_ && !flushInProgress_)
+    {
+        statsTimer_->stop();
     }
 
-    // Guard: During experiment cannot stop camera before stopping experiment
-    if (experimentActive_)
+    if (!statusLabel_) return;
+    switch (state.phase)
     {
-        QMessageBox::warning(this, tr("Stop Camera"),
-                             tr("Cannot stop camera while experiment is active. Please stop the experiment first."));
-        statusLabel_->setText("Cannot stop camera during experiment");
-        return;
+    case Phase::Failed:
+        statusLabel_->setText(state.failureMessage.isEmpty()
+                                  ? tr("Camera start failed")
+                                  : tr("Camera failed: %1").arg(state.failureMessage));
+        break;
+    case Phase::Idle:
+        // onUpdateStats stopped: leave the operator a definite state.
+        statusLabel_->setText(state.phaseText());
+        break;
+    default:
+        statusLabel_->setText(state.phaseText());
+        break;
     }
-
-    // Stop capture only (don't end experiment)
-    cap.stop();
-    statsTimer_->stop();
-    backend_.processing().resetRealtimeMetrics();
-    statusLabel_->setText("Camera stopped");
 }
 
 void MainWindow::onStartExperiment()
@@ -1438,16 +1475,18 @@ void MainWindow::onTabChanged(int index)
         return;
     }
 
-    // If camera was running, restart it
+    // If camera was running, restart it through the shared command path
+    // (applyCameraScriptFromFile is a documented backend transaction that
+    // stops capture itself; the restart is an ordinary start request).
     if (wasRunning) {
         SPDLOG_INFO("MainWindow::onTabChanged: Restarting camera after script application");
-        if (!backend_.capture().start()) {
-            SPDLOG_ERROR("MainWindow::onTabChanged: Failed to restart camera after script application");
-            statusLabel_->setText("Camera script applied, but restart failed");
+        const auto r = cameraController_->requestStart();
+        if (!r.accepted()) {
+            SPDLOG_ERROR("MainWindow::onTabChanged: Failed to restart camera after script application: {}",
+                         r.message.toStdString());
+            statusLabel_->setText(tr("Camera script applied, but restart failed: %1").arg(r.message));
         } else {
-            SPDLOG_INFO("MainWindow::onTabChanged: Camera restarted successfully");
-            statsTimer_->start();
-            statusLabel_->setText("Camera running");
+            SPDLOG_INFO("MainWindow::onTabChanged: Camera restart requested");
         }
     } else {
         SPDLOG_INFO("MainWindow::onTabChanged: Camera script applied (camera was not running)");

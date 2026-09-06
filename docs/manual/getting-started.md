@@ -33,7 +33,7 @@ The window is a fixed set of task tabs plus a collapsible sidebar:
 - **Experiment** — nested **Preview** and **Monitoring** pages, with
   **Start/Stop Experiment** buttons in the tab-bar corner.
 - **Review** — open and inspect recorded HDF5 files.
-- **Start Camera / Stop Camera** buttons sit in the corner of the main tab
+- **Start Live View / Stop Camera** buttons sit in the corner of the main tab
   bar and control frame acquisition regardless of the current tab.
 - **Left sidebar** (collapsible) — background image preview, capture
   statistics, nanopositioner controls, and syringe pump controls.

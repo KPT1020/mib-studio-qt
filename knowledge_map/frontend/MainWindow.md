@@ -12,8 +12,16 @@
 
 ## Slots and lifecycle
 
-- `onStartCapture` / `onStopCapture` — start/stop camera acquisition via
-  [[Controllers]] `CameraController`.
+- `onStartCapture` / `onStopCapture` — thin wrappers over the owned
+  [[Controllers]] `CameraController` (`cameraController()` accessor). The
+  controller's operation guard reads `experimentActive_`, `flushInProgress_`
+  and `AppBackend::isFrameRecording()`; its `commandFailed` signal shows the
+  warning dialog + status text, and `onCameraStateChanged` arms/disarms
+  `statsTimer_` for every route (the sampling/flush scheduling in
+  `onUpdateStats` no longer depends on which button started the camera) and
+  writes the phase/failure text to the status label. The Preview page's
+  `PlaybackPanel::captureToggleRequested` (Space) is wired to
+  `requestToggle()` (issue #360).
 - `onStartExperiment` / `onStopExperiment` — drive
   [[Controllers]] `ExperimentController`. Start now blocks with an explicit
   acknowledgement when `CaptureService::activeDeliveryMode()` is
@@ -80,7 +88,15 @@
 
 - `closeEvent` stops experiment services, then stops the capture service
   before the window destructs. Mis-ordering causes the stale `StreamModule`
-  stats seen in `docs/howto/safe-start-stop-egrabber.md`.
+  stats seen in `docs/howto/safe-start-stop-egrabber.md`. This and the
+  `applyCameraScriptFromFile`/`applyMindVisionConfigFromFile` internal stops
+  are the only camera stops that do not go through `CameraController`; both
+  are documented lifecycle transactions guarded by the experiment check
+  above, not user commands.
+- The corner **Start Live View / Stop Camera** buttons are pure
+  presentations of `cameraController()->startAction()/stopAction()`
+  (object names `startCameraBtn`/`stopCameraBtn`); do not attach separate
+  guard logic to them.
 - The destructor stops `statsTimer_` before `delete ui` to prevent timer
   callbacks from accessing backend_ on a partially-destroyed widget tree.
 - `experimentServicesActive_` must stay in sync with

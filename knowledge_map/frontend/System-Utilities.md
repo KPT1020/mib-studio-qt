@@ -69,6 +69,10 @@
 - **`PlaybackPanel`** — the scrub+preview widget used by [[PreviewPage]]
   and [[MainWindow]]. Owns a `QImage` display, ROI overlay, scrub slider,
   display-FPS throttle, and overlay mode (Off/Mask/Contours/Both).
+  - The Space-bar shortcut / key press does **not** start or stop capture
+    itself: `onToggleCapture()` emits `captureToggleRequested()`, which
+    [[MainWindow]] routes through its `CameraController` so the experiment
+    guard and duplicate-command protection apply to every route (issue #360).
   - Overlay cell color (blue=target / green=valid / red=invalid) only uses
     the live [[../services/ProcessingService]] `getLatestSnapshot()` while
     *following live*. When stopped/scrubbing/replaying buffered frames the

@@ -187,6 +187,22 @@ if(BUILD_TESTING)
         LABELS "frontend;processing"
         TIMEOUT 120
     )
+
+    # Issue #360: one guarded camera command path for every UI presentation.
+    add_executable(camera_action_state_test
+        ${PROJECT_SOURCE_DIR}/tests/frontend/camera_action_state_test.cpp
+    )
+    target_include_directories(camera_action_state_test PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+    target_link_libraries(camera_action_state_test PRIVATE mib_frontend_common)
+    set_target_properties(camera_action_state_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+        AUTOUIC OFF
+    )
+    add_test(NAME frontend.camera_action_state COMMAND $<TARGET_FILE:camera_action_state_test>)
+    set_tests_properties(frontend.camera_action_state PROPERTIES
+        LABELS "frontend;camera;safety"
+        TIMEOUT 120
+    )
 endif()
 
 set(MIB_STUDIO_QT_EXTRA_SOURCES)

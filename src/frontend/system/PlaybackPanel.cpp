@@ -923,16 +923,10 @@ void PlaybackPanel::onToggleFit()
 
 void PlaybackPanel::onToggleCapture()
 {
-    if (backend_.capture().isRunning())
-    {
-        SPDLOG_INFO("PlaybackPanel: stopping capture (Space)");
-        backend_.capture().stop();
-    }
-    else
-    {
-        SPDLOG_INFO("PlaybackPanel: starting capture (Space)");
-        backend_.capture().start();
-    }
+    // Presentation only: the authoritative command path (CameraController in
+    // MainWindow) decides whether a start/stop is allowed right now.
+    SPDLOG_INFO("PlaybackPanel: capture toggle requested (Space)");
+    emit captureToggleRequested();
 }
 
 static cv::Mat qimageToCvGrayClone(const QImage &img)

@@ -6,9 +6,14 @@ record an experiment to HDF5.
 
 ## Start the camera
 
-Click **Start Camera** (main tab-bar corner). Frames start streaming from
+Click **Start Live View** (main tab-bar corner). Frames start streaming from
 the connected camera (or the mock folder) and the status-bar statistics
 come alive. **Stop Camera** halts acquisition; statistics reset to zero.
+Both buttons, and the Space bar over the preview, go through one guarded
+command path: while an experiment is running or its data is being saved,
+every way of stopping the camera is refused with the same message until the
+experiment is stopped. A camera that fails to open or disconnects shows the
+backend's reason in the status bar and offers **Start Live View** again.
 
 ## Overview tab — frame the ROI
 

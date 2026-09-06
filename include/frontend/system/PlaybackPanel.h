@@ -46,6 +46,10 @@ public:
 
 signals:
     void backgroundImageSet(const QImage& image);
+    // Space-bar toggle. The panel never starts/stops capture itself (issue
+    // #360): MainWindow routes this through its CameraController so the
+    // experiment guard and duplicate-command protection always apply.
+    void captureToggleRequested();
 
 public slots:
     void onBackgroundAutoCaptured(const QImage& background, uint64_t frameIndex);
