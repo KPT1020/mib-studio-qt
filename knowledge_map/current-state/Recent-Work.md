@@ -5,6 +5,24 @@
 
 ## Features shipped
 
+- **Monitoring tune panel: criteria with units, dirty/conflict state,
+  fixed Apply/Revert, acknowledged apply path** (2026-09-07, issue #364 —
+  reliability release #371 phase 6d). New pure `ProcessingConfigDraft`
+  ([[../frontend/System-Utilities]]): exposed-field mapping (labels, units,
+  JSON paths), changed-field patches that never rewrite untouched
+  high-precision values, Refreshed/Unchanged/Conflict/Deferred external
+  baselines, single-flight apply lifecycle. [[../frontend/ExperimentMonitoringTab]]
+  regroups each criterion with its enable switch (checkable groups, full
+  names, µm²), separates *Cell acceptance filters* from *Target group /
+  sorting gate*, keeps Apply changes / Revert / state text in a footer
+  outside the scroll area, and fits 220–280 px. `AppConfigWatcher` gains
+  `applyProcessingDraft` (validate → fingerprint-checked, patch-only
+  QSaveFile write preserving unknown keys → runtime patch → read-back
+  confirmation; self-write echo recognised by fingerprint) replacing the
+  whole-section `writeBackProcessingConfig`; [[../frontend/MainWindow]] wires
+  request/result and raises `tune.conflict` / `tune.apply` alerts. Tests:
+  `frontend.config_draft`, `frontend.monitoring_tune`, `frontend.config_apply`.
+
 - **Run state, alerts and metrics separated; async experiment
   finalization** (2026-09-07, issue #363 — reliability release #371 phase
   6c). New `RunStatusModel`/`UiAlertModel` and `RunStatusWidget`/

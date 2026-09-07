@@ -72,6 +72,36 @@ backend's reason in the status bar and offers **Start Live View** again.
 - The top row also carries trigger bring-up controls (single and periodic
   test pulses) for commissioning a sorter.
 
+### Tune panel
+
+The panel on the right edits the acceptance criteria without leaving the
+page. Each criterion is one box with its own enable checkbox in the title
+and its values below it, named in full with units:
+
+| Group | Criteria |
+|---|---|
+| **Cell acceptance filters** | Area (µm²) min/max · Deformability min/max · Ring ratio min/max · Area ratio max · Border exclusion · Single inner contour |
+| **Target group / sorting gate** | Area (µm²) min/max · Deformability min/max — applied to valid cells only; selects which fire the sort trigger and never changes validity |
+| **Multi-image acquisition** | Record image series · Images per trigger |
+
+Unchecking a criterion greys out its values but keeps them visible, so you
+can see what it would use when re-enabled.
+
+Editing a value only changes the panel: the footer under the list reads
+*N unapplied changes*, changed rows are marked with `*`, and nothing is
+applied yet. **Apply changes** writes exactly those fields into the active
+configuration file and applies them to processing; the footer returns to
+*Applied* only once both have been confirmed. If the write fails the panel
+stays dirty and says why. **Revert** discards the edits and reloads the
+current configuration. The footer and its buttons never scroll out of
+view. Impossible ranges (minimum above maximum) are flagged under the
+state text and block Apply.
+
+If the configuration changes elsewhere (a profile switch, an edit in the
+Preview inspector or an external editor) while you have unapplied edits,
+the footer shows *Conflict* and an alert appears; your edits are kept until
+you click **Revert** to load the new values.
+
 ## Settings dialogs
 
 ![Processing Settings dialog](images/dialog-processing-settings.png)

@@ -545,6 +545,23 @@ set_target_properties(config_document_state_test PROPERTIES RUNTIME_OUTPUT_DIREC
 add_test(NAME frontend.config_document_state COMMAND $<TARGET_FILE:config_document_state_test>)
 set_tests_properties(frontend.config_document_state PROPERTIES LABELS "frontend;utility;safety" TIMEOUT 30)
 
+# Issue #364: pure processing tune-panel draft model (field mapping, patch
+# precision, dirty/conflict/apply lifecycle). QtCore + the Qt-free backend
+# types only.
+add_executable(processing_config_draft_test
+    ${PROJECT_SOURCE_DIR}/tests/frontend/processing_config_draft_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/frontend/models/ProcessingConfigDraft.cpp
+)
+target_include_directories(processing_config_draft_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+    ${OpenCV_INCLUDE_DIRS}
+)
+target_link_libraries(processing_config_draft_test PRIVATE Qt6::Core mib_processing)
+set_target_properties(processing_config_draft_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
+add_test(NAME frontend.config_draft COMMAND $<TARGET_FILE:processing_config_draft_test>)
+set_tests_properties(frontend.config_draft PROPERTIES LABELS "frontend;utility;safety" TIMEOUT 30)
+
 # Issue #363: pure run-state / alert model semantics (QtCore only; automoc for the QObject header).
 add_executable(run_status_model_test
     ${PROJECT_SOURCE_DIR}/tests/frontend/run_status_model_test.cpp

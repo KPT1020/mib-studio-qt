@@ -107,6 +107,7 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/src/frontend/system/ConfigDocumentStore.cpp
     ${PROJECT_SOURCE_DIR}/src/frontend/models/RunStatusModel.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/models/RunStatusModel.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/models/ProcessingConfigDraft.cpp
     ${PROJECT_SOURCE_DIR}/src/frontend/widgets/RunStatusWidget.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/widgets/RunStatusWidget.h
     ${PROJECT_SOURCE_DIR}/src/frontend/widgets/AlertBanner.cpp
@@ -258,6 +259,24 @@ if(BUILD_TESTING)
     add_test(NAME frontend.run_status_ui COMMAND $<TARGET_FILE:run_status_ui_test>
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(frontend.run_status_ui PROPERTIES LABELS "frontend;layout;safety" TIMEOUT 240)
+
+    # Issue #364: Monitoring tune panel (criteria grouping, dirty/conflict
+    # state, fixed footer, compact widths) and the acknowledged apply path.
+    add_executable(monitoring_tune_panel_test ${PROJECT_SOURCE_DIR}/tests/frontend/monitoring_tune_panel_test.cpp)
+    target_include_directories(monitoring_tune_panel_test PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+    target_link_libraries(monitoring_tune_panel_test PRIVATE mib_frontend_common)
+    set_target_properties(monitoring_tune_panel_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" AUTOUIC OFF)
+    add_test(NAME frontend.monitoring_tune COMMAND $<TARGET_FILE:monitoring_tune_panel_test>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(frontend.monitoring_tune PROPERTIES LABELS "frontend;layout;safety" TIMEOUT 240)
+
+    add_executable(app_config_apply_test ${PROJECT_SOURCE_DIR}/tests/frontend/app_config_apply_test.cpp)
+    target_include_directories(app_config_apply_test PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+    target_link_libraries(app_config_apply_test PRIVATE mib_frontend_common)
+    set_target_properties(app_config_apply_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" AUTOUIC OFF)
+    add_test(NAME frontend.config_apply COMMAND $<TARGET_FILE:app_config_apply_test>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(frontend.config_apply PROPERTIES LABELS "frontend;safety" TIMEOUT 240)
 endif()
 
 set(MIB_STUDIO_QT_EXTRA_SOURCES)

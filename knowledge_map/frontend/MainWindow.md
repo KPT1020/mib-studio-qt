@@ -169,10 +169,12 @@ created in `setupStatusSurfaces()`:
 - `QFutureWatcher<size_t> flushWatcher_` — awaits a round-robin HDF5 flush
   without blocking the UI thread; `QFutureWatcher<bool> finalizeWatcher_`
   awaits the stop-time drain.
-- The nested Experiment pages wire Monitoring apply into
-  `AppConfigWatcher::writeBackProcessingConfig()`, which now emits a direct
-  config-change signal after persistence so Preview and Monitoring refresh
-  without waiting for a filesystem watcher round-trip.
+- The nested Experiment pages wire the Monitoring tune panel's
+  `applyRequested` to `AppConfigWatcher::onApplyProcessingDraft` and its
+  `processingDraftApplied` result back to `onApplyResult` (issue #364, one
+  acknowledged apply/persist path); `configFileChanged` refreshes the
+  panel's baseline with the watcher's document fingerprint. The panel's
+  `tuneStateChanged` drives the `tune.conflict` / `tune.apply` alerts.
 
 ## Menu bar
 

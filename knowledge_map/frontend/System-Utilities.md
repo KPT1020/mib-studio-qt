@@ -9,11 +9,27 @@
 
 - **`AppConfigWatcher`** — `QFileSystemWatcher` over an external JSON
   config. Reloads config and propagates to
-  [[../services/ProcessingService]] / [[ConfigTabs]] on change. Monitoring
-  apply now writes the full supported `ProcessingConfig` back to the active
-  config file and emits `configFileChanged` immediately so Preview and
-  Monitoring refresh without waiting for watcher feedback. See
+  [[../services/ProcessingService]] / [[ConfigTabs]] on change. See
   `docs/howto/live-config-reload.md`.
+  **Acknowledged apply path (issue #364):**
+  `applyProcessingDraft(ApplyProcessingDraftRequest)` → `ConfigApplyResult`
+  (slot `onApplyProcessingDraft` + signal `processingDraftApplied`). It
+  validates the merged result (inverted ranges refused), reads the document,
+  refuses with `conflict` when the request's `baselineFingerprint` or the
+  watcher's own `documentFingerprint()` differs from what is on disk (an
+  external edit not yet reloaded is retained, never overwritten), writes
+  **only the patched keys** through `ConfigDocumentStore::writeText`
+  (unknown keys, other sections and untouched high-precision values are
+  preserved), then applies the same patch to `ProcessingService` and
+  reports `persisted` / `applied` separately (`applied` = read-back
+  matches). Nothing is written for an empty patch, a missing/directory
+  path or malformed JSON. A successful write updates the document
+  fingerprint and emits one queued `configFileChanged`; `onFileChanged`
+  skips events whose on-disk fingerprint equals the loaded document (the
+  self-write echo), so nothing is applied or broadcast twice.
+  `writeBackCameraConfig` uses the same checked store. The old
+  `writeBackProcessingConfig` (rewrite the whole section from runtime) is
+  gone. Guard: `frontend.config_apply`.
   On startup, when the app-managed `config.json` already exists,
   `mergeNewDefaultsIntoConfig` deep-merges any keys added to the bundled
   `:/defaults/config.json` by a newer build into the existing file
@@ -101,6 +117,22 @@
   `overflowDropped()` counter that never drops an unresolved error/critical.
   Consumed by [[MainWindow]]. Guard: `frontend.run_status_model` (pure,
   Qt Core only).
+- **`ProcessingConfigDraft`** (`ProcessingConfigDraft.h`, issue #364) —
+  pure draft model for the Monitoring tune panel: `TuneField` enumerates
+  the 20 exposed fields with full label, unit, display decimals, group
+  (Acceptance / TargetGroup / MultiImage) and JSON path
+  (`image_processing/...`); `readTuneField`/`writeTuneField`,
+  `tuneValuesEqual` (equality at display precision), `ProcessingConfigPatch`
+  + `applyTunePatch` / `applyTunePatchToJson` / `tunePatchSatisfiedBy`,
+  `validateTuneConfig`. The draft holds baseline + draft + changed-field
+  set: `setField` (no-op for a re-typed displayed value; restores the exact
+  baseline), `patch()` of changed fields only, `noteExternalBaseline` →
+  Refreshed / Unchanged / Conflict / Deferred, `revert`, and the apply
+  lifecycle `beginApply` (request id; 0 when clean/invalid/conflict/busy) →
+  `completeApply(ConfigApplyResult)` (stale ids ignored; clean only on
+  persisted && applied; "saved, not applied" explicit) / `failApply`.
+  `stateText()` is the footer text. Also defines the request/result
+  contract used by `AppConfigWatcher`. Guard: `frontend.config_draft`.
 
 ## Utils (`src/frontend/utils/`)
 

@@ -538,11 +538,41 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         });
     }
 
-    // Sync tune panel <-> config table bidirectionally
-    connect(monitoringTab, &frontend::ExperimentMonitoringTab::processingConfigApplied,
-            previewPage->getConfigWatcher(), &frontend::AppConfigWatcher::writeBackProcessingConfig);
-    connect(previewPage->getConfigWatcher(), &frontend::AppConfigWatcher::configFileChanged,
-            monitoringTab, &frontend::ExperimentMonitoringTab::loadCurrentConfig);
+    // Issue #364: one acknowledged apply/persist path for the Monitoring tune
+    // panel. The panel asks the config watcher (request), the watcher writes
+    // the patched keys through the checked document store, applies the same
+    // patch to the processing service and answers with a result; the panel
+    // clears Dirty only on a confirmed result. File changes (external or our
+    // own, once) refresh the panel's baseline with the document fingerprint.
+    {
+        auto* configWatcher = previewPage->getConfigWatcher();
+        connect(monitoringTab, &frontend::ExperimentMonitoringTab::applyRequested,
+                configWatcher, &frontend::AppConfigWatcher::onApplyProcessingDraft);
+        connect(configWatcher, &frontend::AppConfigWatcher::processingDraftApplied,
+                monitoringTab, &frontend::ExperimentMonitoringTab::onApplyResult);
+        connect(configWatcher, &frontend::AppConfigWatcher::configFileChanged, monitoringTab,
+                [monitoringTab, configWatcher](const QString&) { monitoringTab->loadCurrentConfig(configWatcher->documentFingerprint()); });
+        // Conflicts and failed applies are actionable alerts (issue #363).
+        connect(monitoringTab, &frontend::ExperimentMonitoringTab::tuneStateChanged, this, [this, monitoringTab]() {
+            if (!alertModel_) return;
+            const auto& draft = monitoringTab->tuneDraft();
+            if (draft.conflict()) {
+                alertModel_->raise(QStringLiteral("tune.conflict"), frontend::AlertSeverity::Warning,
+                                   tr("The processing configuration changed elsewhere while the Monitoring tune panel has unapplied edits."),
+                                   tr("Revert in the tune panel to load the new values, then re-enter your edits."));
+            } else {
+                alertModel_->resolve(QStringLiteral("tune.conflict"));
+            }
+            if (!draft.applying() && !draft.lastError().isEmpty()) {
+                alertModel_->raise(QStringLiteral("tune.apply"), frontend::AlertSeverity::Error,
+                                   tr("Processing criteria were not applied: %1").arg(draft.lastError()),
+                                   draft.savedNotApplied() ? tr("The file was updated but processing reports different values; Revert and check the configuration.")
+                                                           : tr("Fix the reported problem and click Apply changes again."));
+            } else if (!draft.applying()) {
+                alertModel_->resolve(QStringLiteral("tune.apply"));
+            }
+        });
+    }
 
     // Delivery mode: combo change -> persist to active profile + refresh badge;
     // config (re)load -> reflect in combo + badge without re-persisting.
