@@ -17,6 +17,14 @@
   `readImageByIndex` / `readImagesRange` (hyperslab reads — bounded memory).
 - Display metrics in a `QTableView` backed by `HdfMetricsModel`.
 - Optional charts: scatter + histograms over the saved dataset.
+- **Bounded file row** (issue #358): the `.ui` file row is now two rows
+  (`fileRowLayout`: Select/Close/Export Metrics/Export All + a native
+  **More…** `QToolButton` menu holding Batch Metrics, Batch Export All,
+  Export Charts and Regenerate masks — the original buttons stay as hidden
+  enable-state owners mirrored by `updateSecondaryActionState()`;
+  `fileInfoRowLayout`: overlay combo, legend, ROI check, elided path
+  (`ElidingLabel`, `setFilePathText`) and status). The thumbnail scroll
+  areas no longer carry a 400 px minimum width.
 - **Exports run as one asynchronous job at a time** (issue #344): every
   export button builds a `backend::recording::HdfExportRequest` on the GUI
   thread (series-range prompt, chart snapshots rendered into `cv::Mat`s via

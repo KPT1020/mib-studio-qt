@@ -46,6 +46,9 @@ class QScatterSeries;
 class QLineSeries;
 class QValueAxis;
 class QProgressDialog;
+class QToolButton;
+class QAction;
+namespace frontend { class ElidingLabel; }
 template<typename T> class QFutureWatcher;
 #if __has_include(<QHistogramSeries>)
 class QHistogramSeries;
@@ -128,6 +131,11 @@ namespace frontend
             QStringList failures;
         };
         bool exportInProgress() const { return exportWatcher_ != nullptr; }
+        // Issue #358: bounded file row — secondary actions live in a native
+        // "More" menu, the path is elided (full value in tooltip/copy).
+        void setupBoundedFileRow();
+        void updateSecondaryActionState();
+        void setFilePathText(const QString& text);
         bool beginExportJob(backend::recording::HdfExportRequest request, const QString& title,
                             std::function<void(const backend::recording::HdfExportResult&)> onDone);
         void onExportProgress(const backend::recording::HdfExportProgress& progress);
@@ -198,6 +206,12 @@ namespace frontend
         backend::recording::HdfExportCancelToken exportCancel_;
         std::function<void(const backend::recording::HdfExportResult&)> exportDone_;
         std::unique_ptr<BatchExportState> batch_;
+        QToolButton* moreActionsBtn_ = nullptr;
+        QAction* batchMetricsAct_ = nullptr;
+        QAction* batchAllAct_ = nullptr;
+        QAction* exportChartsAct_ = nullptr;
+        QAction* regenerateMasksAct_ = nullptr;
+        frontend::ElidingLabel* filePathLabel_ = nullptr;
 
         static constexpr int THUMBNAIL_SIZE = 128;
         static constexpr int GRID_COLUMNS = 5;

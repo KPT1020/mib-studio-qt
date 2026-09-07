@@ -5,6 +5,22 @@
 
 ## Features shipped
 
+- **Viewport-safe layout + single-owner sidebar** (2026-09-07, issues #358
+  and #359 — reliability release #371 phase 6a). New `ElidingLabel` and pure
+  `WindowGeometryPolicy` ([[../frontend/System-Utilities]]); one
+  window-geometry restore/validate/save path in [[../frontend/MainWindow]]
+  (`Window/*` versioned settings, removed-monitor recovery, coalesced
+  screen-change fit, no unconditional resize in `main.cpp`); the main
+  splitter is the sole owner of the hardware panel width (preference in
+  `Sidebar/*` v1, migrated from the legacy keys; drag→collapse→expand
+  restores the width; narrow windows clamp/compact/hide-for-space without
+  resizing the window; stable `hardwarePanelAct`/`hardwarePanelBtn` reopen
+  control, `Ctrl+Shift+H`); status text elided; Review file row split with a
+  **More…** menu and elided path ([[../frontend/HdfReviewTab]]); screenshot
+  tour asserts actual geometry and adds `sidebar-collapsed`
+  ([[../frontend/Screenshot-Tour]]). Tests: `frontend.window_geometry_policy`,
+  `frontend.ui_layout`.
+
 - **Exporter stability: bounded memory, transactional output,
   deterministic worker lifecycle, 50-run soak** (2026-09-07, issue #344 —
   reliability release #371 phase 5). Python: new `scripts/hdf_export_engine.py`

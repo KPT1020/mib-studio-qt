@@ -98,6 +98,23 @@ tested by `tests/frontend/update_catalog_test.cpp`), `OverlayRenderer`,
 `RoiManager`, `SidebarWidget`, `SimpleImageCanvas`, `StatisticsPanel`,
 `StatsDisplayManager`.
 
+- **`SidebarWidget`** — content-only hardware panel (issue #359): background
+  preview, `StatisticsPanel`, `NanopositionerTab`, `SyringePumpTab` in one
+  scroll area (both scrollbars as needed). Shrinkable size policy, compact
+  floor 160 px; no toggle button, no width/visibility persistence — the
+  main window's splitter owns geometry (see [[MainWindow]]).
+- **`ElidingLabel`** — `QLabel` whose painted text is elided (`ElideMiddle`
+  by default) while `fullText()`/tooltip/accessible description keep the
+  value and a context menu copies it; `minimumSizeHint` depends on a fixed
+  number of characters, `sizeHint` is bounded (≈60 chars). Use it for paths,
+  profile names and status strings (issue #358).
+- **`WindowGeometryPolicy`** — pure, QApplication-free decisions in
+  device-independent pixels: `chooseScreen`, `clampToAvailable`,
+  `defaultWindowRect`, `resolveWindowGeometry` (version/validity/removed
+  monitor), `fitSidebarWidth` (preferred vs compact vs does-not-fit with the
+  640 px workspace floor), `sanitizeSidebarPreferredWidth`. Constants:
+  minimum window 900x560, default 1280x800, sidebar 200–1000 (default 300,
+  compact 160).
 - **`ApplicationSettings`** — establishes the stable `MIB Studio` /
   `MIB Studio Qt` identity before any default `QSettings` access. Its one-time,
   versioned migration copies every missing user key from the former

@@ -103,7 +103,10 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/BackgroundPreviewWidget.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/BackgroundPreviewWidget.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/SidebarWidget.cpp
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/ElidingLabel.cpp
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/WindowGeometryPolicy.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/SidebarWidget.h
+    ${PROJECT_SOURCE_DIR}/include/frontend/utils/ElidingLabel.h
     # Models
     ${PROJECT_SOURCE_DIR}/src/frontend/models/HdfMetricsModel.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/models/HdfMetricsModel.h
@@ -202,6 +205,26 @@ if(BUILD_TESTING)
     set_tests_properties(frontend.camera_action_state PROPERTIES
         LABELS "frontend;camera;safety"
         TIMEOUT 120
+    )
+
+    # Issues #358/#359: full-widget layout harness (viewport matrix, sidebar
+    # single-owner geometry, window restoration). Offscreen; the available
+    # desktop is injected explicitly, so it never depends on the platform
+    # screen size.
+    add_executable(ui_layout_test
+        ${PROJECT_SOURCE_DIR}/tests/frontend/ui_layout_test.cpp
+    )
+    target_include_directories(ui_layout_test PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+    target_link_libraries(ui_layout_test PRIVATE mib_frontend_common)
+    set_target_properties(ui_layout_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+        AUTOUIC OFF
+    )
+    add_test(NAME frontend.ui_layout COMMAND $<TARGET_FILE:ui_layout_test>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(frontend.ui_layout PROPERTIES
+        LABELS "frontend;layout;safety"
+        TIMEOUT 300
     )
 endif()
 

@@ -71,6 +71,44 @@
 - EGrabber JavaScript camera scripts are skipped during `onTabChanged` when
   a MindVision camera is selected.
 
+## Window geometry and the hardware panel (issues #358, #359)
+
+- **One geometry restoration path.** The constructor ends with
+  `restoreWindowGeometry()`: `Window/LayoutVersion` + `Window/Rect`
+  (+ `Window/Maximized`) are resolved through the pure
+  `frontend::geometry::resolveWindowGeometry()` ([[System-Utilities]]
+  `WindowGeometryPolicy`) against the actual screens'
+  `availableGeometry()` — a rect from a removed/larger monitor, an old layout
+  version or garbage falls back to the centered default (≤ 1280x800) on the
+  best matching screen. `main.cpp` no longer resizes unconditionally. The
+  first `showEvent` validates the *decorated* frame (`ensureWindowFitsScreen`,
+  clamps size/position without going below the minimum size hint) and hooks
+  `QScreen::availableGeometryChanged` with a coalesced 250 ms adjustment;
+  `closeEvent` saves only when the close is accepted. Tests and the screenshot
+  tour inject the desktop with `setAvailableGeometryOverrideForTests()` so the
+  800x600 offscreen screen never drives decisions.
+- **Single-owner sidebar.** `mainSplitter_` owns the hardware panel's width;
+  `MainWindow` owns the preference (`Sidebar/LayoutVersion`, `Sidebar/Visible`,
+  `Sidebar/PreferredWidth`, migrated once from the legacy
+  `Sidebar/Collapsed`/`ExpandedWidth`, sanitized + clamped 200–1000) and
+  commands the splitter. `setHardwarePanelVisible(false)` captures the actual
+  expanded width as the preference, hides the child and lets the workspace
+  take the space; `true` shows it and allocates
+  `geometry::fitSidebarWidth(preferred, contents, handle)` — compact when
+  the window is narrow, hidden-for-space (with a status message and the
+  intent remembered) when not even the compact panel leaves the 640 px
+  workspace. `splitterMoved` records user drags (debounced persist); the
+  remembered width is never a hard minimum; nothing ever resizes the outer
+  window. The stable reopen affordance is the checkable
+  `hardwarePanelAct` (Settings menu, `Ctrl+Shift+H`) mirrored by the
+  `hardwarePanelBtn` tool button in the main tab bar's left corner.
+- **Bounded status text.** `statusLabel_` is an `ElidingLabel` (stretch 1):
+  its minimum size is independent of the text, the full string is in the
+  tooltip. Guards: `frontend.window_geometry_policy` (pure),
+  `frontend.ui_layout` (1024x768 / 1366x768 / 1920x1080 matrix, every tab,
+  long strings, 50 sidebar cycles, rapid toggles, oversized legacy width,
+  removed-monitor restore).
+
 ## Composition
 
 - `connectTab_`, `overviewTab_`, `experimentTabs_` (QTabWidget with child

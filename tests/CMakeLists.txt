@@ -515,6 +515,22 @@ set_target_properties(hdf_review_export_paths_test PROPERTIES
 add_test(NAME frontend.hdf_review_export_paths COMMAND $<TARGET_FILE:hdf_review_export_paths_test>)
 set_tests_properties(frontend.hdf_review_export_paths PROPERTIES LABELS "frontend;utility" TIMEOUT 30)
 
+# Issues #358/#359: pure window/sidebar geometry decisions (no QApplication).
+add_executable(window_geometry_policy_test
+    ${PROJECT_SOURCE_DIR}/tests/frontend/window_geometry_policy_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/frontend/utils/WindowGeometryPolicy.cpp
+)
+target_include_directories(window_geometry_policy_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+)
+target_link_libraries(window_geometry_policy_test PRIVATE Qt6::Core)
+set_target_properties(window_geometry_policy_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
+)
+add_test(NAME frontend.window_geometry_policy COMMAND $<TARGET_FILE:window_geometry_policy_test>)
+set_tests_properties(frontend.window_geometry_policy PROPERTIES LABELS "frontend;utility;layout" TIMEOUT 30)
+
 add_executable(update_catalog_test
     ${PROJECT_SOURCE_DIR}/tests/frontend/update_catalog_test.cpp
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/UpdateCatalog.cpp

@@ -28,9 +28,16 @@
 #include <QSet>
 #include <QSettings>
 #include <QSysInfo>
+#include <QScreen>
+#include <QToolButton>
+#include <QShowEvent>
+#include <QResizeEvent>
+#include <QWindow>
+#include <QGuiApplication>
 #include <QStringList>
 #include <QVector>
 #include <algorithm>
+#include <optional>
 #include <vector>
 
 #include "backend/app/AppBackend.h"
@@ -46,6 +53,8 @@
 #include "frontend/system/PlaybackPanel.h"
 #include "frontend/controllers/CameraController.h"
 #include "frontend/utils/StatsDisplayManager.h"
+#include "frontend/utils/ElidingLabel.h"
+#include "frontend/utils/WindowGeometryPolicy.h"
 #include "frontend/tabs/ConnectTab.h"
 #include "frontend/tabs/PreviewPage.h"
 #include "frontend/tabs/HdfReviewTab.h"
@@ -139,6 +148,15 @@ bool isServiceDisabledAtBoot(const QString &serviceToken)
     return disabled.contains("all") || disabled.contains(token);
 }
 } // namespace
+
+namespace frontend::detail {
+// RAII reentrancy guard for layout application (issues #358/#359).
+struct ScopedFlag {
+    explicit ScopedFlag(bool& f) : flag(f) { flag = true; }
+    ~ScopedFlag() { flag = false; }
+    bool& flag;
+};
+} // namespace frontend::detail
 
 MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow), backend_(backend)
@@ -381,8 +399,12 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     connect(startExperimentAct_, &QAction::triggered, this, &MainWindow::onStartExperiment);
     connect(stopExperimentAct_, &QAction::triggered, this, &MainWindow::onStopExperiment);
 
-    statusLabel_ = new QLabel("Idle");
-    ui->statusbar->addPermanentWidget(statusLabel_);
+    // Issue #358: the status text is elided, never a minimum-width driver.
+    statusLabel_ = new frontend::ElidingLabel(QStringLiteral("Idle"), this);
+    statusLabel_->setObjectName(QStringLiteral("statusLabel"));
+    statusLabel_->setElideMode(Qt::ElideRight);
+    statusLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    ui->statusbar->addPermanentWidget(statusLabel_, /*stretch=*/1);
     processingCoreLabel_ = new QLabel(this);
     processingCoreLabel_->setToolTip(
         tr("Active deformability-cytometry processing core; click Settings > Processing Core to change it."));
@@ -568,6 +590,9 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
             if (updater_) updater_->checkForUpdates(false);
         });
     }
+
+    // Issue #358: one restoration path (default when nothing valid is saved).
+    restoreWindowGeometry();
 }
 
 MainWindow::~MainWindow() {
@@ -592,39 +617,264 @@ void MainWindow::setupSidebar()
     // Remove the existing tabs widget from the central widget layout
     ui->verticalLayout->removeWidget(ui->tabs);
 
-    // Create horizontal splitter
+    // The splitter is the single owner of sidebar geometry (issue #359).
     mainSplitter_ = new QSplitter(Qt::Horizontal, ui->centralwidget);
+    mainSplitter_->setObjectName(QStringLiteral("mainSplitter"));
     mainSplitter_->setChildrenCollapsible(false);
 
-    // Create sidebar widget
     sidebarWidget_ = new frontend::SidebarWidget(backend_, mainSplitter_);
-    connect(sidebarWidget_, &frontend::SidebarWidget::collapseStateChanged, this, [this](bool collapsed) {
-        if (mainSplitter_ && mainSplitter_->count() >= 2) {
-            int targetWidth = collapsed ? 30 : sidebarWidget_->expandedWidth();
-            QList<int> sizes = mainSplitter_->sizes();
-            if (sizes.size() >= 2) {
-                sizes[0] = targetWidth;
-                mainSplitter_->setSizes(sizes);
-            }
-        }
-    });
-
-    // Add sidebar to splitter
     mainSplitter_->addWidget(sidebarWidget_);
-    
-    // Add tabs widget to splitter
     mainSplitter_->addWidget(ui->tabs);
-
-    // Set splitter stretch factors (sidebar: 0, tabs: 1)
     mainSplitter_->setStretchFactor(0, 0);
     mainSplitter_->setStretchFactor(1, 1);
+    ui->tabs->setMinimumWidth(frontend::geometry::kWorkspaceMinWidth);
 
-    // Set initial sizes - sidebar width depends on collapsed state
-    int sidebarWidth = sidebarWidget_->isCollapsed() ? 30 : sidebarWidget_->expandedWidth();
-    mainSplitter_->setSizes({sidebarWidth, 1000});
+    loadSidebarPreference();
+    sidebarWidget_->setVisible(sidebarUserVisible_);
+    mainSplitter_->setSizes({sidebarPreferredWidth_, 1000});
+    connect(mainSplitter_, &QSplitter::splitterMoved, this, &MainWindow::onSplitterMoved);
 
-    // Add splitter to central widget layout
+    sidebarPersistTimer_ = new QTimer(this);
+    sidebarPersistTimer_->setSingleShot(true);
+    sidebarPersistTimer_->setInterval(300);
+    connect(sidebarPersistTimer_, &QTimer::timeout, this, &MainWindow::saveSidebarPreference);
+    layoutAdjustTimer_ = new QTimer(this);
+    layoutAdjustTimer_->setSingleShot(true);
+    layoutAdjustTimer_->setInterval(120);
+    connect(layoutAdjustTimer_, &QTimer::timeout, this, &MainWindow::applySidebarLayout);
+
     ui->verticalLayout->addWidget(mainSplitter_);
+}
+
+QTabWidget* MainWindow::mainTabs() const { return ui->tabs; }
+
+void MainWindow::loadSidebarPreference()
+{
+    QSettings settings;
+    const int version = settings.value(QStringLiteral("Sidebar/LayoutVersion"), 0).toInt();
+    if (version >= frontend::geometry::kSidebarLayoutVersion) {
+        sidebarUserVisible_ = settings.value(QStringLiteral("Sidebar/Visible"), true).toBool();
+        sidebarPreferredWidth_ = frontend::geometry::sanitizeSidebarPreferredWidth(
+            settings.value(QStringLiteral("Sidebar/PreferredWidth")));
+        return;
+    }
+    // One-time migration of the legacy keys written by SidebarWidget.
+    sidebarUserVisible_ = !settings.value(QStringLiteral("Sidebar/Collapsed"), false).toBool();
+    sidebarPreferredWidth_ = frontend::geometry::sanitizeSidebarPreferredWidth(
+        settings.value(QStringLiteral("Sidebar/ExpandedWidth")));
+    saveSidebarPreference();
+}
+
+void MainWindow::saveSidebarPreference()
+{
+    QSettings settings;
+    settings.setValue(QStringLiteral("Sidebar/LayoutVersion"), frontend::geometry::kSidebarLayoutVersion);
+    settings.setValue(QStringLiteral("Sidebar/Visible"), sidebarUserVisible_);
+    settings.setValue(QStringLiteral("Sidebar/PreferredWidth"), sidebarPreferredWidth_);
+}
+
+bool MainWindow::isHardwarePanelVisible() const
+{
+    return sidebarWidget_ && sidebarWidget_->isVisible();
+}
+
+void MainWindow::updateHardwarePanelAction()
+{
+    if (!hardwarePanelAct_) return;
+    const bool visible = isHardwarePanelVisible();
+    const QSignalBlocker block(hardwarePanelAct_);
+    hardwarePanelAct_->setChecked(visible);
+    hardwarePanelAct_->setText(visible ? tr("Hide hardware panel") : tr("Show hardware panel"));
+    hardwarePanelAct_->setToolTip(visible ? tr("Hide the hardware panel (statistics, background, nanopositioner, pump)")
+                                          : tr("Show the hardware panel (statistics, background, nanopositioner, pump)"));
+    if (hardwarePanelBtn_) {
+        hardwarePanelBtn_->setText(visible ? QStringLiteral("◀") : QStringLiteral("▶"));
+        hardwarePanelBtn_->setToolTip(hardwarePanelAct_->toolTip());
+        hardwarePanelBtn_->setAccessibleName(hardwarePanelAct_->text());
+    }
+}
+
+void MainWindow::setHardwarePanelVisible(bool visible)
+{
+    if (!sidebarWidget_ || !mainSplitter_) return;
+    sidebarUserVisible_ = visible;
+    if (!visible) {
+        // Capture the actual expanded width as the preference (never the
+        // collapsed/forced-narrow value), then hide through the splitter.
+        if (sidebarWidget_->isVisible() && !sidebarHiddenForSpace_) {
+            const QList<int> sizes = mainSplitter_->sizes();
+            if (!sizes.isEmpty() && sizes[0] >= frontend::geometry::kSidebarMinWidth) {
+                sidebarPreferredWidth_ = std::clamp(sizes[0], frontend::geometry::kSidebarMinWidth,
+                                                    frontend::geometry::kSidebarMaxWidth);
+            }
+        }
+        const bool hadFocus = sidebarWidget_->isAncestorOf(QApplication::focusWidget());
+        {
+            frontend::detail::ScopedFlag guard(applyingSidebarLayout_);
+            sidebarWidget_->hide();
+        }
+        sidebarHiddenForSpace_ = false;
+        if (hadFocus && hardwarePanelBtn_) hardwarePanelBtn_->setFocus(Qt::OtherFocusReason);
+    } else {
+        applySidebarLayout();
+    }
+    updateHardwarePanelAction();
+    if (sidebarPersistTimer_) sidebarPersistTimer_->start();
+}
+
+void MainWindow::applySidebarLayout()
+{
+    if (!sidebarWidget_ || !mainSplitter_ || applyingSidebarLayout_) return;
+    frontend::detail::ScopedFlag guard(applyingSidebarLayout_);
+    if (!sidebarUserVisible_) {
+        if (sidebarWidget_->isVisible()) sidebarWidget_->hide();
+        return;
+    }
+    const int contents = mainSplitter_->contentsRect().width();
+    const int handle = mainSplitter_->handleWidth();
+    const auto fit = frontend::geometry::fitSidebarWidth(sidebarPreferredWidth_, contents, handle);
+    if (!fit.fits) {
+        // Even the compact panel would push the workspace below its minimum:
+        // keep the workspace usable, remember the intent, re-show when space
+        // returns (resizeEvent). Never enlarge the outer window.
+        if (sidebarWidget_->isVisible()) sidebarWidget_->hide();
+        sidebarHiddenForSpace_ = true;
+        statusBar()->showMessage(tr("Window too narrow for the hardware panel; enlarge the window to show it."), 4000);
+        updateHardwarePanelAction();
+        return;
+    }
+    sidebarHiddenForSpace_ = false;
+    if (!sidebarWidget_->isVisible()) sidebarWidget_->show();
+    QList<int> sizes = mainSplitter_->sizes();
+    if (sizes.size() < 2) return;
+    const int total = sizes[0] + sizes[1];
+    if (sizes[0] != fit.width) {
+        sizes[0] = fit.width;
+        sizes[1] = std::max(0, total - fit.width);
+        mainSplitter_->setSizes(sizes);
+    }
+    updateHardwarePanelAction();
+}
+
+void MainWindow::onSplitterMoved(int pos, int index)
+{
+    Q_UNUSED(pos);
+    Q_UNUSED(index);
+    if (applyingSidebarLayout_ || !sidebarWidget_ || !sidebarWidget_->isVisible() || sidebarHiddenForSpace_) return;
+    const QList<int> sizes = mainSplitter_->sizes();
+    if (sizes.isEmpty() || sizes[0] < frontend::geometry::kSidebarCompactWidth) return;
+    // A user-driven drag defines the preference (clamped, never 0).
+    sidebarPreferredWidth_ = std::clamp(sizes[0], frontend::geometry::kSidebarMinWidth,
+                                        frontend::geometry::kSidebarMaxWidth);
+    if (sidebarPersistTimer_) sidebarPersistTimer_->start();
+}
+
+// ---- Issue #358: window geometry ------------------------------------------
+
+void MainWindow::setAvailableGeometryOverrideForTests(const QRect& available)
+{
+    availableGeometryOverride_ = available;
+}
+
+QRect MainWindow::availableDesktopForWindow() const
+{
+    if (availableGeometryOverride_.isValid()) return availableGeometryOverride_;
+    const QScreen* s = screen();
+    if (!s && windowHandle()) s = windowHandle()->screen();
+    if (!s) s = QGuiApplication::primaryScreen();
+    return s ? s->availableGeometry() : QRect();
+}
+
+void MainWindow::restoreWindowGeometry()
+{
+    QSettings settings;
+    const int version = settings.value(QStringLiteral("Window/LayoutVersion"), 0).toInt();
+    std::optional<QRect> saved;
+    if (settings.contains(QStringLiteral("Window/Rect"))) {
+        const QRect r = settings.value(QStringLiteral("Window/Rect")).toRect();
+        if (r.isValid()) saved = r;
+    }
+    QList<QRect> screens;
+    if (availableGeometryOverride_.isValid()) {
+        screens.push_back(availableGeometryOverride_);
+    } else {
+        for (const QScreen* s : QGuiApplication::screens()) screens.push_back(s->availableGeometry());
+    }
+    const auto decision = frontend::geometry::resolveWindowGeometry(saved, version, screens);
+    restoredGeometryFromSettings_ = decision.usedSaved;
+    // decision.geometry is a frame rectangle; apply the client size and
+    // position (the frame margin is validated after show).
+    resize(decision.geometry.size());
+    move(decision.geometry.topLeft());
+    if (decision.usedSaved && settings.value(QStringLiteral("Window/Maximized"), false).toBool()) {
+        setWindowState(windowState() | Qt::WindowMaximized);
+    }
+    SPDLOG_INFO("MainWindow: geometry {} {}x{}@{},{} (screen {}{})", decision.usedSaved ? "restored" : "default",
+                decision.geometry.width(), decision.geometry.height(), decision.geometry.x(), decision.geometry.y(),
+                decision.screenIndex, decision.clamped ? ", clamped" : "");
+}
+
+void MainWindow::saveWindowGeometry()
+{
+    QSettings settings;
+    settings.setValue(QStringLiteral("Window/LayoutVersion"), frontend::geometry::kWindowLayoutVersion);
+    const QRect rect = isMaximized() ? normalGeometry() : frameGeometry();
+    settings.setValue(QStringLiteral("Window/Rect"), rect);
+    settings.setValue(QStringLiteral("Window/Maximized"), isMaximized());
+}
+
+void MainWindow::ensureWindowFitsScreen()
+{
+    if (fittingWindow_ || isMaximized() || isFullScreen()) return;
+    const QRect available = availableDesktopForWindow();
+    if (!available.isValid()) return;
+    const QRect frame = frameGeometry();
+    if (available.contains(frame)) return;
+    frontend::detail::ScopedFlag guard(fittingWindow_);
+    const QSize frameMargin = frame.size() - size();
+    const QSize minimum = minimumSizeHint().expandedTo(minimumSize()) + frameMargin;
+    const QRect fitted = frontend::geometry::clampToAvailable(frame, available, minimum);
+    SPDLOG_INFO("MainWindow: window {}x{}@{},{} exceeds the available desktop {}x{}@{},{}; fitting to {}x{}@{},{}",
+                frame.width(), frame.height(), frame.x(), frame.y(), available.width(), available.height(),
+                available.x(), available.y(), fitted.width(), fitted.height(), fitted.x(), fitted.y());
+    resize(fitted.size() - frameMargin);
+    move(fitted.topLeft());
+}
+
+void MainWindow::showEvent(QShowEvent* event)
+{
+    QMainWindow::showEvent(event);
+    if (firstShowDone_) return;
+    firstShowDone_ = true;
+    // Validate the actual decorated geometry once the window exists, then
+    // follow screen changes with a coalesced adjustment.
+    QTimer::singleShot(0, this, [this]() {
+        ensureWindowFitsScreen();
+        applySidebarLayout();
+    });
+    if (QWindow* handle = windowHandle()) {
+        // One coalesced adjustment per screen change; each screen is hooked
+        // once (tracked by object name set on a per-window property).
+        auto hookScreen = [this](QScreen* s) {
+            if (!s) return;
+            const QString key = QStringLiteral("mib_screen_hooked_%1").arg(reinterpret_cast<quintptr>(this));
+            if (s->property(key.toUtf8().constData()).toBool()) return;
+            s->setProperty(key.toUtf8().constData(), true);
+            connect(s, &QScreen::availableGeometryChanged, this, [this](const QRect&) {
+                QTimer::singleShot(250, this, [this]() { ensureWindowFitsScreen(); });
+            });
+        };
+        hookScreen(handle->screen());
+        connect(handle, &QWindow::screenChanged, this, [hookScreen](QScreen* s) { hookScreen(s); });
+    }
+}
+
+void MainWindow::resizeEvent(QResizeEvent* event)
+{
+    QMainWindow::resizeEvent(event);
+    // Coalesced sidebar re-fit (may re-show a panel hidden for space or
+    // clamp one that no longer fits); never resizes the outer window.
+    if (layoutAdjustTimer_ && !applyingSidebarLayout_) layoutAdjustTimer_->start();
 }
 
 void MainWindow::setupCornerWidgets() {
@@ -648,7 +898,9 @@ void MainWindow::setupCornerWidgets() {
 
     // Create push buttons and connect them to actions
     startExperimentBtn_ = new QPushButton(startExperimentAct_->text(), experimentControlsWidget);
+    startExperimentBtn_->setObjectName(QStringLiteral("startExperimentBtn"));
     stopExperimentBtn_ = new QPushButton(stopExperimentAct_->text(), experimentControlsWidget);
+    stopExperimentBtn_->setObjectName(QStringLiteral("stopExperimentBtn"));
     connect(startExperimentBtn_, &QPushButton::clicked, startExperimentAct_, &QAction::trigger);
     connect(stopExperimentBtn_, &QPushButton::clicked, stopExperimentAct_, &QAction::trigger);
     experimentControlsLayout->addWidget(startExperimentBtn_);
@@ -689,6 +941,31 @@ void MainWindow::setupCornerWidgets() {
     
     // Add controls widget to the corner of the main tab bar (same row as tabs)
     ui->tabs->setCornerWidget(cameraControlsWidget, Qt::TopRightCorner);
+
+    // Issue #359: stable reopen/hide affordance for the hardware panel in the
+    // main chrome (left tab-bar corner), backed by one checkable action.
+    hardwarePanelAct_ = new QAction(this);
+    hardwarePanelAct_->setObjectName(QStringLiteral("hardwarePanelAct"));
+    hardwarePanelAct_->setCheckable(true);
+    hardwarePanelAct_->setShortcut(QKeySequence(tr("Ctrl+Shift+H")));
+    connect(hardwarePanelAct_, &QAction::triggered, this, [this](bool checked) { setHardwarePanelVisible(checked); });
+    ui->settingsMenu->addSeparator();
+    ui->settingsMenu->addAction(hardwarePanelAct_);
+    hardwarePanelBtn_ = new QToolButton(this);
+    hardwarePanelBtn_->setObjectName(QStringLiteral("hardwarePanelBtn"));
+    hardwarePanelBtn_->setDefaultAction(hardwarePanelAct_);
+    hardwarePanelBtn_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    hardwarePanelBtn_->setAutoRaise(true);
+    hardwarePanelBtn_->setFocusPolicy(Qt::StrongFocus);
+    ui->tabs->setCornerWidget(hardwarePanelBtn_, Qt::TopLeftCorner);
+    updateHardwarePanelAction();
+    // The button shows only the glyph; the action keeps the full text for
+    // menus/accessibility.
+    connect(hardwarePanelAct_, &QAction::changed, this, [this]() {
+        if (hardwarePanelBtn_ && hardwarePanelAct_)
+            hardwarePanelBtn_->setText(hardwarePanelAct_->isChecked() ? QStringLiteral("◀") : QStringLiteral("▶"));
+    });
+    hardwarePanelBtn_->setText(hardwarePanelAct_->isChecked() ? QStringLiteral("◀") : QStringLiteral("▶"));
 }
 
 void MainWindow::updateExperimentButtonStates()
@@ -1676,5 +1953,8 @@ void MainWindow::closeEvent(QCloseEvent* event)
         backend_.capture().stop();
     }
 
+    // Issue #358: persist geometry only when the close is accepted.
+    saveWindowGeometry();
+    saveSidebarPreference();
     QMainWindow::closeEvent(event);
 }

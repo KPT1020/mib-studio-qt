@@ -57,6 +57,11 @@
 #include "frontend/utils/OverlayRenderer.h"
 #include "frontend/utils/HdfReviewExportPaths.h"
 #include "backend/recording/HdfExportService.h"
+#include "frontend/utils/ElidingLabel.h"
+
+#include <QToolButton>
+#include <QMenu>
+#include <QAction>
 
 #include <QFutureWatcher>
 #include <QPointer>
@@ -335,6 +340,7 @@ HdfReviewTab::HdfReviewTab(backend::AppBackend& backend, QWidget* parent)
     connect(ui->batchExportAllBtn, &QPushButton::clicked, this, &HdfReviewTab::onBatchExportAll);
     connect(ui->exportChartsBtn, &QPushButton::clicked, this, &HdfReviewTab::onExportCharts);
     connect(ui->regenerateMasksBtn, &QPushButton::clicked, this, &HdfReviewTab::onRegenerateMasks);
+    setupBoundedFileRow();
     connect(ui->overlayModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &HdfReviewTab::onOverlayModeChanged);
     connect(ui->roiOverlayCheck, &QCheckBox::toggled, this, &HdfReviewTab::onToggleRoiOverlay);
@@ -488,7 +494,7 @@ void HdfReviewTab::onCloseFile() {
     clearDisplay();
     hdfReader_.reset();
     loadedHdfFilePath_.clear();
-    ui->filePathLabel->setText(tr("No file selected"));
+    setFilePathText(tr("No file selected"));
     ui->statusLabel->setText(tr("Ready"));
     ui->closeFileBtn->setEnabled(false);
     ui->overlayModeLabel->setEnabled(false);
@@ -500,7 +506,7 @@ void HdfReviewTab::onCloseFile() {
 
 void HdfReviewTab::loadHdfFile(const QString& filePath) {
     ui->statusLabel->setText(tr("Loading..."));
-    ui->filePathLabel->setText(filePath);
+    setFilePathText(filePath);
     clearDisplay();
 
     SPDLOG_INFO("HdfReviewTab: opening file '{}'", filePath.toStdString());
@@ -639,6 +645,7 @@ void HdfReviewTab::loadHdfFile(const QString& filePath) {
     ui->exportChartsBtn->setEnabled(hasData && !isRecordingMode_);
     ui->closeFileBtn->setEnabled(hasData);
     ui->regenerateMasksBtn->setEnabled(hasData);
+    updateSecondaryActionState();
 
     // Enable overlay controls if we have frames (not in recording mode — no masks/ROI)
     if (hasData && !isRecordingMode_) {
@@ -708,6 +715,7 @@ void HdfReviewTab::clearDisplay() {
     ui->exportAllBtn->setEnabled(false);
     ui->exportChartsBtn->setEnabled(false);
     ui->regenerateMasksBtn->setEnabled(false);
+    updateSecondaryActionState();
     ui->roiOverlayCheck->setEnabled(false);
     ui->roiOverlayCheck->setChecked(false);
 
@@ -1868,6 +1876,58 @@ void HdfReviewTab::setExportControlsEnabled(bool enabled) {
     ui->batchExportMetricsBtn->setEnabled(enabled);
     ui->batchExportAllBtn->setEnabled(enabled);
     ui->exportChartsBtn->setEnabled(enabled);
+    ui->regenerateMasksBtn->setEnabled(enabled && !loadedHdfFilePath_.isEmpty());
+    updateSecondaryActionState();
+}
+
+void HdfReviewTab::setupBoundedFileRow() {
+    // Secondary/batch actions move into one native menu so the primary row
+    // (open/close/export) stays bounded at 1366 px (issue #358). The hidden
+    // buttons keep their enable logic; the actions mirror it.
+    moreActionsBtn_ = new QToolButton(this);
+    moreActionsBtn_->setObjectName(QStringLiteral("reviewMoreActionsBtn"));
+    moreActionsBtn_->setText(tr("More…"));
+    moreActionsBtn_->setToolTip(tr("Batch exports, chart export and mask regeneration"));
+    moreActionsBtn_->setPopupMode(QToolButton::InstantPopup);
+    moreActionsBtn_->setFocusPolicy(Qt::StrongFocus);
+    auto* menu = new QMenu(moreActionsBtn_);
+    batchMetricsAct_ = menu->addAction(ui->batchExportMetricsBtn->text(), this, &HdfReviewTab::onBatchExportMetrics);
+    batchMetricsAct_->setToolTip(ui->batchExportMetricsBtn->toolTip());
+    batchAllAct_ = menu->addAction(ui->batchExportAllBtn->text(), this, &HdfReviewTab::onBatchExportAll);
+    batchAllAct_->setToolTip(ui->batchExportAllBtn->toolTip());
+    exportChartsAct_ = menu->addAction(ui->exportChartsBtn->text(), this, &HdfReviewTab::onExportCharts);
+    menu->addSeparator();
+    regenerateMasksAct_ = menu->addAction(ui->regenerateMasksBtn->text(), this, &HdfReviewTab::onRegenerateMasks);
+    regenerateMasksAct_->setToolTip(ui->regenerateMasksBtn->toolTip());
+    moreActionsBtn_->setMenu(menu);
+    for (QPushButton* hidden : {ui->batchExportMetricsBtn, ui->batchExportAllBtn, ui->exportChartsBtn, ui->regenerateMasksBtn}) {
+        hidden->hide();
+    }
+    const int insertAt = ui->fileRowLayout->indexOf(ui->exportAllBtn) + 1;
+    ui->fileRowLayout->insertWidget(insertAt, moreActionsBtn_);
+    ui->fileRowLayout->addStretch(1);
+
+    // Path: elided display, full value in tooltip / copy action.
+    filePathLabel_ = new frontend::ElidingLabel(ui->filePathLabel->text(), this);
+    filePathLabel_->setObjectName(QStringLiteral("reviewFilePathLabel"));
+    filePathLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    ui->fileInfoRowLayout->replaceWidget(ui->filePathLabel, filePathLabel_);
+    ui->filePathLabel->hide();
+    ui->overlayLegendLabel->setTextInteractionFlags(Qt::NoTextInteraction);
+    updateSecondaryActionState();
+}
+
+void HdfReviewTab::updateSecondaryActionState() {
+    if (!moreActionsBtn_) return;
+    batchMetricsAct_->setEnabled(ui->batchExportMetricsBtn->isEnabled());
+    batchAllAct_->setEnabled(ui->batchExportAllBtn->isEnabled());
+    exportChartsAct_->setEnabled(ui->exportChartsBtn->isEnabled());
+    regenerateMasksAct_->setEnabled(ui->regenerateMasksBtn->isEnabled());
+}
+
+void HdfReviewTab::setFilePathText(const QString& text) {
+    ui->filePathLabel->setText(text);
+    if (filePathLabel_) filePathLabel_->setText(text);
 }
 
 QString HdfReviewTab::exportSummary(const backend::recording::HdfExportResult& r) const {
