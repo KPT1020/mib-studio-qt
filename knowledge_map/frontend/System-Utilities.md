@@ -103,6 +103,15 @@ tested by `tests/frontend/update_catalog_test.cpp`), `OverlayRenderer`,
   scroll area (both scrollbars as needed). Shrinkable size policy, compact
   floor 160 px; no toggle button, no width/visibility persistence — the
   main window's splitter owns geometry (see [[MainWindow]]).
+- **`ConfigDocumentStore`** — checked document write (issue #361, reused by
+  #364): `writeText(path, text, expectedFingerprint, force)` verifies the
+  on-disk fingerprint against the loaded baseline first (conflict result,
+  nothing written), then writes through `QSaveFile` with a checked
+  `commit()`, returning `ConfigWriteResult{ok, conflict, error, fingerprint,
+  bytesWritten}`. Atomic replacement, not a cross-process compare-and-swap.
+  Pure companion `ConfigDocumentState` (`frontend/models/`) holds
+  path/fingerprints/dirty/conflict/last-save. Guard:
+  `frontend.config_document_state`.
 - **`ElidingLabel`** — `QLabel` whose painted text is elided (`ElideMiddle`
   by default) while `fullText()`/tooltip/accessible description keep the
   value and a context menu copies it; `minimumSizeHint` depends on a fixed

@@ -104,6 +104,7 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/BackgroundPreviewWidget.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/SidebarWidget.cpp
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/ElidingLabel.cpp
+    ${PROJECT_SOURCE_DIR}/src/frontend/system/ConfigDocumentStore.cpp
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/WindowGeometryPolicy.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/SidebarWidget.h
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/ElidingLabel.h
@@ -226,6 +227,22 @@ if(BUILD_TESTING)
         LABELS "frontend;layout;safety"
         TIMEOUT 300
     )
+
+    # Issue #361: explicit editor state + bounded, responsive config header.
+    add_executable(config_tabs_state_test ${PROJECT_SOURCE_DIR}/tests/frontend/config_tabs_state_test.cpp)
+    target_include_directories(config_tabs_state_test PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+    target_link_libraries(config_tabs_state_test PRIVATE mib_frontend_common)
+    set_target_properties(config_tabs_state_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" AUTOUIC OFF)
+    add_test(NAME frontend.config_tabs_state COMMAND $<TARGET_FILE:config_tabs_state_test>)
+    set_tests_properties(frontend.config_tabs_state PROPERTIES LABELS "frontend;layout;safety" TIMEOUT 240)
+
+    # Issue #362: Preview inspector modes, persistence and clamping.
+    add_executable(preview_layout_test ${PROJECT_SOURCE_DIR}/tests/frontend/preview_layout_test.cpp)
+    target_include_directories(preview_layout_test PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+    target_link_libraries(preview_layout_test PRIVATE mib_frontend_common)
+    set_target_properties(preview_layout_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" AUTOUIC OFF)
+    add_test(NAME frontend.preview_layout COMMAND $<TARGET_FILE:preview_layout_test>)
+    set_tests_properties(frontend.preview_layout PROPERTIES LABELS "frontend;layout" TIMEOUT 240)
 endif()
 
 set(MIB_STUDIO_QT_EXTRA_SOURCES)

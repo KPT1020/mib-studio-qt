@@ -1,7 +1,7 @@
 # PreviewPage
 
 > Central workspace widget: live preview canvas on the left, playback scrub
-> and overlays below, [[ConfigTabs]] docked on the right.
+> and overlays above, [[ConfigTabs]] as the inspector below (vertical splitter).
 
 **Source:** `src/frontend/tabs/PreviewPage.cpp`,
 `include/frontend/tabs/PreviewPage.h`
@@ -26,6 +26,36 @@
   [[../services/ProcessingService]] (`setRealtimeRoi`,
   `setRealtimeBackgroundGray`) and to
   [[../frontend/System-Utilities]] (`PlaybackPanel`).
+
+## Inspector modes and persistence (issue #362)
+
+- `InspectorMode { Expanded, Compact, Hidden }` with a **stable mode bar**
+  (`inspectorModeBar`: Expanded / Compact / Hidden tool buttons bound to
+  `inspectorExpandedAct` etc., plus an elided compact summary
+  `"<profile> · <state>"` from `ConfigTabs::compactSummary()`) placed
+  *outside* the splitter, so the reopen affordance never disappears.
+- **Expanded** shows the full `ConfigTabs`; **Compact** shows only its
+  bounded header (`ConfigTabs::setCompactMode(true)`, editors hidden, height
+  = header size hint); **Hidden** hides the child. Documents, edits,
+  `AppConfigWatcher` and the `getConfigTabs()`/`getConfigWatcher()` pointers
+  stay alive in every mode.
+- The `QSplitter` is the only geometry owner. No more constructor 50/50
+  `setSizes`; `applyInspectorLayout()` runs once after the first show and
+  (coalesced, 80 ms) on resize/mode change: Expanded allocates
+  `preferredRatio × usable` clamped to `[220 px, usable − 140 px image]`;
+  when even that cannot fit, the *effective* mode falls back to Compact and
+  the preference is untouched. A drag below 220 px is clamped deliberately
+  (`onSplitterMoved`), never a sliver. Nothing resizes the outer window.
+- Persistence (`Preview/LayoutVersion` = 1, `Preview/InspectorMode`,
+  `Preview/InspectorRatio`; `Preview/ShowTable` preserved): saved only from
+  user drags/mode changes (debounced, flushed on hide), restored once when
+  valid, corrupt/obsolete values fall back to the image-biased default
+  (ratio 0.34 ⇒ ≈ 66 % image at 1366x768).
+- `setTemporaryInspectorMode(std::optional<InspectorMode>)` is the
+  presentation-only workflow hook for #311: a temporary Compact (e.g. while
+  a run is active) keeps pending edits and the dirty summary; `nullopt`
+  restores the user preference. It changes no acquisition/processing/config
+  state. Guard: `frontend.preview_layout`.
 
 ## UI controls
 

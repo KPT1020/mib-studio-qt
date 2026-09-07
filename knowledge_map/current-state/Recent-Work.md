@@ -5,6 +5,22 @@
 
 ## Features shipped
 
+- **Config inspector: explicit edit state, bounded header, responsive
+  Preview inspector** (2026-09-07, issues #361 and #362 — reliability
+  release #371 phase 6b). [[../frontend/ConfigTabs]]: per-document
+  `ConfigDocumentState` (dirty = content comparison, conflict retained
+  while hidden), checked `ConfigDocumentStore` saves (QSaveFile, stale
+  baseline detected), primary header = Profile · state · Reset · Save ·
+  **More…** menu, elided path row + wrapping notices, passive vs
+  intentional profile refresh, geometry-only 1/2/3-column reflow, JS/MV
+  pages in scroll areas, two-row MindVision form.
+  [[../frontend/PreviewPage]]: `InspectorMode` Expanded/Compact/Hidden with a
+  stable mode bar, image-biased default (no 50/50), versioned
+  `Preview/*` preference clamped to the viewport, deliberate drag clamp,
+  temporary workflow override that never overwrites the preference. Tests:
+  `frontend.config_document_state`, `frontend.config_tabs_state`,
+  `frontend.preview_layout`.
+
 - **Viewport-safe layout + single-owner sidebar** (2026-09-07, issues #358
   and #359 — reliability release #371 phase 6a). New `ElidingLabel` and pure
   `WindowGeometryPolicy` ([[../frontend/System-Utilities]]); one

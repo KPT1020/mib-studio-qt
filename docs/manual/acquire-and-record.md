@@ -42,9 +42,20 @@ backend's reason in the status bar and offers **Start Live View** again.
   existing output.
 - A **background** frame is captured automatically (or set manually from
   the playback panel); the current background shows in the sidebar preview.
-- The docked **Config / Profiles** editor (right) edits the processing
+- The **configuration inspector** below the image edits the processing
   configuration — thresholds, gates, multi-image, target group — and
-  manages named profiles, including catalog-published ones. Changes saved
+  manages named profiles, including catalog-published ones. Its header
+  shows the active **Profile**, its state (*Loaded*, *Edited (unsaved)*,
+  *Saved*, *Conflict*), **Reset**, **Save**, and a **More…** menu with the
+  profile-management actions (save as / rename / delete / duplicate,
+  catalog updates and diff, choosing another config file, table view).
+  Notices below the header explain unsaved edits, a file that changed
+  elsewhere while you were editing (your edits are kept until you choose
+  Reset or Save), a failed save, or an incompatible profile. The
+  **Settings: Expanded / Compact / Hidden** bar at the bottom of the page
+  sizes the inspector — *Compact* keeps only the profile/state header so
+  the live image dominates during alignment — and the app remembers your
+  choice and the divider position. Changes saved
   to the config file apply live; no restart needed. Note that several gates
   only take effect when their `enable_*` flag is on.
 

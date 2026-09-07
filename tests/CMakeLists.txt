@@ -531,6 +531,20 @@ set_target_properties(window_geometry_policy_test PROPERTIES
 add_test(NAME frontend.window_geometry_policy COMMAND $<TARGET_FILE:window_geometry_policy_test>)
 set_tests_properties(frontend.window_geometry_policy PROPERTIES LABELS "frontend;utility;layout" TIMEOUT 30)
 
+# Issue #361: pure editor-document state + checked QSaveFile document store.
+add_executable(config_document_state_test
+    ${PROJECT_SOURCE_DIR}/tests/frontend/config_document_state_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/frontend/system/ConfigDocumentStore.cpp
+)
+target_include_directories(config_document_state_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+)
+target_link_libraries(config_document_state_test PRIVATE Qt6::Core)
+set_target_properties(config_document_state_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
+add_test(NAME frontend.config_document_state COMMAND $<TARGET_FILE:config_document_state_test>)
+set_tests_properties(frontend.config_document_state PROPERTIES LABELS "frontend;utility;safety" TIMEOUT 30)
+
 add_executable(update_catalog_test
     ${PROJECT_SOURCE_DIR}/tests/frontend/update_catalog_test.cpp
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/UpdateCatalog.cpp
