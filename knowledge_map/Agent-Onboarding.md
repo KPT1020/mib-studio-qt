@@ -24,6 +24,7 @@ Jump to the notes that match your task:
 | Frame acquisition / camera | [[services/CaptureService]] + [[camera/_MOC]] (`[[camera/MindVisionCamera]]`, `[[camera/EGrabberCamera]]`, `[[camera/MockCamera]]`) |
 | Image analysis / metrics | [[services/ProcessingService]] + [[domain/Microscopy-Pipeline]] |
 | Saving/reading experiment files | [[services/Hdf5Service]] + [[data-model/HDF5-Storage]] |
+| Exporting CSV/TIFF from HDF5 (native or PySide tool) | [[services/HdfExportService]] + [[frontend/HdfReviewTab]] + [[task/2026-08-24-exporter-stability]] |
 | Live preview / ROI / overlays | [[frontend/PreviewPage]], [[frontend/ConfigTabs]] |
 | Post-experiment review | [[frontend/HdfReviewTab]] |
 | Live charts during a run | [[frontend/ExperimentMonitoringTab]] |

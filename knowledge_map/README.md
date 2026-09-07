@@ -17,7 +17,7 @@ following `[[WikiLinks]]`. If you are a new agent, start here:
 ### Services (`src/backend/services/`)
 - [[services/_MOC|Services MOC]]
 - Realtime path: [[services/CaptureService]] → [[services/ProcessingService]]
-- Persistence: [[services/Hdf5Service]], [[services/SqliteService]]
+- Persistence: [[services/Hdf5Service]], [[services/SqliteService]]; export: [[services/HdfExportService]]
 - Playback: [[services/PlaybackService]]
 - Hardware I/O: [[services/CameraControlService]], [[services/AutofocusService]],
   [[services/TriggerService]], [[services/SerialBus]],

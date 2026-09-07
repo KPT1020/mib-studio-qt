@@ -3720,6 +3720,21 @@ namespace backend::services {
         return true;
     }
 
+    // ---- Open-object diagnostics (issue #344) ------------------------------------
+
+    long long Hdf5Service::globalOpenObjectCountForDiagnostics()
+    {
+        const ssize_t n = H5Fget_obj_count(static_cast<hid_t>(H5F_OBJ_ALL), H5F_OBJ_ALL);
+        return n < 0 ? -1 : static_cast<long long>(n);
+    }
+
+    long long Hdf5Service::openObjectCountForDiagnostics() const
+    {
+        if (!isFileOpen()) return 0;
+        const ssize_t n = H5Fget_obj_count(impl_->fileId_, H5F_OBJ_ALL);
+        return n < 0 ? -1 : static_cast<long long>(n);
+    }
+
     // ---- Run configuration snapshot (issue #369) --------------------------------
 
     bool Hdf5Service::writeRunSnapshotJson(const std::string& runSnapshotJson,

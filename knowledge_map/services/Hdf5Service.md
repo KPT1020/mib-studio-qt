@@ -123,6 +123,13 @@ persist and read the versioned `accounting_*` attributes described in
 [[../frontend/HdfReviewTab]] status text. Types live in
 `include/backend/recording/RecordingAccounting.h` (Qt-free, header-only).
 
+## Open-object diagnostics (issue #344)
+
+`globalOpenObjectCountForDiagnostics()` (static) and
+`openObjectCountForDiagnostics()` wrap `H5Fget_obj_count` so tests and
+debug logging can prove HDF5 handles return to baseline after repeated
+jobs ([[HdfExportService]] stress test). HDF5 ids never leave this class.
+
 ## Run configuration snapshot (issue #369)
 
 `writeRunSnapshotJson(runJson, readinessJson)` / `readRunSnapshotJson(...)`

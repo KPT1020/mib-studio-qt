@@ -5,6 +5,24 @@
 
 ## Features shipped
 
+- **Exporter stability: bounded memory, transactional output,
+  deterministic worker lifecycle, 50-run soak** (2026-09-07, issue #344 —
+  reliability release #371 phase 5). Python: new `scripts/hdf_export_engine.py`
+  (frozen `ExportJob`/`ExportProgress`/`ExportResult`, one-frame-at-a-time
+  streaming, `threading.Event` cancel, `.partial-<job>` staging + rename,
+  single-listing name lookup); `export_hdf5.py` is a CLI adapter;
+  `export_worker.py` / `hdf5_export_app.py` use the
+  `finished→quit/deleteLater` chain, no GUI `wait()`, single-flight, deferred
+  close. Native: new [[../services/HdfExportService]] (Qt-free, own reader,
+  cancellable, transactional) + `Hdf5Service` open-object diagnostics;
+  [[../frontend/HdfReviewTab]] exports run asynchronously with progress /
+  cancel and batch no longer swaps the live reader. Tests:
+  `scripts.export_hdf5_streaming`, `scripts.hdf5_export_app_lifecycle`,
+  `recording.hdf_export_service` (+TSan), soak gates
+  `scripts.exporter_soak` / `recording.hdf_export_soak`; evidence in
+  `docs/evidence/2026-09-07-exporter-soak/`. Notes:
+  [[../task/2026-08-24-exporter-stability]].
+
 - **Backend readiness transaction + immutable run snapshot + bounded
   background calibration** (2026-09-06, issue #369 + host portion of #274 —
   reliability release #371 phase 4). New

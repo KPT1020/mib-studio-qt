@@ -161,6 +161,13 @@ public:
     // stored as JSON attributes on the /run_provenance group. Written at Start
     // (before the run may be considered complete); readable from Review.
     bool writeRunSnapshotJson(const std::string& runSnapshotJson, const std::string& readinessJson);
+
+    // Diagnostics (issue #344): number of HDF5 objects (files, datasets,
+    // groups, types, attributes) currently open in this process, and for this
+    // file. Used by repeated-export stress tests and debug logging to prove
+    // handles return to baseline; HDF5 ids never leave this class.
+    static long long globalOpenObjectCountForDiagnostics();
+    long long openObjectCountForDiagnostics() const;
     bool readRunSnapshotJson(std::string& runSnapshotJson, std::string* readinessJson = nullptr) const;
 
     // Acquisition time/telemetry provenance (issue #368, `timestamp_schema_version`

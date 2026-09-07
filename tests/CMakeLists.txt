@@ -274,6 +274,19 @@ mib_add_backend_test_executable(experiment_roundtrip_test recording/experiment_r
 add_test(NAME recording.experiment_roundtrip COMMAND $<TARGET_FILE:experiment_roundtrip_test>)
 set_tests_properties(recording.experiment_roundtrip PROPERTIES LABELS "recording;backend" TIMEOUT 30)
 
+# Issue #344: native Qt-free export service (round-trip, cancellation, faults,
+# bounded names, repeated runs with HDF5 open-object accounting). The
+# `performance`-labelled variant is the 50-round soak release gate.
+mib_add_backend_test_executable(hdf_export_service_test recording/hdf_export_service_test.cpp)
+target_link_libraries(hdf_export_service_test PRIVATE Threads::Threads)
+add_test(NAME recording.hdf_export_service COMMAND $<TARGET_FILE:hdf_export_service_test>)
+set_tests_properties(recording.hdf_export_service PROPERTIES LABELS "recording;backend;hdf5;safety" TIMEOUT 300)
+add_test(NAME recording.hdf_export_soak COMMAND $<TARGET_FILE:hdf_export_service_test>)
+set_tests_properties(recording.hdf_export_soak PROPERTIES
+    LABELS "recording;performance;soak"
+    ENVIRONMENT "MIB_EXPORT_SOAK_CYCLES=50"
+    TIMEOUT 900)
+
 mib_add_backend_test_executable(kin6_batch_pipeline_evidence integration/kin6_batch_pipeline_evidence.cpp)
 
 mib_add_backend_test_executable(kin10_hf_dataset_pipeline_test integration/kin10_hf_dataset_pipeline_test.cpp)
@@ -537,6 +550,36 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(scripts.export_hdf5_paths PROPERTIES
         LABELS "scripts;hdf5"
         TIMEOUT 30
+    )
+
+    add_test(
+        NAME scripts.export_hdf5_streaming
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/test_export_hdf5_streaming.py
+    )
+    set_tests_properties(scripts.export_hdf5_streaming PROPERTIES
+        LABELS "scripts;hdf5;safety"
+        TIMEOUT 120
+    )
+
+    add_test(
+        NAME scripts.hdf5_export_app_lifecycle
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/test_hdf5_export_app_lifecycle.py
+    )
+    set_tests_properties(scripts.hdf5_export_app_lifecycle PROPERTIES
+        LABELS "scripts;hdf5;safety"
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 300
+    )
+
+    # 50-round PySide soak release gate (scheduled/manual; excluded from fast lanes).
+    add_test(
+        NAME scripts.exporter_soak
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/exporter_soak.py --cycles 50 --mode gui
+    )
+    set_tests_properties(scripts.exporter_soak PROPERTIES
+        LABELS "scripts;performance;soak"
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        TIMEOUT 1800
     )
 
     add_test(

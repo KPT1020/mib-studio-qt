@@ -17,6 +17,22 @@
   `readImageByIndex` / `readImagesRange` (hyperslab reads — bounded memory).
 - Display metrics in a `QTableView` backed by `HdfMetricsModel`.
 - Optional charts: scatter + histograms over the saved dataset.
+- **Exports run as one asynchronous job at a time** (issue #344): every
+  export button builds a `backend::recording::HdfExportRequest` on the GUI
+  thread (series-range prompt, chart snapshots rendered into `cv::Mat`s via
+  `renderChartSnapshots`), then `beginExportJob` runs
+  [[../services/HdfExportService]] through `QtConcurrent::run` +
+  `QFutureWatcher` with a cancellable `QProgressDialog`; the worker callable
+  owns request/token/service and never captures a widget. Progress is
+  re-dispatched via `QPointer` + queued invocation; export buttons are
+  re-enabled only from the finished handler. A second export request while
+  one runs is refused. Cancelled/failed jobs report "partial output was
+  discarded" (or the retained `.partial-*` path); output folders are
+  published only on success. Batch exports chain per file
+  (`continueBatchExport`) using a separate reader for each file — the live
+  `hdfReader_` / frame vectors are never moved out and the current file's
+  charts are restored with `updateCharts()` afterwards. The destructor
+  cancels a running job and waits (bounded by one frame).
 - Metrics exports default to `<loaded-h5-basename>_metrics.csv` and suffix
   `_2`, `_3`, etc. before the save dialog opens when files already exist.
 - `Export All` writes into a source-specific folder under the selected root

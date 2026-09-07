@@ -23,7 +23,11 @@ namespace backend::services
 }
 
 #include "backend/processing/ProcessingService.h"
+#include "backend/recording/HdfExportService.h"
 #include "frontend/utils/OverlayRenderer.h"
+
+#include <functional>
+#include <map>
 
 class QPushButton;
 class QComboBox;
@@ -41,6 +45,8 @@ class QChart;
 class QScatterSeries;
 class QLineSeries;
 class QValueAxis;
+class QProgressDialog;
+template<typename T> class QFutureWatcher;
 #if __has_include(<QHistogramSeries>)
 class QHistogramSeries;
 #else
@@ -95,7 +101,6 @@ namespace frontend
         QImage matToQImage(const cv::Mat &mat) const;
         void setSelectedFrame(int frameIndex);
         void onScrollValueChanged(int value);
-        bool exportMetricsToCsv(const QString &filePath, bool showCompletionMessage = true);
         QImage drawRoiOverlay(const QImage &image, int imgWidth, int imgHeight) const;
         void showFrameViewer(int frameIndex);
         // Carousel/refresh helpers
@@ -109,9 +114,30 @@ namespace frontend
         // masksPath() returns "" in recording mode (no masks written).
         std::string imagesPath(bool isValid) const;
         std::string masksPath(bool isValid) const;
-        void exportAllImagesToTiff(const QString& baseDir);
-        bool exportChartFromHdf5(const std::string& datasetPath, const QString& filePath);
-        bool exportAllData(const QString& baseDir, bool showCompletionMessage = true);
+        // Issue #344: asynchronous, single-flight export through the Qt-free
+        // backend::recording::HdfExportService (own reader per job, progress +
+        // cancellation, transactional output). Batch jobs are chained on the
+        // GUI thread without swapping the live reader/model state.
+        struct BatchExportState {
+            QStringList sources;
+            QStringList destinations;
+            QString root;
+            bool metricsOnly{false};
+            int index{0};
+            int exported{0};
+            QStringList failures;
+        };
+        bool exportInProgress() const { return exportWatcher_ != nullptr; }
+        bool beginExportJob(backend::recording::HdfExportRequest request, const QString& title,
+                            std::function<void(const backend::recording::HdfExportResult&)> onDone);
+        void onExportProgress(const backend::recording::HdfExportProgress& progress);
+        void onExportJobFinished();
+        void finishExportUi();
+        void setExportControlsEnabled(bool enabled);
+        QString exportSummary(const backend::recording::HdfExportResult& result) const;
+        void reportExportNotCompleted(const QString& title, const backend::recording::HdfExportResult& result);
+        std::map<std::string, cv::Mat> renderChartSnapshots(const std::vector<backend::services::ProcessedFrame>& validFrames);
+        void continueBatchExport();
         void updateCharts();
         void generateScatterPlot(const std::vector<backend::services::ProcessedFrame>& validFrames);
         void generateHistogram(const std::vector<backend::services::ProcessedFrame>& validFrames);
@@ -167,6 +193,11 @@ namespace frontend
         backend::services::ProcessingService::Roi roi_{0, 0, 0, 0};
         QString loadedHdfFilePath_;
         QString lastExportDir_;
+        QFutureWatcher<backend::recording::HdfExportResult>* exportWatcher_ = nullptr;
+        QProgressDialog* exportProgress_ = nullptr;
+        backend::recording::HdfExportCancelToken exportCancel_;
+        std::function<void(const backend::recording::HdfExportResult&)> exportDone_;
+        std::unique_ptr<BatchExportState> batch_;
 
         static constexpr int THUMBNAIL_SIZE = 128;
         static constexpr int GRID_COLUMNS = 5;
