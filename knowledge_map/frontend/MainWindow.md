@@ -56,10 +56,15 @@
   The constructor records the application identity
   (`MIB_STUDIO_QT_VERSION_FULL`, OS/arch) in the coordinator so every frozen
   run snapshot carries it.
-- `onUpdateStats` — timer tick; pulls `CaptureStats`, count-only
-  `ProcessingService::getBufferedFrameCounts()`, and autofocus state for the
-  status bar/sidebar. It must not copy full `ProcessedFrame` buffers on the
-  500 ms UI timer.
+- `onUpdateStats` — timer tick, split in three (issue #363):
+  `sampleStats()` pulls `CaptureStats`, count-only
+  `ProcessingService::getBufferedFrameCounts()` and autofocus state and
+  schedules the round-robin flush (skipped while a stop is finalizing);
+  `renderStats(data)` writes the sidebar panel and the compact status
+  metrics; `refreshDiagnostics(data)` fills the Diagnostics dialog when it
+  is open. Rendering never touches the alert model or the run state, so a
+  stats tick cannot erase an error. It must not copy full `ProcessedFrame`
+  buffers on the 500 ms UI timer.
 - `onTabChanged(index)` — starts/stops the realtime loop when entering or
   leaving the experiment-related tabs (ExperimentController state).
 - `onNoCamerasFound` — shows a friendly dialog when
@@ -109,12 +114,61 @@
   long strings, 50 sidebar cycles, rapid toggles, oversized legacy width,
   removed-monitor restore).
 
+## Run state, alerts and metrics (issue #363)
+
+The status bar used to be one string that every path overwrote (a 500 ms
+stats tick could erase a save error). Three separate surfaces now exist,
+created in `setupStatusSurfaces()`:
+
+- **Run state** — `frontend::RunStatusModel` (`runStatusModel()`) projected
+  by the `RunStatusWidget` in the Experiment tab-bar corner (glyph + text,
+  accessible name "Run state: …"; never color alone). Every run is an
+  *operation*: `onStartExperiment` does `runOperationId_ =
+  beginOperation(Starting, file)` and moves to `Running`; a phase change
+  with a stale id is rejected, so a late completion cannot overwrite a newer
+  run. `latchFailure(op, reason)` keeps the state **Failed – recovery
+  required** even when the later `Complete` arrives; only a new operation
+  clears it. Camera-only lifecycle uses `setIdlePhase(Idle/CameraRunning)`,
+  which is a no-op while a failure is latched.
+- **Alerts** — `frontend::UiAlertModel` (`alertModel()`) shown by the
+  `AlertBanner` above the tab widget (wrapping summary, ×count, "+N more",
+  bounded Details list, **Acknowledge**). Keys used by the window:
+  `save.fatal` (Critical, fatal save callback), `save.flush`,
+  `save.metadata`, `run.accounting` (stop-time failures; also latch the run
+  failure and report the coordinator fault), `camera.start` (resolved by a
+  successful start), `processing.core` (restore/pin failure at startup),
+  `config.conflict` ([[ConfigTabs]] `documentStateChanged`). Acknowledging
+  hides; only the owner `resolve()`s. Metrics ticks never add/remove alerts.
+- **Metrics** — `statusLabel_` carries one bounded compact line
+  ("Camera N fps · Valid x/s · Invalid y/s · Algo z µs · Run t s · buffered
+  n", `compactStatusText()`); verbose transport counters, delivery-mode
+  confirmation, timestamp descriptor, core identity/sha256 and process memory
+  live in the non-modal **Diagnostics…** dialog (status-bar `diagnosticsBtn`,
+  Help ▸ Diagnostics…, `showDiagnostics()` slot, dialog objectName
+  `diagnosticsDialog`, text `diagnosticsText`). Long values never change the
+  window's required width.
+- **Two-phase stop.** `onStopExperiment` sets `Stopping`, waits for an
+  in-flight round-robin flush, then `Saving` and runs the drain
+  (`finishFlush`) on `QtConcurrent` via `finalizeWatcher_`;
+  `finishStopExperiment(flushOk)` writes experiment info / accounting /
+  provenance, closes the file, raises the alerts above on failure and ends
+  with `Complete` (or the latched `Failed`). `stopInProgress_` disables
+  Start/Stop, suppresses the stats tick's flush scheduling and compact text,
+  and makes the fatal-save callback skip a second stop. `closeEvent` and the
+  destructor wait for `finalizeWatcher_`. Guards: `frontend.run_status_model`
+  (pure), `frontend.run_status_ui` (25 ticks do not touch a raised alert,
+  aggregation ×100, acknowledge ≠ resolve, latched Failed survives Complete
+  and ticks, bounded width, keyboard-reachable banner buttons, Diagnostics
+  dialog adds no alerts).
+
 ## Composition
 
 - `connectTab_`, `overviewTab_`, `experimentTabs_` (QTabWidget with child
-  tabs), `playbackPanel_`, `sidebarWidget_`, `updater_`, `initManager_`.
-- `QFutureWatcher<size_t> flushWatcher_` — used to await the final HDF5
-  flush on experiment stop without blocking the UI thread.
+  tabs), `playbackPanel_`, `sidebarWidget_`, `updater_`, `initManager_`,
+  `runStatusModel_`/`alertModel_`/`alertBanner_`/`runStatusWidget_` (#363).
+- `QFutureWatcher<size_t> flushWatcher_` — awaits a round-robin HDF5 flush
+  without blocking the UI thread; `QFutureWatcher<bool> finalizeWatcher_`
+  awaits the stop-time drain.
 - The nested Experiment pages wire Monitoring apply into
   `AppConfigWatcher::writeBackProcessingConfig()`, which now emits a direct
   config-change signal after persistence so Preview and Monitoring refresh
@@ -130,9 +184,9 @@
   Preview, which hosts the config/profiles editor).
 - **Help:** About, **Software Updates…** (opens [[System-Utilities]]'s
   `SoftwareUpdatesDialog` — channel + version selection; replaced the old
-  "Check for Updates…"), Documentation and Report a Problem (open the GitHub
-  repo/issues). The Software Updates action is disabled when `auto_update` is
-  disabled at boot.
+  "Check for Updates…"), **Diagnostics…** (#363), Documentation and Report a
+  Problem (open the GitHub repo/issues). The Software Updates action is
+  disabled when `auto_update` is disabled at boot.
 
 ## Boot disable GUI
 
@@ -164,6 +218,10 @@
 - The status-bar `Core: <version> · contract <n>` label is authoritative for
   the selected engine. Experiment metadata receives that core identity on
   stop; activation itself is rejected while an operation is active.
+- Never write run-lifecycle or error text into `statusLabel_` directly: use
+  `runStatusModel_->setPhase/latchFailure` and `alertModel_->raise` (#363).
+  The compact metrics line is regenerated on every tick and would overwrite
+  it.
 - `deliveryModeLabel_` is a permanent status-bar badge ("▶ EVERY FRAME ·
   sequence preserved" / "⏩ LATEST FRAME · drops stale frames"), so the
   acquisition mode is visible on every tab. `updateDeliveryModeBadge()` shows

@@ -54,6 +54,10 @@
 #include "frontend/controllers/CameraController.h"
 #include "frontend/utils/StatsDisplayManager.h"
 #include "frontend/utils/ElidingLabel.h"
+#include "frontend/models/RunStatusModel.h"
+#include "frontend/widgets/RunStatusWidget.h"
+#include "frontend/widgets/AlertBanner.h"
+#include <QPlainTextEdit>
 #include "frontend/utils/WindowGeometryPolicy.h"
 #include "frontend/tabs/ConnectTab.h"
 #include "frontend/tabs/PreviewPage.h"
@@ -348,8 +352,18 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     backend_.setFatalSaveErrorCallback([this](const std::string& msg) {
         const QString q = QString::fromStdString(msg);
         QMetaObject::invokeMethod(this, [this, q]() {
+            // Persistent, actionable and latched (issue #363): the alert
+            // survives metrics refreshes and the run stays Failed even if the
+            // metadata write later succeeds.
+            alertModel_->raise(QStringLiteral("save.fatal"), frontend::AlertSeverity::Critical,
+                               tr("Data could not be saved: %1").arg(q),
+                               tr("Check free space and permissions on the destination; the run is incomplete."));
+            if (runStatusModel_ && experimentActive_) runStatusModel_->latchFailure(runOperationId_, q);
+            backend_.experiment().reportUnresolvedFault("save.fatal", q.toStdString());
             if (backend_.isFrameRecording()) backend_.stopFrameRecording();
-            if (experimentActive_) onStopExperiment();
+            // One finalization only: a fatal error during Stopping/Saving is
+            // reported into the in-flight stop, never a second stop.
+            if (experimentActive_ && !stopInProgress_) onStopExperiment();
             statusBar()->showMessage(tr("Save error: %1").arg(q));
             QMessageBox::critical(this, tr("Save Error"),
                 tr("Data could not be saved and the operation was stopped:\n\n%1").arg(q));
@@ -405,6 +419,7 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
     statusLabel_->setElideMode(Qt::ElideRight);
     statusLabel_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     ui->statusbar->addPermanentWidget(statusLabel_, /*stretch=*/1);
+    setupStatusSurfaces();
     processingCoreLabel_ = new QLabel(this);
     processingCoreLabel_->setToolTip(
         tr("Active deformability-cytometry processing core; click Settings > Processing Core to change it."));
@@ -417,6 +432,9 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
                      processingCoreRestoreError.toStdString());
         statusBar()->showMessage(
             tr("Pinned processing core unavailable: %1").arg(processingCoreRestoreError));
+        alertModel_->raise(QStringLiteral("processing.core"), frontend::AlertSeverity::Error,
+                           tr("Pinned processing core unavailable: %1").arg(processingCoreRestoreError),
+                           tr("Activate the pinned core in Settings › Processing Core; experiments cannot start until then."));
     }
     const auto startupCore = backend_.processing().activeProcessingCoreIdentity();
     processingCoreLabel_->setText(processingCoreReady
@@ -505,6 +523,20 @@ MainWindow::MainWindow(backend::AppBackend &backend, QWidget *parent)
         if (ui->tabs) {
             ui->tabs->setCurrentIndex(1); // Overview tab
         } });
+
+    // Config conflicts are actionable alerts (issue #363/#361).
+    if (auto* cfgTabs = previewPage->getConfigTabs()) {
+        connect(cfgTabs, &frontend::ConfigTabs::documentStateChanged, this, [this, cfgTabs]() {
+            if (!alertModel_) return;
+            if (cfgTabs->appConfigDocument().conflict) {
+                alertModel_->raise(QStringLiteral("config.conflict"), frontend::AlertSeverity::Warning,
+                                   tr("config.json changed elsewhere while it has unsaved edits in the inspector."),
+                                   tr("Use Reset to load the file or Save to overwrite it."));
+            } else {
+                alertModel_->resolve(QStringLiteral("config.conflict"));
+            }
+        });
+    }
 
     // Sync tune panel <-> config table bidirectionally
     connect(monitoringTab, &frontend::ExperimentMonitoringTab::processingConfigApplied,
@@ -601,6 +633,9 @@ MainWindow::~MainWindow() {
     // watcher's own destructor would not wait for the running task.
     if (flushWatcher_ && flushWatcher_->isRunning()) {
         flushWatcher_->waitForFinished();
+    }
+    if (finalizeWatcher_ && finalizeWatcher_->isRunning()) {
+        finalizeWatcher_->waitForFinished();
     }
     // Stop all timers that access backend_ via callbacks before the UI is
     // torn down. The OverviewTab 50fps timer fires onTick() which calls
@@ -884,12 +919,10 @@ void MainWindow::setupCornerWidgets() {
     experimentControlsLayout->setContentsMargins(5, 0, 5, 0);
     experimentControlsLayout->setSpacing(5);
     
-    // Create experiment indicator widget (colored rectangle)
-    experimentIndicator_ = new QLabel(experimentControlsWidget);
-    experimentIndicator_->setFixedSize(20, 20);
-    experimentIndicator_->setStyleSheet("background-color: gray; border: 1px solid black;");
-    experimentIndicator_->setToolTip(tr("Experiment status indicator"));
-    experimentControlsLayout->addWidget(experimentIndicator_);
+    // Run lifecycle state as text + glyph (issue #363), never color alone.
+    runStatusWidget_ = new frontend::RunStatusWidget(experimentControlsWidget);
+    runStatusWidget_->bind(runStatusModel_);
+    experimentControlsLayout->addWidget(runStatusWidget_);
     
     // ROI display label
     roiLabel_ = new QLabel(tr("ROI: --"), experimentControlsWidget);
@@ -988,22 +1021,9 @@ void MainWindow::updateExperimentButtonStates()
         stopExperimentBtn_->setEnabled(stopExperimentAct_ ? stopExperimentAct_->isEnabled() : false);
     }
 
-    // Update visual indicator
-    if (experimentIndicator_)
-    {
-        if (experimentActive_)
-        {
-            // Green/active color when experiment is running
-            experimentIndicator_->setStyleSheet("background-color: #00ff00; border: 1px solid black;");
-            experimentIndicator_->setToolTip(tr("Experiment is running"));
-        }
-        else
-        {
-            // Gray/inactive color when no experiment
-            experimentIndicator_->setStyleSheet("background-color: gray; border: 1px solid black;");
-            experimentIndicator_->setToolTip(tr("No experiment running"));
-        }
-    }
+    // Stop is a single in-flight operation: no second stop while finalizing.
+    if (stopExperimentBtn_ && stopInProgress_) stopExperimentBtn_->setEnabled(false);
+    if (startExperimentBtn_ && stopInProgress_) startExperimentBtn_->setEnabled(false);
 
     // Update tab states
     updateTabStates();
@@ -1058,19 +1078,120 @@ void MainWindow::onCameraStateChanged(const frontend::CameraActionState& state)
     if (!statusLabel_) return;
     switch (state.phase)
     {
-    case Phase::Failed:
-        statusLabel_->setText(state.failureMessage.isEmpty()
-                                  ? tr("Camera start failed")
-                                  : tr("Camera failed: %1").arg(state.failureMessage));
+    case Phase::Failed: {
+        const QString message = state.failureMessage.isEmpty() ? tr("Camera start failed")
+                                                               : tr("Camera failed: %1").arg(state.failureMessage);
+        statusLabel_->setText(message);
+        // Actionable and persistent (issue #363): survives every stats tick.
+        if (alertModel_)
+            alertModel_->raise(QStringLiteral("camera.start"), frontend::AlertSeverity::Error, message,
+                               tr("Check the camera connection/selection in Connect, then Start Live View again."));
+        if (runStatusModel_ && !experimentActive_) runStatusModel_->setIdlePhase(frontend::RunPhase::Idle, tr("camera failed"));
         break;
+    }
     case Phase::Idle:
         // onUpdateStats stopped: leave the operator a definite state.
         statusLabel_->setText(state.phaseText());
+        if (runStatusModel_ && !experimentActive_) runStatusModel_->setIdlePhase(frontend::RunPhase::Idle);
+        break;
+    case Phase::Running:
+        statusLabel_->setText(state.phaseText());
+        if (alertModel_) alertModel_->resolve(QStringLiteral("camera.start"));
+        if (runStatusModel_ && !experimentActive_) runStatusModel_->setIdlePhase(frontend::RunPhase::CameraRunning);
         break;
     default:
         statusLabel_->setText(state.phaseText());
         break;
     }
+}
+
+// ---- Issue #363: status surfaces ---------------------------------------------
+
+void MainWindow::setupStatusSurfaces()
+{
+    alertModel_ = new frontend::UiAlertModel(this);
+    runStatusModel_ = new frontend::RunStatusModel(this);
+    alertBanner_ = new frontend::AlertBanner(ui->centralwidget);
+    alertBanner_->bind(alertModel_);
+    // Above the workspace splitter (inserted before setupSidebar adds it), so
+    // it wraps across the full width and is never covered by a tab.
+    ui->verticalLayout->insertWidget(0, alertBanner_);
+
+    auto* diagnosticsBtn = new QToolButton(this);
+    diagnosticsBtn->setObjectName(QStringLiteral("diagnosticsBtn"));
+    diagnosticsBtn->setText(tr("Diagnostics…"));
+    diagnosticsBtn->setToolTip(tr("Detailed acquisition/processing/transport telemetry and identities"));
+    diagnosticsBtn->setAutoRaise(true);
+    diagnosticsBtn->setFocusPolicy(Qt::StrongFocus);
+    connect(diagnosticsBtn, &QToolButton::clicked, this, &MainWindow::showDiagnostics);
+    ui->statusbar->addPermanentWidget(diagnosticsBtn);
+    auto* diagnosticsAct = new QAction(tr("Diagnostics…"), this);
+    diagnosticsAct->setObjectName(QStringLiteral("diagnosticsAct"));
+    connect(diagnosticsAct, &QAction::triggered, this, &MainWindow::showDiagnostics);
+    ui->helpMenu->addAction(diagnosticsAct);
+}
+
+void MainWindow::showDiagnostics()
+{
+    if (!diagnosticsDialog_) {
+        diagnosticsDialog_ = new QDialog(this);
+        diagnosticsDialog_->setObjectName(QStringLiteral("diagnosticsDialog"));
+        diagnosticsDialog_->setWindowTitle(tr("Diagnostics"));
+        diagnosticsDialog_->setModal(false);
+        diagnosticsDialog_->resize(560, 420);
+        auto* layout = new QVBoxLayout(diagnosticsDialog_);
+        diagnosticsText_ = new QPlainTextEdit(diagnosticsDialog_);
+        diagnosticsText_->setObjectName(QStringLiteral("diagnosticsText"));
+        diagnosticsText_->setReadOnly(true);
+        layout->addWidget(diagnosticsText_);
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, diagnosticsDialog_);
+        connect(buttons, &QDialogButtonBox::rejected, diagnosticsDialog_, &QDialog::hide);
+        layout->addWidget(buttons);
+    }
+    diagnosticsDialog_->show();
+    diagnosticsDialog_->raise();
+    refreshDiagnostics(sampleStats());
+}
+
+QString MainWindow::compactStatusText() const { return compactStatus_; }
+
+void MainWindow::refreshDiagnostics(const frontend::StatisticsData& data)
+{
+    if (!diagnosticsDialog_ || !diagnosticsDialog_->isVisible() || !diagnosticsText_) return;
+    const auto& cap = backend_.capture();
+    const auto telemetry = cap.telemetrySnapshot();
+    const auto core = backend_.processing().activeProcessingCoreIdentity();
+    const auto lifecycle = cap.lifecycleSnapshot();
+    QStringList lines;
+    lines << tr("Capture session: %1 (generation %2)").arg(QLatin1String(backend::services::toString(lifecycle.state))).arg(lifecycle.generation);
+    lines << tr("Delivery mode: requested %1, confirmed %2")
+                 .arg(QLatin1String(camera::common::toString(cap.activeDeliveryMode())),
+                      cap.stats().deliveryModeConfirmed.load() ? tr("yes") : tr("no"));
+    lines << tr("Camera frame rate: %1").arg(frontend::StatsDisplayManager::formatMetric(telemetry.captureFrameRate));
+    lines << tr("Camera data rate (MB/s): %1").arg(frontend::StatsDisplayManager::formatMetric(telemetry.captureDataRateMBps));
+    lines << tr("Frames delivered: %1").arg(frontend::StatsDisplayManager::formatMetric(telemetry.framesDelivered));
+    lines << tr("Transport lost frames: %1").arg(frontend::StatsDisplayManager::formatMetric(telemetry.transportLostFrames));
+    lines << tr("Intentionally discarded (LatestFrame): %1").arg(frontend::StatsDisplayManager::formatMetric(telemetry.intentionallyDiscardedFrames));
+    lines << tr("Buffer underruns: %1").arg(frontend::StatsDisplayManager::formatMetric(telemetry.bufferUnderruns));
+    lines << tr("SDK completed queue depth: %1").arg(frontend::StatsDisplayManager::formatMetric(telemetry.sdkCompletedQueueDepth));
+    lines << tr("SDK input buffers: %1").arg(frontend::StatsDisplayManager::formatMetric(telemetry.sdkInputBufferCount));
+    lines << tr("Frame age (µs): %1").arg(frontend::StatsDisplayManager::formatMetric(telemetry.frameAgeUs));
+    lines << tr("Publish latency (µs): %1").arg(frontend::StatsDisplayManager::formatMetric(telemetry.publishLatencyUs));
+    lines << tr("Timestamps: %1").arg(QString::fromStdString(camera::common::describe(cap.timestampDescriptor())));
+    lines << QString();
+    lines << tr("Display: %1 fps").arg(QString::number(data.displayFps, 'f', 1));
+    lines << tr("Algorithm: %1 µs (age %2 ms)").arg(QString::number(data.algoAvgUs, 'f', 1)).arg(QString::number(data.algoAvgUsAgeMs, 'f', 0));
+    lines << tr("Valid: %1/s   Invalid: %2/s   Flushed (valid): %3").arg(QString::number(data.validFps, 'f', 1), QString::number(data.invalidFps, 'f', 1)).arg(static_cast<qulonglong>(data.totalValidFlushed));
+    lines << tr("Ring width (median): %1 (age %2 ms)").arg(QString::number(data.meanRingRatio, 'f', 3)).arg(QString::number(data.meanRingRatioAgeMs, 'f', 0));
+    lines << tr("Experiment: %1; buffered valid=%2 invalid=%3; flushing=%4; runtime %5 s")
+                 .arg(data.experimentActive ? tr("active") : tr("inactive"))
+                 .arg(static_cast<qulonglong>(data.validBuffered)).arg(static_cast<qulonglong>(data.invalidBuffered))
+                 .arg(data.flushInProgress ? tr("yes") : tr("no")).arg(QString::number(data.experimentRuntimeSeconds, 'f', 0));
+    lines << QString();
+    lines << tr("Processing core: %1 (contract %2, source %3)").arg(QString::fromStdString(core.version)).arg(core.contractVersion).arg(QString::fromStdString(core.source));
+    lines << tr("Core artifact sha256: %1").arg(QString::fromStdString(core.artifactSha256));
+    lines << tr("Process memory: %1 MB").arg(QString::number(backend::Tools::getProcessMemoryMB(), 'f', 1));
+    diagnosticsText_->setPlainText(lines.join(QLatin1Char('\n')));
 }
 
 namespace {
@@ -1133,7 +1254,7 @@ bool MainWindow::explainReadiness(const backend::app::ExperimentReadinessSnapsho
 
 void MainWindow::onStartExperiment()
 {
-    if (experimentActive_)
+    if (experimentActive_ || stopInProgress_)
     {
         QMessageBox::information(this, tr("Experiment"),
                                  tr("Experiment is already running"));
@@ -1288,6 +1409,8 @@ void MainWindow::onStartExperiment()
     experimentStartTimeNs_ = result.run.startWallClockNs;
 
     experimentActive_ = true;
+    runOperationId_ = runStatusModel_->beginOperation(frontend::RunPhase::Starting, QFileInfo(filePath).fileName());
+    runStatusModel_->setPhase(frontend::RunPhase::Running, runOperationId_, QFileInfo(filePath).fileName());
     statusLabel_->setText(result.run.camera.simulated
                               ? tr("Experiment started (simulated camera)")
                               : tr("Experiment started"));
@@ -1319,20 +1442,22 @@ void MainWindow::onStopExperiment()
                                  tr("No experiment is currently running"));
         return;
     }
+    if (stopInProgress_) return; // one finalization only
 
-    // --- Stop-lag diagnostic timing ---------------------------------------
-    // Every blocking section below is wrapped in a steady_clock timer and
-    // emitted via SPDLOG_INFO under the "stop-lag:" prefix so the slow
-    // segment is easy to grep out of the log. Investigative only; the
-    // behaviour of the stop path is unchanged.
+    // Issue #363: stop is a two-phase, single-flight operation. Phase 1
+    // (here) marks Stopping, waits for the in-flight auto-flush, then drains
+    // the buffered frames on a worker (Saving) so the GUI keeps rendering the
+    // state; phase 2 (finishStopExperiment) writes metadata/provenance,
+    // closes the file and reports Complete or Failed.
     using stop_clock = std::chrono::steady_clock;
-    const auto tStopBegin = stop_clock::now();
     auto sinceMs = [](stop_clock::time_point t0) {
         return std::chrono::duration<double, std::milli>(stop_clock::now() - t0).count();
     };
-
-    // End experiment and flush any remaining frames
-    auto &processing = backend_.processing();
+    stopInProgress_ = true;
+    finalizeHandled_ = false;
+    runStatusModel_->setPhase(frontend::RunPhase::Stopping, runOperationId_);
+    updateExperimentButtonStates();
+    statusLabel_->setText(tr("Stopping experiment…"));
 
     // Wait for any ongoing flush to complete
     {
@@ -1346,27 +1471,55 @@ void MainWindow::onStopExperiment()
                     sinceMs(t0), wasInProgress);
     }
 
-    // Flush any remaining buffered frames (synchronous for final flush)
-    auto &hdf5 = backend_.hdf5();
-    if (hdf5.isFileOpen())
+    if (!backend_.hdf5().isFileOpen())
     {
-        const auto t0 = stop_clock::now();
-        size_t flushed = processing.flushBufferedFrames(hdf5);
-        SPDLOG_INFO("stop-lag: final flushBufferedFrames took {:.3f} ms (frames={})",
-                    sinceMs(t0), flushed);
-        if (flushed > 0)
-        {
-            SPDLOG_INFO("Final flush: {} frames submitted to HDF5 write queue", flushed);
-        }
+        finishStopExperiment(true);
+        return;
+    }
+
+    runStatusModel_->setPhase(frontend::RunPhase::Saving, runOperationId_);
+    statusLabel_->setText(tr("Saving experiment data…"));
+    if (!finalizeWatcher_) {
+        finalizeWatcher_ = new QFutureWatcher<bool>(this);
+        connect(finalizeWatcher_, &QFutureWatcher<bool>::finished, this, [this]() {
+            if (finalizeHandled_) return;
+            finishStopExperiment(finalizeWatcher_->result());
+        });
+    }
+    // The worker owns only the backend pointer (outlives this window).
+    auto* backend = &backend_;
+    finalizeWatcher_->setFuture(QtConcurrent::run([backend]() {
+        auto& hdf5 = backend->hdf5();
+        auto& proc = backend->processing();
+        const size_t flushed = proc.flushBufferedFrames(hdf5);
+        if (flushed > 0) SPDLOG_INFO("Final flush: {} frames submitted to HDF5 write queue", flushed);
         // Drain the async write queue so the writer thread has stopped before the
-        // direct appendFrames below (no two threads writing the shared file).
-        if (!processing.finishFlush())
-        {
-            backend_.experiment().reportUnresolvedFault(
-                "experiment.flushFailed", "a save error occurred while flushing experiment data to disk");
-            QMessageBox::warning(this, tr("Save Error"),
-                                 tr("A save error occurred while flushing experiment data to disk."));
-        }
+        // direct appendFrames in finishStopExperiment (no two writers on the file).
+        return proc.finishFlush();
+    }));
+}
+
+void MainWindow::finishStopExperiment(bool flushOk)
+{
+    if (finalizeHandled_) return;
+    finalizeHandled_ = true;
+    using stop_clock = std::chrono::steady_clock;
+    const auto tStopBegin = stop_clock::now();
+    auto sinceMs = [](stop_clock::time_point t0) {
+        return std::chrono::duration<double, std::milli>(stop_clock::now() - t0).count();
+    };
+    auto &processing = backend_.processing();
+    auto &hdf5 = backend_.hdf5();
+    if (!flushOk)
+    {
+        backend_.experiment().reportUnresolvedFault(
+            "experiment.flushFailed", "a save error occurred while flushing experiment data to disk");
+        alertModel_->raise(QStringLiteral("save.flush"), frontend::AlertSeverity::Error,
+                           tr("A save error occurred while flushing experiment data to disk."),
+                           tr("The run is incomplete; check the destination and the log."));
+        runStatusModel_->latchFailure(runOperationId_, tr("flush failed"));
+        QMessageBox::warning(this, tr("Save Error"),
+                             tr("A save error occurred while flushing experiment data to disk."));
     }
 
     {
@@ -1432,6 +1585,10 @@ void MainWindow::onStopExperiment()
             backend_.experiment().reportUnresolvedFault(
                 "experiment.provenanceFailed",
                 "mandatory metadata/processing-core provenance could not be saved for the last run");
+            alertModel_->raise(QStringLiteral("save.metadata"), frontend::AlertSeverity::Error,
+                               tr("Experiment metadata/processing-core provenance could not be saved."),
+                               tr("The file is not complete; keep the log and free space/permissions before the next run."));
+            runStatusModel_->latchFailure(runOperationId_, tr("metadata/provenance write failed"));
             QMessageBox::critical(
                 this, tr("Save Error"),
                 tr("Experiment frame data was written, but mandatory metadata and "
@@ -1459,6 +1616,13 @@ void MainWindow::onStopExperiment()
                     accounting.persistenceFailed);
         if (accounting.completion != backend::recording::RunCompletionState::Complete &&
             accounting.completion != backend::recording::RunCompletionState::IntentionallyPartial) {
+            alertModel_->raise(QStringLiteral("run.accounting"), frontend::AlertSeverity::Warning,
+                               tr("The run is recorded as '%1': %2")
+                                   .arg(QString::fromLatin1(backend::recording::toString(accounting.completion)),
+                                        QString::fromStdString(accounting.completionReason)),
+                               tr("Review the frame accounting in the Review tab before using this run."));
+            runStatusModel_->latchFailure(runOperationId_,
+                                          QString::fromLatin1(backend::recording::toString(accounting.completion)));
             QMessageBox::warning(
                 this, tr("Experiment Accounting"),
                 tr("The run is recorded as '%1': %2\n\nEmpty %3 · processed %4 · rejected %5 · "
@@ -1514,12 +1678,15 @@ void MainWindow::onStopExperiment()
     }
 
     experimentActive_ = false;
+    stopInProgress_ = false;
+    // Complete becomes Failed automatically when a failure was latched.
+    runStatusModel_->setPhase(frontend::RunPhase::Complete, runOperationId_);
     restoreRealtimeModeIfNeeded();
     updateExperimentButtonStates(); // This will also call updateTabStates() to enable Overview and Review tabs
 
     const auto cfgAtStop = processing.getProcessingConfig();
     const double stopTotalMs = sinceMs(tStopBegin);
-    SPDLOG_INFO("stop-lag: onStopExperiment total {:.3f} ms (multiImage={}/{})",
+    SPDLOG_INFO("stop-lag: finishStopExperiment total {:.3f} ms (multiImage={}/{})",
                 stopTotalMs,
                 cfgAtStop.multi_image_enabled, cfgAtStop.multi_image_count);
     {
@@ -1530,8 +1697,20 @@ void MainWindow::onStopExperiment()
             "experiment.stop", "ui.action", stopTotalMs, data.str());
     }
 }
-
 void MainWindow::onUpdateStats()
+{
+    // Sampling + persistence scheduling always run while a session is
+    // active; rendering is a separate step (issue #363) and never touches
+    // alerts or the run state.
+    const frontend::StatisticsData data = sampleStats();
+    renderStats(data);
+    refreshDiagnostics(data);
+    // Keep the acquisition-mode badge in sync with the backend-confirmed mode
+    // (the confirmation lands shortly after capture start).
+    updateDeliveryModeBadge();
+}
+
+frontend::StatisticsData MainWindow::sampleStats()
 {
     const auto &cap = backend_.capture();
     const auto &s = cap.stats();
@@ -1541,7 +1720,6 @@ void MainWindow::onUpdateStats()
     const uint64_t tFetchEndUs = backend::Tools::getTimestamp();
     const double fetchMs = static_cast<double>(tFetchEndUs - tFetchStartUs) / 1000.0;
 
-    // Collect statistics data
     double displayFps = 0.0;
     if (experimentTabs_ && experimentTabs_->count() > 0) {
         auto* previewPage = qobject_cast<frontend::PreviewPage*>(experimentTabs_->widget(0));
@@ -1561,7 +1739,6 @@ void MainWindow::onUpdateStats()
     const double algoAvgUsAgeMs = (nowUs - proc.getAlgoAvgUs1sUpdatedUs()) / 1000.0;
     const double meanRingRatioAgeMs = (nowUs - backend_.autofocus().getLastRingRatioUpdateUs()) / 1000.0;
 
-    // Calculate experiment runtime
     double experimentRuntimeSeconds = 0.0;
     if (experimentActive_ && experimentStartTimeNs_ > 0) {
         uint64_t currentTimeNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -1570,61 +1747,30 @@ void MainWindow::onUpdateStats()
         experimentRuntimeSeconds = static_cast<double>(currentTimeNs - experimentStartTimeNs_) / 1e9;
     }
 
-    // Update statistics panel if sidebar exists
-    if (sidebarWidget_ && sidebarWidget_->statisticsPanel()) {
-        frontend::StatisticsData data;
-        data.displayFps = displayFps;
-        data.algoAvgUs = algoAvgUs;
-        data.validFps = validFps;
-        data.invalidFps = invalidFps;
-        data.totalValidFlushed = totalValidFlushed;
-        data.cameraRunning = cap.isRunning();
-        {
-            const auto telemetry = cap.telemetrySnapshot();
-            data.cameraFps = s.lastFrameRate.load();
-            data.cameraDataRateMBps = s.lastDataRateMBps.load();
-            data.cameraFpsText = frontend::StatsDisplayManager::formatMetric(telemetry.captureFrameRate);
-            data.cameraDataRateText = frontend::StatsDisplayManager::formatMetric(telemetry.captureDataRateMBps);
-        }
-        data.meanRingRatio = backend_.autofocus().getMedianRingRatio();
-        data.experimentActive = experimentActive_;
-        data.validBuffered = bufferedFrames.valid;
-        data.invalidBuffered = bufferedFrames.invalid;
-        data.flushInProgress = flushInProgress_;
-        data.experimentRuntimeSeconds = experimentRuntimeSeconds;
-        data.algoAvgUsAgeMs = algoAvgUsAgeMs;
-        data.meanRingRatioAgeMs = meanRingRatioAgeMs;
-
-        sidebarWidget_->statisticsPanel()->updateStatistics(data);
-    }
-
-    // Also update status bar for backward compatibility
-    QString status;
-    status = QString("Display=%1 fps | Algo=%2 us | Valid=%3/s | Invalid=%4/s | Flushed(valid)=%5")
-                 .arg(QString::number(displayFps, 'f', 1))
-                 .arg(QString::number(algoAvgUs, 'f', 1))
-                 .arg(QString::number(validFps, 'f', 1))
-                 .arg(QString::number(invalidFps, 'f', 1))
-                 .arg(QString::number(static_cast<qulonglong>(totalValidFlushed)));
-
-    // Camera transport stats. Per-metric validity (issue #368): an
-    // unavailable/stale rate is shown as such, never as a measured zero.
-    if (cap.isRunning()) {
-        const auto telemetry = cap.telemetrySnapshot();
-        status += QString(" | Camera=%1 fps, %2 MB/s")
-                      .arg(frontend::StatsDisplayManager::formatMetric(telemetry.captureFrameRate))
-                      .arg(frontend::StatsDisplayManager::formatMetric(telemetry.captureDataRateMBps));
-    } else {
-        status += " | Camera: stopped";
-    }
-
-    // Append live ring width (median from AutofocusService, same value used by autofocus)
+    frontend::StatisticsData data;
+    data.displayFps = displayFps;
+    data.algoAvgUs = algoAvgUs;
+    data.validFps = validFps;
+    data.invalidFps = invalidFps;
+    data.totalValidFlushed = totalValidFlushed;
+    data.cameraRunning = cap.isRunning();
     {
-        const double ringWidth = backend_.autofocus().getMedianRingRatio();
-        status += QString(" | Ring width=%1").arg(QString::number(ringWidth, 'f', 3));
+        const auto telemetry = cap.telemetrySnapshot();
+        data.cameraFps = s.lastFrameRate.load();
+        data.cameraDataRateMBps = s.lastDataRateMBps.load();
+        data.cameraFpsText = frontend::StatsDisplayManager::formatMetric(telemetry.captureFrameRate);
+        data.cameraDataRateText = frontend::StatsDisplayManager::formatMetric(telemetry.captureDataRateMBps);
     }
+    data.meanRingRatio = backend_.autofocus().getMedianRingRatio();
+    data.experimentActive = experimentActive_;
+    data.validBuffered = bufferedFrames.valid;
+    data.invalidBuffered = bufferedFrames.invalid;
+    data.flushInProgress = flushInProgress_;
+    data.experimentRuntimeSeconds = experimentRuntimeSeconds;
+    data.algoAvgUsAgeMs = algoAvgUsAgeMs;
+    data.meanRingRatioAgeMs = meanRingRatioAgeMs;
 
-    if (experimentActive_)
+    if (experimentActive_ && !stopInProgress_)
     {
         size_t totalBuffered = bufferedFrames.total();
 
@@ -1663,17 +1809,8 @@ void MainWindow::onUpdateStats()
             flushWatcher_->setFuture(future);
         }
 
-        status += QString(" | Experiment: active | buffered: valid=%1, invalid=%2")
-                      .arg(bufferedFrames.valid)
-                      .arg(bufferedFrames.invalid);
-        if (flushInProgress_)
-        {
-            status += " (flushing...)";
-        }
-
         // Throttled diagnostic log (~1 Hz)
         static uint64_t lastDiagLogUs = 0;
-        const uint64_t nowUs = backend::Tools::getTimestamp();
         if (nowUs - lastDiagLogUs >= 1'000'000ULL) {
             uint64_t earliest = 0, latest = 0;
             size_t count = 0;
@@ -1684,16 +1821,31 @@ void MainWindow::onUpdateStats()
             lastDiagLogUs = nowUs;
         }
     }
-    else
-    {
-        status += " | Experiment: inactive";
+    return data;
+}
+
+void MainWindow::renderStats(const frontend::StatisticsData& data)
+{
+    if (sidebarWidget_ && sidebarWidget_->statisticsPanel()) {
+        sidebarWidget_->statisticsPanel()->updateStatistics(data);
     }
-
-    statusLabel_->setText(status);
-
-    // Keep the acquisition-mode badge in sync with the backend-confirmed mode
-    // (the confirmation lands shortly after capture start).
-    updateDeliveryModeBadge();
+    // Bounded operator metrics only (issue #363): camera rate, valid/invalid
+    // rate, algorithm headline, persistence health. Verbose transport values
+    // live in Diagnostics. The label is elided, so this never changes the
+    // window's required width, and it never carries alerts.
+    QString compact = data.cameraRunning
+                          ? tr("Camera %1 fps").arg(data.cameraFpsText.isEmpty() ? QString::number(data.cameraFps, 'f', 0) : data.cameraFpsText)
+                          : tr("Camera stopped");
+    compact += tr(" · Valid %1/s · Invalid %2/s").arg(QString::number(data.validFps, 'f', 1), QString::number(data.invalidFps, 'f', 1));
+    compact += tr(" · Algo %1 µs").arg(QString::number(data.algoAvgUs, 'f', 0));
+    if (data.experimentActive) {
+        compact += tr(" · Run %1 s · buffered %2%3")
+                       .arg(QString::number(data.experimentRuntimeSeconds, 'f', 0))
+                       .arg(static_cast<qulonglong>(data.validBuffered + data.invalidBuffered))
+                       .arg(data.flushInProgress ? tr(" (flushing)") : QString());
+    }
+    compactStatus_ = compact;
+    if (!stopInProgress_) statusLabel_->setText(compact);
 }
 
 void MainWindow::updateDeliveryModeBadge()
@@ -1940,6 +2092,13 @@ void MainWindow::closeEvent(QCloseEvent* event)
             event->ignore();
             return;
         }
+    }
+
+    // A finalization in flight completes before the window goes away
+    // (bounded: the worker only drains the write queue).
+    if (stopInProgress_ && finalizeWatcher_) {
+        finalizeWatcher_->waitForFinished();
+        if (!finalizeHandled_) finishStopExperiment(finalizeWatcher_->result());
     }
 
     // Ensure experiment services are stopped before closing

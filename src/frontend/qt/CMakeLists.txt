@@ -105,6 +105,12 @@ set(FRONTEND_COMMON_SOURCES
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/SidebarWidget.cpp
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/ElidingLabel.cpp
     ${PROJECT_SOURCE_DIR}/src/frontend/system/ConfigDocumentStore.cpp
+    ${PROJECT_SOURCE_DIR}/src/frontend/models/RunStatusModel.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/models/RunStatusModel.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/widgets/RunStatusWidget.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/widgets/RunStatusWidget.h
+    ${PROJECT_SOURCE_DIR}/src/frontend/widgets/AlertBanner.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/widgets/AlertBanner.h
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/WindowGeometryPolicy.cpp
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/SidebarWidget.h
     ${PROJECT_SOURCE_DIR}/include/frontend/utils/ElidingLabel.h
@@ -243,6 +249,15 @@ if(BUILD_TESTING)
     set_target_properties(preview_layout_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" AUTOUIC OFF)
     add_test(NAME frontend.preview_layout COMMAND $<TARGET_FILE:preview_layout_test>)
     set_tests_properties(frontend.preview_layout PROPERTIES LABELS "frontend;layout" TIMEOUT 240)
+
+    # Issue #363: run state / alerts / metrics separation in the main window.
+    add_executable(run_status_ui_test ${PROJECT_SOURCE_DIR}/tests/frontend/run_status_ui_test.cpp)
+    target_include_directories(run_status_ui_test PRIVATE ${PROJECT_SOURCE_DIR}/tests)
+    target_link_libraries(run_status_ui_test PRIVATE mib_frontend_common)
+    set_target_properties(run_status_ui_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" AUTOUIC OFF)
+    add_test(NAME frontend.run_status_ui COMMAND $<TARGET_FILE:run_status_ui_test>
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(frontend.run_status_ui PROPERTIES LABELS "frontend;layout;safety" TIMEOUT 240)
 endif()
 
 set(MIB_STUDIO_QT_EXTRA_SOURCES)

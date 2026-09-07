@@ -25,6 +25,9 @@ namespace frontend { class SidebarWidget; }
 namespace frontend { class DeviceInitManager; }
 namespace frontend { class CameraController; }
 namespace frontend { class ElidingLabel; }
+namespace frontend { class RunStatusModel; class UiAlertModel; class RunStatusWidget; class AlertBanner; struct StatisticsData; }
+class QDialog;
+class QPlainTextEdit;
 namespace frontend { struct CameraActionState; }
 namespace Ui { class MainWindow; }
 
@@ -48,6 +51,9 @@ private slots:
     void onTabChanged(int index);
     void onNoCamerasFound();
     void onCameraStateChanged(const frontend::CameraActionState& state);
+    // Issue #363: detailed identities/telemetry live in a non-modal dialog,
+    // never in the status bar. Invokable so tests can open it by name.
+    void showDiagnostics();
 
 public:
     // Single authoritative camera command path (issue #360). Every camera
@@ -71,6 +77,14 @@ public:
     // screenshot tour supply the available desktop explicitly so decisions
     // never depend on the (800x600) offscreen platform screen.
     void setAvailableGeometryOverrideForTests(const QRect& available);
+
+    // Issue #363: run state, alerts and metrics are separate surfaces.
+    frontend::UiAlertModel* alertModel() const { return alertModel_; }
+    frontend::RunStatusModel* runStatusModel() const { return runStatusModel_; }
+    frontend::AlertBanner* alertBanner() const { return alertBanner_; }
+    frontend::RunStatusWidget* runStatusWidget() const { return runStatusWidget_; }
+    QString compactStatusText() const;
+    bool stopInProgress() const { return stopInProgress_; }
     bool restoredWindowGeometryFromSettings() const { return restoredGeometryFromSettings_; }
     void ensureWindowFitsScreen();
     void saveWindowGeometry();
@@ -81,6 +95,12 @@ private:
     // return false; true when the snapshot is ready.
     bool explainReadiness(const backend::app::ExperimentReadinessSnapshot& readiness);
     void restoreRealtimeModeIfNeeded();
+    // Issue #363
+    void setupStatusSurfaces();
+    frontend::StatisticsData sampleStats();
+    void renderStats(const frontend::StatisticsData& data);
+    void refreshDiagnostics(const frontend::StatisticsData& data);
+    void finishStopExperiment(bool flushOk);
     void updateTabStates();
     void updateDeliveryModeBadge();
     void startExperimentServices();
@@ -121,7 +141,17 @@ private:
     QAction* stopExperimentAct_ = nullptr;
     QPushButton* startExperimentBtn_ = nullptr;
     QPushButton* stopExperimentBtn_ = nullptr;
-    QLabel* experimentIndicator_ = nullptr;
+    frontend::RunStatusWidget* runStatusWidget_ = nullptr;
+    frontend::UiAlertModel* alertModel_ = nullptr;
+    frontend::RunStatusModel* runStatusModel_ = nullptr;
+    frontend::AlertBanner* alertBanner_ = nullptr;
+    QDialog* diagnosticsDialog_ = nullptr;
+    QPlainTextEdit* diagnosticsText_ = nullptr;
+    QFutureWatcher<bool>* finalizeWatcher_ = nullptr;
+    bool stopInProgress_{false};
+    bool finalizeHandled_{false};
+    uint64_t runOperationId_{0};
+    QString compactStatus_;
     QLabel* roiLabel_ = nullptr;
     QPushButton* startCameraBtn_ = nullptr;
     QPushButton* stopCameraBtn_ = nullptr;

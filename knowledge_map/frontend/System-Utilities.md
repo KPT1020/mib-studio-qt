@@ -86,6 +86,21 @@
   [[ConfigTabs]]).
 - **`HdfMetricsModel`** — `QAbstractTableModel` reading metadata from
   [[../services/Hdf5Service]] (`readValidMetadata`, `readInvalidMetadata`).
+- **`RunStatusModel` / `UiAlertModel`** (`RunStatusModel.h`, issue #363) —
+  `RunStatusModel` is the run-lifecycle projection (`RunPhase` Idle /
+  CameraRunning / Starting / Running / Stopping / Saving / Complete / Failed,
+  each with a distinct `runPhaseLabel`/`runPhaseGlyph`): `beginOperation`
+  returns an operation id, `setPhase(phase, id)` rejects stale ids,
+  `latchFailure(id, reason)` turns a later `Complete` into `Failed` until a
+  new operation begins, `setIdlePhase` never hides a latched failure.
+  `UiAlertModel` holds actionable alerts keyed `source.code`: `raise`
+  aggregates repeats (count, first/last time, message refreshed, re-surfaces
+  an acknowledged alert), `acknowledge`/`acknowledgeAll` hide from the banner
+  without resolving, `resolve` is the owner's job, `headline()` is the
+  highest-severity unacknowledged alert, `kMaxRetained = 50` with an
+  `overflowDropped()` counter that never drops an unresolved error/critical.
+  Consumed by [[MainWindow]]. Guard: `frontend.run_status_model` (pure,
+  Qt Core only).
 
 ## Utils (`src/frontend/utils/`)
 
@@ -139,6 +154,15 @@ tested by `tests/frontend/update_catalog_test.cpp`), `OverlayRenderer`,
 
 - **`ZoomableChartView`** — subclass of `QChartView` with scroll/zoom.
   Used by [[ExperimentMonitoringTab]] and [[HdfReviewTab]].
+- **`RunStatusWidget`** (issue #363) — glyph + `ElidingLabel` bound to a
+  `RunStatusModel` (`bind`); text carries the state, color is only a
+  secondary cue; accessible name "Run state: …"; bounded width (≤ 260 px).
+- **`AlertBanner`** (issue #363) — `QFrame` bound to a `UiAlertModel`: shows
+  the headline alert with severity word, ×count, remediation and "+N more",
+  a checkable **Details** button revealing a bounded (120 px) read-only list
+  of every unresolved alert, and **Acknowledge** (= `acknowledgeAll()`).
+  Hidden when nothing is unacknowledged; both buttons are keyboard focusable.
+  Placed by [[MainWindow]] above the main tab widget.
 
 ## Gotchas
 

@@ -5,6 +5,22 @@
 
 ## Features shipped
 
+- **Run state, alerts and metrics separated; async experiment
+  finalization** (2026-09-07, issue #363 — reliability release #371 phase
+  6c). New `RunStatusModel`/`UiAlertModel` and `RunStatusWidget`/
+  `AlertBanner` ([[../frontend/System-Utilities]]); [[../frontend/MainWindow]]
+  projects the run lifecycle (operation ids, latched failure survives a
+  later Complete), raises keyed aggregated alerts (`save.fatal`,
+  `save.flush`, `save.metadata`, `run.accounting`, `camera.start`,
+  `processing.core`, `config.conflict`) into a persistent wrapping banner
+  with Acknowledge ≠ resolve, keeps one bounded compact metrics line in the
+  status bar and moves verbose telemetry/identities into a non-modal
+  **Diagnostics…** dialog. `onUpdateStats` is split into sample / render /
+  diagnostics so a stats tick can never erase an error; Stop is two-phase
+  (Stopping → Saving on a worker via `finalizeWatcher_` →
+  `finishStopExperiment`). Tests: `frontend.run_status_model`,
+  `frontend.run_status_ui`.
+
 - **Config inspector: explicit edit state, bounded header, responsive
   Preview inspector** (2026-09-07, issues #361 and #362 — reliability
   release #371 phase 6b). [[../frontend/ConfigTabs]]: per-document

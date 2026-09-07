@@ -545,6 +545,21 @@ set_target_properties(config_document_state_test PROPERTIES RUNTIME_OUTPUT_DIREC
 add_test(NAME frontend.config_document_state COMMAND $<TARGET_FILE:config_document_state_test>)
 set_tests_properties(frontend.config_document_state PROPERTIES LABELS "frontend;utility;safety" TIMEOUT 30)
 
+# Issue #363: pure run-state / alert model semantics (QtCore only; automoc for the QObject header).
+add_executable(run_status_model_test
+    ${PROJECT_SOURCE_DIR}/tests/frontend/run_status_model_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/frontend/models/RunStatusModel.cpp
+    ${PROJECT_SOURCE_DIR}/include/frontend/models/RunStatusModel.h
+)
+target_include_directories(run_status_model_test PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
+    ${PROJECT_SOURCE_DIR}/tests
+)
+target_link_libraries(run_status_model_test PRIVATE Qt6::Core)
+set_target_properties(run_status_model_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}" AUTOMOC ON)
+add_test(NAME frontend.run_status_model COMMAND $<TARGET_FILE:run_status_model_test>)
+set_tests_properties(frontend.run_status_model PROPERTIES LABELS "frontend;utility;safety" TIMEOUT 30)
+
 add_executable(update_catalog_test
     ${PROJECT_SOURCE_DIR}/tests/frontend/update_catalog_test.cpp
     ${PROJECT_SOURCE_DIR}/src/frontend/utils/UpdateCatalog.cpp

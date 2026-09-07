@@ -105,26 +105,57 @@ refresh rate for the Monitoring page.
    configuration revision, background, calibration factor) into the file
    before the first frame; if the configuration changes between the check
    and the start, the start is refused and you simply start again.
-   The corner indicator turns green and the flushed-frame counter starts.
-3. Click **Stop Experiment** when done. The final flush runs in the
-   background and the file is closed with its metadata (ROI, background,
-   configuration) — wait for the indicator to return to grey before
-   pulling a USB drive.
+   The run state in the Experiment tab-bar corner reads **Running** (with
+   the file name in its tooltip) and the flushed-frame counter starts.
+3. Click **Stop Experiment** when done. The run state goes through
+   **Stopping** and **Saving** while the final flush and the metadata (ROI,
+   background, configuration) are written in the background, then
+   **Complete** — wait for **Complete** before pulling a USB drive. If any
+   part of the save fails the state stays **Failed – recovery required**
+   and an alert explains what to do; the next Start is blocked until the
+   fault is acknowledged in the readiness dialog.
+
+The run state is always written as text (Idle, Camera running, Starting,
+Running, Stopping, Saving, Complete, Failed); the color is only a hint.
 
 Recorded files contain the valid/invalid frame images, masks, per-frame
 metrics, and the experiment metadata needed to reanalyse later — see
 [Review & post-process](review-and-postprocess.md).
 
-## Status bar statistics
+## Status bar, alerts and diagnostics
+
+The status bar shows one compact line of live metrics on the left
+(**Camera** fps · **Valid**/**Invalid** rates per second · **Algo** time ·
+**Run** time and buffered frames while recording), the **Diagnostics…**
+button, and the processing-core and acquisition-mode badges on the right.
+The full statistics (display FPS, flushed totals, camera data rate, ring
+width, buffer state) stay in the hardware panel on the left of the window.
 
 | Field | Meaning |
 |---|---|
 | **Display** | Frames per second actually rendered in the preview |
-| **Algo** | Realtime processing rate (frames/s) |
+| **Algo** | Realtime processing time per frame (µs) |
 | **Valid / Invalid** | Classification rates per second |
-| **Flushed(valid)** | Total valid frames written to HDF5 in the active experiment |
+| **Flushed** | Total valid frames written to HDF5 in the active experiment |
 | **Camera** | Transport statistics from the camera (frame rate, MB/s) |
 | **Ring width** | Median ring ratio of validated frames (drives autofocus) |
 
 Rates reset to zero when an experiment starts or capture stops; totals
-persist until the next experiment starts.
+persist until the next experiment starts. A value shown as **n/a** was not
+reported by the camera; it is never displayed as 0.
+
+**Alerts.** Warnings and errors that need your attention (a failed camera
+start, a save failure, a configuration file changed on disk while you were
+editing it) appear in a banner above the tabs with the reason and what to
+do. Repeats of the same problem are counted on one line, **Details** lists
+every open alert, and **Acknowledge** hides the banner — it does not clear
+the underlying condition; that clears when the cause is fixed. Metrics
+updates never remove an alert.
+
+**Diagnostics…** (status bar or Help ▸ Diagnostics…) opens a non-modal
+window with the detailed values that used to crowd the status bar: capture
+session state, requested vs confirmed delivery mode, transport counters
+(delivered, lost, discarded, underruns, queue depths), frame age and
+publish latency, the timestamp source, the active processing core and its
+artifact hash, and process memory. It refreshes on every statistics tick
+while open.
